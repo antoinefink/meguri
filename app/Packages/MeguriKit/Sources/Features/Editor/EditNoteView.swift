@@ -17,7 +17,7 @@ public struct EditNoteView: View {
     public var body: some View {
         NoteFormChrome(title: Text("Edit Note", bundle: .module), subtitle: subtitle,
                        subtitleIdentifier: "review.editCurrent.subtitle", identifier: "review.editCurrent",
-                       host: host, decisions: EditNoteDecisions(flow: flow), attemptClose: cancel, sheet: true) {
+                       host: host, decisions: EditNoteDecisions(flow: flow), attemptClose: cancel, window: true) {
             cancelButton
         } confirm: {
             doneButton
@@ -35,6 +35,9 @@ public struct EditNoteView: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
+            #if os(macOS)
+            facts
+            #endif
             if let host {
                 FieldEditorView(host: host)
                     .id(ObjectIdentifier(host.webView))
@@ -56,6 +59,34 @@ public struct EditNoteView: View {
         }
     }
 
+    #if os(macOS)
+    /// F1 (2026-11-25): the note type and deck as plain text in the form's
+    /// label column, above the fields; neither can be changed here.
+    @ViewBuilder private var facts: some View {
+        if let subtitle = flow.subtitle {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.xSmall, verticalSpacing: Spacing.xSmall) {
+                GridRow {
+                    factLabel(Text("Note type:", bundle: .module))
+                    Text(verbatim: subtitle.notetype).foregroundStyle(.secondary)
+                }
+                GridRow {
+                    factLabel(Text("Deck:", bundle: .module))
+                    Text(verbatim: subtitle.deck).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The page's inset (16 pt) and its column gap (8 pt), so both columns line up.
+            .padding(Spacing.medium)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("review.editCurrent.subtitle")
+        }
+    }
+    /// The page's label column (`FieldEditor/page.html`): 140 pt, trailing.
+    private func factLabel(_ text: Text) -> some View {
+        text.frame(width: 140, alignment: .trailing)
+    }
+    #endif
+
     private func failure(_ text: Text) -> some View {
         Label { text } icon: { Image(systemName: "exclamationmark.triangle") }
             .accessibilityIdentifier("review.editCurrent.error")
@@ -76,7 +107,13 @@ public struct EditNoteView: View {
             .accessibilityIdentifier("review.editCurrent.cancel")
     }
     private var doneButton: some View {
-        Button(action: done) { Text("Done", bundle: .module) }
+        Button(action: done) {
+            #if os(macOS)
+            Text("Save", bundle: .module)
+            #else
+            Text("Done", bundle: .module)
+            #endif
+        }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!flow.canSave || host?.editable != true)

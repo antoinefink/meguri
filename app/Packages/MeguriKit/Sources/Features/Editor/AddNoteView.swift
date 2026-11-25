@@ -168,10 +168,10 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     let host: FieldEditorHost?
     let decisions: Decisions
     let attemptClose: () -> Void
-    /// Mac: Edit Note is a window-modal sheet (N20.8, option A): the title
-    /// over its subtitle, and Cancel beside Done at the bottom trailing
-    /// corner, as every Mac sheet places them. Add keeps its panel's header.
-    var sheet = false
+    /// Mac: Edit Note is its own window (N20.8, F1): the window's title names
+    /// the note, the form sits on the window background, and Cancel beside
+    /// Save at the bottom trailing corner. Add keeps its panel's header.
+    var window = false
     @ViewBuilder let cancel: () -> Cancel
     @ViewBuilder let confirm: () -> Confirm
     @ViewBuilder let content: () -> Content
@@ -179,7 +179,7 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     var body: some View {
         #if os(macOS)
         Group {
-            if sheet { sheetBody } else { panelBody }
+            if window { windowBody } else { panelBody }
         }
         .modifier(decisions)
         .accessibilityElement(children: .contain)
@@ -236,24 +236,16 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
         // The page's own background, so the fields and their form read as one surface.
         .background(Color(nsColor: .textBackgroundColor))
     }
-    /// The sheet keeps the window's own background; the page draws the
-    /// fields' grouped box on it (`FieldEditor/page.html`).
-    private var sheetBody: some View {
+    /// The window's own background shows through the page's columns form
+    /// (`FieldEditor/page.html`); the one mode control sits at the bottom
+    /// leading corner, Cancel and the default Save at the trailing one.
+    private var windowBody: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading) {
-                title.font(.headline)
-                if let subtitle { subtitleText(subtitle).font(.subheadline) }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
             content()
-            Divider()
             HStack { modeToggle; Spacer(); cancel(); confirm() }.padding()
         }
-        .frame(minWidth: 520, idealWidth: 640, maxWidth: 900, minHeight: 420, idealHeight: 640, maxHeight: .infinity)
-        // Only Cancel (Esc) and Done close the sheet, so the discard decision
-        // always stays on screen; the system never dismisses it on its own.
-        .interactiveDismissDisabled()
+        .frame(minWidth: 480, idealWidth: 580, maxWidth: .infinity, minHeight: 320, idealHeight: 520, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
     private func subtitleText(_ subtitle: String) -> some View {
         Text(verbatim: subtitle).foregroundStyle(.secondary)

@@ -451,7 +451,7 @@ extension EnvironmentValues {
 /// Edit Note's form as Add Note's is placed (N17.1): a sheet, or the whole
 /// screen on an iPhone at regular width. A fold moves the same draft and
 /// page to the other presentation; the swipe down asks as Cancel does.
-/// Mac: a window-modal sheet (user-approved 2026-11-24, option A).
+/// Mac: its own window (F1, user-approved 2026-11-25; `EditNoteWindow`).
 private struct ReviewEditNotePresentation: ViewModifier {
     let editNote: ReviewEditNote?
     #if os(iOS)
@@ -460,29 +460,37 @@ private struct ReviewEditNotePresentation: ViewModifier {
         AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
     }
     #else
-    private let coversScreen = false
-    // A Mac sheet takes these from its own window, not from the presenter
+    // A separate window takes these from the app, not from the presenter
     // (app/AGENTS.md): the form gets the review's again.
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
     @Environment(\.appClock) private var clock
     #endif
+    #if os(iOS)
     private func shown(cover: Bool) -> Binding<Bool> {
         Binding(get: { editNote?.flow.isPresented == true && coversScreen == cover },
                 set: { if !$0, coversScreen == cover, let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } } })
     }
+    #endif
     func body(content: Content) -> some View {
         #if os(iOS)
         content
             .sheet(isPresented: shown(cover: false)) { editNote?.form }
             .fullScreenCover(isPresented: shown(cover: true)) { editNote?.form }
         #else
-        content.sheet(isPresented: shown(cover: false)) {
-            editNote?.form
-                .environment(\.locale, locale)
-                .environment(\.timeZone, timeZone)
-                .environment(\.appClock, clock)
-        }
+        content
+            .onChange(of: editNote?.flow.isPresented == true, initial: true) { _, presented in
+                guard presented, let editNote else { return }
+                EditNoteWindow.show(editNote.form
+                    .environment(\.locale, locale)
+                    .environment(\.timeZone, timeZone)
+                    .environment(\.appClock, clock), flow: editNote.flow, over: NSApp.keyWindow)
+            }
+            // The review leaving (its window closed) cancels as Cancel does; the
+            // edit window stays for a discard question and closes with the flow.
+            .onDisappear {
+                if let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } }
+            }
         #endif
     }
 }

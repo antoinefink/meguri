@@ -84,7 +84,7 @@ final class ReviewActionsMacUITests: XCTestCase {
     /// Option A (2026-11-24): Edit Note is a sheet on the review window. Back
     /// to Decks cannot end the review under it, Cancel sits beside Done at
     /// its bottom trailing corner, and Esc returns to the same card.
-    func testEditNoteSheetKeepsTheReview() throws {
+    func testEditNoteWindowKeepsTheReview() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundleIdentifier = try build.bundleIdentifier
@@ -112,51 +112,65 @@ final class ReviewActionsMacUITests: XCTestCase {
         XCTAssertTrue(close.isEnabled, "Back to Decks acts while no note is edited")
 
         let menu = app.menuButtons["review.session.actions"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.click()
-        let edit = menu.menuItems["review.menu.editNote"]
-        XCTAssertTrue(edit.waitForExistence(timeout: 10))
-        edit.click()
+        func openEditNote() -> XCUIElement {
+            XCTAssertTrue(menu.waitForExistence(timeout: 10))
+            menu.click()
+            let edit = menu.menuItems["review.menu.editNote"]
+            XCTAssertTrue(edit.waitForExistence(timeout: 10))
+            edit.click()
+            let window = app.windows["review.editCurrent.window"]
+            XCTAssertTrue(window.waitForExistence(timeout: 15), "Review actions › Edit Note opens its own window")
+            return window
+        }
+        var editWindow = openEditNote()
         let form = element(app, "review.editCurrent")
-        XCTAssertTrue(form.waitForExistence(timeout: 15), "Review actions › Edit Note opens the form")
-        let sheet = app.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "The form is a sheet on the review window")
-        let cancel = sheet.descendants(matching: .any).matching(identifier: "review.editCurrent.cancel").firstMatch
-        let done = sheet.descendants(matching: .any).matching(identifier: "review.editCurrent.done").firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 10) && done.waitForExistence(timeout: 10))
-        let window = app.windows.firstMatch
-        let attachment = XCTAttachment(screenshot: window.screenshot())
-        attachment.name = "review-edit-note-sheet"
+        XCTAssertTrue(form.waitForExistence(timeout: 15))
+        XCTAssertTrue(editWindow.title.hasPrefix("Question"), "The window names the note: \(editWindow.title)")
+        XCTAssertTrue(reveal.exists && close.exists, "The review stays visible beside the window")
+        let facts = editWindow.descendants(matching: .any).matching(identifier: "review.editCurrent.subtitle").firstMatch
+        XCTAssertTrue(facts.waitForExistence(timeout: 10), "The note type and deck head the form")
+        let cancel = editWindow.descendants(matching: .any).matching(identifier: "review.editCurrent.cancel").firstMatch
+        let save = editWindow.descendants(matching: .any).matching(identifier: "review.editCurrent.done").firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10) && save.waitForExistence(timeout: 10))
+        XCTAssertEqual(save.label, "Save")
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "review-edit-note-window"
         attachment.lifetime = .keepAlways
         add(attachment)
 
-        XCTAssertFalse(close.isEnabled, "Back to Decks cannot end the review under the form")
-        XCTAssertLessThan(abs(cancel.frame.midY - done.frame.midY), 4, "Cancel and Done share the bottom bar")
-        XCTAssertLessThan(cancel.frame.maxX, done.frame.minX, "Cancel comes before Done")
-        XCTAssertGreaterThan(cancel.frame.minX, sheet.frame.midX, "Both sit at the trailing end")
-        XCTAssertGreaterThan(cancel.frame.midY, sheet.frame.midY, "Both sit at the bottom")
+        XCTAssertFalse(close.isEnabled, "Back to Decks cannot end the review while the note is edited")
+        XCTAssertLessThan(abs(cancel.frame.midY - save.frame.midY), 4, "Cancel and Save share the bottom row")
+        XCTAssertLessThan(cancel.frame.maxX, save.frame.minX, "Cancel comes before Save")
+        XCTAssertGreaterThan(cancel.frame.minX, editWindow.frame.midX, "Both sit at the trailing end")
+        XCTAssertGreaterThan(cancel.frame.midY, editWindow.frame.midY, "Both sit at the bottom")
 
+        // ⌘W on the unchanged note closes only the edit window.
         app.typeKey("w", modifierFlags: .command)
-        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "Command-W leaves the sheet up")
-        XCTAssertTrue(window.exists, "Command-W does not close the review window under the sheet")
+        XCTAssertTrue(editWindow.waitForNonExistence(timeout: 10), "Command-W closes the unchanged note's window")
+        XCTAssertTrue(reveal.waitForExistence(timeout: 10), "The review stays on the unanswered card")
+        XCTAssertTrue(close.isEnabled, "Back to Decks acts again once the window has closed")
 
-        // A changed draft asks before it is thrown away; Keep Editing keeps the sheet.
+        // A changed draft asks before it is thrown away, on the edit window.
+        editWindow = openEditNote()
         app.typeText(" edited")
-        app.typeKey(.escape, modifierFlags: [])
-        let keep = app.buttons["Keep Editing"].firstMatch
-        let discard = app.buttons["Discard"].firstMatch
-        XCTAssertTrue(discard.waitForExistence(timeout: 10) && keep.exists, "Esc on a changed draft asks to discard")
+        app.typeKey("w", modifierFlags: .command)
+        let prompt = editWindow.sheets.containing(NSPredicate(format: "elementType == %d AND label == %@",
+                                                              XCUIElement.ElementType.button.rawValue, "Discard")).firstMatch
+        let keep = prompt.buttons["Keep Editing"]
+        let discard = prompt.buttons["Discard"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10) && discard.exists && keep.exists,
+                      "Command-W on a changed draft asks to discard")
         keep.click()
-        XCTAssertTrue(discard.waitForNonExistence(timeout: 10))
-        XCTAssertTrue(form.exists, "Keep Editing leaves the form open")
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(editWindow.exists, "Keep Editing leaves the window open")
         XCTAssertFalse(close.isEnabled)
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        XCTAssertTrue(discard.waitForExistence(timeout: 10), "Esc asks the same question")
         discard.click()
-        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Discard closes the changed draft")
+        XCTAssertTrue(editWindow.waitForNonExistence(timeout: 10), "Discard closes the window")
         XCTAssertTrue(reveal.waitForExistence(timeout: 10), "The review stays on the unanswered card")
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
-        XCTAssertTrue(close.isEnabled, "Back to Decks acts again once the form has closed")
+        XCTAssertTrue(close.isEnabled, "Back to Decks acts again once the window has closed")
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
