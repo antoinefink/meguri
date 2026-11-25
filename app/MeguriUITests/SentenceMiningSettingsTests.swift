@@ -14,7 +14,7 @@ import Network
         guard build.hasHooks, try build.bundleIdentifier.hasSuffix(".dev") else {
             throw XCTSkip("Requires development hooks")
         }
-        _ = try XCTUnwrap(CardSwapTimingGate.hypervisorPresent() == true && NSUserName() == "meguri" ? true : nil,
+        _ = try XCTUnwrap(CardSwapTimingGate.hypervisorPresent() == true ? true : nil,
                           "Live fixed-port tests require the dedicated test VM")
         let bundle = try build.bundleIdentifier
         XCTAssertEqual(bundle, build.expectedBundleIdentifier)
@@ -30,13 +30,20 @@ import Network
         // MG discovers this recipe path and stages it in the isolated VM.
         // Omit port overrides to use the supported production listener defaults.
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory),
             ownedProviderFixture: true, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
             locale: "en_US", animations: false).arguments
         app.launch()
         defer { if app.state != .notRunning { app.terminate() } }
         let main = app.windows.matching(identifier: "main").firstMatch
         XCTAssertTrue(main.waitForExistence(timeout: 10))
+        let launchError = app.staticTexts["testhooks.error.message"]
+        if launchError.exists {
+            let value = launchError.value as? String
+            let message = value.flatMap { $0.isEmpty ? nil : $0 } ?? launchError.label
+            XCTFail("Owned synthetic collection launch failed: \(message)")
+            return
+        }
         try app.bringToFront(bundleIdentifier: build.bundleIdentifier)
         let deck = main.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "home.sidebar.deck.")).firstMatch
@@ -59,13 +66,27 @@ import Network
         configuration.timeoutIntervalForResource = 2
         let session = URLSession(configuration: configuration, delegate: MiningNoRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        func statusMatches(_ name: String, _ port: UInt16, _ enabled: Bool) -> Bool {
+        func displayedStatus(_ name: String) -> String? {
             let status = settings.descendants(matching: .any).matching(identifier: "settings.integrations.\(name).status").firstMatch
-            guard status.exists else { return false }
+            guard status.exists else { return nil }
+            // Native text can sit inside a disabled AX wrapper with stale text.
+            // Read the enabled leaf within this endpoint's freshly queried status.
+            let leaves = status.descendants(matching: .staticText).allElementsBoundByIndex.filter {
+                $0.isEnabled && $0.children(matching: .any).count == 0
+            }
+            if leaves.count == 1 {
+                let leaf = leaves[0]
+                if let value = leaf.value as? String, !value.isEmpty { return value }
+                return leaf.label
+            }
+            guard leaves.isEmpty, status.children(matching: .any).count == 0 else { return nil }
+            return status.value as? String
+        }
+        func statusMatches(_ name: String, _ port: UInt16, _ enabled: Bool) -> Bool {
+            guard let observed = displayedStatus(name) else { return false }
             let expected = enabled ? "Listening on 127.0.0.1:\(port)" : "Off · Port \(port)"
             let allowed = enabled ? [expected, expected + " · Collection unavailable"] : [expected]
-            return allowed.contains(status.label) || allowed.contains(status.value as? String ?? "")
-                || status.staticTexts.matching(NSPredicate(format: "label IN %@", allowed)).count == 1
+            return allowed.contains(observed)
         }
         func checked(_ checkbox: XCUIElement, _ enabled: Bool) -> Bool {
             let value = checkbox.value
@@ -85,7 +106,7 @@ import Network
                 let deadline = ContinuousClock.now + .seconds(5)
                 while !checked(checkbox, enabled) || !statusMatches(name, port, enabled) {
                     _ = try XCTUnwrap(ContinuousClock.now < deadline ? true : nil,
-                                      "\(name) must report checked=\(enabled) and its exact port status")
+                                      "\(name) must report checked=\(enabled) and its exact port status; observed status: \(displayedStatus(name) ?? "<missing or ambiguous>")")
                     try await Task.sleep(for: .milliseconds(20))
                 }
             }
@@ -104,7 +125,7 @@ import Network
                     && current.first?.processIdentifier == owner.processIdentifier
                     && owner.bundleURL?.resolvingSymlinksInPath() == build.appBundle.resolvingSymlinksInPath()
                     && checked(checkbox, true) && statusMatches(name, port, true) ? true : nil,
-                    "The tested Dev app must own this control and listening status")
+                    "The tested Dev app must own this control and listening status; \(name) observed status: \(displayedStatus(name) ?? "<missing or ambiguous>")")
                 // Listening is published only after the production exclusive
                 // bind succeeds. Never send an RPC after Off or Port in use.
                 var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!)
