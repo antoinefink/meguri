@@ -145,3 +145,15 @@ Independent complete-file review by `s-20261124T123814Z-b6a481ac`.
 | `docs/process/sim-posture.md` | `0925ee0e393b456197a8836c79099a954bd00bc7b77ca750ca87d5b7fbf529e0` | `20261125T133956Z-45073` |
 | `tools/tests/vnc_session_test.py` | `12f2aac01221f01874cc62b0559b1fba9797e01b8801870a6b13fa44dcb857e4` | `20261125T131915Z-21453` |
 | `tools/vm/duo-fold.sh` | `92ee39fb80652d04bbd1fd004b1aa0af4bc7c6c02e77a3c283422e6418a739f9` | `20261125T131915Z-21453` |
+
+## Move through a distinct titlebar point before parking
+
+A native calibration observed the guest cursor outside the signed window after a repeated parking coordinate. On the rework, both signed titlebar positions were verified. Native calibration 20261125T141557Z-1425 passed with zero clicks. Native Open run 20261125T142007Z-4488 reported one joined click and changed from the outer display to the inner display. All 312 Docker image-tool tests passed. PR #205 records the full cycle and any refusals.
+
+Independent complete-file review by `s-20261124T123814Z-b6a481ac`.
+
+| Public file | SHA-256 | Cleanroom run |
+| --- | --- | --- |
+| `docs/process/sim-posture.md` | `c25258d6c316996e858f3cd1e6f248d1c702f5e38b48b7604909680d4ab236bc` | `20261125T141807Z-2944` |
+| `tools/vm/sim-posture.py` | `71edf3b55e6058b98b025f9c38c536107d19f96faf24a1f3fd3566b275c309fe` | `20261125T141807Z-2944` |
+| `tools/vm/tests/test_sim_posture.py` | `d91c8097797b98c7c249f20c361ef991e3ad7d6a907427a14777aeb2a677fec3` | `20261125T141807Z-2944` |

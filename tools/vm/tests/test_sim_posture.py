@@ -286,7 +286,7 @@ class ToolbarTests(unittest.TestCase):
                             return title + (rows(path) if view == "full" or case == "fresh-tooltip" else [])
 
                         holder = mock.Mock()
-                        holder.batch.side_effect = [baseline, baseline, after]
+                        holder.batch.side_effect = [baseline, baseline, baseline, after]
                         with mock.patch.object(p, "stable_window"), \
                                 mock.patch.object(p, "text_boxes", side_effect=full), \
                                 mock.patch.object(p, "tooltip_text_boxes", side_effect=lambda ocr, path, *args:
@@ -305,7 +305,7 @@ class ToolbarTests(unittest.TestCase):
                                 self.assertNotIn("Popover", str(caught.exception))
                         holder.click.assert_not_called()
                         self.assertEqual(holder.batch.call_count,
-                                         2 if case.startswith("baseline-") or case == "partial-overlap" else 3)
+                                         3 if case.startswith("baseline-") or case == "partial-overlap" else 4)
 
     def test_posture_glyph_fallback_cannot_erase_any_observed_pose_label(self):
         box = (315, 720, 30, 14)
@@ -361,7 +361,7 @@ class ToolbarTests(unittest.TestCase):
                             ticks["now"] = p.HOVER_ACQUISITION_SECONDS + 10
                         return scaled(crop_rows) if path == first or case == "canvas" else []
                     holder = mock.Mock()
-                    holder.batch.side_effect = [baseline, baseline, first] + [unlabelled] * 50
+                    holder.batch.side_effect = [baseline, baseline, baseline, first] + [unlabelled] * 50
                     # Virtual sleep ends the bounded wait. A later clean frame
                     # is available, but bad observations must stop before it.
                     def sleep(seconds):
@@ -389,7 +389,8 @@ class ToolbarTests(unittest.TestCase):
                     if case.startswith("baseline-"):
                         self.assertEqual(ticks["samples"], 0)
                         self.assertEqual(holder.batch.call_args_list,
-                                         [mock.call("move %d %d" % (300 * scale, 62 * scale)), mock.call()])
+                                         [mock.call("move %d %d" % (284 * scale, 62 * scale)),
+                                          mock.call("move %d %d" % (300 * scale, 62 * scale)), mock.call()])
 
     def test_posture_glyph_admission_keeps_single_click_and_display_receipts(self):
         for pose in ("open", "closed"):
@@ -711,9 +712,11 @@ class EvidenceTests(unittest.TestCase):
                 w = dict(window(), screen=[0, 0, 1920, 1200], pointer=[270, 700])
                 geometry = p.window_binding(w, (3840, 2400), NAME)
                 holder = mock.Mock()
-                holder.batch.side_effect = [baseline, baseline, after]
+                holder.batch.side_effect = [baseline, baseline, baseline, after]
                 guest = mock.Mock()
-                guest.call.side_effect = lambda *args: dict(w, pointer=[300, 62] if holder.batch.call_count < 3 else [270, 700])
+                guest.call.side_effect = lambda *args: dict(w, pointer=(
+                    [284, 62] if holder.batch.call_count == 1 else
+                    [300, 62] if holder.batch.call_count < 4 else [270, 700]))
                 recognized = []
                 ticks = dict(now=0)
                 def recognize(path):
@@ -746,7 +749,7 @@ class EvidenceTests(unittest.TestCase):
                             p.hover(guest, holder, w, geometry, NAME, [170, 650], "Closed", ocr)
                     else:
                         p.hover(guest, holder, w, geometry, NAME, [170, 650], "Closed", ocr)
-                expected = [mock.call("move 600 124"), mock.call()]
+                expected = [mock.call("move 568 124"), mock.call("move 600 124"), mock.call()]
                 if failure != "before-pose":
                     expected += [mock.call("move 540 1400")]
                 self.assertEqual(holder.batch.call_args_list, expected)
@@ -884,6 +887,114 @@ class EvidenceTests(unittest.TestCase):
             guest.call.return_value = changed
             with self.assertRaises(RuntimeError):
                 p.stable_window(guest, original, [300, 700])
+
+    def test_posture_parking_refusal_bounds_numeric_evidence_and_keeps_target_checks_private(self):
+        original = window()
+        private = "PRIVATE unrelated native content"
+        original["title"] = private
+        guest = mock.Mock()
+        for scale in (1, 2):
+            for observed in ([600, 124], [799, 899], [330, 700], [], [private, 62],
+                             [float("nan"), 62], [True, 62], None):
+                with self.subTest(scale=scale, observed=observed):
+                    guest.call.return_value = dict(original, pointer=observed)
+                    with self.assertRaises(RuntimeError) as caught:
+                        p.stable_window(guest, original, [300, 62], parking_scale=scale)
+                    message, payload = str(caught.exception).split("; ", 1)
+                    self.assertEqual(message, "pre-prompt neutral-pointer parking refused")
+                    self.assertEqual(json.loads(payload), dict(
+                        expected_pt=[300, 62],
+                        observed_pt=observed if observed in ([600, 124], [799, 899], [330, 700]) else None,
+                        front_rect_pt=[100, 50, 400, 700], scale=scale))
+                    self.assertNotIn(private, str(caught.exception))
+                    # Hover and final input never disclose this parking payload.
+                    for final in (False, True):
+                        guest.call.reset_mock()
+                        with self.assertRaises(RuntimeError) as target:
+                            p.stable_window(guest, original, [300, 62], final=final)
+                        self.assertEqual(str(target.exception), "guest pointer moved away from verified control")
+                        guest.call.assert_called_once_with("click-window" if final else "window")
+        # Signed-window mismatch wins even when a pointer also disagrees.
+        guest.call.return_value = dict(original, id=24, pointer=[600, 124])
+        with self.assertRaises(RuntimeError) as caught:
+            p.stable_window(guest, original, [300, 62], parking_scale=2)
+        self.assertEqual(str(caught.exception), "foreground window changed; no pose input permitted")
+        guest.call.return_value = dict(original, pointer=[330, 700])
+        for origin in ([private, 62], [float("nan"), 62], [True, 62], []):
+            with self.assertRaises(RuntimeError) as caught:
+                p.stable_window(guest, original, [284, 62], parking_scale=2, parking_origin=origin)
+            self.assertIsNone(json.loads(str(caught.exception).split("; ", 1)[1])["original_pt"])
+            self.assertNotIn(private, str(caught.exception))
+        # The one-point bound remains inclusive and is never relaxed for parking.
+        for final, scale in ((False, None), (False, 2), (True, None), (True, 2)):
+            guest.call.return_value = dict(original, pointer=[301, 61])
+            p.stable_window(guest, original, [300, 62], final=final, parking_scale=scale)
+            guest.call.return_value = dict(original, pointer=[301.01, 61])
+            with self.assertRaises(RuntimeError) as caught:
+                p.stable_window(guest, original, [300, 62], final=final, parking_scale=scale)
+            if final:
+                self.assertEqual(str(caught.exception), "guest pointer moved away from verified control")
+
+    def test_posture_pre_prompt_parking_reports_actual_points_at_both_vnc_scales(self):
+        for scale in (1, 2):
+            for failure in (None, "ignored-waypoint", "relative-waypoint", "center", "capture"):
+                with self.subTest(scale=scale, failure=failure):
+                    w = dict(window(), rect=[663, 215, 612, 700], screen=[0, 0, 1920, 1200])
+                    geometry = p.window_binding(w, (1920 * scale, 1200 * scale), NAME)
+                    origin, waypoint, center = [654, 784], [953, 227], [969, 227]
+                    actual = dict(pointer=origin)
+                    guest, holder = mock.Mock(), mock.Mock()
+                    guest.call.side_effect = lambda *args: dict(w, pointer=actual["pointer"])
+                    def move(command=None):
+                        if command is None:
+                            if failure == "capture":
+                                actual["pointer"] = origin
+                        else:
+                            target = [int(v) / scale for v in command.split()[1:]]
+                            if target == waypoint and failure == "ignored-waypoint":
+                                pass
+                            elif target == waypoint and failure == "relative-waypoint":
+                                actual["pointer"] = [origin[0] - 16, origin[1]]
+                            else:
+                                actual["pointer"] = origin if failure == "center" and target == center else target
+                        return "synthetic.png"
+                    holder.batch.side_effect = move
+                    title = [(NAME, (700 * scale, 220 * scale, 250 * scale, 18 * scale))]
+                    with mock.patch.object(p.time, "sleep") as sleep, \
+                            mock.patch.object(p, "text_boxes", return_value=title):
+                        if failure is None:
+                            _, pointer, _ = p.neutral_frame(guest, holder, w, geometry, NAME, None, pre_prompt=True)
+                            self.assertEqual(pointer, center)
+                        else:
+                            with self.assertRaises(RuntimeError) as caught:
+                                p.neutral_frame(guest, holder, w, geometry, NAME, None, pre_prompt=True)
+                            payload = json.loads(str(caught.exception).split("; ", 1)[1])
+                            expected = dict(expected_pt=waypoint if "waypoint" in failure else center,
+                                            observed_pt=actual["pointer"], front_rect_pt=w["rect"], scale=scale)
+                            if "waypoint" in failure:
+                                expected["original_pt"] = origin
+                            self.assertEqual(payload, expected)
+                    calls = [mock.call("move %d %d" % (953 * scale, 227 * scale))]
+                    if failure is None or "waypoint" not in failure:
+                        calls.append(mock.call("move %d %d" % (969 * scale, 227 * scale)))
+                    if failure in (None, "capture"):
+                        calls.append(mock.call())
+                    self.assertEqual(holder.batch.call_args_list, calls)
+                    self.assertEqual(sleep.call_count, int(failure in (None, "capture")))
+                    holder.click.assert_not_called()
+
+    def test_posture_neutral_parking_refuses_unsafe_titlebar_before_any_move(self):
+        for scale in (1, 2):
+            for rect in ([100, 50, 220, 700], [100, 50, 400, 12]):
+                with self.subTest(scale=scale, rect=rect):
+                    w = dict(window(), rect=rect)
+                    geometry = p.window_binding(w, (800 * scale, 900 * scale), NAME)
+                    guest, holder = mock.Mock(), mock.Mock()
+                    guest.call.return_value = w
+                    with self.assertRaisesRegex(RuntimeError, "safe neutral titlebar points unavailable"):
+                        p.neutral_frame(guest, holder, w, geometry, NAME, None, pre_prompt=True)
+                    holder.batch.assert_not_called()
+                    holder.click.assert_not_called()
 
 
 class HolderTests(unittest.TestCase):
@@ -1303,7 +1414,7 @@ class ProductionFlowTests(unittest.TestCase):
     def test_posture_neutral_calibration_and_first_frame_proof_use_offscreen_and_hosted_paths(self):
         hosted = p.sibling("vnc-hosted")
         for remote in (False, True):
-            for action, failures in (("calibrate", (None, "initial-title", "initial-window", "neutral-pointer", "neutral-window", "neutral-title", "approval-pointer")),
+            for action, failures in (("calibrate", (None, "initial-title", "initial-window", "neutral-pointer", "neutral-center-pointer", "neutral-capture-pointer", "neutral-window", "neutral-title", "approval-pointer")),
                                      ("open", (None, "late", "wrong", "pointer", "glyph", "legacy-delay", "legacy-expired"))):
                 for failure in failures:
                     with self.subTest(remote=remote, action=action, failure=failure), tempfile.TemporaryDirectory() as directory:
@@ -1334,12 +1445,12 @@ class ProductionFlowTests(unittest.TestCase):
                             # A second target frame would exceed the budget.
                             # Returning the move's complete frame must avoid it.
                             if state["pointed"]:
-                                test.assertIn(state["frames"], (4, 5) if legacy else (4,))
+                                test.assertIn(state["frames"], (5, 6) if legacy else (5,))
                                 clock["now"] += 12  # PNG capture + large transfer.
                             events.append("capture")
                             image = synthetic_toolbar(w, geometry, record["controls"],
                                                       "missing" if failure == "glyph" and state["pointed"] else None)
-                            if legacy and state["pointed"] and state["frames"] == 5:
+                            if legacy and state["pointed"] and state["frames"] == 6:
                                 ImageDraw.Draw(image).rectangle([300, 720, 380, 735], fill="white")
                             path = folder / ("synthetic-%d.png" % number)
                             image.save(path)
@@ -1356,6 +1467,10 @@ class ProductionFlowTests(unittest.TestCase):
                                             or failure == "neutral-window" and state["moves"]):
                                         value["id"] += 1
                                     if failure == "neutral-pointer" and state["moves"]:
+                                        value["pointer"][0] += 3
+                                    if failure == "neutral-center-pointer" and len(state["moves"]) == 2:
+                                        value["pointer"][0] += 3
+                                    if failure == "neutral-capture-pointer" and state["frames"] >= 4:
                                         value["pointer"][0] += 3
                                     if failure == "pointer" and state["pointed"]:
                                         value["pointer"][0] += 3
@@ -1420,7 +1535,7 @@ class ProductionFlowTests(unittest.TestCase):
                                 clock["now"] += 4  # Two OCR calls per target frame.
                                 if (path.name == "crop.png" and
                                         (failure == "late" and state["pointed"]
-                                         or failure == "legacy-expired" and state["frames"] == 5)):
+                                         or failure == "legacy-expired" and state["frames"] == 6)):
                                     clock["now"] += p.HOVER_ACQUISITION_SECONDS
                                 bad_title = (failure == "initial-title" and state["frames"] == 1
                                              or failure == "neutral-title" and state["frames"] > 1)
@@ -1430,7 +1545,7 @@ class ProductionFlowTests(unittest.TestCase):
                                 if failure == "wrong" and state["pointed"] and path.name == "crop.png":
                                     rows.append(dict(text="Partially Open", confidence=1,
                                                      box=[105/240, 85/130, 30/240, 14/130]))
-                                if legacy and state["pointed"] and state["frames"] == 5 and path.name == "crop.png":
+                                if legacy and state["pointed"] and state["frames"] == 6 and path.name == "crop.png":
                                     rows.append(dict(text="Open", confidence=1,
                                                      box=[105/240, 85/130, 30/240, 14/130]))
                                 kwargs["stdout"].write(json.dumps(rows).encode())
@@ -1438,8 +1553,8 @@ class ProductionFlowTests(unittest.TestCase):
 
                         def approve(path, name, actual_geometry):
                             test.assertEqual(w["pointer"], [300, 62])
-                            test.assertEqual(state["frames"], 3)
-                            test.assertEqual(state["moves"], [[300, 62]])
+                            test.assertEqual(state["frames"], 4)
+                            test.assertEqual(state["moves"], [[284, 62], [300, 62]])
                             test.assertEqual(events[-1], "window")
                             test.assertTrue(path.is_file())
                             test.assertEqual(name, NAME)
@@ -1473,8 +1588,19 @@ class ProductionFlowTests(unittest.TestCase):
                             stack.enter_context(mock.patch.object(p.time, "monotonic", side_effect=lambda: clock["now"]))
                             stack.enter_context(mock.patch.object(p.time, "sleep", side_effect=sleep))
                             if not success:
-                                with self.assertRaises(RuntimeError):
+                                with self.assertRaises(RuntimeError) as caught:
                                     p.run(root, "ssh", "guest", str(ROOT), UDID, "wrapper", action, lease)
+                                if failure in ("neutral-pointer", "neutral-center-pointer", "neutral-capture-pointer"):
+                                    message, payload = str(caught.exception).split("; ", 1)
+                                    self.assertEqual(message, "pre-prompt neutral-pointer parking refused")
+                                    expected = dict(expected_pt=[300, 62], observed_pt=[303, 62],
+                                                    front_rect_pt=[100, 50, 400, 700], scale=1)
+                                    if failure == "neutral-pointer":
+                                        expected.update(expected_pt=[284, 62], observed_pt=[287, 62],
+                                                        original_pt=[330, 700])
+                                    self.assertEqual(json.loads(payload), expected)
+                                else:
+                                    self.assertNotIn("pre-prompt neutral-pointer parking", str(caught.exception))
                             else:
                                 result = p.run(root, "ssh", "guest", str(ROOT), UDID, "wrapper", action, lease)
                                 test.assertEqual(result["click_count"], int(action == "open"))
@@ -1491,12 +1617,16 @@ class ProductionFlowTests(unittest.TestCase):
                             self.assertNotIn("publish", events)
                             self.assertNotIn("target-move", events)
                             if success:
-                                self.assertEqual(state["moves"], [[300, 62]])
-                                self.assertEqual(state["frames"], 5)
+                                self.assertEqual(state["moves"], [[284, 62], [300, 62]])
+                                self.assertEqual(state["frames"], 6)
                             if failure in ("initial-title", "initial-window"):
                                 self.assertEqual(state["moves"], [])
+                            elif failure in ("neutral-pointer", "neutral-window"):
+                                self.assertEqual(state["moves"], [[284, 62]])
+                            else:
+                                self.assertEqual(state["moves"], [[284, 62], [300, 62]])
                         elif success:
-                            self.assertEqual(state["frames"], 5 if legacy else 4)
+                            self.assertEqual(state["frames"], 6 if legacy else 5)
                             self.assertLess(events.index("target-move"), events.index("arm"))
                             self.assertEqual(events.count("displays"), 3)
                         else:

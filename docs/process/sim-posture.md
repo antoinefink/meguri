@@ -239,10 +239,16 @@ permission setup or recovery as part of this procedure.
    owner may have different PIDs, but each must prove the exact selected bundle,
    identifier and approved signed executable. After proving this initial window
    and its exact leased title in a joined capture, the CLI uses the existing held
-   VNC connection to move the guest pointer to the safe noninteractive titlebar
+   VNC connection to move the guest pointer first to a distinct noninteractive
+   titlebar waypoint 16 points left of center, then to the existing neutral
    point used by hover (horizontal center, 12 points below the window top).
-   It verifies the actual pointer and unchanged signed window, waits for old
-   tooltips to disappear, then acquires a fresh joined image and repeats title,
+   Both points must remain inside the titlebar, clear of window buttons and
+   edges. It verifies actual pointer arrival and the unchanged signed window
+   after each move; either failure refuses without retry or correction. A
+   pre-approval waypoint refusal reports separately labeled expected, observed
+   and, when available, original guest pointer coordinates in points, plus the
+   bound window rectangle and scale. After both arrivals it waits for old
+   tooltips to disappear, acquires a fresh joined image and repeats title,
    pointer and window proof **before** asking for approval. There is no click,
    keyboard input or focus change during neutralization. It reports the guest CG
    window rectangle in points and displays this fresh image's private capture
@@ -313,6 +319,7 @@ search, shifted matching or screen-coordinate fallback. The three-glyph proof
 distinguishes full Open from Partially Open even when the display state cannot.
 
 The existing strong exact localized tooltip path remains preferred when present.
+Each hover baseline uses the same verified waypoint-then-center titlebar entry.
 Before hovering, the pointer-away baseline must have no recognized nearby pose
 labels in either its full frame or its accurate localized crop, and no nonempty
 high-confidence text within the candidate control's precise tooltip scope that

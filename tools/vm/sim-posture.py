@@ -1063,17 +1063,32 @@ def snapshot_displays(guest, folder):
     return result
 
 
-def stable_window(guest, original, point=None, *, final=False):
+def stable_window(guest, original, point=None, *, final=False, parking_scale=None, parking_origin=None):
     require(not final or point is not None, "expected click pointer unavailable")
     current = guest.call("click-window" if final else "window")
     require({k: v for k, v in current.items() if k not in ("pointer", "lookup_pid")}
             == {k: v for k, v in original.items() if k not in ("pointer", "lookup_pid")},
             "foreground window changed; no pose input permitted")
     if point is not None:
-        require(len(point) == len(current["pointer"]) == 2
-                and all(type(v) in (int, float) and math.isfinite(v) for v in (*point, *current["pointer"]))
-                and all(abs(a - b) <= 1 for a, b in zip(current["pointer"], point)),
-                "guest pointer moved away from verified control")
+        def numeric_point(value):
+            return (type(value) in (list, tuple) and len(value) == 2
+                    and all(type(v) in (int, float) and math.isfinite(v) for v in value))
+        observed = current.get("pointer")
+        matches = (numeric_point(point) and numeric_point(observed)
+                   and all(abs(a - b) <= 1 for a, b in zip(observed, point)))
+        if not matches and parking_scale is not None and not final:
+            # Only calibration's pre-prompt parking, after signed exact title
+            # admission and this unchanged-window check. Never serialize native
+            # strings or malformed pointer data, nor add geometry at a target.
+            evidence = dict(
+                expected_pt=list(point) if numeric_point(point) else None,
+                observed_pt=list(observed) if numeric_point(observed) else None,
+                front_rect_pt=original["rect"], scale=parking_scale)
+            if parking_origin is not None:
+                evidence["original_pt"] = list(parking_origin) if numeric_point(parking_origin) else None
+            raise RuntimeError("pre-prompt neutral-pointer parking refused; " + json.dumps(evidence))
+        require(matches, "guest pointer moved away from verified control")
+    return current
 
 
 # Acquisition includes joined PNG transport, two bounded OCR calls and signed
@@ -1083,20 +1098,31 @@ HOVER_ACQUISITION_SECONDS = 240
 LEGACY_POLL_SECONDS = 8
 
 
-def neutral_frame(guest, holder, window, geometry, name, ocr):
+def neutral_frame(guest, holder, window, geometry, name, ocr, *, pre_prompt=False):
     """Move only, through the held VNC connection, then observe a fresh baseline."""
-    stable_window(guest, window)
-    x, y, w, _ = window["rect"]
+    original = stable_window(guest, window)
+    x, y, w, h = window["rect"]
     scale = geometry["scale"]
     away = (int((x + w / 2) * scale), int((y + 12) * scale))
+    waypoint = (away[0] - int(16 * scale), away[1])
+    # Reserve the left window-button area and both edges before either move.
+    # A distinct request tests entry after other jobs moved the guest pointer;
+    # neither a missed waypoint nor a missed center is retried or corrected.
+    require(all(x + 96 <= px / scale <= x + w - 32
+                and y + 4 <= py / scale < y + min(24, h)
+                for px, py in (waypoint, away)), "safe neutral titlebar points unavailable")
+    holder.batch("move %d %d" % waypoint)
+    stable_window(guest, window, [v / scale for v in waypoint],
+                  parking_scale=scale if pre_prompt else None,
+                  parking_origin=original.get("pointer") if pre_prompt else None)
     pointer = [v / scale for v in away]
     holder.batch("move %d %d" % away)
-    stable_window(guest, window, pointer)
+    stable_window(guest, window, pointer, parking_scale=scale if pre_prompt else None)
     time.sleep(1.2)  # Hide old tooltips before the image offered for approval.
     path = holder.batch()
     boxes = text_boxes(ocr, path)
     title_evidence(boxes, window, scale, name)
-    stable_window(guest, window, pointer)
+    stable_window(guest, window, pointer, parking_scale=scale if pre_prompt else None)
     return path, pointer, boxes
 
 
@@ -1364,7 +1390,8 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
             # Initial signed exact leased window and title have been proved.
             # Neutralize BEFORE presenting an image to the operator. Keep the
             # original window binding, with the actually observed safe pointer.
-            path, pointer, _ = neutral_frame(guest, holder, window, geometry, binding["name"], ocr)
+            path, pointer, _ = neutral_frame(guest, holder, window, geometry, binding["name"], ocr,
+                                            pre_prompt=True)
             window = dict(window, pointer=pointer)
             print("sim-posture: guest window rect (points) " + json.dumps(window["rect"]), file=sys.stderr)
             viewport, controls = operator_controls(path, binding["name"], geometry)

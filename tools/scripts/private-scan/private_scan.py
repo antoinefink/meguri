@@ -1390,20 +1390,20 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
     # Independent full-file review in cleanroom/20261125T093743Z-19179.
     'docs/process/review-log/duo-posture-rework-20261124.md':
-        '207229516f394abce26d14368432013524624e47bbbc495d3292044e482ae517',
+        'bbad727f0553d5bf9f23e6835b3a46f62fe4346ef3fffd2ad021ab47d15e3f25',
     # Complete-file reviews recorded in duo-posture-rework-20261124.md.
     'tools/vm/vnc-hosted.py':
         'c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba',
     'tools/vm/tests/test_hosted_posture.py':
         '3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0',
     'docs/process/sim-posture.md':
-        '0925ee0e393b456197a8836c79099a954bd00bc7b77ca750ca87d5b7fbf529e0',
+        'c25258d6c316996e858f3cd1e6f248d1c702f5e38b48b7604909680d4ab236bc',
     'tools/vm/sim-posture-visual.swift':
         '69330e3a690576dd8a97e4072579c65c81145b48de69fe4225e1aa2ff3c789a0',
     'tools/vm/sim-posture.py':
-        'ba1d4671b5908fde12b7a9d9792af2825232b5d2f80d9023d9e3544864218b04',
+        '71edf3b55e6058b98b025f9c38c536107d19f96faf24a1f3fd3566b275c309fe',
     'tools/vm/tests/test_sim_posture.py':
-        '6fd677428d02d01c615591cc2dc6425f881743efe1b84d5873ad28c3b107db7b',
+        'd91c8097797b98c7c249f20c361ef991e3ad7d6a907427a14777aeb2a677fec3',
     # Independent reviews in duo-posture-rework-20261124.md.
     'tools/scripts/vm-claim.py':
         'f71d76cc817da0a7e83b3232c710f58da883b8e10c96eeca484abb459d3034c8',
