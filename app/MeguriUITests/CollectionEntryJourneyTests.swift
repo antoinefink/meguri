@@ -266,36 +266,74 @@ import notify
             XCTAssertEqual(inputs.count, 1)
             XCTAssertTrue(input.isEnabled)
             #if os(macOS)
-            // As in the native drive macros: click the current input's center,
-            // then type through the app without asking XCTest to refocus it.
+            // These diagnostics contain only this journey's synthetic text.
+            // A textView AX role also describes the rich contenteditable; it
+            // does not imply that the hidden HTML-source textarea is active.
+            func describeValue(_ value: String?) -> String {
+                guard let value else { return "<unavailable>" }
+                let scalars = value.unicodeScalars.prefix(128)
+                    .map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
+                return "\(value.debugDescription) count=\(value.count) scalars (capped at 128)=[\(scalars)]"
+            }
+            func attachTypingEvidence(_ detail: String, stage: String) {
+                let attachment = XCTAttachment(string: detail)
+                attachment.name = "synthetic-\(name)-\(stage)"
+                attachment.lifetime = .keepAlways
+                self.add(attachment)
+            }
+            let initial = input.value as? String
+            attachTypingEvidence("Initial AX value before focus: \(describeValue(initial))", stage: "initial-AX")
+            XCTAssertEqual(initial, "", "Fresh \(name) must start empty: \(describeValue(initial))")
+            var firstDivergence: String?
+            func waitForPrefix(_ expected: String, previous: String?, step: String) {
+                var observed: String?
+                var firstUnexpected: String?
+                let reached = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    observed = input.exists ? input.value as? String : nil
+                    // AX may still publish the preceding, already verified
+                    // prefix. Observe it without sending the key again.
+                    if observed != expected && observed != previous && firstUnexpected == nil {
+                        firstUnexpected = describeValue(observed)
+                    }
+                    return observed == expected
+                }, object: nil)
+                let result = XCTWaiter().wait(for: [reached], timeout: 20)
+                if firstDivergence == nil,
+                   let actual = firstUnexpected ?? (result != .completed ? describeValue(observed) : nil) {
+                    let detail = "\(name), \(step)\nExpected logical prefix: \(describeValue(expected))\nFirst divergent AX value: \(actual)"
+                    firstDivergence = detail
+                    attachTypingEvidence(detail, stage: "first-divergence")
+                }
+                XCTAssertEqual(result, .completed,
+                    "\(name), \(step): expected \(describeValue(expected)); last AX value: \(describeValue(observed)); first divergence: \(firstDivergence ?? "none")")
+            }
+            // Keep the native focus, preferences and rich editor unchanged.
+            // typeText's burst obscures which key first diverges. Send each
+            // hardware key once, including Space and Shift + letter, and wait
+            // for the real AX value before sending the next key.
             input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-            app.typeText(content)
+            waitForPrefix("", previous: nil, step: "after focus, before typing")
+            var prefix = ""
+            for (index, character) in content.enumerated() {
+                let previous = prefix
+                let key = String(character)
+                app.typeKey(key.lowercased(), modifierFlags: character.isUppercase ? .shift : [])
+                prefix.append(character)
+                waitForPrefix(prefix, previous: previous, step: "key \(index + 1) \(key.debugDescription)")
+            }
+            attachTypingEvidence("Final exact AX value: \(describeValue(input.value as? String))\nFirst divergence: \(firstDivergence ?? "none")",
+                stage: "final-AX")
             #else
             try click(input, app, bundle)
             try app.bringToFront(bundleIdentifier: bundle)
             input.typeText(content)
-            #endif
-            // Require the live native AX String, allowing exactly one terminal LF.
-            var characterCount = -1
-            var exactWithTerminalLF = false
-            var firstMismatchScalars: String?
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                guard input.exists, let value = input.value as? String else {
-                    characterCount = -1; exactWithTerminalLF = false
-                    return false
-                }
-                characterCount = min(value.count, 128)
-                exactWithTerminalLF = value == content + "\n"
-                // This journey authors every byte in a fresh synthetic collection.
-                // Keep value diagnostics here only; never add them to shared input helpers.
-                if value != content && !exactWithTerminalLF && firstMismatchScalars == nil {
-                    firstMismatchScalars = value.unicodeScalars.prefix(128)
-                        .map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
-                }
-                return value == content || exactWithTerminalLF
+                input.exists && input.value as? String == content
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
-                "Native typing must reach \(name); AX String character count (capped at 128)=\(characterCount), exactWithTerminalLF=\(exactWithTerminalLF); first mismatched synthetic AX value scalars (capped at 128)=[\(firstMismatchScalars ?? "unavailable")]")
+                "Native typing must reach the exact \(name) value")
+            #endif
+            XCTAssertEqual(input.value as? String, content, "Native typing must leave the exact \(name) value")
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -303,6 +341,11 @@ import notify
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [addReady], timeout: 20), .completed,
             "The real field-change events must make Add actionable")
+        // Recheck both fields after Front's blur and the form's live updates.
+        for (name, content) in [("Front", front), ("Back", back)] {
+            let input = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name)).firstMatch
+            XCTAssertEqual(input.value as? String, content, "\(name) must remain exact before saving")
+        }
         XCTAssertEqual(add.label, "Add")
         #if os(macOS)
         add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
