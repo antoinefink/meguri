@@ -159,10 +159,15 @@ pub(crate) fn prune(c: &Connection,id: &str,now: i64,protected: &[&str]) -> Resu
         Ok(d.year()*12+i32::from(u8::from(d.month())))
     };
     let current_month=month(now)?;
-    let points=list(c,id)?;
+    // Retention needs only metadata, never the public list's media-size sums.
+    struct Retained {id: String,created_at: i64,kind: String}
+    let mut q=c.prepare("SELECT id,created_at,kind FROM backup_points WHERE account_id=?1 ORDER BY created_at DESC,id DESC")?;
+    let points=q.query_map([id],|r|Ok(Retained {id:r.get(0)?,created_at:r.get(1)?,kind:r.get(2)?}))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let newest=points.iter().find(|p|p.kind!="before_restore").map(|p|p.id.clone());
     // A selected point and captures ahead of a backwards-moving sweep clock
     // stay intact. Reserve their monthly slots before considering other points.
-    let preserve=|p: &Backup| protected.contains(&p.id.as_str())
+    let preserve=|p: &Retained| protected.contains(&p.id.as_str())
         || (p.kind!="before_restore" && p.created_at>now);
     let reserved=points.iter().filter(|p|p.kind=="before_restore" && preserve(p)).count();
     let mut buckets=BTreeSet::new(); let mut safety=reserved; let mut monthly=0;
@@ -181,7 +186,7 @@ pub(crate) fn prune(c: &Connection,id: &str,now: i64,protected: &[&str]) -> Resu
             if safety<=3 {Some(("before_restore",p.created_at))} else {None}
         } else if (0..7).contains(&age) {Some(("daily",day))}
         else if (1..=4).contains(&week) {Some(("weekly",(day+3).div_euclid(7)))}
-        else if (0..=12).contains(&months) {Some(("monthly",i64::from(month(p.created_at)?)))}
+        else if (1..=12).contains(&months) {Some(("monthly",i64::from(month(p.created_at)?)))}
         else {None};
         let keep=match tier {Some(("before_restore",_))=>true,Some(key)=>{
             let fresh=buckets.insert(key);
@@ -189,8 +194,11 @@ pub(crate) fn prune(c: &Connection,id: &str,now: i64,protected: &[&str]) -> Resu
             fresh && (key.0!="monthly" || monthly<=12)
         },None=>false};
         if keep {
-            c.execute("UPDATE backup_points SET kind=?3 WHERE account_id=?1 AND id=?2",params![id,p.id,tier.unwrap().0])?;
-        } else { c.execute("DELETE FROM backup_points WHERE account_id=?1 AND id=?2",params![id,p.id])?; }
+            let kind=tier.unwrap().0;
+            if p.kind!=kind {
+                c.execute("UPDATE backup_points SET kind=?3 WHERE account_id=?1 AND id=?2",params![id,p.id,kind])?;
+            }
+        } else if newest.as_deref()!=Some(p.id.as_str()) { c.execute("DELETE FROM backup_points WHERE account_id=?1 AND id=?2",params![id,p.id])?; }
     }
     Ok(())
 }
@@ -388,8 +396,7 @@ mod tests {
     }
     #[test]
     fn monthly_limit_includes_a_protected_old_point_at_calendar_boundaries() {
-        // January 2028 spans five Monday-based weeks: all thirteen month
-        // starts can be monthly. Also exercise leap February and year rollover.
+        // Exercise leap February, year rollover and the protected oldest month.
         for now in [stamp(2028,1,31)+86399,stamp(2028,2,1),stamp(2028,2,29)+86399,stamp(2029,1,1)] {
             let c=database();
             let date=time::OffsetDateTime::from_unix_timestamp(now).unwrap();
@@ -404,9 +411,37 @@ mod tests {
             let points=list(&c,"account").unwrap();
             let monthly=points.iter().filter(|p|p.kind=="monthly").count();
             assert!(monthly<=12);
-            if now==stamp(2028,1,31)+86399 {assert_eq!(monthly,12);}
+            if now==stamp(2028,1,31)+86399 {assert_eq!(monthly,12);assert!(!points.iter().any(|p|p.id=="month-00"));}
             assert!(points.iter().any(|p|p.id=="month-12"));
             assert!(points.iter().any(|p|p.id=="fresh" && p.kind=="daily"));
         }
     }
+    #[test]
+    fn sparse_months_exclude_current_month_and_unchanged_tiers_do_not_write() {
+        let c=database();
+        let now=stamp(2028,1,31)+86399;
+        add(&c,"today",now,"daily",1).unwrap();
+        add(&c,"current-month",stamp(2028,1,1),"monthly",1).unwrap();
+        add(&c,"preceding-month",stamp(2027,12,1),"monthly",1).unwrap();
+        add(&c,"twelfth-month",stamp(2027,1,1),"monthly",1).unwrap();
+        add(&c,"expired",stamp(2026,12,31),"monthly",1).unwrap();
+        prune(&c,"account",now,&[]).unwrap();
+        let ids=list(&c,"account").unwrap().into_iter().map(|p|p.id).collect::<BTreeSet<_>>();
+        assert_eq!(ids,BTreeSet::from(["today".into(),"preceding-month".into(),"twelfth-month".into()]));
+        let changes=c.total_changes();
+        prune(&c,"account",now,&[]).unwrap();
+        assert_eq!(c.total_changes(),changes,"unchanged tiers produce no writes");
+    }
+    #[test]
+    fn expired_history_keeps_the_last_ordinary_recovery_point() {
+        let c=database();
+        add(&c,"last-good",stamp(2025,1,1),"daily",1).unwrap();
+        add(&c,"older",stamp(2024,12,1),"monthly",1).unwrap();
+        prune(&c,"account",stamp(2028,1,31),&[]).unwrap();
+        assert_eq!(list(&c,"account").unwrap().iter().map(|p|p.id.as_str()).collect::<Vec<_>>(),vec!["last-good"]);
+        add(&c,"new-good",stamp(2028,1,31),"daily",1).unwrap();
+        prune(&c,"account",stamp(2028,1,31),&[]).unwrap();
+        assert_eq!(list(&c,"account").unwrap().iter().map(|p|p.id.as_str()).collect::<Vec<_>>(),vec!["new-good"]);
+    }
+
 }

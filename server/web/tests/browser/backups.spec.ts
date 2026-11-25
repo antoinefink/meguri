@@ -278,7 +278,7 @@ for (const result of ["lost", "malformed"] as const) {
     await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
     await expect(history(page).getByRole("alert")).toBeFocused();
     await expect(history(page).getByRole("alert")).toContainText("The restore result is unknown");
-    await expect(history(page).getByRole("alert")).toContainText("previous pre-restore safety copy");
+    await expect(history(page).getByRole("alert")).toContainText("Refresh history and review the backups before choosing another restore");
     await expect(confirmation(page)).toHaveCount(0);
     await expect(page.getByRole("status").filter({ hasText: "Storage unavailable" })).toBeVisible();
     if (result === "lost") {

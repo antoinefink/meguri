@@ -93,7 +93,7 @@ impl Service {
         }}).await?;
         if !exists {
             let captured=self.capture_backup(id.clone(),epoch,clock.clone(),"daily",work.clone()).await?;
-            self.publish_backup(id.clone(),captured.point,&captured.media,epoch,work.clone()).await?;
+            self.publish_backup(id.clone(),captured,epoch,work.clone()).await?;
         }
         let guard=gate.enter().await;
         #[cfg(feature="test-hooks")]
@@ -135,8 +135,8 @@ impl Service {
             let version=source.pragma_query_value(None,"data_version",|r|r.get::<_,i64>(0))?;
             let pages:i64=source.pragma_query_value(None,"page_count",|r|r.get(0))?;
             let size:i64=source.pragma_query_value(None,"page_size",|r|r.get(0))?;
-            let bytes=store::collection_bytes(pages,size)?;
-            let reservation=budget.reserve(bytes.checked_mul(2).and_then(|n|n.checked_add(u64::try_from(names).ok()?)).ok_or(Error::new("storage_unavailable"))?)?;
+            store::collection_bytes(pages,size)?;
+            let reservation=budget.reserve(schema::snapshot_reservation_bytes(pages,size).and_then(|n|n.checked_add(u64::try_from(names).ok()?)).ok_or(Error::new("storage_unavailable"))?)?;
             let media=store::media(&c,&id,None)?;
             let cursor=index::cursor(&c,&id)?;
             let pin=root.pin_collection(&path)?;
@@ -162,19 +162,21 @@ impl Service {
             Ok(Capture {point,media,source,path,version,cursor,epoch,_pin:pin,_reservations:vec![metadata,reservation],_capacity:capacity,_work:stage._work.clone()})
         }).await
     }
-    async fn publish_backup(&self,id: String,point: store::Point,media: &BTreeMap<String,blobs::Content>,epoch: i64,work: Arc<BackupWork>) -> Result<()> {
+    async fn publish_backup(&self,id: String,captured: Capture,epoch: i64,work: Arc<BackupWork>) -> Result<()> {
         let gate=work.gate.clone();
-        let media=media.clone();
         let guard=gate.enter().await;
         self.metadata.run(move |c| {
             let _work=work;
             let _publication=(gate,guard);
             let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             eligible(&tx,&id,epoch)?;
+            // Retain the whole capture, including its pins and reservations,
+            // until publication completes; do not clone the media manifest.
+            let captured=captured;
             // Pinning may cross UTC midnight after the early duplicate check.
-            let at=point.summary.created_at;
+            let at=captured.point.summary.created_at;
             if tx.prepare("SELECT 1 FROM backup_points WHERE account_id=?1 AND kind<>'before_restore' AND created_at>=?2 AND created_at<?3")?.exists(params![id,at.div_euclid(86400)*86400,(at.div_euclid(86400)+1)*86400])? {return Ok(());}
-            store::insert(&tx,&id,&point,&media,epoch)?;
+            store::insert(&tx,&id,&captured.point,&captured.media,epoch)?;
             phase("backup_before_publish")?;
             tx.commit()?;
             Ok(())
@@ -215,7 +217,12 @@ impl Service {
             eligible(&c,&id,epoch)?;
             let point=store::point(&c,&id,&backup)?;
             let manifest_bytes:i64=c.query_row("SELECT coalesce(sum(4*length(CAST(name AS BLOB))+2048),0) FROM backup_media WHERE account_id=?1 AND backup_id=?2",params![id,backup],|r|r.get(0))?;
-            let hold=budget.reserve(point.bytes.checked_mul(2).and_then(|n|n.checked_add(u64::try_from(manifest_bytes).ok()?)).and_then(|n|n.checked_add(4096)).ok_or(Error::new("storage_unavailable"))?)?;
+            let source=schema::open_upload(&root.stores(&id)?.directory.join("backups").join(&point.payload))?;
+            let pages:i64=source.pragma_query_value(None,"page_count",|r|r.get(0))?;
+            let size:i64=source.pragma_query_value(None,"page_size",|r|r.get(0))?;
+            if store::collection_bytes(pages,size)?!=point.bytes {return Err(Error::new("storage_unavailable"));}
+            drop(source);
+            let hold=budget.reserve(schema::snapshot_reservation_bytes(pages,size).and_then(|n|n.checked_add(u64::try_from(manifest_bytes).ok()?)).and_then(|n|n.checked_add(4096)).ok_or(Error::new("storage_unavailable"))?)?;
             let selected_media=store::media(&c,&id,Some(&backup))?;
             drop(c);
             let mut file=root.backup_file(&id,&point.payload)?;

@@ -72,18 +72,6 @@ struct Snapshot {
     _capacity: OwnedSemaphorePermit,
     _root: Arc<DataRoot>,
 }
-fn snapshot_reservation_bytes(pages: i64, page_size: i64) -> Option<u64> {
-    let pages = u64::try_from(pages).ok().filter(|n| *n > 0)?;
-    let page_size = u64::try_from(page_size).ok().filter(|n| *n > 0)?;
-    // Checkpoint can retain the full destination WAL beside the main file.
-    // Include both page bodies, 24 bytes per WAL frame and its 32-byte header.
-    // WAL-index mappings grow in 32 KiB blocks (about 4,096 frames each);
-    // 16 bytes per page plus 64 KiB bounds mapping rounding with spare margin.
-    let bodies = pages.checked_mul(page_size)?.checked_mul(2)?;
-    let frames = pages.checked_mul(24)?;
-    let wal_index = pages.checked_mul(16)?.checked_add(64 * 1024)?;
-    bodies.checked_add(frames)?.checked_add(wal_index)?.checked_add(32)
-}
 impl Service {
     pub(crate) async fn redeem_collection(self: &Arc<Self>, token: &str) -> Result<Response> {
         let key = key(token)?;
@@ -103,7 +91,7 @@ impl Service {
             c.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get::<_, i64>(0))?;
             let pages: i64 = c.pragma_query_value(None, "page_count", |r| r.get(0))?;
             let page_size: i64 = c.pragma_query_value(None, "page_size", |r| r.get(0))?;
-            let bytes = snapshot_reservation_bytes(pages, page_size).ok_or(Error::new("storage_unavailable"))?;
+            let bytes = schema::snapshot_reservation_bytes(pages, page_size).ok_or(Error::new("storage_unavailable"))?;
             let metadata = budget.reserve(4096)?;
             let reservation = budget.reserve(bytes)?;
             // Create only under the original account guard. Reset cannot make
@@ -237,19 +225,6 @@ fn stream(mut snapshot: Snapshot) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn snapshot_reservation_covers_wal_overhead_and_refuses_overflow() {
-        // 10,000 frames need three 32 KiB WAL-index mappings.
-        let reserved = snapshot_reservation_bytes(10_000, 4096).unwrap();
-        let two_main_files = 2 * 10_000 * 4096_u64;
-        assert!(reserved >= two_main_files + 10_000 * 24 + 3 * 32 * 1024 + 32);
-        assert!(snapshot_reservation_bytes(1, 4096).unwrap() >= 2 * 4096 + 24 + 32 * 1024 + 32);
-        for (pages, page_size) in [(i64::MAX, 65536), (i64::MAX, 1), (1, i64::MAX),
-            (0, 4096), (-1, 4096), (1, 0), (1, -1)] {
-            assert_eq!(snapshot_reservation_bytes(pages, page_size), None);
-        }
-    }
 
     #[tokio::test]
     async fn elapsed_response_deadline_refuses_queued_bytes_and_waits_for_cleanup() {

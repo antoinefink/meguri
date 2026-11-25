@@ -144,7 +144,17 @@ async fn daily_idempotence_retention_boundaries_and_missed_days_use_real_account
     let dates=points.iter().filter(|p|p["kind"]=="daily").map(|p|p["created_at"].as_i64().unwrap()).collect::<Vec<_>>();
     assert_eq!(dates,(403..=409).rev().map(|day|start+day*86400).collect::<Vec<_>>());
     assert_eq!(points.iter().filter(|p|p["kind"]=="weekly").count(),4);
-    assert_eq!(points.iter().filter(|p|p["kind"]=="monthly").count(),12);
+    let end_day=(start+409*86400).div_euclid(86400);
+    let month=|at| {let d=time::OffsetDateTime::from_unix_timestamp(at).unwrap();d.year()*12+i32::from(u8::from(d.month()))};
+    let expected_months=(0..410).filter_map(|day| {
+        let at=start+day*86400;let date=at.div_euclid(86400);
+        let age=end_day-date;let week=(end_day+3).div_euclid(7)-(date+3).div_euclid(7);
+        let age_month=month(start+409*86400)-month(at);
+        (age>=7 && !(1..=4).contains(&week) && (1..=12).contains(&age_month)).then(||month(at))
+    }).collect::<std::collections::BTreeSet<_>>();
+    let actual_months=points.iter().filter(|p|p["kind"]=="monthly").map(|p|month(p["created_at"].as_i64().unwrap())).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(actual_months,expected_months);
+    assert_eq!(points.iter().filter(|p|p["kind"]=="monthly").count(),expected_months.len());
     assert!(points.windows(2).all(|p|p[0]["created_at"].as_i64().unwrap()>=p[1]["created_at"].as_i64().unwrap()));
     let before=points.clone();h.service.capture_backups_at(start+409*86400+500).await.unwrap();assert_eq!(history(&h,&cookie).await,before);
     // Identical collection payloads are shared across all retained dates.
@@ -222,6 +232,25 @@ async fn invalid_payload_and_budget_exhaustion_refuse_without_cutover_or_safety_
     assert_eq!(history(&h,&cookie).await,points);assert_eq!(stamps(&h,id),before);
     std::fs::write(&path,original).unwrap();
     restore(&h,&cookie,backup).await;
+    let _=h.stop().await;
+}
+#[tokio::test]
+async fn persistent_capture_budget_failures_preserve_last_history_until_success() {
+    let h=Harness::new().await;let account=h.setup().await;let id=account["id"].as_str().unwrap().to_owned();
+    let cookie=h.login("root.admin",PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let original=history(&h,&cookie).await;
+    let hold=h.service.temp.reserve(h.service.config.temp_bytes.get()).unwrap();
+    let later=today()+800*86400;
+    for day in 0..3 {
+        assert_eq!(h.service.capture_account_backup_at(id.clone(),later+day*86400).await.unwrap_err().code,"storage_unavailable");
+        assert_eq!(history(&h,&cookie).await,original);
+    }
+    drop(hold);
+    h.service.capture_account_backup_at(id,later+3*86400).await.unwrap();
+    let points=history(&h,&cookie).await;
+    assert_eq!(points.len(),1);assert_ne!(points[0]["id"],original[0]["id"]);
+    restore(&h,&cookie,points[0]["id"].as_str().unwrap()).await;
     let _=h.stop().await;
 }
 #[tokio::test]
@@ -437,7 +466,7 @@ async fn already_validated_native_collection_and_media_uploads_cannot_commit_aft
     let collection=tokio::spawn(async move {request.send().await.unwrap()});within(collection_pause.arrived()).await;
     let request=h.client.post(format!("{}/msync/uploadChanges",h.base))
         .header("anki-sync",json!({"v":11,"k":key,"c":"fixture","s":"stale"}).to_string())
-        .body(zstd::stream::encode_all(media_zip(&[("late.bin",Some(b"late bytes")))]).as_slice(),0).unwrap());
+        .body(zstd::stream::encode_all(media_zip(&[("late.bin",Some(b"late bytes"))]).as_slice(),0).unwrap());
     let media=tokio::spawn(async move {request.send().await.unwrap()});within(media_pause.arrived()).await;
     restore(&h,&cookie,backup).await;
     collection_pause.resume();media_pause.resume();

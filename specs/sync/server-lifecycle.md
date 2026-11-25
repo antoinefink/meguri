@@ -99,11 +99,14 @@ another account's payload or media by a digest alone.
 
 Keep the newest point per UTC day for today and the preceding six days. Older
 points in the preceding four Monday-based UTC weeks become weekly points (one
-newest point per week). Remaining points become monthly points, one newest per
-UTC calendar month within the current and preceding twelve months, at most
-twelve monthly points, including a selected monthly point protected during
-restore. Preserve points captured after the sweep's sampled clock when the clock
-moves backwards. Promote metadata in place without copying payloads.
+newest point per week). Remaining points become monthly points, at most one newest point for
+each of the twelve preceding UTC calendar months beyond daily/weekly coverage,
+at most twelve monthly points, including a selected monthly point protected during
+restore. Prune old history only after a successful daily capture (or when that
+day already has a published point), so capture failure cannot erase the last
+restorable history. Always retain the newest ordinary recovery point, even if
+it has aged beyond these windows. Preserve points captured after the sweep's
+sampled clock when the clock moves backwards. Promote metadata in place without copying payloads.
 Expired and unreferenced collection payloads are reclaimed only in the account's
 owned backup directory. Online reclamation retains the strong account
 publication barrier and per-account backup-work lease through cleanup, even if

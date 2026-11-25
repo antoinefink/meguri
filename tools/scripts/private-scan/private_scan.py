@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'server/tests/backups.rs':
-        '14d661a1136929059b25441eefd000c15efc1ae1f62320774f1affd2af6740d2',
+        '23ce76cdfaf24672b010f21781857d8c44f52afaedfc2c6e1dd9a83e89888121',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -844,16 +844,16 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/collection.rs':
         'e27e2657c752118e14a57eee533d7070b2e40f29348c732b88058382a57c7537',
     'server/src/storage/backups.rs':
-        'b74a5ce157bbeecad392c37e949d673d66f4bc3de3914f3f3afbeeb5118235e0',
+        '474ac2b8eeb940fabc7eb3abc719b5af50ac5bcf62451de6153cce0f0e006537',
     'server/web/tests/api.test.ts':
         'f686e358e8c4535f8408fcaa131cb53fd3dae474d4c8a7fb86c9e620cadeedf6',
     'server/web/tests/browser/mcp.spec.ts':
         'b4045b73d11cd3fcc38fddc1cfcee477bfca005e24347c1ba098f44ef74ab5af',
     'server/web/tests/browser/backups.spec.ts':
-        'd9c0899e0b90f48f30519c811d56b181c1593c2f497ebb696dc1c9c6b8ba73cd',
+        '8759ae634a5ad4d8f00e922fad011cf69e0e1f610b0253b5ca9e6aea8f9a4b21',
     # Complete-content public review, collection recovery fixture, 2026-11-25.
     'server/tests/backup_round_trip.rs':
-        'f4c2931a964617aee54b1ffc21a438b2f72aba3fbd59f75fa9d891be88936914',
+        '751a5642286c97d761851bc41ed1450afc5cd9c53a3b2ac9593547c05629b3cd',
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
     'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
         '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
@@ -902,7 +902,7 @@ PUBLIC_ARTIFACTS = {
         'ce8b31f955e6aac28cf117bcb041cee67566273a6c6583bd560285c46b23a4bc',
     # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
     'server/src/mcp_service/export.rs':
-        'de4bcaceea675b072c5b13569ec3b347c838cd359af8866326b5900b3696c551',
+        '463edb515478d490e6d07a1010edada22a852bbd3c451000228d245ad35fca1d',
     'server/src/mcp_service/attachments/format/audio.rs':
         '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/images.rs':
@@ -948,7 +948,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '7e8bc3ff20571a429ce57396995255d0ccb55c11eb19bd60efa3029791a17b21',
+        '9c7c8495126dde8511790efaa905a6e80597c75f8b82cddbe8e902031ddc9aad',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1237,7 +1237,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-collection.md":
         "85c3d211817ce238682043964f4e61835a5fbc83009134b69998242563c42ccb",
     "specs/sync/server-lifecycle.md":
-        "8cba86301f3a5621025ad0e4bcfb62f179252d5f26b96e31e34afaeb67d5052e",
+        "ae5b10969d39c9bae94095fdb81d025d63b502cdb1d87720e5983fdd9559c5bf",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
@@ -1336,7 +1336,7 @@ PUBLIC_ARTIFACTS = {
 
     # Independently reviewed public transfer code and process evidence.
     'server/src/collection/schema.rs':
-        'e17519c1a370abb797bba2f0beebeb6813f80d954fc2e7a952a626c74d887fea',
+        'b6e1a6d0ad4657ad6d56b9d62cbb02e86ca153564335cceb6cdefd8c858accd2',
     'server/src/protocol/framing.rs':
         'a1349d00d0b25dd659e0e8fff5d3adc6b7ce63d20f861e17604e60071d79b777',
     'server/src/protocol/full.rs':

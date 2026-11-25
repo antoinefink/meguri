@@ -88,7 +88,7 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
           storageRequest.current?.abort(); storageRequest.current = null;
           setStorage(null); setLoading(false); setOutcome(null);
           setRestoreUnknown(true); closeConfirmation(true);
-          setRestoreOutcome({ error: true, text: "The restore result is unknown. Refresh history and review the backups before choosing another restore. Another restore replaces the previous pre-restore safety copy. No retry was sent automatically." });
+          setRestoreOutcome({ error: true, text: "The restore result is unknown. Refresh history and review the backups before choosing another restore. No retry was sent automatically." });
         } else setRestoreOutcome(value);
       });
     }

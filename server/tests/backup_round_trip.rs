@@ -200,7 +200,7 @@ async fn startup_scheduler_captures_idle_account_and_cookie_restore_recovers_dow
         let id = point["id"].as_str().unwrap();
         assert!(!id.is_empty());
         assert!(!point["kind"].as_str().unwrap().is_empty());
-        assert!(!point["created_at"].as_str().unwrap().is_empty());
+        assert!(point["created_at"].as_i64().unwrap() > 0, "capture time is positive integer Unix seconds");
         assert!(point["size_bytes"].as_u64().unwrap() > 0);
         let restore = format!("/api/me/backups/{id}/restore");
 
