@@ -175,14 +175,14 @@ jobs:
             echo 'core_shards=[1,2,3,4]'
             # The one list of selftest shards: the shard matrix and the check
             # in "Linux · selftest" both read it.
-            echo 'selftest_shards=[1,2,3,4]'
+            echo 'selftest_shards=[1,2,3,4,5,6]'
           } >>"$GITHUB_OUTPUT"
           {
             echo "### Selected suites"
             echo
             echo "- Core (4 shards, lint and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
-            echo "- selftest (4 shards and the image-tools job): **$selftest** (Linux · checks runs on every change)"
+            echo "- selftest (6 shards and the image-tools job): **$selftest** (Linux · checks runs on every change)"
             echo "- Swift packages (macOS, advisory): **$swift**"
             if [[ -n "$added" ]]; then
               echo
