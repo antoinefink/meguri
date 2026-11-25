@@ -253,8 +253,12 @@ import XCTest
             XCTAssertTrue(add.exists && add.sheets.count == 0 && save.exists && !save.isEnabled, app.debugDescription)
             XCTAssertTrue((deck.value as? String ?? "").contains("Synthetic Summary"))
         }
-        main.typeKey("n", modifierFlags: .command)
-        XCTAssertEqual(try inputEvidence(bundle: bundle)["addWindowKey"], "true")
+        let newNote = app.menuBars.menuBarItems["File"].menuItems.matching(NSPredicate(format: "title == %@", "New Note")).firstMatch
+        XCTAssertTrue(newNote.exists && newNote.isEnabled)
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(wait {
+            (try? inputEvidence(bundle: bundle)["addWindowKey"]) == "true"
+        }, "Add must be the native key window before closing")
         add.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(add.waitForNonExistence(timeout: 10), app.debugDescription)
     }
