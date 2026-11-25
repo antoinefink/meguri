@@ -14,7 +14,7 @@ import AppKit
 /// `search/filter-tokens` T9 says. The sidebar's field filters the rows
 /// (`browser/sidebar` S6). Since 2026-11-24 (N21.1) the list's own selection
 /// is the Browse row alone: a filter row the query selects draws a tinted
-/// background and a checkmark itself, and each row leads with a symbol.
+/// background itself, and each row leads with a symbol.
 public struct BrowseSidebar<Header: View>: View {
     @Bindable private var model: BrowseModel
     private let decks: [CountedDeckNode]
@@ -376,7 +376,8 @@ public struct BrowseSidebar<Header: View>: View {
 
     /// One value row: its symbol, its label (the match highlighted) and its
     /// count as the row's badge once known. A row the query selects (T9)
-    /// reads in the emphasized weight on a tinted background, with a checkmark.
+    /// reads in the emphasized weight on a tinted background (no checkmark
+    /// since 2026-11-25: the tint and the weight already say it).
     fileprivate func row(_ tag: BrowseSidebarTag, label: String, identifier: String, icon: RowIcon,
                          help: String? = nil) -> some View {
         let active = model.selectedRows.contains(tag)
@@ -388,13 +389,6 @@ public struct BrowseSidebar<Header: View>: View {
             }
             .lineLimit(1)
             Spacer(minLength: 0)
-            if active {
-                Image(systemName: "checkmark")
-                    .imageScale(.small)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.tint)
-                    .accessibilityHidden(true)
-            }
         }
         // The whole row takes the click below, not the label alone.
         .contentShape(Rectangle())
