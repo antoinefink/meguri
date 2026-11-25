@@ -19,6 +19,27 @@ struct BrowseTagFieldTests {
     }
 
     @Test
+    func selectionMustStillMatchCurrentQueryNamesAndHeldTokens() throws {
+        let name = "Spanish::Grammar::Verbs"
+        let query = try #require(BrowseTagField.Query(text: "VER", selection: NSRange(location: 3, length: 0)))
+        #expect(query.isEligible(name, in: [name], excluding: []))
+        #expect(!query.isEligible(name, in: [], excluding: []))
+        #expect(!query.isEligible(name, in: [name], excluding: [name.lowercased()]))
+        let changed = try #require(BrowseTagField.Query(text: "Nouns", selection: NSRange(location: 5, length: 0)))
+        #expect(!changed.isEligible(name, in: [name], excluding: []))
+        #expect(changed.suggestions(in: [name], excluding: []).isEmpty)
+    }
+
+    @Test
+    func suggestionsStopAtFiftyEligibleNamesInInputOrder() throws {
+        let names = (0..<80).map { "Spanish::Grammar::Verbs\($0)" }
+        let held = Array(names.prefix(5))
+        let query = try #require(BrowseTagField.Query(text: "grammar::v", selection: NSRange(location: 10, length: 0)))
+        #expect(query.suggestions(in: names, excluding: held) == Array(names[5..<55]))
+        #expect(query.suggestions(in: ["Unrelated"] + names, excluding: held) == Array(names[5..<55]))
+    }
+
+    @Test
     func replacementRangePreservesBothAdjacentTokensAndUnicode() throws {
         let text = "\u{FFFC} 語::🦉partial \u{FFFC}"
         let caret = ("\u{FFFC} 語::🦉" as NSString).length

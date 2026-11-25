@@ -39,10 +39,15 @@ final class MacBrowseInspectorTests: XCTestCase {
         let paths = ["Adjectives", "Adverbs", "Articles", "Conditionals", "Nouns", "Prepositions", "Pronouns", "Tenses", "Verbs"]
             .map { "Spanish::Grammar::" + $0 }
         let tags = element(app, "browse.inspector.tags")
-        func tagText() -> String {
-            ([String(describing: tags.value ?? "")] + tags.descendants(matching: .any).allElementsBoundByIndex.map {
-                $0.label + " " + String(describing: $0.value ?? "")
-            }).joined(separator: " ")
+        func hasTag(_ name: String) -> Bool {
+            // Match in the remote AX process, rather than fetching every child's
+            // label and value separately on every poll.
+            tags.descendants(matching: .any).matching(
+                NSPredicate(format: "label == %@ OR value == %@", name, name)).firstMatch.exists
+        }
+        func suggestion(_ name: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "label == %@ OR value == %@", name, name)).firstMatch
         }
         // This test is VM-only. Never read or retain the workstation clipboard.
         let pasteboard = NSPasteboard.general
@@ -54,22 +59,19 @@ final class MacBrowseInspectorTests: XCTestCase {
             XCTAssertTrue(pasteboard.setString(names.joined(separator: " ") + " ", forType: .string))
             app.typeKey("v", modifierFlags: [.command])
         }
-        func typeQuery(_ query: String, capture name: String) {
+        func typeQuery(_ query: String, showing name: String) -> XCUIElement {
             app.typeText(query)
-            // Wait on the parent field, not an assumed remote menu hierarchy.
-            let typed = waitUntil { (tags.value as? String ?? "").contains(query) }
-            screen(app, "browse-tags-\(name)-\(appearance)-synthetic")
-            let hierarchy = XCTAttachment(string: app.debugDescription)
-            hierarchy.name = "browse-tags-\(name)-hierarchy-\(appearance)"
-            hierarchy.lifetime = .keepAlways
-            add(hierarchy)
-            XCTAssertTrue(typed, "the unfinished query is editable text, not a pasted token")
+            XCTAssertTrue(waitUntil { (tags.value as? String ?? "").contains(query) },
+                          "the unfinished query is editable text, not a pasted token")
+            let choice = suggestion(name)
+            XCTAssertTrue(choice.waitForExistence(timeout: 10), "native suggestion: \(name)")
+            XCTAssertTrue(choice.isHittable, "the specific suggestion is visible before capture or selection")
+            return choice
         }
         func afterAcceptance(_ name: String, capture label: String) {
-            let accepted = waitUntil { tagText().contains(name) }
+            XCTAssertTrue(waitUntil { hasTag(name) }, "accepted tag: \(name)")
+            XCTAssertTrue(hasTag(paths[0]) && hasTag("Kept::Token"), "adjacent tokens survive")
             screen(app, "browse-tags-\(label)-\(appearance)-synthetic")
-            XCTAssertTrue(accepted, "accepted tag: \(name)")
-            XCTAssertTrue(tagText().contains(paths[0]) && tagText().contains("Kept::Token"), "adjacent tokens survive")
         }
 
         seed(paths)
@@ -82,49 +84,74 @@ final class MacBrowseInspectorTests: XCTestCase {
         let secondFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
         seed([paths[0], "Kept::Token"])
         let prefix = "spanish::grammar::"
-        typeQuery(prefix, capture: "expanded")
-        // Exercise native highlight and Esc with keys before querying any
-        // suggestion elements: the window can be AX-remote on current macOS.
+        _ = typeQuery(prefix, showing: paths[1])
+        screen(app, "browse-tags-expanded-\(appearance)-synthetic")
         app.typeKey(.downArrow, modifierFlags: [])
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertFalse(tagText().contains(paths[7]), "Escape accepts nothing")
-        XCTAssertFalse(tagText().contains(paths[8]), "highlighting preserves the editor")
+        XCTAssertTrue((tags.value as? String ?? "").contains(prefix), "Escape preserves typed text")
+        for name in paths.dropFirst() { XCTAssertFalse(hasTag(name), "Escape accepts nothing: \(name)") }
         for _ in prefix { app.typeKey(.delete, modifierFlags: []) }
-        typeQuery("SPANISH::GRAMMAR::TEN", capture: "keyboard-expanded")
+        let keyboardQuery = "SPANISH::GRAMMAR::TEN"
+        let keyboardChoice = typeQuery(keyboardQuery, showing: paths[7])
         app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(keyboardChoice.isHittable)
+        XCTAssertTrue((tags.value as? String ?? "").contains(keyboardQuery), "highlighting preserves typed text")
+        screen(app, "browse-tags-keyboard-highlighted-\(appearance)-synthetic")
         app.typeKey(.return, modifierFlags: [])
         afterAcceptance(paths[7], capture: "after-keyboard-accept")
+        XCTAssertFalse(hasTag(keyboardQuery), "acceptance replaces the unfinished token")
 
-        tags.click()
-        app.typeKey(.downArrow, modifierFlags: [.command])
+        // No click or focus command: typing the next query proves keyboard focus
+        // survives acceptance, and the held tokens must survive that typing too.
         app.typeText(" ")
-        typeQuery("ver", capture: "pointer-expanded")
-        // Match the suggestion's public text across all element types, including
-        // remote children. No table, row, menu shape or system dimensions assumed.
-        let choice = app.descendants(matching: .any).matching(
-            NSPredicate(format: "label == %@ OR value == %@", paths[8], paths[8])).firstMatch
-        XCTAssertTrue(choice.waitForExistence(timeout: 10), "native suggestion: \(paths[8])")
+        let choice = typeQuery("ver", showing: paths[8])
+        XCTAssertTrue(hasTag(paths[7]), "typing after acceptance preserves the accepted token")
+        screen(app, "browse-tags-pointer-expanded-\(appearance)-synthetic")
         choice.click()
         afterAcceptance(paths[8], capture: "after-pointer-accept")
-        tags.click()
-        app.typeKey(.downArrow, modifierFlags: [.command])
+        XCTAssertFalse(hasTag("ver"), "pointer acceptance replaces the unfinished token")
         app.typeText(" Fresh::Created ")
+        XCTAssertTrue(waitUntil { hasTag("Fresh::Created") }, "typing immediately after pointer acceptance retains focus")
         app.typeKey(.tab, modifierFlags: [])
 
         // Browse's real editing-end save, then a reload of each note.
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, firstFront))
-        XCTAssertFalse(tagText().contains("Fresh::Created"))
+        XCTAssertFalse(hasTag("Fresh::Created"))
         press(table.outlineRows.element(boundBy: 1))
         XCTAssertTrue(shows(fields, secondFront))
         for name in [paths[0], paths[7], paths[8], "Kept::Token", "Fresh::Created"] {
-            XCTAssertTrue(waitUntil { tagText().contains(name) }, "persisted tag: \(name)")
+            XCTAssertTrue(waitUntil { hasTag(name) }, "persisted tag: \(name)")
         }
         for name in paths[1..<7] {
-            XCTAssertFalse(tagText().contains(name), "dismissed suggestion is never saved: \(name)")
+            XCTAssertFalse(hasTag(name), "dismissed suggestion is never saved: \(name)")
         }
         for query in [prefix, "SPANISH::GRAMMAR::TEN", "ver"] {
-            XCTAssertFalse(tagText().contains(query), "unfinished query is not saved as another token: \(query)")
+            XCTAssertFalse(hasTag(query), "unfinished query is not saved as another token: \(query)")
+        }
+
+        // A highlighted offer is not acceptance. Both ordinary blur and a note
+        // switch commit the typed token, never the highlighted full name.
+        for (query, offered, switchNote) in [("Spanish::Grammar::NOU", paths[4], false),
+                                             ("Spanish::Grammar::PRO", paths[6], true)] {
+            tags.click()
+            app.typeKey(.downArrow, modifierFlags: [.command])
+            app.typeText(" ")
+            _ = typeQuery(query, showing: offered)
+            app.typeKey(.downArrow, modifierFlags: [])
+            if !switchNote {
+                app.typeKey(.tab, modifierFlags: [])
+                XCTAssertTrue(waitUntil { hasTag(query) }, "blur preserves the typed token")
+                XCTAssertFalse(hasTag(offered), "blur never accepts a highlight")
+            }
+            press(table.outlineRows.element(boundBy: 0))
+            XCTAssertTrue(shows(fields, firstFront))
+            press(table.outlineRows.element(boundBy: 1))
+            XCTAssertTrue(shows(fields, secondFront))
+            XCTAssertTrue(waitUntil { hasTag(query) }, "typed token persists after switching notes")
+            XCTAssertFalse(hasTag(offered), "switching notes never accepts a highlight")
+            XCTAssertTrue(hasTag(paths[0]) && hasTag(paths[7]) && hasTag(paths[8]) &&
+                          hasTag("Kept::Token") && hasTag("Fresh::Created"), "existing tokens remain saved")
         }
     }
 

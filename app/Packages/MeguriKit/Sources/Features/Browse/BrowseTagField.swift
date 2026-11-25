@@ -77,9 +77,17 @@ struct BrowseTagField: NSViewRepresentable {
 
         func textField(_ textField: NSTextField, didSelect item: Item) {
             guard let editor = textField.currentEditor() as? NSTextView,
-                  !editor.hasMarkedText(), let query = Query(text: editor.string, selection: editor.selectedRange()) else { return }
+                  !editor.hasMarkedText(), let query = Query(text: editor.string, selection: editor.selectedRange()),
+                  query.isEligible(item.representedValue, in: parent.names,
+                                   excluding: textField.objectValue as? [String] ?? []) else { return }
             editor.insertText(item.representedValue, replacementRange: query.range)
             editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            // Tokenizing with Return can end editing. Keep accepting successive
+            // tags from the keyboard, without disturbing an editor still active.
+            if textField.currentEditor() == nil, let window = textField.window,
+               window.makeFirstResponder(textField), let resumed = textField.currentEditor() as? NSTextView {
+                resumed.setSelectedRange(NSRange(location: resumed.string.utf16.count, length: 0))
+            }
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
@@ -121,11 +129,26 @@ struct BrowseTagField: NSViewRepresentable {
         func suggestions(in names: [String], excluding held: [String]) -> [String] {
             let held = Set(held.map { $0.lowercased() })
             let typed = text.lowercased()
-            return names.filter { name in
-                let lower = name.lowercased()
-                guard !held.contains(lower) else { return false }
-                let components = lower.components(separatedBy: "::")
-                return components.indices.contains { components[$0...].joined(separator: "::").hasPrefix(typed) }
+            var matches: [String] = []
+            for name in names where isEligible(name, typed: typed, excluding: held) {
+                matches.append(name)
+                if matches.count == 50 { break }
+            }
+            return matches
+        }
+
+        func isEligible(_ name: String, in names: [String], excluding held: [String]) -> Bool {
+            names.contains(name) && isEligible(name, typed: text.lowercased(), excluding: Set(held.map { $0.lowercased() }))
+        }
+
+        private func isEligible(_ name: String, typed: String, excluding held: Set<String>) -> Bool {
+            let lower = name.lowercased()
+            guard !held.contains(lower) else { return false }
+            var start = lower.startIndex
+            while true {
+                if lower[start...].hasPrefix(typed) { return true }
+                guard let separator = lower.range(of: "::", range: start..<lower.endIndex) else { return false }
+                start = separator.upperBound
             }
         }
     }

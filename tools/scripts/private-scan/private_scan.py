@@ -845,9 +845,9 @@ PUBLIC_ARTIFACTS = {
         '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
     # Whole-file review in cleanroom 20261125T154052Z-94614.
     'app/Packages/MeguriKit/Tests/BrowseTests/BrowseTagFieldTests.swift':
-        '9d4f83ae0ffe4c49beb2efc35fc1474a9928786b94f2b49a4401bd7b9e621b44',
+        'f8389c31bf475893b70ff473535c3f347d09f78a5ad06a037743d1355c6611ab',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '417bd403de6a33face77a64add0e883e2099d73a96ffc8da20b7d1891648d84d',
+        '9ac640eecb6a44833a166e3c05eebafafc0ce5e8cf31d03d839a58d3495fc03f',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
