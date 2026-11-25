@@ -182,22 +182,37 @@ import XCTest
     }
 
     func testMainCloseLeavesCleanAddOpenAndReopensTheSameWorkspace() throws {
-        let (app, _) = try launch()
+        let (app, bundle) = try launch()
         defer { app.terminate() }
-        try selectDeck("Synthetic Summary", app: app)
+        let deckPage = try selectDeck("Synthetic Summary", app: app)
+        let collection = try inputEvidence(bundle: bundle)
         let main = app.windows.containing(.any, identifier: "shell.root.sidebar.browse").firstMatch
         app.typeKey("n", modifierFlags: .command)
         let add = app.windows["editor.add.window"]
         XCTAssertTrue(add.waitForExistence(timeout: 15))
-        try selectDeck("Synthetic Summary", app: app)
+        // Reselecting an already-selected row can perform its AX action without
+        // making main key. Click the exposed left sidebar with native input.
+        let rows = HomeControls.deckRows(app, labelContaining: "Synthetic Summary")
+        XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
+        let row = try XCTUnwrap(HomeControls.hittable(rows))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
+            "Cmd-W must target the actual main key window")
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(main.waitForNonExistence(timeout: 10), "the main window must continue its own close")
         XCTAssertTrue(add.exists && add.sheets.count == 0, "main close must not cancel Add")
         app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
-        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
+            "Window > Meguri brings the workspace to the front")
+        let reopened = try inputEvidence(bundle: bundle)
+        XCTAssertTrue(element(app, deckPage).waitForExistence(timeout: 15), "Window > Meguri restores the same deck: \(reopened)")
+        XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
+        XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
+        XCTAssertEqual(reopened["collectionReady"], "true")
         XCTAssertTrue(add.exists, "reopening main preserves the collection-owned Add window")
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(wait { (add.popUpButtons["editor.add.deck"].value as? String ?? "").contains("Synthetic Summary") })
+        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["addWindowKey"]) == "true" })
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(add.waitForNonExistence(timeout: 10))
     }
@@ -205,18 +220,35 @@ import XCTest
     func testMainCloseCancelsCleanEditThenClosesAndQuitStillGuardsDirtyAdd() throws {
         let (app, bundle) = try launch(extra: ["-MeguriIntegrations", "on"])
         defer { app.terminate() }
-        try study("Synthetic Long Audio", app: app, bundle: bundle)
+        let deckPage = try study("Synthetic Long Audio", app: app, bundle: bundle)
+        let collection = try inputEvidence(bundle: bundle)
         app.typeKey("e", modifierFlags: .command)
         let edit = app.windows["review.editCurrent.window"]
         XCTAssertTrue(edit.waitForExistence(timeout: 15))
         let main = app.windows.containing(.any, identifier: "review.session.card").firstMatch
-        main.click(); app.typeKey("w", modifierFlags: .command)
+        // Target main's native close button, rather than its centre behind Edit.
+        let close = main.buttons[XCUIIdentifierCloseWindow]
+        XCTAssertTrue(wait { close.exists && close.isEnabled && close.isHittable })
+        close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         XCTAssertTrue(edit.waitForNonExistence(timeout: 10))
         XCTAssertTrue(main.waitForNonExistence(timeout: 10), "clean Edit cancellation must continue main close")
         app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
-        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 15))
-        element(app, "review.session.close").click()
-        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        // S4's lifetime contract restores the deck and collection. It does not
+        // promise that closing/recreating a scene retains a transient review.
+        let page = element(app, deckPage)
+        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
+            "the reopened workspace owns the keys")
+        let reopened = try inputEvidence(bundle: bundle)
+        XCTAssertTrue(page.waitForExistence(timeout: 15), "Window > Meguri restores the same known deck: \(reopened)")
+        XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
+        XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
+        XCTAssertEqual(reopened["collectionReady"], "true")
+        let study = page.buttons["home.deck.study"]
+        XCTAssertTrue(wait { study.exists && study.isEnabled && study.isHittable })
+        study.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try clickReviewButton("review.session.close", app: app, bundle: bundle)
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
         app.typeKey("n", modifierFlags: .command)
         let add = app.windows["editor.add.window"]
         XCTAssertTrue(add.waitForExistence(timeout: 15))

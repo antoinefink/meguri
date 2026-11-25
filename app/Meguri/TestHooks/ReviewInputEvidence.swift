@@ -12,13 +12,27 @@ extension TestHooks {
     struct ReviewInputEvidence: ViewModifier {
         @MainActor final class Source {
             weak var collection: ReviewCollection?
+            weak var workspaceView: NSView?
+        }
+        /// A view in the actual main scene identifies its window even without
+        /// a review card. Reading AppKit identity needs no accessibility trust.
+        struct WorkspaceWindow: NSViewRepresentable {
+            let source: Source
+            func makeNSView(context: Context) -> NSView {
+                let view = NSView()
+                source.workspaceView = view
+                return view
+            }
+            func updateNSView(_ view: NSView, context: Context) { source.workspaceView = view }
         }
         let collection: ReviewCollection?
         let enabled: Bool
         @State private var observer: NSObjectProtocol?
         @State private var source = Source()
         func body(content: Content) -> some View {
-            content.onAppear {
+            content.background {
+                if enabled { WorkspaceWindow(source: source) }
+            }.onAppear {
                 source.collection = collection
                 guard enabled, observer == nil, let bundle = Bundle.main.bundleIdentifier else { return }
                 observer = DistributedNotificationCenter.default().addObserver(
@@ -46,6 +60,7 @@ extension TestHooks {
                         let audio = pair?.nativeReviewAudioReadiness
                         let sides = audio?.replaySides.map { $0 == .question ? "q" : "a" }.joined(separator: ",") ?? ""
                         let window = NSApp.keyWindow
+                        let workspace = source.workspaceView?.window
                         let responder = window?.firstResponder
                         let reviewWindowActive = window != nil && window === pair?.container.window && NSApp.isActive
                         let responderInWindow = responder != nil
@@ -59,6 +74,12 @@ extension TestHooks {
                         let fields = ["requests": String(audio?.replayRequests ?? 0), "sides": sides,
                                       "live": source.collection == nil ? "false" : "true", "focus": focus,
                                       "firstResponderClass": responder.map { NSStringFromClass($0.classForCoder) } ?? "none",
+                                      "workspaceKey": workspace != nil && window === workspace ? "true" : "false",
+                                      "collectionIdentity": source.collection.map { String(describing: ObjectIdentifier($0)) } ?? "none",
+                                      "collectionGeneration": source.collection.map { String($0.generation) } ?? "none",
+                                      "collectionReady": source.collection?.state == .ready ? "true" : "false",
+                                      "reviewPhase": source.collection?.review.map { String(describing: $0.phase) } ?? "none",
+                                      "reviewPresented": source.collection?.navigation.review == nil ? "false" : "true",
                                       "addWindowKey": NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"]
                         let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
                         guard let data, let text = String(data: data, encoding: .utf8) else { return }
