@@ -136,8 +136,24 @@ final class ReviewActionsMacUITests: XCTestCase {
         XCTAssertGreaterThan(cancel.frame.minX, sheet.frame.midX, "Both sit at the trailing end")
         XCTAssertGreaterThan(cancel.frame.midY, sheet.frame.midY, "Both sit at the bottom")
 
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "Command-W leaves the sheet up")
+        XCTAssertTrue(window.exists, "Command-W does not close the review window under the sheet")
+
+        // A changed draft asks before it is thrown away; Keep Editing keeps the sheet.
+        app.typeText(" edited")
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Esc closes the unchanged draft")
+        let keep = app.buttons["Keep Editing"].firstMatch
+        let discard = app.buttons["Discard"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 10) && keep.exists, "Esc on a changed draft asks to discard")
+        keep.click()
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(form.exists, "Keep Editing leaves the form open")
+        XCTAssertFalse(close.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        discard.click()
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Discard closes the changed draft")
         XCTAssertTrue(reveal.waitForExistence(timeout: 10), "The review stays on the unanswered card")
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
         XCTAssertTrue(close.isEnabled, "Back to Decks acts again once the form has closed")
