@@ -2,6 +2,7 @@
 export type Identity = { id: string; username: string; role: "admin" | "member" };
 export type Me = Identity & { server_url: string };
 export type AccountStorage = { collection_bytes: number; media_bytes: number; total_bytes: number };
+export type CollectionBackup = { id: string; created_at: number; kind: "daily" | "weekly" | "monthly" | "before_restore"; size_bytes: number };
 export type Account = Identity & { enabled: boolean; provisioning_state: "provisioning" | "ready"; storage?: AccountStorage | null };
 export type GeneratedLink = { url: string; expires_at: string };
 export type MCPAccess = "read" | "read_write";

@@ -835,6 +835,10 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/web/tests/browser/mcp.spec.ts':
+        'b4045b73d11cd3fcc38fddc1cfcee477bfca005e24347c1ba098f44ef74ab5af',
+    'server/web/tests/browser/backups.spec.ts':
+        '72c9bdbc3cba06f72cd258cab249832d479bd88483c9382caab72224e3f8896b',
     # Complete-content public review, collection recovery fixture, 2026-11-25.
     'server/tests/backup_round_trip.rs':
         'f4c2931a964617aee54b1ffc21a438b2f72aba3fbd59f75fa9d891be88936914',
@@ -932,7 +936,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '17779a1e91c303db26256265114fbd015627340676ad9e56c957330e629b9077',
+        'dcfb5f12b1d4883ee5f01683f289e79a04b200cdef20a724ba429f4750d98cc1',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1134,13 +1138,13 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        'd7199181ece5972ea365c5086cb612f6f605fee2512af49d1667e304f3d1691c',
+        '6474b82fd50c40b5c288011d7baee17f2c226821568ee19ab78a1a940fad18b4',
     'server/web/src/style.css':
-        '6a0fdbdf6a892c051129c554b5b940271763bfda3641b0a1fecfa5f5b7583e9f',
+        '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
     'server/web/src/app.tsx':
-        '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
+        '1d02bba9fbfc89f325ed88ec87b0f5fd99b2661bd697f1a7ca5efc046ea84f91',
     'server/web/tests/browser/accounts.spec.ts':
-        'ca12f0a952651e7bbbf110916fc31759c4e43679e59d0da776523afd5f6fa06d',
+        'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
