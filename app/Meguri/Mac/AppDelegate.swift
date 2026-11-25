@@ -27,10 +27,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         !Self.keepsRunningWithoutWindow
     }
 
-    /// A click on the Dock icon (or opening the app again) with the window
-    /// closed opens it.
+    /// A click on the Dock icon (or opening the app again) with the workspace
+    /// closed opens it, including when only the standalone Add window remains.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        guard !hasVisibleWindows, let openMainWindow = Self.openMainWindow else { return true }
+        let visibleWindows = sender.windows.filter(\.isVisible)
+        // Match only Add: a visible workspace, Settings or system sheet keeps
+        // AppKit's existing reopen behavior.
+        let onlyAddIsVisible = !visibleWindows.isEmpty && visibleWindows.allSatisfy {
+            $0.identifier?.rawValue == "editor.add.window"
+        }
+        guard !hasVisibleWindows || onlyAddIsVisible,
+              let openMainWindow = Self.openMainWindow else { return true }
         openMainWindow()
         return false
     }
