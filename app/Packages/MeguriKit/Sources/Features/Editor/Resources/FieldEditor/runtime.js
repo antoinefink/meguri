@@ -596,7 +596,7 @@
         return {top, bottom};
     }
     function grow(source) { source.style.height = "auto"; source.style.height = `${source.scrollHeight}px`; }
-    function makeField(value) {
+    function makeField(value, mode) {
         const section = document.createElement("section"), header = document.createElement("header");
         // N21.4: Browse names are labels, never individual disclosures.
         // The separate Add/Edit form keeps N17.1's collapse button (F3).
@@ -622,6 +622,8 @@
         const rich = document.createElement("meguri-field-content");
         rich.contentEditable = "true"; rich.setAttribute("role", "textbox"); rich.setAttribute("aria-multiline", "true");
         rich.setAttribute("aria-label", value.name); rich.id = `editor.field.${value.ord}`;
+        // Native inline prediction can duplicate a typed suffix in the Mac Add form.
+        if (mode === "add" && document.documentElement.classList.contains("mac")) rich.setAttribute("writingsuggestions", "false");
         const placeholderLabel = document.createElement("span");
         placeholderLabel.className = "placeholder"; placeholderLabel.textContent = value.description;
         placeholderLabel.setAttribute("aria-hidden", "true");
@@ -713,7 +715,7 @@
             // Edit Note shows the same media as the inspector (2026-11-24, option A).
             media = browsing || message.mode === "edit";
             document.documentElement.classList.toggle("inspector", browsing);
-            held = true; container.replaceChildren(); fields = message.fields.map(makeField);
+            held = true; container.replaceChildren(); fields = message.fields.map(value => makeField(value, message.mode));
             held = false; container.inert = false;
             focus(fields.find(field => field.ord === message.focus));
             await emit("loaded");

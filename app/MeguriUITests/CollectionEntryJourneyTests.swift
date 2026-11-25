@@ -261,9 +261,7 @@ import notify
                 || actual.utf8.elementsEqual((expected + "\n").utf8)
         }
         func describeValue(_ value: String?) -> String {
-            guard let value else { return "<unavailable>" }
-            let scalars = value.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
-            return "\(value.debugDescription) [\(scalars)]"
+            value?.debugDescription ?? "<unavailable>"
         }
         for (name, content) in [("Front", front), ("Back", back)] {
             #if os(macOS)
