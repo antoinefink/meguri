@@ -835,6 +835,16 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
+        '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
+    'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
+        '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
+        '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
+        '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
+    'app/MeguriUITests/MacBrowseInspectorTests.swift':
+        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':

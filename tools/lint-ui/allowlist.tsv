@@ -3,3 +3,4 @@
 # reason; glass outside DesignSystem/Chrome/ is allowed only for the control layer (R1996).
 raw-color	app/Packages/MeguriKit/Sources/Features/NoteTypes/SwatchColour.swift	The template editor's colour swatches show colour values of the person's card styling (notetypes/workspace W6): card data drawn as written, not interface colours.
 non-sf-symbol-icon	app/Packages/MeguriKit/Sources/Features/Browse/BrowseCommandsView.swift	The flag symbol in the Flag menus (browser/workspace V8.1: each flag with its colour) is the SF Symbol flag.fill drawn by AppKit in its system palette colour as a non-template NSImage, because a menu draws template symbols in the text colour.
+raw-color	app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift	The JPEG encoder composites transparent picture pixels over white for editor/paste P7. This colour is written into the stored image.

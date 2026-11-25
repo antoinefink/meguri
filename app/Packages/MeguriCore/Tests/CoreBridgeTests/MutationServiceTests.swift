@@ -18,6 +18,66 @@ private final class MutationDiskCapacity: DiskSpaceProviding {
 }
 
 extension EventTests {
+    @Test @MainActor func guardedMediaRejectsReplacedCollectionBeforeWritingFilesOrTracking() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func location(_ name: String) throws -> CoreBridge.CollectionLocation {
+            let directory = root.appending(path: name)
+            let backups = root.appending(path: "\(name)-backups")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+            return CoreBridge.CollectionLocation(collectionDirectory: directory, backupsDirectory: backups,
+                appGroupSnapshot: root.appending(path: "\(name).snapshot"),
+                manualTransferDirectory: root.appending(path: "ManualTransfers"))
+        }
+        let first = try location("first"), replacement = try location("replacement")
+        try await MaintenanceLane.shared.bootstrapCollection(first)
+        try await MaintenanceLane.shared.bootstrapCollection(replacement)
+        let service = CoreCollectionService(clock: MutationClock(), diskSpace: MutationDiskCapacity())
+        let media = CoreMediaService()
+        let bytes: [UInt8] = [1, 3, 5, 7]
+        do {
+            try await service.open(first, randomSeed: 83)
+            let captured = try await service.waitAvailable(timeoutMilliseconds: 0)
+            try await service.close()
+            try await service.open(replacement, randomSeed: 83)
+            let current = try await service.waitAvailable(timeoutMilliseconds: 0)
+            #expect(current != captured)
+            // Keep an existing file and tracking row to detect unintended changes,
+            // while retaining coverage of the unguarded, non-editor API.
+            let existing = try await media.addMedia(name: "Existing.PNG", bytes: [2, 4, 6])
+            #expect(existing == "existing.png")
+            let before = try await media.trackedNames()
+            let filesBefore = try FileManager.default.contentsOfDirectory(atPath: before.root.path).sorted()
+            #expect(before.generation == current)
+            #expect(before.names.map(\.name) == [existing])
+            // The captured request reaches FFI only after the replacement is open,
+            // as when an editor call waits in InteractiveLane during a switch.
+            await #expect(throws: BridgeError.staleGeneration(planned: captured, current: current)) {
+                try await CoreMediaService(expectedGeneration: captured).addMedia(name: "Picture.PNG", bytes: bytes)
+            }
+            let after = try await media.trackedNames()
+            #expect(after.generation == before.generation && after.root == before.root && after.names == before.names)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: before.root.path).sorted() == filesBefore)
+            #expect(!FileManager.default.fileExists(atPath: before.root.appending(path: "picture.png").path))
+            #expect(try Data(contentsOf: before.root.appending(path: existing)) == Data([2, 4, 6]))
+
+            let stored = try await CoreMediaService(expectedGeneration: current).addMedia(name: "Picture.PNG", bytes: bytes)
+            #expect(stored == "picture.png")
+            #expect(try Data(contentsOf: before.root.appending(path: stored)) == Data(bytes))
+            let accepted = try await media.trackedNames()
+            #expect(accepted.names.map(\.name).sorted() == [existing, stored].sorted())
+            #expect(accepted.generation == current && accepted.root == before.root)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: before.root.path).sorted() == [existing, stored].sorted())
+            #expect(try Data(contentsOf: before.root.appending(path: existing)) == Data([2, 4, 6]))
+            try await service.close()
+        } catch {
+            try? await service.close()
+            throw error
+        }
+    }
+
     @Test @MainActor func guardedAddUsesCapturedGenerationAndRealNoteWriter() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let directory = root.appending(path: "collection")

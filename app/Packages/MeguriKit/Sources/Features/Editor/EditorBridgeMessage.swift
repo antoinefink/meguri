@@ -21,6 +21,7 @@ struct EditorBridgeMessage {
         case "loaded": members = ["type", "loadId", "seq"]
         case "focus", "modeChanged": members = ["type", "loadId", "seq", "ord", "mode"]
         case "blur", "dirty": members = ["type", "loadId", "seq", "ord"]
+        case "pastePicture": members = ["type", "loadId", "seq", "ord", "request"]
         case "commit": members = ["type", "loadId", "seq", "ord", "html", "unchanged", "reason"]
         case "focusLeave": members = ["type", "loadId", "seq", "direction"]
         case "collapsedChanged": members = ["type", "loadId", "seq", "ord", "collapsed"]
@@ -46,6 +47,9 @@ struct EditorBridgeMessage {
         }
         if members.contains("mode") {
             guard let mode = body["mode"] as? String, NoteEditorDraft.Mode(rawValue: mode) != nil else { throw EditorRuntimeError.invalidMessage }
+        }
+        if type == "pastePicture" {
+            guard let request = Self.integer(body["request"]), request > 0 else { throw EditorRuntimeError.invalidMessage }
         }
         if members.contains("collapsed"), Self.boolean(body["collapsed"]) == nil { throw EditorRuntimeError.invalidMessage }
         if members.contains("canUndo"), Self.boolean(body["canUndo"]) == nil || Self.boolean(body["canRedo"]) == nil {
