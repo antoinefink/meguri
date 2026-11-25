@@ -8,10 +8,132 @@ changes consent or uses the coordinator's GUI. There is no host simulator
 fallback. The former unleased `hub`, fixed-coordinate `fold` and generic
 `click` helper routes have been removed.
 
-All commands share the transport's state selection: normally `build/vm-fold`,
-or `build/vmf2` after verified canonical old-orphan admission. Both use
-`build/vm-fold/venv` and the primary M5 scheduler lease; mutating commands
-recompute routing and revalidate selected VM metadata under that lease.
+New configured-remote sessions use coordinator state `build/vmh3` and a
+resident M3 owner. Local and already connected legacy sessions retain
+`build/vm-fold` or `build/vmf2`. M5 remains the only scheduler, with the same
+primary lease, guest acquisition/window/OCR guards and display readback.
+M5 posture analysis still uses `build/vm-fold/venv`. Mutations recheck routing
+and VM metadata under the scheduler lease.
+
+## Resident deployment and the one drained migration
+
+Integrator/operator only, from the authorized M5 scheduler checkout, with its
+existing private `mac-vm.json` / wrapper-adjacent `remote.json`. No endpoint,
+credential, command or remote output path is supplied to these commands:
+
+```sh
+tools/mg image-tools-selftest -k hosted
+tools/mg image-tools-selftest -k posture
+tools/mg selftest tools/tests/vnc_session.bats tools/tests/remote_wrapper.bats
+tools/mg sim-posture deploy
+tools/mg sim-posture preflight
+tools/mg sim-posture status
+# Only after both readiness jobs pass and normal jobs/acquisitions have drained:
+tools/mg sim-posture prepare
+tools/mg sim-posture status
+# Repeat: must report reused, with no stop, start or new RFB connection.
+tools/mg sim-posture prepare
+```
+
+Use MG result status/details to verify each job; its process exit alone is not
+a pass.
+
+`deploy` installs only the six shipped Python components plus a private venv
+with `vncdotool==1.4.2` and `Pillow==11.3.0`, under the fixed kit-relative
+`vnc-owner-v1/`. It uses the configured endpoint and existing strict SSH
+validation/options; only hosted VNC control opts into dedicated SSH connections.
+All code/state is owned, unsymlinked and private. Under the install lock,
+`deploy` can atomically replace partial or changed components and rebuild an
+incomplete venv only before any drain, launch or operation evidence exists.
+For an interrupted pre-connection install or a new release in that vacant
+installation, rerun `deploy`, then `preflight`. Do not delete reservations or
+owner records to enable an update. Matching ready components remain usable
+with an existing owner; deployment refuses code or dependency repair there.
+Deployment never changes system settings, provisions the guest or accesses
+user credentials. `preflight` verifies digests, pinned versions and the actual
+posture sidecar imports, exercises private state/operation storage and a
+unique control-socket bind/listen probe, and parses the configured guest's
+local Tart inventory before drain admission. Its probes remove only their own
+files. Neither command starts Tart or connects to RFB.
+
+The configured M3 kit must already be mounted, its actual `runtime/bin/tart`
+locally executable, strict-key batch SSH working, Python 3.9+ with venv/pip
+available, and the two pinned packages installable (network/package availability
+only during deployment). All kit ancestors must be unsymlinked and protected
+from other writers. `runtime/vnc-owner-v1/state/control.sock` must fit Darwin's
+103-byte pathname budget. M5 still needs the existing Pillow operator venv.
+These are real prerequisites; a Docker fixture does not establish them.
+
+The guarded migration admits the actual disconnected authenticated supervisor
+in `vmf2`: two positive disconnected replies, unchanged private owner/VM/peer
+records, all former transport children absent or stably kernel-confirmed
+zombies parented by that same live supervisor, no shutdown/recovery/drain/posture
+uncertainty, and the existing strict canonical pre-supervisor orphan proof.
+The live same-user supervisor must own the authenticated control socket;
+Darwin `ps` observations of parent, state and command repeat without change.
+Live, unrelated or ambiguous children refuse migration. This zombie admission
+applies only to managed `vmf2`, never the canonical pre-supervisor orphan.
+Timeout, EOF, unknown process evidence or a lost supervisor response refuse.
+M3 must independently report no resident reservation. The canonical directory
+and `vmf2` evidence are preserved. No old PID is signalled and no old holder is
+reconnected. Admission also works for a genuinely empty legacy route.
+
+After the ordinary M5 lease, idle-test check and committed guest drain, M3
+reserves one token-bound detached stop peer. Its single terminal receipt
+requires the actual stop command to join **and** M3 to confirm Tart stopped.
+Only that receipt admits one detached resident start with the actual local
+Tart binary. Stop/start reservations, logs and receipts stay in the private
+kit. Controller loss cannot kill these peers. Lost replies use fresh receipt
+or status calls; an unknown reservation is never vacant. A completed stop
+followed by an interrupted start can resume that reservation through prepare.
+A caught log-open or `Popen` failure durably marks a proven pre-spawn failure;
+only the original VM/drain token may retry it. The active drain caller queries
+that marker before retrying its stop reservation; prepare can resume a marked
+start failure. A missing failure marker always retains uncertain ownership,
+even if no child can be observed. Persistent stop failure retains the scheduler
+and guest fences for token-bound reconciliation; a new token cannot replace it.
+There is no rollback restart or automatic replacement of a disconnected owner,
+and this versioned runtime refuses a second migration stop. Hosted `stop`
+refuses because it would require a further authorized restart.
+
+An established hosted connection always returns `reused` from ordinary prepare,
+including after M5 SSH/client loss. It never stops, starts or reconnects Tart.
+An already connected legacy/local route is likewise preserved. The resident
+supervisor owns its original children and authenticated loopback RFB connection
+on M3; no new remote session uses a foreground M5 VNC tunnel. No other RFB
+client may connect to running Tart.
+
+Capture and move+capture requests reuse that connection and the existing local
+Holder's FIFO/log/complete-PNG barrier. Only bounded PNG bytes cross SSH into
+exclusive owner-only files in unique private coordinator directories. The
+service accepts typed coordinates, never supplied paths or executable commands.
+
+For a click, M5 still holds its scheduler and exact guest lease/window guard.
+M3 first reserves a unique request bound to that resident session and guest
+guard, sampling a five-second deadline on **M3's clock before publication**.
+Before sending input, M5 requires headroom for a full five-second resident
+ticket from receipt of the reservation response, plus the measured reservation
+round trip, all before its tighter guest/lease deadline. A short lease refuses
+input; the abandoned resident ticket expires without input. No bare M5 monotonic
+timestamp is sent. The resident latches an attempt before the FIFO write and
+the existing synchronous holder callback checks the M3 deadline. A lost click
+reply triggers only receipt queries, never a click resend. Terminal receipts
+survive client loss, are independent of screenshots and cannot be overwritten
+by a repeated attempt. Uncertain publication retains the scheduler/guest fences
+and private evidence. `tools/mg sim-posture receipt` reads only the exact
+outstanding scheduler intent and refreshes that receipt; it emits bounded
+joined/executed/error data and never clears fences or emits input. A null
+receipt remains unknown. Receipt recovery alone is not a pose/display proof.
+
+Native acceptance remains with the integrator: first verify the ready M3 kit,
+then use the single authorized drained migration. Interrupt the M5 client/SSH
+between joined read-only operations, verify the same resident session/children
+and one connection with fresh private captures, then acquire a Duo and run the
+calibration below. Verify real full-frame refresh, signed Hub/window identity,
+scale, tooltips and open → closed → open display pairs through production MG.
+Slow SSH must still fit the five-second click reservation; otherwise refuse
+input and report that latency prerequisite. Do not clear uncertain fences,
+reconnect RFB or consume another restart to manufacture acceptance.
 
 M3 evidence identifies the selected `DeviceHub.app` as `com.apple.dt.Devices`,
 declaring `DevicesTrampoline`, with the visible window owned by
@@ -30,8 +152,7 @@ helper compilation, live full-frame VNC refresh, compact/expanded title-bar OCR,
 CG/RFB coordinate scale, exact control labels, tooltip localization/placement
 at 1x/2x, the synchronous holder input path, and both pose transitions need the
 coordinator's M3 lab run. Synthetic tests exercise the production controller
-with fake guest evidence; they do not establish native acceptance. The
-cleanroom's MG test attempt could not start because `jq` is absent.
+with fake guest evidence; they do not establish native acceptance.
 
 The supplied Apple Device Hub documentation describes three buttons below
 the bezel: Closed immediately right of Rotate Right, Partially Open in the
@@ -49,7 +170,7 @@ permission setup or recovery as part of this procedure.
 1. Before acquiring a device, the coordinator can use the existing
    `tools/mg sim-posture prepare` route if preparation is needed. Posture
    itself never calls it. Confirm `tools/mg sim-posture status` is connected;
-   the existing `build/vm-fold/venv` must already have vncdotool and Pillow.
+   the M3 venv must pass preflight, and the existing M5 `build/vm-fold/venv` must have Pillow.
 2. Acquire `foldable` through MG from this checkout. Keep that exact lease
    unexpired, with sufficient time for calibration (the terminal input budget
    is three minutes, the guest guard is bounded to eight). An actual click

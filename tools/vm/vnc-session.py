@@ -1,6 +1,7 @@
 """Private transport for duo-fold.sh; never print Tart output or credentials."""
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -37,14 +38,14 @@ def address(output):
     return match[1], int(match[2])
 
 
-def request(state, action, timeout=15):
-    token = (state / "owner").read_text()
+def request(state, action, timeout=15, max_bytes=65536):
+    token = metadata_text(state / "owner")
     with socket.socket(socket.AF_UNIX) as channel:
         channel.settimeout(timeout)
         channel.connect(str(state / "control.sock"))
         channel.sendall((json.dumps([token, action]) + "\n").encode())
         with channel.makefile("r") as response:
-            result = json.loads(response.readline(65536))
+            result = json.loads(response.readline(max_bytes))
     if not result["ok"]:
         raise RuntimeError("VNC ownership or remote run completion uncertain; evidence retained")
     return result
@@ -182,6 +183,8 @@ def legacy_connected(state, vm, tart):
 
 
 def status(state, vm, tart=None):
+    if hosted_state(state) and tart:
+        return hosted_module().hosted_status(state, vm, tart)
     recorded = None
     conclusive = True
     remote = (state / "tunnel.pid").exists()
@@ -277,7 +280,40 @@ def guard_state(state):
             raise RuntimeError("session state directory must be owned, private and unsymlinked")
 
 
-def route_state(canonical, vm):
+def hosted_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vnc_hosted", Path(__file__).with_name("vnc-hosted.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def hosted_state(state):
+    return state.name == "vmh3"
+
+
+def route_state(canonical, vm, tart=None):
+    if tart and remote_host(tart):
+        hosted = canonical.with_name("vmh3")
+        guard_state(hosted)
+        primary(hosted, vm)
+        # An aborted admission can leave only hosted endpoint metadata. It is
+        # not ownership, but neither a legacy timeout nor resident uncertainty
+        # permits falling back across a migration or input/stop fence.
+        fences = ("shutdown-pending", "recovery-pending", "drain-token",
+                  "drain-precommit", "sim-posture-pending")
+        if any(os.path.lexists(hosted / name)
+               for name in (*SESSION_EVIDENCE, *fences) if name != "vm"):
+            return hosted
+        resident = status(hosted, vm, tart)
+        if resident["conclusive"] is not True or resident.get("vacant") is not True:
+            return hosted
+        old = route_state(canonical, vm)
+        if not any(os.path.lexists(old / name) for name in fences):
+            legacy = status(old, vm, tart)
+            if legacy["conclusive"] is True and legacy["connected"] is True:
+                return old  # Reuse only the validated existing connection.
+        return hosted
     managed = canonical.with_name("vmf2")
     guard_state(canonical)
     guard_state(managed)
@@ -458,7 +494,7 @@ def preflight(state):
         listener.close()
 
 
-def serve(state, tart, vm, holder_python=None):
+def serve(state, tart, vm, holder_python=None, operations=None):
     children = {}
     remote = bool(remote_host(tart))
     token = secrets.token_hex(32)
@@ -505,13 +541,18 @@ def serve(state, tart, vm, holder_python=None):
                             (state / name).unlink(missing_ok=True)
                         done = True
                         result = {"ok": True}
-                    elif action in ("ready", "status"):
+                    elif isinstance(action, str) and action in ("ready", "status"):
                         connected = ready and all(c.poll() is None for c in children.values())
                         result = {"ok": action == "status" or connected,
-                                  "connected": connected}
+                                  "connected": connected,
+                                  "session": hashlib.sha256(token.encode()).hexdigest(),
+                                  "peers": {n: c.poll() for n, c in children.items()}}
+                    elif operations is not None and isinstance(action, dict):
+                        connected = lambda: ready and all(c.poll() is None for c in children.values())
+                        result = dict(ok=True, **operations(action, connected, token))
                     else:
                         raise ValueError("unknown action")
-                except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired):
                     result = {"ok": False}
                 try:
                     channel.sendall((json.dumps(result) + "\n").encode())
@@ -929,16 +970,20 @@ def shutdown(state, ssh, tart, vm, lease):
                 record.flush()
         fence.arm()  # Before any actual stop, while the scheduler still owns this lease.
         with (state / "stop.log").open("wb") as output:
-            try:
-                child = subprocess.Popen([tart, "stop", vm, "--timeout", "60"],
-                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
-            except OSError:
-                raise RuntimeError("shutdown wrapper could not launch; no stop issued") from None
-            launched = True
-            try:
-                code = child.wait(timeout=75)
-            except (OSError, subprocess.TimeoutExpired):
-                raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit") from None
+            if hosted_state(state):
+                launched = True  # An uncertain RPC may already have reserved the stop.
+                code = hosted_module().drained_stop(tart, vm, token)
+            else:
+                try:
+                    child = subprocess.Popen([tart, "stop", vm, "--timeout", "60"],
+                                             stdin=subprocess.DEVNULL, stdout=output, stderr=output)
+                except OSError:
+                    raise RuntimeError("shutdown wrapper could not launch; no stop issued") from None
+                launched = True
+                try:
+                    code = child.wait(timeout=75)
+                except (OSError, subprocess.TimeoutExpired):
+                    raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit") from None
         if code < 0 or code == 255:
             raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit")
         unlink_owned(state / "shutdown-pending", records["shutdown-pending"][0])

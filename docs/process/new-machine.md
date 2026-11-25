@@ -146,15 +146,20 @@ failures remain in that log for inspection on the hosting Mac. MG still checks
 Tart state and guest readiness. A dropped coordinator connection cannot
 terminate the detached guest. Nothing here stops or recreates it.
 
-VNC runs (`--vnc-experimental`) remain foreground SSH calls through the
-installed wrapper. `tools/mg sim-posture prepare` uses `tools/vm/duo-fold.sh`
-to detach that coordinator session, validate Tart's authenticated 127.0.0.1 URI
-privately and forward coordinator 127.0.0.1 to M3's 127.0.0.1 port over OpenSSH.
-It reuses the one persistent holder; `tools/mg sim-posture status` reports it.
-The existing private holder venv in the main checkout's `build/vm-fold/venv`
-must be usable before any remote restart. No remote package install or network
-configuration is needed. The hosting Mac's installed Tart 2.32.1 provides this
-mode with an ephemeral authenticated port; it has no bind flag.
+New remote posture sessions use an M3-resident supervisor and holder under
+`runtime/vnc-owner-v1`, using the actual hosting `bin/tart`. M5 keeps the only
+scheduler. Deploy and preflight before the authorized drained prepare:
+`tools/mg sim-posture deploy`, `tools/mg sim-posture preflight`, then
+`tools/mg sim-posture prepare` and `tools/mg sim-posture status`. See
+[resident deployment, migration and connection reuse](sim-posture.md#resident-deployment-and-the-one-drained-migration)
+for exact commands, prerequisites and pending lab acceptance. Control calls
+are short reconnectable SSH RPCs; Tart, RFB and private state survive their
+loss. There is no M5 VNC tunnel for a new remote session. An existing hosted
+connection is reused without a stop/start. Do not connect another RFB client.
+
+The following lifecycle and forward details apply to retained legacy/local
+routes. They do not authorize a new remote foreground VNC session or a second
+restart of the resident route.
 
 Preparation, manual `duo-fold.sh start` and `stop` support only the configured
 primary VM (the first entry), using its one M5 scheduler lease and the single

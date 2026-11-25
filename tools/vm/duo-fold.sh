@@ -5,6 +5,7 @@
 #
 # usage: tools/vm/duo-fold.sh start [--vm <name>]   prepare/reuse VNC (manual alias)
 #        tools/vm/duo-fold.sh prepare|status      persistent session (no repeated restart)
+#        tools/vm/duo-fold.sh deploy|preflight    private hosted component readiness
 #        tools/vm/duo-fold.sh inspect <udid>       private hardware calibration capture
 #        tools/vm/duo-fold.sh open|closed|calibrate <udid>  guarded leased posture
 #        tools/vm/duo-fold.sh screen <file.png>     save the VM's whole screen
@@ -41,6 +42,7 @@ log() { printf 'duo-fold: %s\n' "$*" >&2; }
 usage() { sed -n '6,13p' "$0" | sed 's/^# *//' >&2; exit 2; }
 
 SESSION="$ROOT/tools/vm/vnc-session.py"
+HOSTED="$ROOT/tools/vm/vnc-hosted.py"
 RECOVER="" LEASE="" LEASE_WRITING=""
 
 mvl_read_config || { log "$MVL_REASON"; exit 1; }
@@ -55,19 +57,19 @@ TART="$(jq -r .tart <<<"$SELECTED")"
 SSH="$(jq -r .ssh <<<"$SELECTED")"
 # The persistent state and holder venv are global, not per VM. Never stop or
 # start a secondary guest under the primary guest's state/scheduler lease.
-case "$COMMAND" in start|prepare|stop|inspect|open|closed|calibrate)
+case "$COMMAND" in start|prepare|stop|inspect|open|closed|calibrate|deploy|preflight)
   [ "$VM" = "$PRIMARY" ] || { log "VNC lifecycle supports only configured primary VM $PRIMARY"; exit 1; }
 esac
 
 select_state() {
-  STATE="$(python3 "$SESSION" route "$CANONICAL" "$VM")" || exit 1
+  STATE="$(python3 "$SESSION" route "$CANONICAL" "$VM" "$TART")" || exit 1
   python3 "$SESSION" primary "$STATE" "$VM" || exit 1
   FIFO="$STATE/commands"
 }
 
 recheck_state() {
   local selected
-  selected="$(python3 "$SESSION" route "$CANONICAL" "$VM")" || return 1
+  selected="$(python3 "$SESSION" route "$CANONICAL" "$VM" "$TART")" || return 1
   [ "$selected" = "$STATE" ] || { log "session route changed; retain evidence"; return 1; }
   python3 "$SESSION" primary "$STATE" "$VM" || return 1
 }
@@ -184,6 +186,7 @@ start() {
   lease vm-fold-prepare
   recheck_state || exit 1
   python3 "$SESSION" init "$STATE" || exit 1
+  if [ "$STATE" = "$MAIN/build/vmh3" ]; then hosted_start; return $?; fi
   current="$(session_status)" || exit 1
   if [ "$(jq -r .vm <<<"$current")" != null ] && [ "$(jq -r .vm <<<"$current")" != "$VM" ]; then
     log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
@@ -244,10 +247,43 @@ start() {
   log "connected to $VM"
 }
 
+hosted_start() {
+  local current
+  python3 "$HOSTED" bind "$STATE" "$TART" "$VM" || return 1
+  current="$(session_status)" || return 1
+  if [ "$(jq -r .connected <<<"$current")" = true ]; then
+    python3 "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
+    log "connected to $VM (reused; resident holder)"; return 0
+  fi
+  if pending_cleanup; then
+    [ -f "$STATE/recovery-pending" ] && [ ! -e "$STATE/shutdown-pending" ] && [ ! -e "$STATE/drain-precommit" ] || {
+      log "prior drain/stop unconfirmed; retain fences; no restart issued"; return 1;
+    }
+    # Resume only this stopped/start reservation. Never repeat the drained stop.
+  else
+    # An uncertain/starting owner is never permission to drain or reconnect.
+    if [ "$(jq -r .vacant <<<"$current")" != true ]; then
+      log "resident owner unavailable or starting; query status; no restart issued"; return 1
+    fi
+    python3 "$HOSTED" prepare "$STATE" "$TART" "$VM" "$CANONICAL" admit || return 1
+    # No automatic headless rollback: exactly one authorized stop.
+    shutdown_guest || return 1
+  fi
+  python3 "$HOSTED" prepare "$STATE" "$TART" "$VM" "$CANONICAL" start || return 1
+  mvl_wait_ready "$SSH" "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
+    log "resident started; guest readiness unconfirmed; retain evidence and query status"; return 1;
+  }
+  python3 "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
+  log "connected to $VM (resident holder)"
+}
+
 stop() {
   [ $# -eq 0 ] || usage
   lease vm-fold-stop
   recheck_state || exit 1
+  [ "$STATE" != "$MAIN/build/vmh3" ] || {
+    log "resident holder retained; this route grants no further restart"; return 1;
+  }
   python3 "$SESSION" init "$STATE" || exit 1
   # One recovery attempt only; an uncertain result keeps all session evidence.
   headless || exit 1
@@ -292,6 +328,8 @@ posture() {
 select_state
 
 case "$COMMAND" in
+  deploy|preflight) [ $# -eq 0 ] || usage; python3 "$HOSTED" "$COMMAND" "$TART" "$VM" ;;
+  receipt) [ $# -eq 0 ] || usage; python3 "$HOSTED" receipt "$STATE" "$TART" "$VM" "$(mvl_lease_dir "$ROOT" "$PRIMARY")" ;;
   start|prepare) start "$@" ;;
   status) [ $# -eq 0 ] || usage; session_status ;;
   inspect) inspect "$@" ;;

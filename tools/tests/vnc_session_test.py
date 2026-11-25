@@ -280,6 +280,10 @@ print('n127.0.0.1:' + str(listener['port']))
                      '            ' + repr(str(tunnel)) + ', "-N",')
         replace_once('            "/usr/sbin/lsof", "-nP",',
                      '            ' + repr(str(lsof)) + ', "-nP",')
+        # This suite deliberately retains coverage of the legacy M5-forwarded
+        # route. New resident routing/peers are covered in test_hosted_posture.
+        replace_once('def route_state(canonical, vm, tart=None):\n',
+                     'def route_state(canonical, vm, tart=None):\n    tart = None\n')
         # Lose a selected authenticated status reply after guest login. Count
         # real RPCs rather than using sleeps or killing supervisor processes.
         replace_once('    return result\n', '''    root = Path(os.environ['FAKE_ROOT'])

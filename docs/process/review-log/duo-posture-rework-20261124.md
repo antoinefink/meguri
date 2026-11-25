@@ -51,3 +51,26 @@ All 25 posture tests passed in `image-tools-selftest/20261125T075703Z-17098`. Th
 | `tools/vm/sim-posture-visual.swift` | `4a7cfd87ed798ea236eb8d68d349f134107d7841ac26ee984f0c95c25bd4bc1a` | `20261125T073516Z-82423` |
 | `tools/vm/sim-posture.py` | `096611e99ab9cebe2884b29423e68c0ba5b1e0366dc269f74f832f7b331f8d83` | `20261125T075726Z-18350` |
 | `tools/vm/tests/test_sim_posture.py` | `937e1e3fea17395a3849ba1a03e039824fac6d682ce240df41457f2150f53531` | `20261125T075726Z-18350` |
+
+## Running the VNC client on the hosting Mac
+
+Both SSH connections to the previous VNC client timed out. The new client and Tart run on the hosting Mac. The scheduler reconnects to that client for each operation. A read-only probe on the hosting Mac survived termination of its SSH controller. The production deployment and preflight passed with the guest running.
+
+Independent reviewer `s-20261124T123814Z-b6a481ac` reviewed the complete files below and classified them as public project source, documentation or synthetic fixtures. The fixes preserve generic SSH arguments, verify the runtime before draining, keep stop and click recovery bound to the original request, and reuse the supported legacy sessions. Docker checks covered controller loss during capture and click, receipt lookup, and migration.
+
+| File | Complete-file SHA-256 | Independent cleanroom |
+| --- | --- | --- |
+| `docs/process/mac-ui-vm.md` | `c64a939877a151325b12f32cec129ff471f97c998ca926e2f6cf70cb83383c75` | `20261125T091929Z-75549` |
+| `docs/process/new-machine.md` | `38bbea98b844515718436a23f535bd6eae0b63a1b6c151e84983d84a7084b3be` | `20261125T091929Z-75549` |
+| `docs/process/sim-posture.md` | `655fb85d7e2941ef12c9da517b3666b575638698ce79164646351f2de5dbdee4` | `20261125T091929Z-75549` |
+| `tools/mg.d/sim.sh` | `6250d4619b7bdbd835e6925abe3c7cc5fe63e4962ab6ee1db4ab93c12fb68772` | `20261125T091929Z-75549` |
+| `tools/tests/remote_wrapper_test.py` | `576de9b1f51a8745b2e2fb97768bd06931910f38281970d4a8de5bb7662d83e0` | `20261125T091929Z-75549` |
+| `tools/tests/vnc_session_test.py` | `97ff94100897a99e98ec03b04d6d649740663eee18d411ae28892f71c9dff29a` | `20261125T091929Z-75549` |
+| `tools/vm/AGENTS.md` | `769e5c699e27fdce053f34a57fe026df91900e556566e6e9f62d8402b6fd9b94` | `20261125T091929Z-75549` |
+| `tools/vm/duo-fold.sh` | `b903f936b3fbe39589e0ded3e6825706823d86ac3baac2c125921c598c8c5f56` | `20261125T091929Z-75549` |
+| `tools/vm/remote-wrapper.py` | `048d5ec2df394d5f6a65bd6e6dfa519058e2e211197b686cada90094fa50fa6b` | `20261125T091929Z-75549` |
+| `tools/vm/sim-posture-inspect.py` | `57c8498f891428027bc3ceb9d6d4497934fd62458ff944c915504aee5a0f013e` | `20261125T091929Z-75549` |
+| `tools/vm/sim-posture.py` | `e723aee80cdc4ba02ed178aa2e8e594cc4eb91410bbff02c38b118a07bbf8b76` | `20261125T091929Z-75549` |
+| `tools/vm/tests/test_hosted_posture.py` | `cdc01982383ced2c80e55e3b9f87ba016b74139e51504b1c65ffa59459f08cf4` | `20261125T093459Z-11667` |
+| `tools/vm/vnc-hosted.py` | `c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba` | `20261125T091929Z-75549` |
+| `tools/vm/vnc-session.py` | `0361433453b25f9714db86a4f2d91f51d773b60d2ac32922c50b5ec6f04fe218` | `20261125T093459Z-11667` |

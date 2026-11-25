@@ -58,8 +58,9 @@ The coordinator's default per-user config,
 `vms: ["meguri-mac"]`, using absolute paths. Install it as documented in
 [`new-machine.md`](new-machine.md#install-the-coordinator-wrappers), clearing
 old activation overrides in every shell. The SSD paths above are used only
-on the hosting Mac. Manual VNC needs a separate tunnel; the remote launcher
-does not detach VNC sessions or rewrite their addresses.
+on the hosting Mac. New posture sessions instead use the detached M3-resident
+owner and short SSH RPC described in [sim-posture.md](sim-posture.md); no M5 VNC
+tunnel or additional RFB client is used.
 
 `tools/mg mac-ui`, `tools/mg a11y --platform mac` and `tools/mg drive --platform mac` build on the host, take the VM's lease (one run at a time per VM, across checkouts), start the VM headless when it is stopped, and then follow the steps above. They copy `app/Fixtures` and a drive's script and fixtures too. They run as often as needed, with the host locked or not. Their `result.json` has `details.mac_runner: "vm"`. `tools/mg doctor` shows the VM's state. Conventions and traps: `tools/vm/AGENTS.md`.
 
@@ -138,7 +139,7 @@ Only Device Hub's buttons change the iPhone Duo's fold position. `tools/mg sim-p
 
 Keep one VNC connection: reconnecting crashes Tart and stops guest jobs. Preparation reuses a persistent holder. Fresh preparation and manual `stop` require MG's scheduler lease, idle guest tests and no active or unknown acquisitions. The guest `pool.lock` excludes legacy renewals through shutdown. A private owner joins its child transports; PID files never authorize teardown. Recovery requires confirmed shutdown and remote run completion. Uncertainty retains evidence; it never triggers another start.
 
-Lifecycle operations support only the configured primary VM, with its single M5 scheduler lease and the existing global `build/vm-fold` state/venv. Secondary requests or state naming another VM are refused before teardown/start. Fresh preparation preflights the actual UNIX control socket bind/listen before stopping; its pathname must fit macOS's 103-byte limit. Failed pre-child setup removes only records it created. The SSH forward must have OS evidence (`lsof` on M5) of the owned foreground child's exact loopback listener; no readiness probe connects to VNC. Actual RFB disconnect exits the holder even while it waits on its FIFO; intentional `quit` remains orderly. Ready requires functioning transports, and disconnected status after prepare fails the job. Read-only status may successfully report disconnected.
+Lifecycle operations support only the configured primary VM and its single M5 scheduler lease. New resident routes use coordinator `build/vmh3` and private M3 kit state; the following `build/vm-fold`/`vmf2` and forward details describe legacy/local routes. Secondary requests or state naming another VM are refused before teardown/start. Fresh preparation preflights the actual UNIX control socket bind/listen before stopping; its pathname must fit macOS's 103-byte limit. Failed pre-child setup removes only records it created. The SSH forward must have OS evidence (`lsof` on M5) of the owned foreground child's exact loopback listener; no readiness probe connects to VNC. Actual RFB disconnect exits the holder even while it waits on its FIFO; intentional `quit` remains orderly. Ready requires functioning transports, and disconnected status after prepare fails the job. Read-only status may successfully report disconnected.
 
 When two stable observations prove the canonical pre-supervisor session disconnected, normal prepare/status/inspect/calibrate/open/closed/stop commands select the fixed private sibling `build/vmf2`, retaining `build/vm-fold/venv` and the primary scheduler lease. Routing and bounded, nofollow VM metadata admission are repeated under that lease before mutation. The canonical orphan stays untouched; live or ambiguous orphan evidence refuses managed-session work. Keep both state directories private.
 
@@ -150,7 +151,7 @@ For hardware inspection, `tools/mg sim-posture inspect <leased-udid>` holds the 
 
 Resize defect (2026-11-24, operator live evidence): seven complete 3840×2400 PNGs through one Tart 2.32.1 / vncdotool 1.4.2 connection had all six successive pairwise differences confined to the boot negotiation's 1280×720 region. The isolated resizing test had passed; it did not establish live full-frame refresh. The holder now resynchronizes protocol width/height from `screen.size` before delegating `captureScreen` through a client/factory subclass (`api.connect` supports `factory_class` in 1.4.2). The deterministic regression checks request bounds and unchanged library arguments. Live full-frame refresh after this fix and native fold calibration remain pending.
 
-One-time remote session preparation from M5, with the default private remote-wrapper config and existing holder venv already installed: `tools/mg sim-posture prepare`, then `tools/mg sim-posture status`. Prepare once before acquiring the foldable; repeated status/inspection uses that same connection.
+Resident remote preparation from M5 first requires `tools/mg sim-posture deploy` and `tools/mg sim-posture preflight` as documented in [sim-posture.md](sim-posture.md). With both ready and ordinary jobs/acquisitions drained: `tools/mg sim-posture prepare`, then `tools/mg sim-posture status`. Prepare once before acquiring the foldable; repeated status/inspection uses that same connection.
 
 ## Growing the disk (2026-11-01)
 

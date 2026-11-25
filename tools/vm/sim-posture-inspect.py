@@ -133,6 +133,16 @@ def capture(state, connected):
         raise RuntimeError("private capture directory must be outside Git checkouts")
     folder = Path(tempfile.mkdtemp(prefix="meguri-sim-posture-", dir=base))
     path = folder / "guest-desktop.png"
+    if state.name == "vmh3":
+        spec = importlib.util.spec_from_file_location("vnc_hosted", Path(__file__).with_name("vnc-hosted.py"))
+        hosted = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hosted)
+        tart, vm = hosted.endpoint(state)
+        status = hosted.rpc(tart, dict(op="status", vm=vm))
+        hosted.require(status["connected"] is True)
+        path = hosted.capture_into(tart, vm, hosted.identifier(status["session"]), folder, 1)
+        hosted.require(complete_png(path))
+        return path
     command = ("shot " + str(path) + "\n").encode()
     if b"\n" in os.fsencode(str(path)) or b"\r" in command:
         raise RuntimeError("invalid private capture path")

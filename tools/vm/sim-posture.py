@@ -688,6 +688,35 @@ class Holder:
         with self.scheduler():
             self.drop_marker(marker)
 
+    def open_publication(self):
+        fd = os.open(self.state / "commands", os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            require(stat.S_ISFIFO(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def publication(self, fd, latest, receipt):
+        deadline = min(time.monotonic() + 5, latest)
+        payload = ("posture-click " + repr(deadline) + " " + str(receipt) + "\n").encode()
+        require(len(payload) <= os.fpathconf(fd, "PC_PIPE_BUF") and payload.count(b"\n") == 1
+                and b"\r" not in payload)
+        return deadline, payload
+
+    def click_intent(self, receipt, deadline):
+        return dict(receipt=str(receipt), deadline=deadline, guard=self.guest.request["guard"])
+
+    def publish(self, fd, payload):
+        return os.write(fd, payload)
+
+    def click_receipt(self, receipt):
+        if receipt.exists():
+            require(receipt.stat().st_size <= 1024)
+            return strict_json(receipt.read_bytes())
+        return None
+
     def click(self):
         """One bounded synchronous reactor command, with its own terminal receipt.
 
@@ -695,10 +724,8 @@ class Holder:
         turn a completed input into an unknown in-flight click.
         """
         require(self.capable, "existing holder needs posture-click-v1; coordinator preparation required")
-        fd = os.open(self.state / "commands", os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        fd = self.open_publication()
         try:
-            info = os.fstat(fd)
-            require(stat.S_ISFIFO(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022)
             start = time.monotonic()
             arm = self.guest.call("arm")
             self.armed = True
@@ -714,11 +741,9 @@ class Holder:
                     and type(ack["remaining"]) in (int, float) and math.isfinite(ack["remaining"]),
                     "invalid click publication acknowledgment")
             latest = start + ack["remaining"] - CLICK_BUDGET
-            # Both the caller and the reactor check this exact monotonic handoff.
-            deadline = min(time.monotonic() + 5, latest)
-            payload = ("posture-click " + repr(deadline) + " " + str(receipt) + "\n").encode()
-            require(len(payload) <= os.fpathconf(fd, "PC_PIPE_BUF") and payload.count(b"\n") == 1
-                    and b"\r" not in payload)
+            # Local callbacks share this clock. Hosted publication separately
+            # samples/bounds the resident clock before any input is published.
+            deadline, payload = self.publication(fd, latest, receipt)
             require(self.connected() and time.monotonic() < deadline, "lease/transport unavailable before click")
             marker = self.lease / "sim-posture-pending"
             # Signals cannot interrupt the final admission/write or its join.
@@ -729,15 +754,13 @@ class Holder:
                     info = marker.stat()
                     self.marker_identity = (info.st_dev, info.st_ino)
                     try:
-                        (marker / "intent.json").write_text(json.dumps(dict(
-                            receipt=str(receipt), deadline=deadline,
-                            guard=self.guest.request["guard"])))
+                        (marker / "intent.json").write_text(json.dumps(self.click_intent(receipt, deadline)))
                     except OSError:
                         self.drop_marker(marker)
                         raise
                     self.pending = True
                     try:
-                        count = os.write(fd, payload)
+                        count = self.publish(fd, payload)
                     except OSError:
                         self.pending = False  # Atomic nonblocking PIPE_BUF write wrote nothing.
                         self.drop_marker(marker)
@@ -748,9 +771,8 @@ class Holder:
                     require(count == len(payload), "click publication uncertain")
                 until = time.monotonic() + 10
                 while time.monotonic() < until:
-                    if receipt.exists():
-                        require(receipt.stat().st_size <= 1024)
-                        result = strict_json(receipt.read_bytes())
+                    result = self.click_receipt(receipt)
+                    if result is not None:
                         require(type(result) is dict and set(result) in
                                 ({"joined", "executed"}, {"joined", "executed", "error"})
                                 and result["joined"] is True and type(result["executed"]) is bool
@@ -766,7 +788,8 @@ class Holder:
                     time.sleep(.05)
                 raise RuntimeError("click completion unproven; fences retained")
         finally:
-            os.close(fd)
+            if fd is not None:
+                os.close(fd)
             if self.armed and not self.pending:
                 self.armed = False
                 self.guest.call("disarm")
@@ -950,7 +973,10 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
         guest.__init__(ssh, request, log)
         binding = guest.ready["binding"]
         window = guest.call("window")
-        holder = Holder(state, connected, guest, folder, lease)
+        if session.hosted_state(state):
+            holder = sibling("vnc-hosted").RemoteHolder(state, connected, guest, folder, lease)
+        else:
+            holder = Holder(state, connected, guest, folder, lease)
         path = holder.batch()
         geometry = window_binding(window, image_size(path), binding["name"])
         title_evidence(text_boxes(guest, path), window, geometry["scale"], binding["name"])
