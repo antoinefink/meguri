@@ -211,9 +211,13 @@ pub async fn serve(
     let (backup_stop, mut backup_stopped) = tokio::sync::oneshot::channel::<()>();
     let backup_owner = service.clone();
     let backups = tokio::spawn(async move {
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::before_initial_backup_sweep().await.expect("backup startup fixture gate");
         loop {
             // A sweep completes before shutdown releases the service owner.
             let _ = backup_owner.sweep_backups(crate::accounts::now).await;
+            #[cfg(feature = "test-hooks")]
+            backup_owner.hooks.hit("backup_sweep_complete").await;
             tokio::select! {
                 _ = &mut backup_stopped => break,
                 _ = tokio::time::sleep(Duration::from_secs(300)) => {},

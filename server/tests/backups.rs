@@ -74,7 +74,8 @@ async fn history(h: &Harness,cookie: &str) -> Vec<Value> {
 }
 async fn restore(h: &Harness,cookie: &str,id: &str) {
     let response=h.post(&format!("/api/me/backups/{id}/restore"),json!({}),Some(cookie)).await;
-    assert_eq!(response.status(),200);assert_eq!(response.json::<Value>().await.unwrap(),json!({"data":null}));
+    let status=response.status();let body=response.json::<Value>().await.unwrap();
+    assert_eq!(status,200,"restore response: {body}");assert_eq!(body,json!({"data":null}));
 }
 fn today() -> i64 {time::OffsetDateTime::now_utc().unix_timestamp()}
 fn account_credentials(h: &Harness,id: &str) -> (String,i64,i64) {
@@ -569,6 +570,8 @@ async fn collection_grown_above_default_upload_limit_captures_reopens_and_restor
     assert!(saved["size_bytes"].as_u64().unwrap()>314_572_800);
     let selected=saved["id"].as_str().unwrap().to_owned();
     // Startup size validation and restore point decoding accept the same size.
+    // Harness joins today's real startup capture before this one-shot restore,
+    // including cleanup and release of the account's backup-work lease.
     let h=Harness::reopen(h.stop().await).await;
     restore(&h,&cookie,&selected).await;
     let c=meguri_sync_server::collection::schema::open(&current(&h,&id),false).unwrap();

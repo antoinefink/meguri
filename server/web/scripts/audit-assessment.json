@@ -281,8 +281,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 25777,
-        "sha256": "e5bebfc8a507c9aa1916a3d3f286af48ff646fed6c0fcc0e379826618aa4f764"
+        "bytes": 26028,
+        "sha256": "82fc0b60594f576c41f398dd535fe4e0b9b7c20ee314fd69a7bd568818fb99cb"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4512,

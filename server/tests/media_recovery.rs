@@ -148,10 +148,17 @@ async fn pinned_download_survives_replacement_without_blocking_media_publication
 
 #[cfg(feature="test-hooks")]
 async fn child_service(path:&std::path::Path,phase:&str,kill:bool,signal:&std::path::Path)->(Child,String) {
+    child_service_with_backup_gate(path,phase,kill,signal,None).await
+}
+#[cfg(feature="test-hooks")]
+async fn child_service_with_backup_gate(path:&std::path::Path,phase:&str,kill:bool,signal:&std::path::Path,backup_gate:Option<&std::path::Path>)->(Child,String) {
     use std::{io::BufRead,process::{Command,Stdio}};
-    let mut child=Child(Command::new(binary()).args(["serve",path.to_str().unwrap(),ORIGIN,"127.0.0.1:0"])
+    let mut command=Command::new(binary());
+    command.args(["serve",path.to_str().unwrap(),ORIGIN,"127.0.0.1:0"])
         .env(if kill {"MEGURI_TEST_KILL_PHASE"} else {"MEGURI_TEST_FAIL_PHASE"},phase)
-        .env("MEGURI_TEST_SIGNAL_FILE",signal).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap());
+        .env("MEGURI_TEST_SIGNAL_FILE",signal).stdout(Stdio::piped()).stderr(Stdio::null());
+    if let Some(gate)=backup_gate {command.env("MEGURI_TEST_BACKUP_START_SIGNAL",gate);}
+    let mut child=Child(command.spawn().unwrap());
     let stdout=child.0.stdout.take().unwrap();
     let line=within(tokio::task::spawn_blocking(move || {let mut line=String::new();std::io::BufReader::new(stdout).read_line(&mut line).unwrap();line})).await.unwrap();
     let address=line.trim().strip_prefix("listening ").unwrap();let base=format!("http://{address}");(child,base)
@@ -326,7 +333,13 @@ DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN
 
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let unused = temp.path().join("unused-migration-phase");
-    let (mut child, base) = child_service(&path, "unused_migration_phase", false, &unused).await;
+    // Keep the real scheduler enrolled but hold its first capture separately
+    // from migration. Every original file remains subject to exact comparison;
+    // no backup directories or unknown additions are excluded.
+    let backup_gate = temp.path().join("migration-backup-gate");
+    let (mut child, base) = child_service_with_backup_gate(&path, "unused_migration_phase", false, &unused, Some(&backup_gate)).await;
+    wait_file(&backup_gate, &mut child).await;
+    assert_eq!(std::fs::read(&backup_gate).unwrap(), b"backup_before_initial_sweep");
     let response = request(&client, &base, "msync", "begin", &key, br#"{"v":"synthetic-migration"}"#).send().await.unwrap();
     let begin: Value = serde_json::from_slice(&decoded(response).await).unwrap();
     assert_eq!(begin["err"], "");
@@ -353,7 +366,10 @@ DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN
     // A second real-binary restart leaves the same hook armed. Reaching HTTP
     // proves it did not run the migration transaction again; no mock outcome.
     let second_signal = temp.path().join("unexpected-second-migration");
-    let (mut child, base) = child_service(&path, "media_migration_before_commit", true, &second_signal).await;
+    let second_backup_gate = temp.path().join("second-migration-backup-gate");
+    let (mut child, base) = child_service_with_backup_gate(&path, "media_migration_before_commit", true, &second_signal, Some(&second_backup_gate)).await;
+    wait_file(&second_backup_gate, &mut child).await;
+    assert_eq!(std::fs::read(&second_backup_gate).unwrap(), b"backup_before_initial_sweep");
     let response = request(&client, &base, "msync", "begin", &key, br#"{"v":"synthetic-migration"}"#).send().await.unwrap();
     let begin: Value = serde_json::from_slice(&decoded(response).await).unwrap();
     assert_eq!(begin["err"], "");

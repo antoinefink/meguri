@@ -835,8 +835,14 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/tests/support/mod.rs':
+        'fbaccbd87526b237ac1db6d1a2f17ff810838bb15366409b5f0ef254d4cecce8',
+    'server/tests/media_recovery.rs':
+        'd786705aa844ae1cc1e41c9164a6f65975bd6d94355c2bc926cf48559d7e0d8f',
+    'server/tests/deletion.rs':
+        'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
     'server/tests/backups.rs':
-        '23ce76cdfaf24672b010f21781857d8c44f52afaedfc2c6e1dd9a83e89888121',
+        '32af26a1fa924533b7d6015f21afd7127b3b1a64c1324294ae0542b892887c2d',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -948,7 +954,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '9c7c8495126dde8511790efaa905a6e80597c75f8b82cddbe8e902031ddc9aad',
+        '6d106cd95d86ddea212a35fe8224e4f84b7f04b87f8a8a2c4154a5c6f9c148b0',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1310,7 +1316,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        'e5bebfc8a507c9aa1916a3d3f286af48ff646fed6c0fcc0e379826618aa4f764',
+        '82fc0b60594f576c41f398dd535fe4e0b9b7c20ee314fd69a7bd568818fb99cb',
     'server/src/httpapi/tests.rs':
         '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
     'server/src/storage/schema.sql':
