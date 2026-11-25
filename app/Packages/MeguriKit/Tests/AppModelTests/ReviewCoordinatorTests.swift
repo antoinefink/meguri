@@ -454,9 +454,12 @@ extension ReviewCollectionStartupTests {
         fixture.model.rate(.good); await fixture.model.settled()
         #expect(fixture.model.phase == .error)
         #expect(fixture.surface.audioInvalidations == 1)
+        let historyBeforeRetry = fixture.surface.presented
+        #expect(historyBeforeRetry.last == 2)
         fixture.surface.onPresent = nil
         fixture.model.retry(); await fixture.model.settled()
-        #expect(fixture.model.phase == .question && fixture.surface.presented.last == 2)
+        #expect(fixture.surface.presented == historyBeforeRetry + [2])
+        #expect(fixture.model.phase == .question)
         #expect(!fixture.surface.calls.contains("resume"))
         #expect(await fixture.model.end())
     }
