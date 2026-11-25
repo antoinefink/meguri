@@ -183,25 +183,64 @@ import XCTest
 
     func testMainCloseLeavesCleanAddOpenAndReopensTheSameWorkspace() throws {
         let (app, bundle) = try launch()
-        defer { app.terminate() }
+        let main = app.windows["main"], add = app.windows["editor.add.window"]
+        var phase = "initial workspace"
+        var deckPageIdentifier = "<not selected>"
+        var lastEvidence: [String: String]?
+        var requests = 0, replies = 0
+        func snapshot(timeout: TimeInterval = 0.5) -> [String: String]? {
+            requests += 1
+            let fields = optionalInputEvidence(bundle: bundle, timeout: timeout)
+            if let fields { replies += 1; lastEvidence = fields }
+            return fields
+        }
+        addTeardownBlock { @MainActor in
+            if (self.testRun?.totalFailureCount ?? 0) > 0 {
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "main-close-\(phase)-real-hierarchy-synthetic"
+                hierarchy.lifetime = .keepAlways; self.add(hierarchy)
+                let current = app.state == .notRunning ? nil : snapshot()
+                let sidebarExists = main.descendants(matching: .any)["shell.root.sidebar.browse"].firstMatch.exists
+                let pageExists = main.descendants(matching: .any)[deckPageIdentifier].firstMatch.exists
+                let evidence = XCTAttachment(string: "phase=\(phase) mainAX=\(main.exists) addAX=\(add.exists) "
+                    + "sidebarAX=\(sidebarExists) deckPageAX=\(pageExists) deckPageID=\(deckPageIdentifier) "
+                    + "requests=\(requests) replies=\(replies) currentReply=\(current != nil)\nlastReply=\(String(describing: lastEvidence))")
+                evidence.name = "main-close-\(phase)-reply-and-identifiers-synthetic"
+                evidence.lifetime = .keepAlways; self.add(evidence)
+            }
+            app.terminate()
+        }
+        let build = try BuildUnderTest.current()
+        XCTAssertEqual(try build.bundleIdentifier, bundle)
+        XCTAssertEqual(bundle, build.expectedBundleIdentifier)
         let deckPage = try selectDeck("Synthetic Summary", app: app)
-        let collection = try inputEvidence(bundle: bundle)
-        let main = app.windows["main"]
+        deckPageIdentifier = deckPage
+        let page = main.descendants(matching: .any).matching(identifier: deckPage).firstMatch
+        let collection = try XCTUnwrap(snapshot(timeout: 2), "the initial collection probe must reply")
+        XCTAssertEqual(collection["live"], "true")
+        let identity = try XCTUnwrap(collection["collectionIdentity"])
+        let generation = try XCTUnwrap(collection["collectionGeneration"])
+        XCTAssertNotEqual(identity, "none"); XCTAssertNotEqual(generation, "none")
         XCTAssertTrue(main.waitForExistence(timeout: 10))
         XCTAssertTrue(main.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch.exists)
         app.typeKey("n", modifierFlags: .command)
-        let add = app.windows["editor.add.window"]
         XCTAssertTrue(add.waitForExistence(timeout: 15))
-        // Prove ordinary native Close first, then retain the real keyboard
-        // regression after reopen. A red-button pass cannot hide broken Cmd-W.
-        for keyboard in [false, true] {
+        func focusMain() throws {
+            // The selected deck's exposed sidebar row gives real input to main
+            // without navigating away from the known deck or closing Add.
             let rows = HomeControls.deckRows(app, labelContaining: "Synthetic Summary")
             XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
             let row = try XCTUnwrap(HomeControls.hittable(rows))
             row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
-            XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
-                "Close must target the actual main key window")
-            let before = try inputEvidence(bundle: bundle)
+            XCTAssertTrue(wait { snapshot()?["workspaceKey"] == "true" },
+                "the exposed main sidebar must make main key before keyboard input")
+        }
+        // Prove ordinary native Close first, then retain the real keyboard
+        // regression after reopen. A red-button pass cannot hide broken Cmd-W.
+        for keyboard in [false, true] {
+            phase = "\(keyboard ? "command-w" : "red-button")-before-close"
+            try focusMain()
+            let before = try XCTUnwrap(lastEvidence)
             XCTAssertEqual(before["workspaceIdentifier"], "main")
             XCTAssertEqual(before["workspaceMatchesMain"], "true")
             if keyboard {
@@ -211,35 +250,49 @@ import XCTest
                 XCTAssertTrue(wait { close.exists && close.isEnabled && close.isHittable })
                 close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
             }
+            phase = "\(keyboard ? "command-w" : "red-button")-closed"
             let closed = main.waitForNonExistence(timeout: 10)
             let addStayedOpen = add.exists && add.sheets.count == 0
-            if !closed || !addStayedOpen {
-                let hierarchy = XCTAttachment(string: app.state == .notRunning ? "App terminated" : app.debugDescription)
-                hierarchy.name = "main-close-real-hierarchy-synthetic"
-                hierarchy.lifetime = .keepAlways; self.add(hierarchy)
-                // The main-scene probe leaves with a successfully closed main.
-                // Preserve the hierarchy even if a still-visible main stops replying.
-                let after = main.exists ? (try? inputEvidence(bundle: bundle)) ?? [:]
-                    : ["workspaceVisible": "false", "addWindowVisible": String(add.exists)]
-                let evidence = XCTAttachment(string: "before=\(before)\nafter=\(after)")
-                evidence.name = "main-close-\(keyboard ? "command-w" : "red-button")-synthetic"
-                evidence.lifetime = .keepAlways; self.add(evidence)
-            }
             XCTAssertTrue(closed, "main must close via \(keyboard ? "Cmd-W" : "its native close button")")
             XCTAssertTrue(addStayedOpen, "main close must not cancel Add")
-            app.menuBars.menuBarItems["Window"].click(); app.menuBars.menuBarItems["Window"].menuItems["Meguri"].click()
-            XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
-                "Window > Meguri brings the workspace to the front")
-            let reopened = try inputEvidence(bundle: bundle)
-            XCTAssertTrue(element(app, deckPage).waitForExistence(timeout: 15), "Window > Meguri restores the same deck: \(reopened)")
-            XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
-            XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
+            // NavigationLayoutTests documents that Window-menu clicks do not
+            // reliably deliver input here. Use the ordinary Dock reopen event
+            // for this exact VM Dev product, activating for key-window checks.
+            XCTAssertTrue(app.menuBars.menuBarItems["Window"].menuItems.matching(NSPredicate(format: "title == %@", "Meguri")).firstMatch.exists)
+            phase = "\(keyboard ? "command-w" : "red-button")-dock-reopen"
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            let opened = expectation(description: "Dock reopen of the exact Dev app")
+            let result = Mutex<(bundle: String?, error: String?)?>(nil)
+            NSWorkspace.shared.openApplication(at: build.appBundle, configuration: configuration) { running, error in
+                result.withLock { $0 = (running?.bundleIdentifier, error?.localizedDescription) }
+                opened.fulfill()
+            }
+            wait(for: [opened], timeout: 15)
+            let outcome = try XCTUnwrap(result.withLock { $0 })
+            XCTAssertNil(outcome.error)
+            XCTAssertEqual(outcome.bundle, bundle)
+            // Establish actual UI return before asking a synthetic subscription
+            // about visibility, collection identity or key-window ownership.
+            XCTAssertTrue(main.waitForExistence(timeout: 15), "Dock reopen must show the real main window while Add is open")
+            XCTAssertTrue(page.waitForExistence(timeout: 15), "Dock reopen must restore the same native deck page")
+            XCTAssertTrue(add.exists && add.sheets.count == 0, "Dock reopen leaves clean Add open")
+            phase = "\(keyboard ? "command-w" : "red-button")-reopened-focus"
+            try focusMain()
+            let reopened = try XCTUnwrap(lastEvidence)
+            XCTAssertEqual(reopened["live"], "true")
+            XCTAssertEqual(reopened["workspaceVisible"], "true")
+            XCTAssertEqual(reopened["workspaceIdentifier"], "main")
+            XCTAssertEqual(reopened["workspaceMatchesMain"], "true")
+            XCTAssertEqual(reopened["collectionIdentity"], identity)
+            XCTAssertEqual(reopened["collectionGeneration"], generation)
             XCTAssertEqual(reopened["collectionReady"], "true")
             XCTAssertTrue(add.exists, "reopening main preserves the collection-owned Add window")
         }
+        phase = "clean-add-close"
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(wait { (add.popUpButtons["editor.add.deck"].value as? String ?? "").contains("Synthetic Summary") })
-        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["addWindowKey"]) == "true" })
+        XCTAssertTrue(wait { snapshot()?["addWindowKey"] == "true" })
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(add.waitForNonExistence(timeout: 10))
     }
@@ -394,6 +447,25 @@ import XCTest
         let fields = received.withLock { $0 }
         XCTAssertEqual(fields?["live"], "true", "the snapshot must read the live collection and audio controller")
         return try XCTUnwrap(fields)
+    }
+    private func optionalInputEvidence(bundle: String, timeout: TimeInterval) -> [String: String]? {
+        let reply = XCTestExpectation(description: "Optional review input state")
+        let received = Mutex<[String: String]?>(nil)
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(forName: .init(bundle + ".testhooks.reviewInputReply"), object: nil, queue: .main) { note in
+            guard let text = note.object as? String, let data = text.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+            let first = received.withLock { fields in
+                guard fields == nil else { return false }
+                fields = value
+                return true
+            }
+            if first { reply.fulfill() }
+        }
+        defer { center.removeObserver(observer) }
+        inject("snapshot", bundle: bundle)
+        guard XCTWaiter().wait(for: [reply], timeout: timeout) == .completed else { return nil }
+        return received.withLock { $0 }
     }
     private func capture(_ window: XCUIElement, _ name: String) {
         let attachment = XCTAttachment(screenshot: window.screenshot())
