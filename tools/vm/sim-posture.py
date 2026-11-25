@@ -84,6 +84,38 @@ def posture_mark(owner, token, state):
 # separate front-app and window-owner identities; only the owner is pinned
 # between fresh checks, after both have passed exact installation admission.
 WINDOW_ADMISSION = r'''
+import stat
+signed_installation = {}
+def installation_fact(path):
+    require(path.resolve(strict=True) == path)
+    paths = [path]
+    if path == hub:
+        paths += [hub / "Contents/Info.plist", hub / "Contents/_CodeSignature/CodeResources"]
+    facts = []
+    for item in paths:
+        try:
+            info = item.lstat()
+        except FileNotFoundError:
+            require(item == hub / "Contents/_CodeSignature/CodeResources")
+            facts.append(None)  # A later addition also invalidates the proof.
+            continue
+        require(not stat.S_ISLNK(info.st_mode))
+        facts.append(tuple(getattr(info, key) for key in (
+            "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+            "st_size", "st_mtime_ns", "st_ctime_ns")))
+    return facts
+
+def admit_signature(path, final):
+    fact = installation_fact(path)
+    if final:
+        # Reuse only this guard's verified, unchanged signed installation.
+        # No codesign process or signature hashing inside M3's short ticket.
+        require(signed_installation.get(path) == fact)
+    else:
+        run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(path))
+        require(installation_fact(path) == fact)
+        signed_installation[path] = fact
+
 def kernel_executable(pid):
     import ctypes
     require(type(pid) is int and 0 < pid <= 2147483647)
@@ -98,14 +130,14 @@ def kernel_executable(pid):
     require(path.startswith("/"))
     return path
 
-def admit_window(evidence):
+def admit_window(evidence, final=False):
     global stage
     stage = "window-installation"
     require(hub.resolve(strict=True) == hub)
     info = plistlib.loads((hub / "Contents/Info.plist").read_bytes())
     require(info.get("CFBundleIdentifier") == "com.apple.dt.Devices"
             and info.get("CFBundleExecutable") == "DevicesTrampoline")
-    run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(hub))
+    admit_signature(hub, final)
     def admit_app(app, owner=False):
         require(app.get("active") is True and app.get("terminated") is False
                 and app.get("finished_launching") is True and app["bundle"] == str(hub)
@@ -115,7 +147,7 @@ def admit_window(evidence):
             hub / "Contents/MacOS/DevicesTrampoline", hub / "Contents/MacOS/DeviceHub")
         require(executable in allowed
                 and executable.resolve(strict=True) == executable)
-        run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(executable))
+        admit_signature(executable, final)
     stage = "window-front"
     front_pid = evidence["front"].get("pid")
     require(type(front_pid) is int and (front_pid > 0 or front_pid == -1))
@@ -123,6 +155,9 @@ def admit_window(evidence):
     stage = "window-unique"
     normal = evidence["normal"]
     require(0 < len(normal) <= 256)
+    ids = [row.get("id") for row in normal]
+    require(all(type(value) is int and value > 0 for value in ids)
+            and len(set(ids)) == len(ids))
     def selected_executable(value):
         return isinstance(value, str) and hub in pathlib.Path(value).parents
     owned = [w for w in normal if w.get("bundle") == str(hub)
@@ -140,12 +175,11 @@ def admit_window(evidence):
         require(not selected or not row.get("bundle"))
         if selected:
             owned.append(row)
-    # Count across the selected bundle, including launcher/companion windows.
-    # Missing AppKit identity is not proof that a lower window is unrelated:
-    # its positive CG PID must resolve outside the selected bundle to exclude it.
-    # The only Hub normal window must also be the top normal window globally.
-    require(len(owned) == 1 and owned[0] == normal[0])
-    window = owned[0]
+    # Bind CG's globally frontmost normal window, never a title-list match.
+    # Missing secondary AppKit identity still needs kernel exclusion from the
+    # selected bundle; selected launcher/companion windows cannot be excluded.
+    window = normal[0]
+    require(window in owned)
     stage = "window-owner-lookup"
     pid, lookup_pid = window.get("pid"), window.get("lookup_pid")
     # CG supplies the bound positive PID. -1 is admitted only for this lookup's
@@ -157,11 +191,24 @@ def admit_window(evidence):
             == str(hub / "Contents/MacOS/DeviceHub"))
     stage = "window-owner-identity"
     admit_app(window, owner=True)
+    stage = "window-unique"
+    # Apple's device canvas may leave a device/management window behind it.
+    # Only fully identified, signed actual DeviceHub owners with distinct CG
+    # IDs may remain below the bound window. No lower title supplies evidence.
+    for row in owned:
+        if row is window:
+            continue
+        lower_pid, lower_lookup = row.get("pid"), row.get("lookup_pid")
+        require(type(lower_pid) is int and 0 < lower_pid <= 2147483647
+                and type(lower_lookup) is int and lower_lookup in (lower_pid, -1))
+        require(kernel_executable(lower_pid) == row.get("executable")
+                == str(hub / "Contents/MacOS/DeviceHub"))
+        admit_app(row, owner=True)
     stage = "window-geometry"
     require(window["id"] > 0 and window["rect"][2] > 100 and window["rect"][3] > 150)
     return dict(window, screen=evidence["screen"], pointer=evidence["pointer"])
 
-def observe_window(initial):
+def observe_window(initial, final=False):
     global stage
     # Only the first pre-input read may wait for open's foreground transition.
     deadline = time.monotonic() + 5 if initial else 0
@@ -171,7 +218,7 @@ def observe_window(initial):
         stage = "window-native"
         evidence = json.loads(run(str(visual), "window"))
         try:
-            return admit_window(evidence)
+            return admit_window(evidence, final=final)
         except RuntimeError:
             if not initial or time.monotonic() >= deadline:
                 raise
@@ -234,8 +281,7 @@ try:
         subprocess.run([str(developer / "Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"),
                         str(source), "-o", str(visual)], env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        stage = "open"
-        run("/usr/bin/open", "-a", str(hub), "--args", "-CurrentDeviceUDID", request["udid"])
+        open_hub()
         print(json.dumps(dict(ready=True, binding=binding)), flush=True)
         first_window = True
         while True:
@@ -256,23 +302,16 @@ try:
                     and message["id"] == request_id + 1)
             request_id = message["id"]
             action = message["action"]
-            require(set(message) == ({"id", "action", "png"} if action == "text" else {"id", "action"}))
+            require(set(message) == {"id", "action"})
             stage = action
             if action not in ("disarm", "finish"):
                 check_lease()
-            if action == "window":
+            if action in ("window", "click-window"):
+                if action == "click-window":
+                    require(armed and pending)
                 initial = first_window and not armed and not pending
                 first_window = False
-                result = observe_window(initial)
-            elif action == "text":
-                image = folder / "vnc.png"
-                payload = base64.b64decode(message["png"], validate=True)
-                require(len(payload) <= 25165824)
-                image.write_bytes(payload)
-                try:
-                    result = json.loads(run(str(visual), "text", str(image)))
-                finally:
-                    image.unlink(missing_ok=True)
+                result = observe_window(initial, final=action == "click-window")
             elif action == "displays":
                 result = {}
                 for display in (1, 3):
@@ -344,7 +383,7 @@ finally:
             if fd is not None:
                 os.close(fd)
 '''
-GUEST_STAGES = set(inspection.GUEST_STAGES) | {"pool", "binding", "compile", "window", "text", "displays", "arm", "publish", "disarm", "finish",
+GUEST_STAGES = set(inspection.GUEST_STAGES) | {"pool", "binding", "compile", "window", "click-window", "displays", "arm", "publish", "disarm", "finish",
     "window-installation", "window-front", "window-unique", "window-owner-lookup",
     "window-owner-kernel", "window-owner-identity", "window-geometry", "window-native"}
 GUEST = "try:\n" + "".join("    " + line + "\n" for line in GUEST.splitlines()) + \
@@ -476,15 +515,47 @@ def image_size(path):
         return image.size
 
 
-def text_boxes(guest, path):
+class OffscreenText:
+    """One private coordinator compiler invocation; saved-frame OCR only."""
+    def __init__(self, folder):
+        self.visual = folder / "ocr"
+        self.output = folder / "ocr.json"
+        source = folder / "ocr.swift"
+        source.write_text(Path(__file__).with_name("sim-posture-ocr.swift").read_text())
+        # Use the coordinator's default selected Xcode, not the guest selection
+        # or an ambient DEVELOPER_DIR override. Never invoke the window helper.
+        env = dict(os.environ)
+        env.pop("DEVELOPER_DIR", None)
+        result = subprocess.run(["/usr/bin/xcrun", "swiftc", str(source), "-o", str(self.visual)],
+                                env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=60)
+        require(result.returncode == 0, "local offscreen OCR compilation unavailable")
+
+    def recognize(self, path):
+        # The bound holder already saved this exact frame on the coordinator.
+        # Keep native output private and bounded before parsing it.
+        try:
+            with self.output.open("wb") as output:
+                result = subprocess.run([str(self.visual), str(path)], stdin=subprocess.DEVNULL,
+                                        stdout=output, stderr=subprocess.DEVNULL, timeout=30)
+            require(result.returncode == 0, "local offscreen OCR unavailable")
+            require(self.output.stat().st_size <= LIMIT, "oversized private OCR reply")
+            return strict_json(self.output.read_bytes())
+        finally:
+            self.output.unlink(missing_ok=True)
+
+
+def text_boxes(ocr, path):
     width, height = image_size(path)
-    result = guest.call("text", png=base64.b64encode(path.read_bytes()).decode())
+    result = ocr.recognize(path)
     require(isinstance(result, list) and len(result) <= 2000)
     boxes = []
     for row in result:
         require(isinstance(row["text"], str) and len(row["text"]) <= 1024)
         box = row["box"]
         require(len(box) == 4 and all(type(v) in (int, float) and math.isfinite(v) and 0 <= v <= 1 for v in box))
+        require(type(row["confidence"]) in (int, float) and math.isfinite(row["confidence"])
+                and 0 <= row["confidence"] <= 1)
         if row["confidence"] >= .9:
             boxes.append((row["text"], (box[0] * width, box[1] * height, box[2] * width, box[3] * height)))
     return boxes
@@ -514,12 +585,50 @@ def title_evidence(boxes, window, scale, name):
     # Always corroborate even when CG supplies a title. Without Screen Recording
     # CG may omit it; only exact high-confidence title-bar OCR admits that case.
     matches = [text for text, box in boxes if inside(box, titlebar)]
-    require(matches == [name], "exact leased window title lacks qualified visual evidence")
+    if matches != [name]:
+        exact_boxes = [box for text, box in boxes if text == name]
+        reason = ("no-exact-row" if not exact_boxes else
+                  "outside-titlebar" if name not in matches else "multiple-qualified-labels")
+        # Only the signed front window's geometry and exact requested-name boxes
+        # may leave the private evidence; never include OCR strings or other rows.
+        require(False, "exact leased window title lacks qualified visual evidence"
+                f"; reason={reason}; front_rect_pt={window['rect']}; scale={scale}"
+                f"; qualified_titlebar_rows={len(matches)}; exact_row_boxes_px={exact_boxes[:4]}")
+
+
+def tooltip_region(point, scale):
+    x, y = point
+    return (x - 120 * scale, y - 65 * scale, 240 * scale, 130 * scale)
+
+
+def tooltip_crop_box(point, scale, dimensions):
+    x, y, width, height = tooltip_region(point, scale)
+    frame_width, frame_height = dimensions
+    box = (max(0, math.floor(x)), max(0, math.floor(y)),
+           min(frame_width, math.ceil(x + width)), min(frame_height, math.ceil(y + height)))
+    require(box[0] < box[2] and box[1] < box[3], "tooltip rectangle outside saved frame")
+    return box
+
+
+def tooltip_text_boxes(ocr, path, point, scale):
+    # Reuse the compiled Accurate helper on this saved frame's fixed nearby
+    # rectangle. Full-frame title OCR and changed-pixel proof keep the original.
+    bounds = tooltip_crop_box(point, scale, image_size(path))
+    with tempfile.TemporaryDirectory(prefix="tooltip-", dir=path.parent) as folder:
+        crop = Path(folder) / "crop.png"
+        fd = os.open(crop, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as output, Image.open(path) as image:
+            image.crop(bounds).save(output, format="PNG")
+        boxes = text_boxes(ocr, crop)
+        # Vision's top-left normalized coordinates were scaled to crop pixels
+        # by text_boxes. Add the *clamped* origin to recover guest desktop pixels.
+        return [(text, (x + bounds[0], y + bounds[1], width, height))
+                for text, (x, y, width, height) in boxes]
 
 
 def tooltip_evidence(before, after, point, scale, label):
     x, y = point
-    region = (x - 120 * scale, y - 65 * scale, 240 * scale, 130 * scale)
+    region = tooltip_region(point, scale)
     poses = {"Open", "Closed", "Partially Open"}
     near_before = [(text, box) for text, box in before if text in poses and inside(box, region)]
     near_after = [(text, box) for text, box in after if text in poses and inside(box, region)]
@@ -532,6 +641,110 @@ def tooltip_evidence(before, after, point, scale, label):
     require(abs(box[0] + box[2] / 2 - x) <= 75 * scale
             and box[1] + box[3] >= y - 35 * scale and box[1] <= y + 55 * scale,
             "tooltip is not scoped to candidate control")
+
+
+# Private, per-calibration masks only. No Apple templates are shipped or learned
+# globally. Fixed small patches exclude button edges and never contain a frame.
+GLYPH_SIDE = 22
+POSES = ("closed", "partial", "open")
+
+
+def toolbar_points(controls, geometry):
+    left, right = controls["closed"], controls["open"]
+    width, height = geometry["size"]
+    spacing = (right[0] - left[0]) / 2
+    require(24 <= spacing <= 48 and abs(left[1] - right[1]) <= 2
+            and all(12 <= x <= width - 12 and height - 90 <= y <= height - 12
+                    for x, y in (left, right)), "implausible bottom pose toolbar")
+    return dict(closed=left, partial=[(left[0] + right[0]) / 2, (left[1] + right[1]) / 2], open=right)
+
+
+def glyph_bits(value):
+    require(type(value) is str and re.fullmatch(r"[0-9a-f]{121}", value) is not None,
+            "invalid private glyph mask")
+    number = int(value, 16)
+    bits = {i for i in range(GLYPH_SIDE ** 2) if number & (1 << i)}
+    require(12 <= len(bits) <= 220, "blank or unbounded toolbar glyph")
+    xs, ys = [i % GLYPH_SIDE for i in bits], [i // GLYPH_SIDE for i in bits]
+    require(0 < min(xs) < max(xs) < GLYPH_SIDE - 1
+            and 0 < min(ys) < max(ys) < GLYPH_SIDE - 1
+            and max(xs) - min(xs) >= 5 and max(ys) - min(ys) >= 5
+            and abs((min(xs) + max(xs)) / 2 - 10.5) <= 3
+            and abs((min(ys) + max(ys)) / 2 - 10.5) <= 3,
+            "clipped or off-center toolbar glyph")
+    return bits
+
+
+def glyph_similarity(a, b):
+    return len(a & b) / len(a | b)
+
+
+def validate_glyphs(glyphs):
+    require(type(glyphs) is dict and set(glyphs) == set(POSES), "three glyphs required")
+    shapes = {pose: glyph_bits(glyphs[pose]) for pose in POSES}
+    require(all(glyph_similarity(shapes[a], shapes[b]) <= .80
+                for i, a in enumerate(POSES) for b in POSES[i + 1:]),
+            "duplicate or ambiguous toolbar glyphs")
+    return shapes
+
+
+def toolbar_glyphs(path, window, geometry, controls):
+    points = toolbar_points(controls, geometry)
+    scale = geometry["scale"]
+    x, y, _, _ = window["rect"]
+    require(window_binding(window, image_size(path), window["title"]) == geometry,
+            "toolbar frame geometry changed")
+    result = {}
+    with Image.open(path) as frame:
+        for pose, (px, py) in points.items():
+            cx, cy = (x + px) * scale, (y + py) * scale
+            radius = GLYPH_SIDE * scale / 2
+            crop = (round(cx - radius), round(cy - radius), round(cx + radius), round(cy + radius))
+            require(0 <= crop[0] < crop[2] <= frame.width and 0 <= crop[1] < crop[3] <= frame.height,
+                    "toolbar glyph outside frame")
+            pixels = list(frame.crop(crop).convert("RGB").resize((GLYPH_SIDE, GLYPH_SIDE),
+                          Image.Resampling.BOX).getdata())
+            border = [v for i, v in enumerate(pixels) if i % GLYPH_SIDE in (0, GLYPH_SIDE - 1)
+                      or i // GLYPH_SIDE in (0, GLYPH_SIDE - 1)]
+            background = [sorted(v[c] for v in border)[len(border) // 2] for c in range(3)]
+            # Distance from the local background ignores uniform selection tint
+            # and foreground polarity, but retains the glyph's exact position.
+            # BOX averages edge coverage without ringing or clipping brighter
+            # selected strokes differently from their neutral counterparts.
+            contrast = [max(abs(v[c] - background[c]) for c in range(3)) for v in pixels]
+            peak = max(contrast)
+            require(peak >= 24, "blank or low-contrast toolbar glyph")
+            bits = sum(1 << i for i, value in enumerate(contrast) if value >= max(18, peak * .4))
+            result[pose] = format(bits, "0121x")
+    validate_glyphs(result)
+    return result
+
+
+def toolbar_evidence(path, window, geometry, record):
+    expected = validate_glyphs(record["glyphs"])
+    observed = validate_glyphs(toolbar_glyphs(path, window, geometry, record["controls"]))
+    require(all(glyph_similarity(observed[pose], expected[pose]) >= .95
+                and all(glyph_similarity(observed[pose], expected[other]) <= .80
+                        for other in POSES if other != pose) for pose in POSES),
+            "fresh three-glyph toolbar does not match private calibration")
+
+
+def localized_poses(boxes, point, scale):
+    # Broad nearby region for vetoes. Positive evidence separately proves scope.
+    return [(text, box) for text, box in boxes
+            if (text in ("Open", "Closed", "Partially Open") or "partial" in text.lower())
+            and inside(box, tooltip_region(point, scale))]
+
+
+def nearby_text(boxes, point, scale, *, control_local=False):
+    # text_boxes already admits only high-confidence rows. Keep arbitrary OCR
+    # text private, and ignore canvas text outside the control's tooltip scope
+    # when deciding whether a pointer-away baseline is neutral.
+    x, y = point
+    return [(text, box) for text, box in boxes
+            if text.strip() and inside(box, tooltip_region(point, scale))
+            and (not control_local or (abs(box[0] + box[2] / 2 - x) <= 75 * scale
+                 and box[1] + box[3] >= y - 35 * scale and box[1] <= y + 55 * scale))]
 
 
 def display_evidence(path):
@@ -587,7 +800,10 @@ def validate_calibration(record, binding, geometry):
     current = (set(record) == {"schema", "binding", "geometry", "viewport", "controls"}
                and type(record["schema"]) is int and record["schema"] == 2
                and record["viewport"] in ("compact", "expanded"))
-    require((legacy or current) and record["binding"] == binding and record["geometry"] == geometry,
+    glyph_record = (set(record) == {"schema", "binding", "geometry", "viewport", "controls", "glyphs"}
+                    and type(record["schema"]) is int and record["schema"] == 3
+                    and record["viewport"] in ("compact", "expanded"))
+    require((legacy or current or glyph_record) and record["binding"] == binding and record["geometry"] == geometry,
             "calibration does not match selected Xcode, target or confirmed viewport geometry")
     points = record["controls"]
     require(set(points) == {"closed", "open"})
@@ -599,6 +815,9 @@ def validate_calibration(record, binding, geometry):
     require(points["closed"][0] < points["open"][0]
             and abs(points["closed"][1] - points["open"][1]) <= 2,
             "calibration does not match Apple's pose control order")
+    if glyph_record:
+        toolbar_points(points, geometry)
+        validate_glyphs(record["glyphs"])
     return points
 
 
@@ -607,7 +826,8 @@ class Holder:
 
     A unique shot after input is a FIFO execution barrier. Its complete PNG and
     the exact pinned log suffix prove the preceding command returned success.
-    Same-size images alone never prove freshness: title + changed tooltip do.
+    Same-size images alone never prove freshness: joined capture plus fresh
+    title and positive tooltip or private three-glyph evidence are required.
     """
     def __init__(self, state, connected, guest, folder, lease=None):
         self.state, self.connected, self.guest, self.folder = state, connected, guest, folder
@@ -717,8 +937,14 @@ class Holder:
             return strict_json(receipt.read_bytes())
         return None
 
-    def click(self):
+    def click(self, window, point):
         """One bounded synchronous reactor command, with its own terminal receipt.
+
+        Caller supplies the exact signed window and guest-point pointer position
+        used by the fresh hover proof. Reobserve after arm/ACK/ticket reservation,
+        under the scheduler mutex, immediately before the input fence and send.
+        Refusal sends no input; a submitted uncertain click stays fenced and is
+        never retried. The ticket must still be live AFTER the observation.
 
         A screenshot is deliberately outside this join: failed readback cannot
         turn a completed input into an unknown in-flight click.
@@ -749,6 +975,7 @@ class Holder:
             # Signals cannot interrupt the final admission/write or its join.
             with uninterrupted():
                 with self.scheduler():
+                    stable_window(self.guest, window, point, final=True)
                     require(time.monotonic() < deadline, "lease too short at atomic click handoff")
                     marker.mkdir(mode=0o700)
                     info = marker.stat()
@@ -822,49 +1049,172 @@ def snapshot_displays(guest, folder):
     return result
 
 
-def stable_window(guest, original, point=None):
-    current = guest.call("window")
+def stable_window(guest, original, point=None, *, final=False):
+    require(not final or point is not None, "expected click pointer unavailable")
+    current = guest.call("click-window" if final else "window")
     require({k: v for k, v in current.items() if k not in ("pointer", "lookup_pid")}
             == {k: v for k, v in original.items() if k not in ("pointer", "lookup_pid")},
             "foreground window changed; no pose input permitted")
     if point is not None:
-        require(len(current["pointer"]) == 2
+        require(len(point) == len(current["pointer"]) == 2
+                and all(type(v) in (int, float) and math.isfinite(v) for v in (*point, *current["pointer"]))
                 and all(abs(a - b) <= 1 for a, b in zip(current["pointer"], point)),
                 "guest pointer moved away from verified control")
 
 
-def hover(guest, holder, window, geometry, name, point, label):
+# Acquisition includes joined PNG transport, two bounded OCR calls and signed
+# window observations. It is independent of the unchanged five-second input
+# tickets: none is reserved until acquisition has completed successfully.
+HOVER_ACQUISITION_SECONDS = 240
+LEGACY_POLL_SECONDS = 8
+
+
+def neutral_frame(guest, holder, window, geometry, name, ocr):
+    """Move only, through the held VNC connection, then observe a fresh baseline."""
     stable_window(guest, window)
-    scale = geometry["scale"]
     x, y, w, _ = window["rect"]
+    scale = geometry["scale"]
     away = (int((x + w / 2) * scale), int((y + 12) * scale))
+    pointer = [v / scale for v in away]
     holder.batch("move %d %d" % away)
-    time.sleep(1.2)  # Hide old tooltips, then capture a pointer-away baseline.
-    baseline = holder.batch()
-    before = text_boxes(guest, baseline)
-    title_evidence(before, window, scale, name)
+    stable_window(guest, window, pointer)
+    time.sleep(1.2)  # Hide old tooltips before the image offered for approval.
+    path = holder.batch()
+    boxes = text_boxes(ocr, path)
+    title_evidence(boxes, window, scale, name)
+    stable_window(guest, window, pointer)
+    return path, pointer, boxes
+
+
+def hover(guest, holder, window, geometry, name, point, label, ocr, record=None):
+    scale = geometry["scale"]
+    x, y, _, _ = window["rect"]
+    baseline, _, before = neutral_frame(guest, holder, window, geometry, name, ocr)
+    glyph_proof = record is not None and record["schema"] == 3
+    if glyph_proof:
+        toolbar_evidence(baseline, window, geometry, record)
     absolute = (round((x + point[0]) * scale), round((y + point[1]) * scale))
+    before_tooltip = tooltip_text_boxes(ocr, baseline, absolute, scale)
+    samples, after_tooltip = 0, []
+    path = None
+    saw_pose = False
+    reason = "no tooltip samples"
+    fixed_reasons = (
+        "fresh localized pose tooltip absent or ambiguous",
+        "partial-open tooltip is not full Open evidence",
+        "tooltip is not scoped to candidate control",
+    )
+
+    def reject(why):
+        # Failure only: fixed vocabulary, never recognized content or geometry.
+        poses = ("Closed", "Open", "Partially Open")
+        region = tooltip_region(absolute, scale)
+        raise RuntimeError("tooltip hover rejected; " + json.dumps(dict(
+            requested=label if label in poses else "unknown",
+            baseline_known_pose=any(text in poses and inside(box, region) for text, box in before_tooltip),
+            after_labels=[pose for pose in poses
+                          if any(text == pose and inside(box, region) for text, box in after_tooltip)],
+            samples=samples, reason=why)))
+
+    # A visible old label is not a neutral baseline. Refuse instead of allowing
+    # a correct-but-stale tooltip or a later unlabelled frame to enable glyphs.
+    if (localized_poses(before, absolute, scale) or localized_poses(before_tooltip, absolute, scale)
+            or nearby_text(before, absolute, scale, control_local=True)
+            or nearby_text(before_tooltip, absolute, scale, control_local=True)):
+        reject("fresh localized pose tooltip absent or ambiguous")
     stable_window(guest, window)
-    holder.batch("move %d %d" % absolute)
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
+    deadline = time.monotonic() + HOVER_ACQUISITION_SECONDS
+    started = time.monotonic()
+    path = holder.batch("move %d %d" % absolute)
+    poll_remaining = LEGACY_POLL_SECONDS
+    while True:
+        require(time.monotonic() < deadline, "tooltip proof deadline expired")
         stable_window(guest, window, [x + point[0], y + point[1]])
-        path = holder.batch()
-        after = text_boxes(guest, path)
+        after = text_boxes(ocr, path)
         title_evidence(after, window, scale, name)
+        after_tooltip = tooltip_text_boxes(ocr, path, absolute, scale)
         stable_window(guest, window, [x + point[0], y + point[1]])
+        samples += 1
+        # Both OCR views are of this exact frame. Check each view independently:
+        # agreement across views is fine, but duplicates/conflicts in either view
+        # or any wrong pose fail immediately, including before a later no-label
+        # sample. The broad nearby rectangle also blocks out-of-scope fallback.
+        for boxes in (after, after_tooltip):
+            localized = localized_poses(boxes, absolute, scale)
+            if len(localized) > 1 or any(text != label for text, _ in localized):
+                reject("fresh localized pose tooltip absent or ambiguous")
+            saw_pose = saw_pose or bool(localized)
+        # An unknown/localized overlay is a veto too, even beside a correct
+        # label or before a later blank frame. Compare each OCR view with its
+        # own baseline so stable canvas text cannot masquerade as a new overlay.
+        for old, boxes in ((before, after), (before_tooltip, after_tooltip)):
+            prior = nearby_text(old, absolute, scale)
+            if any(text != label and (text, box) not in prior
+                   for text, box in nearby_text(boxes, absolute, scale)):
+                reject("fresh localized pose tooltip absent or ambiguous")
+        if glyph_proof:
+            toolbar_evidence(path, window, geometry, record)
+        require(time.monotonic() < deadline, "tooltip proof deadline expired")
         try:
-            tooltip_evidence(before, after, absolute, scale, label)
-        except RuntimeError:
+            tooltip_evidence(before_tooltip, after_tooltip, absolute, scale, label)
+        except RuntimeError as error:
+            reason = next((fixed for fixed in fixed_reasons if str(error) == fixed),
+                          "tooltip predicate rejected")
+            if glyph_proof and not saw_pose:
+                # One complete, in-budget observation is sufficient. Never
+                # discard it to start another expensive joined PNG/OCR sample.
+                require(time.monotonic() < deadline, "tooltip proof deadline expired")
+                return "fresh private three-glyph toolbar for " + label
+            finished = time.monotonic()
+            # Legacy tooltip-only proof may need a delayed tooltip. Allow
+            # eight seconds of polling delays, separately from capture/transfer
+            # and OCR time. Admit a repeat only with acquisition-budget room
+            # for the last complete sample. An overrun still refuses all input.
+            if poll_remaining <= 0 or finished + .25 + (finished - started) >= deadline:
+                break
             time.sleep(.25)
+            poll_remaining -= .25
+            started = time.monotonic()
+            path = holder.batch()
             continue
         with Image.open(baseline) as a, Image.open(path) as b:
             require(a.size == b.size)
-            region = (max(0, absolute[0] - 120 * scale), max(0, absolute[1] - 65 * scale),
-                      min(a.width, absolute[0] + 120 * scale), min(a.height, absolute[1] + 65 * scale))
+            region = tooltip_crop_box(absolute, scale, a.size)
             require(a.crop(region).tobytes() != b.crop(region).tobytes(), "stale VNC tooltip image")
-        return
-    raise RuntimeError("fresh localized pose tooltip absent or ambiguous")
+        require(time.monotonic() < deadline, "tooltip proof deadline expired")
+        return "fresh en-US " + label + " tooltip"
+    reject(reason)
+
+
+def calibrate_toolbar(guest, holder, window, geometry, name, controls, approved, ocr):
+    """Observe only: the operator approved all three glyphs in a neutral frame."""
+    points = toolbar_points(controls, geometry)
+    x, y, _, _ = window["rect"]
+    pointer = window["pointer"]
+    require(len(pointer) == 2 and all(abs(pointer[0] - x - px) > 24 or abs(pointer[1] - y - py) > 65
+                                    for px, py in points.values()),
+            "calibration needs the verified neutral pointer")
+    record = dict(controls=controls, glyphs=toolbar_glyphs(approved, window, geometry, controls))
+    # Include the neutralized, operator-approved frame, then two fresh joined
+    # resident captures. No buttons, keyboard input or further pointer movement.
+    for path in (approved, None, None):
+        stable_window(guest, window, pointer)
+        if path is None:
+            time.sleep(.2)
+            path = holder.batch()
+        boxes = text_boxes(ocr, path)
+        title_evidence(boxes, window, geometry["scale"], name)
+        for px, py in points.values():
+            absolute = ((x + px) * geometry["scale"], (y + py) * geometry["scale"])
+            crop_boxes = tooltip_text_boxes(ocr, path, absolute, geometry["scale"])
+            require(not localized_poses(boxes, absolute, geometry["scale"])
+                    and not localized_poses(crop_boxes, absolute, geometry["scale"])
+                    and not nearby_text(boxes, absolute, geometry["scale"], control_local=True)
+                    and not nearby_text(crop_boxes, absolute, geometry["scale"], control_local=True),
+                    "calibration requires a neutral toolbar")
+        toolbar_evidence(path, window, geometry, record)
+        stable_window(guest, window, pointer)
+    return record["glyphs"]
 
 
 def close_guest(guest, pending):
@@ -928,7 +1278,9 @@ def operator_controls(path, name, geometry):
             require(line.endswith("\n"), "operator calibration input too long")
             return line
         prompt("Private guest capture: " + str(path) + "\nConfirm exactly the leased target " + name
-               + " is visible with its English pose buttons below its bezel, in compact or expanded canvas. "
+               + " is visible with all three distinct, unoccluded pose glyphs below its bezel in documented "
+               "Closed (left), Partially Open (middle), Open (right) order, in compact or expanded canvas. "
+               "Confirm a neutral toolbar with the pointer away and no tooltip or overlay. "
                "A sidebar row or generic library is insufficient. Type COMPACT " + name
                + " or EXPANDED " + name + ":\n")
         confirmation = answer(256).strip()
@@ -963,6 +1315,8 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
         base = Path(tempfile.gettempdir()).resolve()
         require(not any((p / ".git").exists() for p in (base, *base.parents)))
         folder = Path(tempfile.mkdtemp(prefix="meguri-posture-", dir=base))
+        folder.chmod(0o700)
+        ocr = OffscreenText(folder)
         log = (folder / "guest.log").open("wb")
         request = dict(vm=vm, checkout=checkout, udid=udid, guard=uuid.uuid4().hex,
                        pin=json.loads((Path(checkout) / "tools/sim-devices.json").read_text())["foldable"]["runtime"],
@@ -979,11 +1333,17 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
             holder = Holder(state, connected, guest, folder, lease)
         path = holder.batch()
         geometry = window_binding(window, image_size(path), binding["name"])
-        title_evidence(text_boxes(guest, path), window, geometry["scale"], binding["name"])
+        title_evidence(text_boxes(ocr, path), window, geometry["scale"], binding["name"])
         record_path = calibration_path(vm, udid)
         if action == "calibrate":
+            # Initial signed exact leased window and title have been proved.
+            # Neutralize BEFORE presenting an image to the operator. Keep the
+            # original window binding, with the actually observed safe pointer.
+            path, pointer, _ = neutral_frame(guest, holder, window, geometry, binding["name"], ocr)
+            window = dict(window, pointer=pointer)
             print("sim-posture: guest window rect (points) " + json.dumps(window["rect"]), file=sys.stderr)
             viewport, controls = operator_controls(path, binding["name"], geometry)
+            # Validate the existing endpoint constraints before deriving a middle.
             record = dict(schema=2, binding=binding, geometry=geometry, viewport=viewport, controls=controls)
         else:
             record = read_calibration(record_path)
@@ -991,8 +1351,9 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
         before = snapshot_displays(guest, folder)
         display_state(before)
         if action == "calibrate":
-            for pose in ("closed", "open"):
-                hover(guest, holder, window, geometry, binding["name"], controls[pose], pose.title())
+            glyphs = calibrate_toolbar(guest, holder, window, geometry, binding["name"], controls, path, ocr)
+            record.update(schema=3, glyphs=glyphs)
+            validate_calibration(record, binding, geometry)
             fd, temporary = tempfile.mkstemp(prefix=".calibration-", dir=record_path.parent)
             try:
                 with os.fdopen(fd, "w") as output:
@@ -1002,10 +1363,12 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
                 Path(temporary).unlink(missing_ok=True)
             result = dict(calibrated=True, vm=vm, udid=udid, click_count=0)
         else:
-            hover(guest, holder, window, geometry, binding["name"], controls[action], action.title())
+            evidence = hover(guest, holder, window, geometry, binding["name"], controls[action], action.title(), ocr,
+                             record=record)
             # Exactly one synchronous real click, with a separate terminal join.
             # Display activity alone never identifies full Open versus Partially Open.
-            holder.click()
+            holder.click(window, [window["rect"][0] + controls[action][0],
+                                  window["rect"][1] + controls[action][1]])
             deadline = time.monotonic() + 25
             after = None
             matches = 0
@@ -1025,7 +1388,7 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
             require(connected(), "VNC transport lost during display proof")
             stable_window(guest, window)
             result = dict(vm=vm, udid=udid, requested=action, click_count=1,
-                          control_evidence="fresh en-US " + action.title() + " tooltip; joined click",
+                          control_evidence=evidence + "; joined click",
                           before=before, after=after)
         return result
     finally:

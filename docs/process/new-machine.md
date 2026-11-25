@@ -151,10 +151,17 @@ Tart state and guest readiness. A dropped coordinator connection cannot
 terminate the detached guest. Nothing here stops or recreates it.
 
 New remote posture sessions use an M3-resident supervisor and holder under
-`runtime/vnc-owner-v1`, using the actual hosting `bin/tart`. M5 keeps the only
-scheduler. Deploy and preflight before the authorized drained prepare:
+`runtime/vnc-owner-v1`, using the actual hosting `bin/tart`. M5 schedules folding;
+both Macs may schedule ordinary jobs under the shared guest claim. Deploy and
+preflight before operator maintenance:
 `tools/mg sim-posture deploy`, `tools/mg sim-posture preflight`, then
-`tools/mg sim-posture prepare` and `tools/mg sim-posture status`. See
+`tools/mg sim-posture maintenance-prepare` and `tools/mg sim-posture status`.
+The maintenance command declares, for that invocation only, that the operator
+has externally suspended dispatch on BOTH Macs and drained outstanding jobs
+and leases; MG cannot detect that administrative pause. Everyday `prepare`
+only reuses the connected hosted owner; initial boot/migration or a supported
+stopped-reservation resume requires maintenance. A disconnected hosted owner
+still cannot be replaced by this runtime, even in maintenance. See
 [resident deployment, migration and connection reuse](sim-posture.md#resident-deployment-and-the-one-drained-migration)
 for exact commands, prerequisites and pending lab acceptance. Control calls
 are short reconnectable SSH RPCs; Tart, RFB and private state survive their

@@ -447,6 +447,11 @@ class HostedAdmissionTests(unittest.TestCase):
         if (root / 'resident-unknown').exists(): raise RuntimeError()
         if (root / 'resident-reserved').exists():
             return dict(vm='guest', connected=False, vacant=False, phase='stopping')
+        if (root / 'resident-disconnected').exists():
+            return dict(vm='guest', connected=False, vacant=False, phase='disconnected')
+        if (root / 'one-stop').exists() and not online.exists():
+            return dict(vm='guest', connected=False, vacant=False, phase='stopped',
+                        drain=(root / 'one-stop').read_text())
         return dict(vm='guest', connected=online.exists(), vacant=not online.exists(),
                     phase='connected' if online.exists() else 'vacant', session='d'*64,
                     drain=online.read_text() if online.exists() else None)
@@ -477,18 +482,106 @@ class HostedAdmissionTests(unittest.TestCase):
         hosted.write_text(content.replace('def deployed(tart, vm, install=False):', wire + 'def deployed(tart, vm, install=False):'))
         return fixture
 
+    def stopped_maintenance_fixture(self):
+        fixture = self.routing_fixture()
+        # Model a completed operator maintenance stop interrupted before start.
+        # No keeper exists, and guest SSH really refuses until the boot below.
+        state = fixture.root / 'build/vmh3'
+        h.initialize(state, str(fixture.bin / 'tart'), 'guest')
+        token = 'a' * 64
+        for name in ('recovery-pending', 'drain-token'):
+            (state / name).write_text(token)
+        for path in state.iterdir(): path.chmod(0o600)
+        (fixture.root / 'one-stop').write_text(token)
+        (fixture.root / 'stop-joined').touch()
+        (fixture.root / 'vm-state').write_text('stopped')
+        pool = fixture.root / 'pool/pool.lock'
+        pool.mkdir(parents=True)
+        (pool / 'vnc-drain-owner').write_text(token)
+        ssh = fixture.bin / 'vm-ssh'
+        ssh.write_text(ssh.read_text().replace(
+            "cmd = sys.argv[1]\n",
+            "if (root / 'vm-state').read_text() != 'running': sys.exit(255)\ncmd = sys.argv[1]\n"))
+        return fixture
+
+    def test_hosted_ordinary_empty_disconnected_and_stopped_never_restart(self):
+        for kind in ('empty', 'disconnected', 'stopped'):
+            with self.subTest(kind=kind):
+                fixture = self.stopped_maintenance_fixture() if kind == 'stopped' else self.routing_fixture()
+                if kind == 'disconnected': (fixture.root / 'resident-disconnected').touch()
+                result = fixture.call('prepare', 1)
+                self.assertIn(b'BOTH M5 and M3', result.stderr)
+                self.assertIn(b'tools/mg sim-posture maintenance-prepare', result.stderr)
+                self.assertNotIn('stop guest', fixture.trace())
+                self.assertNotIn('run --no-graphics', fixture.trace())
+                self.assertFalse((fixture.root / 'guest-ops').exists())
+                self.assertFalse(fixture.lease.exists())
+
+    def test_hosted_maintenance_resumes_exact_stopped_reservation_before_ssh(self):
+        fixture = self.stopped_maintenance_fixture()
+        self.assertFalse(Path(str(fixture.lease) + '.claim').exists())
+        fixture.call('prepare', 1)  # Ordinary preparation cannot opt itself in.
+        fixture.call('maintenance-prepare')
+        self.assertNotIn('stop guest', fixture.trace())
+        self.assertEqual(fixture.trace().count('run --no-graphics --vnc-experimental guest'), 1)
+        self.assertTrue((fixture.root / 'guest-ops').exists())
+        self.assertFalse((fixture.root / 'build/vmh3/recovery-pending').exists())
+        self.assertFalse((fixture.root / 'pool/pool.lock').exists())
+        before = fixture.trace()
+        fixture.call('prepare')
+        self.assertEqual(fixture.trace(), before)
+
+    def test_hosted_maintenance_never_replaces_disconnected_owner(self):
+        fixture = self.routing_fixture()
+        (fixture.root / 'resident-disconnected').touch()
+        fixture.call('maintenance-prepare', 1)
+        self.assertNotIn('stop guest', fixture.trace())
+        self.assertNotIn('run --no-graphics', fixture.trace())
+
+    def test_hosted_maintenance_declaration_never_overrides_live_claim_or_local_fence(self):
+        fixture = self.routing_fixture()
+        fixture.env['MEGURI_MAC_VM_LEASE_WAIT_SECONDS'] = '0'
+        with fixture.foreign_claim():
+            fixture.call('maintenance-prepare', 1)
+        self.assertFalse((fixture.root / 'guest-ops').exists())
+        fixture.lease.mkdir(parents=True)
+        (fixture.lease / 'sim-posture-pending').mkdir()
+        fixture.call('maintenance-prepare', 3)
+        self.assertTrue((fixture.lease / 'sim-posture-pending').exists())
+        self.assertNotIn('stop guest', fixture.trace())
+        self.assertNotIn('run --no-graphics', fixture.trace())
+
+    def test_hosted_stopped_maintenance_rejects_incomplete_or_mismatching_evidence(self):
+        for name, data in (('drain-token', 'b' * 64), ('recovery-pending', ''),
+                           ('shutdown-pending', 'a' * 64), ('drain-precommit', 'a' * 64),
+                           ('sim-posture-pending', 'uncertain'), ('stop-joined', None),
+                           ('one-stop', 'b' * 64)):
+            with self.subTest(name=name):
+                fixture = self.stopped_maintenance_fixture()
+                path = fixture.root / name if name in ('one-stop', 'stop-joined') else fixture.root / 'build/vmh3' / name
+                if data is None: path.unlink()
+                else:
+                    path.write_text(data)
+                    path.chmod(0o600)
+                fixture.call('maintenance-prepare', 1)
+                self.assertNotIn('stop guest', fixture.trace())
+                self.assertNotIn('run --no-graphics', fixture.trace())
+                self.assertFalse((fixture.root / 'guest-ops').exists())
+                self.assertTrue((fixture.root / 'build/vmh3/recovery-pending').exists())
+
     def test_cancel_before_hosted_start_publication_cannot_publish_after_pause(self):
         fixture = self.routing_fixture()
         fixture.cancel_at_start(fixture.root / "tools/vm/vnc-hosted.py",
                                 "        require((root/'one-stop').read_text() == message['drain'])\n",
-                                published=False)
+                                published=False, command="maintenance-prepare")
         self.assertFalse((fixture.root / "resident-online").exists())
         self.assertEqual((fixture.root / "vm-state").read_text(), "stopped")
 
     def test_cancel_after_hosted_start_reconciles_without_second_start_or_stop(self):
         fixture = self.routing_fixture()
         fixture.cancel_at_start(fixture.root / "tools/vm/vnc-hosted.py",
-                                '        return dict(connected=True)\n', published=True)
+                                '        return dict(connected=True)\n', published=True,
+                                command="maintenance-prepare")
         self.assertTrue((fixture.root / "resident-online").exists())
         fixture.call("prepare")
         self.assertEqual(fixture.trace().count("stop guest"), 1)
@@ -499,13 +592,19 @@ class HostedAdmissionTests(unittest.TestCase):
         fixture = self.routing_fixture(legacy=True)
         trace = fixture.trace()
         (fixture.root / 'legacy-timeout').touch()
-        fixture.call('prepare', 1)
+        (fixture.root / 'preflight-fail').touch()
+        fixture.call('maintenance-prepare', 1)
+        # Maintenance admission reads the VM state before preflight refuses.
+        trace += 'list --format json\n'
+        self.assertEqual(fixture.trace(), trace)
         state = fixture.root / 'build/vmh3'
         self.assertEqual({p.name for p in state.iterdir()}, {'vm', 'hosted.json'})
         metadata = {p.name:p.read_bytes() for p in state.iterdir()}
         self.assertTrue(json.loads(fixture.call('status').stdout)['hosted'])
+        (fixture.root / 'preflight-fail').unlink()
         (fixture.root / 'legacy-timeout').unlink()
         fixture.call('prepare')
+        self.assertEqual(fixture.trace(), trace)
         status = json.loads(fixture.call('status').stdout)
         self.assertTrue(status['connected'] and status['conclusive'])
         self.assertNotIn('hosted', status)
@@ -533,23 +632,24 @@ class HostedAdmissionTests(unittest.TestCase):
         self.assertEqual(fixture.trace(), trace)
         self.assertEqual({p.name:p.read_bytes() for p in state.iterdir()}, metadata)
 
-    def test_hosted_prepare_drains_once_reuses_and_refuses_active_or_unknown_leases(self):
+    def test_hosted_maintenance_drains_once_reuses_and_refuses_active_or_unknown_leases(self):
         fixture = self.routing_fixture()
         (fixture.root / 'preflight-fail').touch()
-        fixture.call('prepare', 1)
-        self.assertEqual(fixture.trace(), '')
+        fixture.call('maintenance-prepare', 1)
+        self.assertNotIn('stop guest', fixture.trace())
+        self.assertNotIn('run --no-graphics', fixture.trace())
         self.assertFalse((fixture.root/'pool/pool.lock').exists())
         (fixture.root / 'preflight-fail').unlink()
         lease = fixture.root / 'pool/leases/orphan/lease.json'
         lease.parent.mkdir(parents=True)
         for data in ({'expires_epoch':time.time()+600}, {}, {'expires_epoch':'unknown'}):
             lease.write_text(json.dumps(data))
-            fixture.call('prepare', 1)
+            fixture.call('maintenance-prepare', 1)
             self.assertNotIn('stop guest', fixture.trace())
             self.assertEqual(json.loads(lease.read_text()), data)
             self.assertFalse((fixture.root/'pool/pool.lock').exists())
         lease.write_text(json.dumps({'expires_epoch':0}))
-        fixture.call('prepare')
+        fixture.call('maintenance-prepare')
         state = fixture.root / 'build/vmh3'
         self.assertFalse((state/'recovery-pending').exists())
         self.assertFalse((fixture.root/'pool/pool.lock').exists())
@@ -721,6 +821,77 @@ class HostedCommissioningTests(unittest.TestCase):
                     else:
                         with self.assertRaises(RuntimeError): holder.publication(None, latest, root / "receipt")
                     self.assertEqual(operation.call_args.args, ("reserve",))
+
+    def test_hosted_click_rechecks_after_arm_and_reserve_before_any_input(self):
+        for change in (None, "arm-window", "arm-pointer", "reserve-window", "reserve-pointer",
+                       "unavailable", "missing-pointer", "expired-observation", "expired-mutex"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory(prefix="hc-") as directory:
+                root = Path(directory)
+                tart = root / "tart"
+                shutil.copyfile(ROOT / "tools/vm/remote-wrapper.py", tart)
+                tart.chmod(0o700)
+                (root / "remote.json").write_text(json.dumps({"host": "fake-m3-alias", "runtime": "/private-kit"}))
+                lease = root / "lease"
+                lease.mkdir()
+                clock = [100.0]
+                original = dict(id=23, pid=123, rect=[100, 50, 400, 700], pointer=[300, 700])
+                current = dict(original)
+                events = []
+                def alter(stage):
+                    if change == stage + "-window":
+                        current["id"] = 24
+                    elif change == stage + "-pointer":
+                        current["pointer"] = [400, 700]
+                def guest_call(action):
+                    events.append(action)
+                    if action in ("arm", "publish"):
+                        alter(action)
+                        return {"armed" if action == "arm" else "published": True, "remaining": 600}
+                    if action == "click-window":
+                        # No scheduler input fence exists before final proof.
+                        self.assertFalse((lease / "sim-posture-pending").exists())
+                        if change == "unavailable":
+                            raise RuntimeError("proof unavailable")
+                        if change == "missing-pointer":
+                            return dict(current, pointer=[])
+                        if change == "expired-observation":
+                            clock[0] += 5
+                        return current
+                    self.assertEqual(action, "disarm")
+                    return True
+                guest = mock.Mock(request={"guard": "c" * 32})
+                guest.call.side_effect = guest_call
+                with mock.patch.object(h, "endpoint", return_value=(str(tart), "guest")), \
+                        mock.patch.object(h, "rpc", return_value=dict(connected=True, session="a" * 64)):
+                    def connected():
+                        if change == "expired-mutex":
+                            clock[0] += 5
+                        return True
+                    holder = h.RemoteHolder(root, connected, guest, root, lease)
+                def operation(op, **values):
+                    events.append(op)
+                    if op == "reserve":
+                        alter("reserve")
+                        return dict(reserved=True)
+                    self.assertIsNone(change, "refused click must send zero input")
+                    if op == "click":
+                        return {}
+                    self.assertEqual(op, "receipt")
+                    return dict(request=holder.rid, session=holder.sid, guard=holder.guard,
+                                receipt=dict(joined=True, executed=True))
+                with mock.patch.object(holder, "operation", side_effect=operation), \
+                        mock.patch.object(h.time, "monotonic", side_effect=lambda: clock[0]):
+                    if change is None:
+                        holder.click(original, [300, 700])
+                        self.assertEqual(events, ["arm", "publish", "reserve", "click-window", "click", "receipt", "disarm"])
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            holder.click(original, [300, 700])
+                        self.assertNotIn("click", events)
+                        self.assertEqual(events[-1], "disarm")
+                self.assertFalse(holder.pending)
+                self.assertFalse(holder.armed)
+                self.assertFalse((lease / "sim-posture-pending").exists())
 
 
 if __name__ == "__main__":

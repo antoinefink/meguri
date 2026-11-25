@@ -6,6 +6,7 @@ boot and immediately before input/shutdown publication. Lost authority refuses
 new work; the existing token-bound terminal/join paths remain available.
 """
 import importlib.util
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -167,6 +168,45 @@ class Cancelled(BaseException):
     """Must escape the resident client's RuntimeError reconciliation loops."""
 
 
+def stopped_reservation(claim, hosted, state, tart, vm):
+    """Host-only maintenance admission; never probes or cleans the stopped guest.
+
+    The local completed drain and M3's original stop reservation/terminal receipt
+    must agree. A disconnected/starting owner or uncertain fence grants nothing.
+    The unchanged resident independently enforces non-replay on start.
+    """
+    session = hosted.session
+    session.guard_state(state)
+    with contextlib.ExitStack() as stack:
+        records = {name: stack.enter_context(session.pinned_record(state / name))
+                   for name in ("vm", "hosted.json", "recovery-pending", "drain-token")}
+        token = hosted.identifier(records["recovery-pending"][0])
+        def validate():
+            if (records["vm"][0] != vm or records["drain-token"][0] != token
+                    or any(os.path.lexists(state / name) for name in
+                           (*session.SESSION_EVIDENCE, "sim-posture-pending")
+                           if name not in ("vm", "recovery-pending", "drain-token"))
+                    or set(claim.lease.iterdir()) != {claim.lease / "holder.json"}):
+                raise RuntimeError("maintenance stop evidence incomplete or fenced")
+            for name, (_, info) in records.items():
+                session.unchanged_record(state / name, info)
+            hosted.endpoint(state, tart, vm)
+            claim.scheduler_check()
+        validate()
+        current = hosted.rpc(tart, dict(op="status", vm=vm))
+        if (current.get("vm") != vm or current.get("connected") is not False
+                or current.get("vacant") is not False or current.get("drain") != token
+                or current.get("phase") not in ("stopped", "start-spawn-failed")):
+            raise RuntimeError("maintenance requires the original stopped reservation")
+        receipt = hosted.rpc(tart, dict(op="stop-receipt", vm=vm, drain=token))
+        if receipt.get("receipt") != dict(joined=True, stopped=True, code=0):
+            raise RuntimeError("maintenance stop terminal receipt unconfirmed")
+        listed = json.loads(subprocess.check_output([tart, "list", "--format", "json"], timeout=10))
+        if [entry.get("State") for entry in listed if entry.get("Name") == vm] != ["stopped"]:
+            raise RuntimeError("maintenance requires positively stopped guest")
+        validate()
+
+
 def lifecycle_start(claim, script, arguments):
     """Explicit M5 start boundary. The stopped guest cannot answer a proof.
 
@@ -185,6 +225,7 @@ def lifecycle_start(claim, script, arguments):
         tart, vm, *_ = args
     elif Path(script).stem == "vnc-hosted" and action == "prepare" and args[-1] == "start":
         tart, vm, *_ = args
+        stopped_reservation(claim, module, state, tart, vm)
     else:
         raise ValueError("unsupported lifecycle start")
     session = module.session if hasattr(module, "session") else module
@@ -216,6 +257,11 @@ def main():
             signal.signal(sig, interrupted)
         action, lease, ssh, *args = sys.argv[1:]
         claim = Claim(lease, ssh)
+        if action == "resume-check":
+            state, tart, vm = args
+            hosted = guarded_modules(claim, ssh)("vnc-hosted")
+            stopped_reservation(claim, hosted, Path(state), tart, vm)
+            return 0
         if action == "start":
             return lifecycle_start(claim, args[0], args[1:])
         claim.check()

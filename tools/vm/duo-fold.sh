@@ -5,6 +5,7 @@
 #
 # usage: tools/vm/duo-fold.sh start [--vm <name>]   prepare/reuse VNC (manual alias)
 #        tools/vm/duo-fold.sh prepare|status      persistent session (no repeated restart)
+#        tools/vm/duo-fold.sh maintenance-prepare  operator declares BOTH schedulers paused/drained
 #        tools/vm/duo-fold.sh deploy|preflight    private hosted component readiness
 #        tools/vm/duo-fold.sh inspect <udid>       private hardware calibration capture
 #        tools/vm/duo-fold.sh open|closed|calibrate <udid>  guarded leased posture
@@ -45,7 +46,7 @@ VENV="$CANONICAL/venv"
 VNCDOTOOL_VERSION=1.4.2
 
 log() { printf 'duo-fold: %s\n' "$*" >&2; }
-usage() { sed -n '6,13p' "$0" | sed 's/^# *//' >&2; exit 2; }
+usage() { sed -n '6,14p' "$0" | sed 's/^# *//' >&2; exit 2; }
 
 SESSION="$ROOT/tools/vm/vnc-session.py"
 HOSTED="$ROOT/tools/vm/vnc-hosted.py"
@@ -64,7 +65,7 @@ TART="$(jq -r .tart <<<"$SELECTED")"
 SSH="$(jq -r .ssh <<<"$SELECTED")"
 # The persistent state and holder venv are global, not per VM. Never stop or
 # start a secondary guest under the primary guest's state/scheduler lease.
-case "$COMMAND" in start|prepare|stop|inspect|open|closed|calibrate|deploy|preflight)
+case "$COMMAND" in start|prepare|maintenance-prepare|stop|inspect|open|closed|calibrate|deploy|preflight)
   [ "$VM" = "$PRIMARY" ] || { log "VNC lifecycle supports only configured primary VM $PRIMARY"; exit 1; }
 esac
 
@@ -127,6 +128,31 @@ release() {
 
 claim_check() { python3 "$BOUNDARY" check "$LEASE" "$SSH"; }
 
+maintenance_instruction() {
+  log "resident preparation requires scheduled maintenance: an operator must suspend dispatch on BOTH M5 and M3 and drain outstanding jobs/leases, then invoke tools/mg sim-posture maintenance-prepare. MG cannot detect that administrative pause; retain all fences"
+}
+
+initial_claim() {
+  local current
+  if [ "$STATE" = "$MAIN/build/vmh3" ]; then
+    if [ "$COMMAND" = maintenance-prepare ]; then
+      # Host-only evidence may admit this exact stopped reservation. There is
+      # no guest to claim yet; every running/unknown guest takes normal admission.
+      if [ "$(mvl_state "$TART" "$VM")" = stopped ]; then
+        python3 -I "$BOUNDARY" resume-check "$LEASE" "$SSH" "$STATE" "$TART" "$VM"
+        return $?
+      fi
+    elif [ "$COMMAND" = prepare ] || [ "$COMMAND" = start ]; then
+      current="$(session_status)" || return 1
+      if [ "$(jq -r .connected <<<"$current")" != true ]; then
+        maintenance_instruction
+        return 1
+      fi
+    fi
+  fi
+  claim_take
+}
+
 claim_take() {
   # Never honor the general opt-out for folding: every guest access needs the
   # same guest-wide claim, even for a connected resident's cleanup/inspection.
@@ -154,6 +180,9 @@ fold_python() {
 
 fold_start() {
   local rc
+  if [ "$STATE" = "$MAIN/build/vmh3" ] && [ "$COMMAND" != maintenance-prepare ]; then
+    maintenance_instruction; return 1
+  fi
   # Starts run while the owned, drained guest is positively stopped. There is
   # no live guest keeper to prove authority then. Track the controller so Bash
   # can forward cancellation while waiting, including before publication.
@@ -248,7 +277,7 @@ lease() {
       LEASE_WRITING=""
       host_lease_unlock
       export MEGURI_FOLD_SCHEDULER_PID="$$"
-      claim_take || exit 1
+      initial_claim || exit 1
       return 0
     fi
     host_lease_unlock
@@ -299,6 +328,12 @@ poststart_cleanup() {
 start() {
   local host current rc
   [ $# -eq 0 ] || usage
+  if [ "$COMMAND" = maintenance-prepare ]; then
+    [ "$STATE" = "$MAIN/build/vmh3" ] || {
+      log "maintenance-prepare supports only the hosted M3 route"; return 1;
+    }
+    log "operator maintenance declaration for this invocation: dispatch on BOTH Macs is suspended and outstanding jobs/leases drained externally; MG cannot verify that pause"
+  fi
   lease vm-fold-prepare
   recheck_state || exit 1
   python3 "$SESSION" init "$STATE" || exit 1
@@ -379,6 +414,7 @@ hosted_start() {
     fold_python "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
     log "connected to $VM (reused; resident holder)"; return 0
   fi
+  [ "$COMMAND" = maintenance-prepare ] || { maintenance_instruction; return 1; }
   if pending_cleanup; then
     [ -f "$STATE/recovery-pending" ] && [ ! -e "$STATE/shutdown-pending" ] && [ ! -e "$STATE/drain-precommit" ] || {
       log "prior drain/stop unconfirmed; retain fences; no restart issued"; return 1;
@@ -457,7 +493,7 @@ select_state
 case "$COMMAND" in
   deploy|preflight) [ $# -eq 0 ] || usage; python3 "$HOSTED" "$COMMAND" "$TART" "$VM" ;;
   receipt) [ $# -eq 0 ] || usage; python3 "$HOSTED" receipt "$STATE" "$TART" "$VM" "$(mvl_lease_dir "$ROOT" "$PRIMARY")" ;;
-  start|prepare) start "$@" ;;
+  start|prepare|maintenance-prepare) start "$@" ;;
   status) [ $# -eq 0 ] || usage; session_status ;;
   inspect) inspect "$@" ;;
   open|closed|calibrate) posture "$COMMAND" "$@" ;;

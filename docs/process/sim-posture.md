@@ -31,15 +31,19 @@ tools/mg selftest tools/tests/vnc_session.bats tools/tests/remote_wrapper.bats
 tools/mg sim-posture deploy
 tools/mg sim-posture preflight
 tools/mg sim-posture status
-# Only after both readiness jobs pass and normal jobs/acquisitions have drained:
-tools/mg sim-posture prepare
+# Operator only: suspend dispatch externally on BOTH M5 and M3, then drain
+# outstanding jobs and simulator leases on both. MG cannot verify this pause.
+tools/mg sim-posture maintenance-prepare
 tools/mg sim-posture status
-# Repeat: must report reused, with no stop, start or new RFB connection.
+# Resume dispatch on both Macs after maintenance. Everyday automated reuse:
 tools/mg sim-posture prepare
 ```
 
 Use MG result status/details to verify each job; its process exit alone is not
-a pass.
+a pass. `maintenance-prepare` is the operator's declaration for that invocation
+only; ordinary prepare and other jobs never inherit it. It adds no host lock to
+ordinary jobs and changes none of their master boot behavior. Both Macs may
+continue scheduling normal jobs outside the maintenance window.
 
 `deploy` installs only the six shipped Python components plus a private venv
 with `vncdotool==1.4.2` and `Pillow==11.3.0`, under the fixed kit-relative
@@ -88,19 +92,33 @@ Only that receipt admits one detached resident start with the actual local
 Tart binary. Stop/start reservations, logs and receipts stay in the private
 kit. Controller loss cannot kill these peers. Lost replies use fresh receipt
 or status calls; an unknown reservation is never vacant. A completed stop
-followed by an interrupted start can resume that reservation through prepare.
+followed by an interrupted start can resume that reservation only through
+`maintenance-prepare` in another externally paused and drained maintenance window.
+Before boot, the local scheduler may admit only a positively stopped guest with
+matching private local VM/endpoint, recovery and drain records, M3's original
+stop reservation and its positive joined/stopped terminal receipt. This host-only
+check needs no guest SSH. It never repeats the stop. Running or unknown guests
+require the normal shared claim before guest work. After boot, preparation waits
+for normal shared admission (also when no prior keeper exists) before readiness
+checks or drain cleanup. Uncertain markers, retained scheduler fences and
+incomplete/mismatching records refuse; the declaration overrides none of them.
 A caught log-open or `Popen` failure durably marks a proven pre-spawn failure;
 only the original VM/drain token may retry it. The active drain caller queries
-that marker before retrying its stop reservation; prepare can resume a marked
+that marker before retrying its stop reservation; maintenance can resume a marked
 start failure. A missing failure marker always retains uncertain ownership,
 even if no child can be observed. Persistent stop failure retains the scheduler
 and guest fences for token-bound reconciliation; a new token cannot replace it.
 There is no rollback restart or automatic replacement of a disconnected owner,
 and this versioned runtime refuses a second migration stop. Hosted `stop`
 refuses because it would require a further authorized restart.
+An actual disconnected hosted owner cannot be replaced by this runtime, even
+inside maintenance. Retain its evidence for operator reconciliation; this command
+does not implement arbitrary replacement or additional VM reboots.
 
 An established hosted connection always returns `reused` from ordinary prepare,
 including after M5 SSH/client loss. It never stops, starts or reconnects Tart.
+An empty, disconnected or stopped hosted route refuses ordinary prepare with
+instructions to schedule maintenance; automation never enters maintenance itself.
 An already connected legacy/local route is likewise preserved. The resident
 supervisor owns its original children and authenticated loopback RFB connection
 on M3; no new remote session uses a foreground M5 VNC tunnel. No other RFB
@@ -147,16 +165,27 @@ the selected installation's launcher with a different PID. Admission proves
 both identities separately; it never equates those transient PIDs. Only these
 two exact binaries beneath the selected bundle are admitted, with
 `codesign --verify --strict -R '=anchor apple and identifier "com.apple.dt.Devices"'`.
-It counts normal Hub windows across that bundle, requires exactly one and
-requires it to be the top normal window globally. A foreign front app, another
-installation, another binary or an additional normal Hub window refuses input.
+Admission binds CG's globally first normal window directly, with a positive
+CG PID and a unique positive integer window ID. It never searches the window
+list for a matching title. Apple's native URL route can open the leased compact
+device canvas in front of an existing device/management window showing the
+previous iPhone. That layout is allowed: each lower selected-Hub window must
+have a distinct positive integer ID and complete AppKit identity, a positive CG
+PID whose kernel executable matches the exact selected `DeviceHub`, and the
+same strict signed-installation verification. IDs must be positive and unique
+across the normal-window list. Launcher or companion windows, unidentified
+secondary selected windows, conflicting identities and unresolved PIDs still
+refuse. Unrelated lower processes retain kernel identity/exclusion checks.
+A foreign front app or foreign, incorrect or unknown top window refuses input,
+even when the requested device/title appears behind it. No other device is
+closed or selected through guest input to obtain this layout.
 
-Native validation of this revision is **pending**: Swift
-helper compilation, live full-frame VNC refresh, compact/expanded title-bar OCR,
+Native validation of this revision is **pending**: local OCR/guest observer
+compilation, live full-frame VNC refresh, compact/expanded title-bar OCR,
 CG/RFB coordinate scale, exact control labels, tooltip localization/placement
 at 1x/2x, the synchronous holder input path, and both pose transitions need the
-coordinator's M3 lab run. Synthetic tests exercise the production controller
-with fake guest evidence; they do not establish native acceptance.
+coordinator's M5/M3 lab run. Synthetic tests exercise the production controller
+with fake guest evidence and OCR subprocesses; they do not establish native acceptance.
 
 The supplied Apple Device Hub documentation describes three buttons below
 the bezel: Closed immediately right of Rotate Right, Partially Open in the
@@ -185,58 +214,154 @@ permission setup or recovery as part of this procedure.
    guest PNG. The selected signed Device Hub must show the unique booted
    leased simulator, awake, in **compact or expanded canvas**, titled exactly
    `Meguri-Pool-foldable-N`. Both external display 1 and internal display 3
-   must be readable, with exactly one lit and the other black. Close other
-   normal Hub windows in the guest, including its library. If arrangement or
-   selecting the target canvas needs operator input, use only the already connected
-   holder's FIFO with fresh private captures. Never guess that a library,
+   must be readable, with exactly one lit and the other black. Fully identified
+   signed same-Hub device/management windows may remain behind the leased
+   canvas under the admission contract above. The exact-UDID URL selects the
+   target; do not close other devices or issue guest input to select them.
+   If it leaves a different canvas on top, stop. Never guess that a library,
    disconnected device or physical device is the simulator. Agents do not
    perform this manual lab step. Remove the inspection PNG afterwards.
 4. In the operator's **foreground local terminal**, run
    `tools/mg sim-posture calibrate <leased-udid>`. The CLI launches/selects the
-   exact UDID through the selected Hub's `-CurrentDeviceUDID` argument, then
-   requires the selected signed frontmost Hub and exactly one unobscured
-   normal window across the selected signed bundle. The front app and window
+   exact UDID with `/usr/bin/open -a <exact validated Hub bundle>` followed by
+   the ordinary URL argument `devices://device/open?id=<leased-udid>`, after
+   validation and an immediate lease recheck. This also routes an already running
+   Hub to the booted target. Inspection uses the same route. The CLI then
+   requires the selected signed frontmost Hub and the exact leased canvas as
+   the globally frontmost normal window, allowing verified lower same-Hub
+   windows as described above. The front app and window
    owner may have different PIDs, but each must prove the exact selected bundle,
-   identifier and approved signed executable. It saves its own private guest screenshot, reports the
-   guest CG window rectangle in points, and displays its capture path directly
-   in `/dev/tty`. No input file or executable path can be supplied.
-5. Open that saved image privately and measure the **centers** of Closed and
-   Open below the bezel. Exclude Rotate Right and the middle Partially Open
-   button. Derive scale `s` from screenshot dimensions divided by the single
-   guest display dimensions: both axes must equal 1 or 2. Convert each PNG
+   identifier and approved signed executable. After proving this initial window
+   and its exact leased title in a joined capture, the CLI uses the existing held
+   VNC connection to move the guest pointer to the safe noninteractive titlebar
+   point used by hover (horizontal center, 12 points below the window top).
+   It verifies the actual pointer and unchanged signed window, waits for old
+   tooltips to disappear, then acquires a fresh joined image and repeats title,
+   pointer and window proof **before** asking for approval. There is no click,
+   keyboard input or focus change during neutralization. It reports the guest CG
+   window rectangle in points and displays this fresh image's private capture
+   path directly in `/dev/tty`. No input file or executable path can be supplied.
+5. Open the saved neutral image privately and confirm all
+   three small glyphs are neutral and unoccluded. Xcode documents their order
+   below the bezel as **Closed (left), Partially Open (middle), Open (right)**.
+   Measure the **centers** of Closed and Open; the CLI derives the middle center
+   halfway between them. Exclude Rotate Right. Derive scale `s` from screenshot
+   dimensions divided by the single guest display dimensions: both axes must
+   equal 1 or 2. Convert each PNG
    center `(px, py)` to window-relative points
    `(px/s - window.x, py/s - window.y)`. Confirm the two controls share a row
    (within two points) and Closed is left of Open. At the terminal, explicitly
    confirm `COMPACT <exact simulator name>` or `EXPANDED <exact simulator name>`,
-   matching the saved canvas. This confirms the **named leased target itself**
-   and its visible pose buttons below its bezel; a selected sidebar row or a
+   matching the saved canvas. This confirms the **named leased target itself**,
+   the documented three-glyph order and a neutral, unoccluded toolbar with the
+   pointer away and no tooltip or overlay; a selected sidebar row or a
    generic library is insufficient. Then enter the two measured `x y` pairs.
    Expanded canvas may keep the same Mac window size across pose changes;
    measure its actual controls without assuming compact proportions. No layout,
    target or control location is discovered from a sidebar or window dimensions.
-6. The CLI verifies both candidates **without clicking**: move away inside the
-   validated window, capture a baseline, hover the candidate, then require a
-   newly visible high-confidence en-US `Closed` or `Open` tooltip near that
-   point. It requires changed local pixels, exact title-bar OCR and unchanged
-   guest foreground/window geometry, plus the actual guest pointer position.
-   Missing/localized/ambiguous/stale evidence refuses publication. It never
-   substitutes the Partially Open tooltip. Successful calibration writes only
-   bounded JSON to the owner-only directory
+6. Calibration emits **zero clicks and no keyboard input**; its only pointer
+   movement is the verified titlebar neutralization before approval. A pointer
+   left on a fold icon by normal use or legacy hover-only calibration needs no
+   separate movement channel. The CLI checks
+   the operator-approved image and two fresh joined captures for exact title-bar
+   OCR, stable signed window/geometry/pointer and the same three distinct,
+   nonempty glyphs. Every approved/fresh frame also needs neutral full-frame
+   and localized crop OCR around all three controls. Movement away from the
+   verified neutral pointer, visible pose labels or nonempty high-confidence
+   text within a control's tooltip scope refuses the calibration write. The row
+   must be within two points, 12–90 points above the
+   window bottom, with equal 24–48 point spacing. Each glyph must fit wholly
+   inside its 22-point square patch and the signed window. Blank, clipped,
+   duplicate, ambiguous or changed shapes refuse publication. Successful
+   calibration writes only bounded JSON with three normalized binary glyph
+   masks to the owner-only directory
    `~/Library/Application Support/meguri/sim-posture/` outside Git. Temporary
-   desktop images are removed on joined completion.
+   desktop images are removed on joined completion; no raw frame or crop is
+   saved in calibration, shipped as an asset or accepted as a global template.
 
 The record binds exact selected Xcode path/version/build, signed Hub trampoline
 SHA-256, VM, UDID, device name/runtime, confirmed viewport, window dimensions, single-monitor
 geometry and VNC scale. It contains no executable instructions or supplied
-paths. Every pose request repeats tooltip/title verification. Window movement
-works through relative coordinates; resizing, scale changes, another Xcode,
+paths. Every pose request repeats fresh title and control verification. Window
+movement works through relative coordinates; resizing, scale changes, another Xcode,
 target, monitor arrangement or layout require fresh calibration. New records
-use schema 2 with an explicit `viewport` of `compact` or `expanded`. Existing
-valid schema-1 records (`compact: true`) retain their compact-only meaning and
-exact binding/geometry checks; they are never migrated into expanded records.
+use schema 3 with an explicit `viewport` of `compact` or `expanded` and private
+glyph proof. Existing schema-1 (`compact: true`) and schema-2 (`viewport`) records
+keep their exact bindings and require the existing positive fresh localized
+tooltip and changed-pixel path; coordinates alone never acquire fallback
+authority. Explicit operator recalibration is required for glyph proof.
 Unknown schemas, mixed fields or other viewport values refuse. Both layouts
 require the exact leased title as high-confidence OCR in the top 40 points and
-the same fresh exact tooltip, changed-pixel and pointer proofs for each control.
+stable signed owner/window/geometry and pointer. Schema 3 also requires both
+endpoints **and the middle glyph** in pointer-away and hovered fresh captures.
+Each mask must match its private calibrated position with at least 95% foreground
+intersection-over-union and remain distinct from either other glyph (at most
+80% overlap). Local background-relative contrast removes uniform background or
+selection tint and allows foreground polarity changes; there is no position
+search, shifted matching or screen-coordinate fallback. The three-glyph proof
+distinguishes full Open from Partially Open even when the display state cannot.
+
+The existing strong exact localized tooltip path remains preferred when present.
+Before hovering, the pointer-away baseline must have no recognized nearby pose
+labels in either its full frame or its accurate localized crop, and no nonempty
+high-confidence text within the candidate control's tooltip scope. This also
+rejects unknown or localized overlay text. A stale visible label, including the
+correct requested tooltip, refuses the request; this
+candidate does not retry the baseline. In every hover sample, wrong or ambiguous
+nearby pose labels in either OCR view fail immediately, even if all glyphs agree.
+Conflicting labels, duplicate labels and split partial-open text refuse. Every
+hover sample also refuses any new nonempty high-confidence nearby text other than the
+exact requested label. Each OCR view is compared with its own baseline; unchanged
+canvas text outside the precise tooltip scope may remain. Unknown OCR strings
+never enter diagnostics or receipts. A later
+unlabelled sample can never erase any recognized label: even a correct label
+that fails freshness or precise tooltip scope blocks glyph fallback for that
+request. Exact title proof always uses the same saved full frame, and positive
+tooltip proof still needs the precise control scope and changed pixels within
+that frame's localized rectangle. The joined frame returned by the actual move
+onto the target is the first observation; it is never discarded. Schema 3 may
+return immediately on that single complete observation when all three fresh
+matching glyphs, exact leased title/window/pointer and a fresh neutral baseline
+are proved, with no recognized nearby pose label in any sample. It does not
+start another acquisition after complete adequate proof. A correct label that
+fails tooltip freshness or scope still blocks glyph fallback for the request.
+For schema 3, every baseline and hover frame must match all three private glyphs.
+
+Acquisition has a 240-second budget beginning before the target move, including
+joined capture, transfer of the large PNG, both offscreen OCR calls, glyph checks
+and signed pointer/window observations. Local FIFO captures retain their
+130-second join bound and hosted capture RPCs their 145-second transport bound;
+each OCR call remains bounded to 30 seconds. Legacy tooltip-only requests (and
+requests whose recognized correct label needs stronger tooltip proof) may
+observe again, with at most eight seconds of polling delays (32 additional
+samples), within the acquisition budget. Transport and OCR time count against
+acquisition rather than that polling allowance. A repeat starts only with room
+for the previous complete sample's duration plus the polling delay. Expired or incomplete
+acquisition evidence permits zero clicks. All checks of a successful observation,
+including changed pixels when using a tooltip, must finish before the acquisition
+deadline. Acquisition reserves no input ticket. Publication still requires all
+five-second resident ticket checks, arm/publication acknowledgments, the final
+signed exact pointer callback, joined click and two consecutive post-click display
+proofs. No resident protocol change is required.
+Title and tooltip OCR use offscreen Apple Vision Accurate on M5, reading only
+the saved frame captured through the same bound resident. The reviewed
+`sim-posture-ocr.swift` helper compiles once per invocation in its private
+mode-0700 temporary folder with M5's default selected Xcode; compilation and
+recognition use bounded quiet subprocesses. No frame returns to the guest for
+OCR. Title proof continues to use the full frame. Tooltip proof reuses that
+compiled helper on the existing candidate rectangle in each saved before/after
+frame, mapping crop boxes back to guest desktop pixels with the clamped crop
+origin. Mode-0600 crops live in private temporary folders and are removed after
+recognition, including on failure; originals remain for title and local changed-pixel
+proof. Both OCR calls count toward the separate acquisition deadline; neither
+extends or consumes a click publication ticket.
+Failure-only hover diagnostics contain only the requested allowlisted pose,
+whether the baseline had a known pose, the last sample's allowlisted pose labels,
+sample count and a fixed rejection reason. They contain no recognized arbitrary
+text, glyph masks, pixels or desktop geometry.
+Unavailable recognition refuses input; exact text and confidence >=0.9
+remain required. Window/process/geometry observation stays guest-only, with
+its observer source sent per request. M5 performs no desktop capture or UI.
 The actual window owner PID, window ID and geometry stay bound throughout each
 request; a newly admitted launcher PID does not invalidate an unchanged owner.
 Both app identities must be active, nonterminated and finished launching. The
@@ -245,8 +370,14 @@ report Apple's documented PID `-1`. A positive lookup PID must equal CG's PID;
 zero, other values and missing lookups refuse. Direct `proc_pidpath` on the CG
 PID must match both AppKit's executable and the exact selected Apple-signed
 `DeviceHub` binary. The positive CG PID stays bound throughout; sentinel-valued
-lookups still count when excluding other Hub windows. Exact selected paths
-and signatures remain required for both. The first pre-input window observation
+lookups never hide secondary Hub windows: known lower actual owners require
+the same identity checks, while missing selected/companion identity refuses.
+Exact selected paths and signatures remain required for both front and owner.
+Only exact high-confidence title evidence within the bound top window's top
+40 points can admit the leased target; global OCR hits or previous-device titles
+behind it cannot supply evidence. Switching active canvases fails the stable
+PID, ID and rectangle binding. Fresh keyboard-free pointer, control evidence
+as above and single-click proof remain required. The first pre-input window observation
 alone may poll read-only for five seconds after opening the leased target; an
 unrelated top window is never admitted. Later observations fail immediately on
 mismatch, and no click is retried.

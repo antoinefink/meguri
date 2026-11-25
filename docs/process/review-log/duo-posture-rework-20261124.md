@@ -94,3 +94,29 @@ Independent reviewer `s-20261124T123814Z-b6a481ac` classified the following comp
 | `tools/vm/fold-claim.py` | `e959bbed9139177db65f04e922c8e0baefa59fbfa3601a9446a07e8272cd5626` | `20261125T105543Z-3873` |
 | `tools/vm/tests/test_fold_claim.py` | `f2b158f4dbe641f1c67909f95313bf6cb79b055194cac3a1d65882ba60b7caa6` | `20261125T105315Z-1142` |
 | `tools/vm/tests/test_hosted_posture.py` | `381a35e844fb73d642f5f72684e7b3a21ef89c8c7771dd1a751e6d71caf455ff` | `20261125T105315Z-1142` |
+
+## Verifying the frontmost Duo canvas
+
+The scheduler verified the running M3 holder and reused it. During a live request the M5 waited for an M3 simulator job through their shared claim. The selected Device Hub opened the leased Duo in its compact window above the management window. On the same guest frame, Accurate recognition on M5 identified the title with confidence 1.0. Fast recognition scored it at 0.5.
+
+The final candidate passed all 307 Docker image-tool tests and 128 VM wrapper, VNC and lease tests. Native end-to-end pose verification is pending.
+
+Independent reviewer `s-20261124T123814Z-b6a481ac` classified the following complete files as public project source, documentation or synthetic fixtures.
+
+| File | Complete-file SHA-256 | Independent cleanroom |
+| --- | --- | --- |
+| `docs/process/mac-ui-vm.md` | `39961911ef6af61cebb4640841b911be6289f0631a24a5d8f5638815ab6881d2` | `20261125T120152Z-11728` |
+| `docs/process/new-machine.md` | `2e72954d450e927909eb814f062570b9dcf8aae54c81529bafd07e42a527c7eb` | `20261125T110607Z-23826` |
+| `docs/process/sim-posture.md` | `b6c676c9e01c985b44472685a824115c971d4786177997fd9654e55008da05ca` | `20261125T120152Z-11728` |
+| `tools/mg.d/sim.sh` | `78d559e9c553d12996203754d2e64ac7a14d21d9d13a8a47b09a96786328f0c9` | `20261125T110607Z-23826` |
+| `tools/tests/vnc_session_test.py` | `6531765f99542b9ac88ccc7d5cd64b8dde387d237906728973b07a614c776c31` | `20261125T111034Z-31693` |
+| `tools/vm/AGENTS.md` | `01acd3234d195b3e59b52a4c63c115b144295dbd9a06134d688cdf959899e7fd` | `20261125T120152Z-11728` |
+| `tools/vm/duo-fold.sh` | `36f49ed599e7b3f9e13f3082557bb91358e696867ded59b54d11153ec7165791` | `20261125T110607Z-23826` |
+| `tools/vm/fold-claim.py` | `564946f07653219766b95394d127c760c4705ae0bdf02d70748b0b6c1392095c` | `20261125T110607Z-23826` |
+| `tools/vm/sim-posture-inspect.py` | `77b2400f8950ab9ec31ded8dbc093a41e9b1b88c8fd1104889ec32daeca7a239` | `20261125T111034Z-31693` |
+| `tools/vm/sim-posture-ocr.swift` | `e50ac5439716639e79a6f892332164440afac67be61efad7caee47867e2f50d1` | `20261125T111718Z-46626` |
+| `tools/vm/sim-posture-visual.swift` | `69330e3a690576dd8a97e4072579c65c81145b48de69fe4225e1aa2ff3c789a0` | `20261125T111718Z-46626` |
+| `tools/vm/sim-posture.py` | `1e67bf53a0b94d67358041776fab4ff6effbd03a02bcfb8914d181a821a4db4d` | `20261125T120956Z-22843` |
+| `tools/vm/tests/test_fold_claim.py` | `86fc1ba9df429f7fd4d32a5d38e631e861019922deea7ccc6bbb8ed4220a947d` | `20261125T110607Z-23826` |
+| `tools/vm/tests/test_hosted_posture.py` | `3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0` | `20261125T113114Z-71613` |
+| `tools/vm/tests/test_sim_posture.py` | `beda7a182485725d56eb3668cf9027be6d78aea6a8fba2a739f93a42c8762e7d` | `20261125T120956Z-22843` |

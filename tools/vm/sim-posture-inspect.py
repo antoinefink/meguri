@@ -29,6 +29,8 @@ def require(ok):
         raise RuntimeError("guest inspection precondition failed")
 def run(*args):
     return subprocess.check_output(args, stderr=subprocess.DEVNULL, timeout=30)
+require(isinstance(request["udid"], str) and re.fullmatch(
+    r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", request["udid"]) is not None)
 uid = os.getuid()
 require(uid != 0 and pathlib.Path("/dev/console").stat().st_uid == uid)
 stage = "xcode-select"
@@ -86,13 +88,19 @@ def check_lease():
     require(lease["udid"] == request["udid"] and lease["kind"] == "foldable"
             and lease["worktree"] == request["checkout"] and lease["vm"] == request["vm"]
             and type(expiry) in (int, float) and math.isfinite(expiry) and expiry > time.time())
-check_lease()  # Fresh expiry/ownership check immediately before launch.
+check_lease()
+def open_hub():
+    global stage
+    # Route an already running Hub to the booted leased simulator, too.
+    stage = "lease"
+    check_lease()  # Recheck after any intervening visual-helper compilation.
+    stage = "open"
+    run("/usr/bin/open", "-a", str(hub), "devices://device/open?id=" + request["udid"])
 '''
 GUEST = GUEST_VALIDATE + r'''
 # Open the exact selected bundle. Its trampoline may launch another executable;
 # foreground/process identity is not a prerequisite for a read-only capture.
-stage = "open"
-run("/usr/bin/open", "-a", str(hub), "--args", "-CurrentDeviceUDID", request["udid"])
+open_hub()
 stage = "lease"
 check_lease()
 print("ready")

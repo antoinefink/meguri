@@ -252,12 +252,14 @@ class StartBoundaryTests(unittest.TestCase):
                     spec = types.SimpleNamespace(loader=mock.Mock())
                     with mock.patch.object(boundary.importlib.util, "spec_from_file_location", return_value=spec), \
                             mock.patch.object(boundary.importlib.util, "module_from_spec", return_value=module), \
+                            mock.patch.object(boundary, "stopped_reservation") as reservation, \
                             mock.patch.object(boundary.subprocess, "check_output", return_value=b'[{"Name":"guest","State":"stopped"}]'), \
                             mock.patch.object(boundary.sys, "argv", []):
                         self.assertEqual(boundary.lifecycle_start(claim, script, arguments), 0)
                         module.main.assert_called_once()
                         claim.check.assert_not_called()
                         self.assertEqual(claim.scheduler_check.call_count, 2)
+                        self.assertEqual(reservation.call_count, int(script == "vnc-hosted.py"))
                         for invalid in ("running", "unknown"):
                             module.main.reset_mock()
                             boundary.subprocess.check_output.return_value = json.dumps([dict(Name="guest", State=invalid)]).encode()

@@ -23,7 +23,7 @@ mg_job sim host mg_sim \
   "Shared iOS simulator pool, in the macOS test VM (queued without it; acquire and gc wait for the VM's lease): acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
 
 mg_job sim-posture host mg_sim_posture \
-  "Duo posture: open|closed|calibrate|inspect <leased-udid>; deploy|preflight|prepare|status|receipt [--vm <name>] for the persistent VNC holder"
+  "Duo posture: open|closed|calibrate|inspect <leased-udid>; deploy|preflight|prepare|status|receipt [--vm <name>]; operator-only maintenance-prepare declares BOTH schedulers externally paused and jobs/leases drained"
 
 mg_sim_posture() {
   local action="${1:-}" out rc
@@ -50,12 +50,12 @@ mg_sim_posture() {
     fi
     mg_status pass; return 0
   fi
-  case "$action" in deploy|preflight|prepare|status|receipt) shift ;; *)
-    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|status|receipt [--vm <name>]"
+  case "$action" in deploy|preflight|prepare|maintenance-prepare|status|receipt) shift ;; *)
+    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|maintenance-prepare|status|receipt [--vm <name>]"
     mg_status error; return 0 ;;
   esac
   if [ $# -ne 0 ] && { [ $# -ne 2 ] || [ "$1" != --vm ]; }; then
-    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|status|receipt [--vm <name>]"
+    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|maintenance-prepare|status|receipt [--vm <name>]"
     mg_status error; return 0
   fi
   if [ "$action" = receipt ]; then
@@ -80,7 +80,7 @@ mg_sim_posture() {
     fi
     return 0
   fi
-  if [ "$action" = prepare ] && ! "$MG_TOOLS/vm/duo-fold.sh" prepare "$@"; then
+  if { [ "$action" = prepare ] || [ "$action" = maintenance-prepare ]; } && ! "$MG_TOOLS/vm/duo-fold.sh" "$action" "$@"; then
     mg_failure vnc-prepare "VNC preparation failed; see log.txt and the coordinator's private build/vm-fold logs"
     mg_status fail; return 0
   fi
@@ -89,7 +89,7 @@ mg_sim_posture() {
     mg_status error; return 0
   fi
   mg_detail vnc "$out"
-  if [ "$action" = prepare ] && [ "$(jq -r .connected <<<"$out")" != true ]; then
+  if { [ "$action" = prepare ] || [ "$action" = maintenance-prepare ]; } && [ "$(jq -r .connected <<<"$out")" != true ]; then
     mg_failure vnc-prepare "VNC transport disconnected after preparation; inspect private build/vm-fold logs"
     mg_status fail; return 0
   fi

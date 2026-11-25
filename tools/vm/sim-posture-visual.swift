@@ -1,7 +1,6 @@
-// Guest only. Reads AppKit/CG geometry, or Vision text in a saved VNC image.
+// Guest only. Reads AppKit/CG window, process and pointer geometry.
 // No Accessibility, AppleEvents, screen capture, permission requests or input.
 import AppKit
-import Vision
 
 func emit(_ value: Any) throws {
     let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
@@ -62,19 +61,6 @@ do {
         try emit(["front": identity(app), "normal": evidence,
                   "pointer": [pointer.x, pointer.y],
                   "screen": [screen.minX, screen.minY, screen.width, screen.height]])
-    } else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "text" {
-        let handler = VNImageRequestHandler(url: URL(fileURLWithPath: CommandLine.arguments[2]))
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = false
-        try handler.perform([request])
-        try emit((request.results ?? []).compactMap { observation -> [String: Any]? in
-            guard let text = observation.topCandidates(1).first else { return nil }
-            let box = observation.boundingBox
-            return ["text": text.string, "confidence": text.confidence,
-                    "box": [box.minX, 1 - box.maxY, box.width, box.height]]
-        })
     } else {
         throw NSError(domain: "posture", code: 5)
     }

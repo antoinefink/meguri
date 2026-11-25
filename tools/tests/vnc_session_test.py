@@ -487,7 +487,7 @@ while True:
                     child.terminate()
                     child.wait(timeout=10)
 
-    def cancel_at_start(self, script, anchor, *, published):
+    def cancel_at_start(self, script, anchor, *, published, command="prepare"):
         """Pause the actual controller at a publication boundary, then cancel Bash."""
         source = script.read_text()
         self.assertEqual(source.count(anchor), 1)
@@ -496,7 +496,7 @@ while True:
                  + indent + "pause.write_text(str(os.getpid()))\n"
                  + indent + "while pause.exists(): time.sleep(.01)\n")
         script.write_text(source.replace(anchor, pause + anchor))
-        child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+        child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), command],
                                  env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             pause_file = self.root / "start-paused"
@@ -1390,7 +1390,7 @@ class TransportTests(unittest.TestCase):
             script = tools / "vm/duo-fold.sh"
             script.write_text('#!/bin/sh\n[ "$1" != status ] || echo \'{"connected":false}\'\nexit 0\n')
             script.chmod(0o700)
-            for action, expected in (("prepare", "fail"), ("status", "pass")):
+            for action, expected in (("prepare", "fail"), ("maintenance-prepare", "fail"), ("status", "pass")):
                 result = subprocess.run(["bash", "-c", '''
 mg_job() { :; }
 mg_detail() { :; }
@@ -1660,8 +1660,16 @@ class InspectionTests(unittest.TestCase):
         for target in (self.hub, self.hub / "Contents/MacOS/DevicesTrampoline"):
             self.assertIn(("/usr/bin/codesign", "--verify", "--strict", "-R",
                            '=anchor apple and identifier "com.apple.dt.Devices"', str(target)), self.calls)
-        self.assertIn(("/usr/bin/open", "-a", str(self.hub), "--args", "-CurrentDeviceUDID", self.udid), self.calls)
+        self.assertIn(("/usr/bin/open", "-a", str(self.hub), "devices://device/open?id=" + self.udid), self.calls)
         self.assertEqual(json.loads(self.lease_path.read_text()), self.lease)
+
+    def test_guest_refuses_non_uuid_routing_before_launch(self):
+        for udid in (self.udid + "&other=1", self.udid + "\n", "../other", "booted", 123):
+            with self.subTest(udid=udid):
+                self.request["udid"] = udid
+                with self.assertRaises(RuntimeError):
+                    self.guest()
+                self.assertFalse(self.opened)
 
     def test_guest_refuses_invalid_lease_before_launch(self):
         for key, value in (("worktree", "/foreign"), ("vm", "foreign"), ("kind", "iphone"),
