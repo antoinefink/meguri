@@ -19,12 +19,43 @@ pub struct PublicationBarrier {
     round: Mutex<Option<Arc<dyn RoundRetirer>>>,
     // MCP collection jobs queue here before touching the publication lock.
     mcp: Arc<AsyncMutex<()>>,
+    // Only browser collection writes and sign-out use this lease. Browse takes
+    // it with try after publication; sign-out takes it without publication and
+    // never acquires publication later. MCP/native admission stays unchanged.
+    browser_commit: Arc<AsyncMutex<()>>,
+    #[cfg(feature = "test-hooks")]
+    browser_waiting: tokio::sync::Semaphore,
     #[cfg(feature = "test-hooks")]
     mcp_waiting: tokio::sync::Semaphore,
     #[cfg(feature = "test-hooks")]
     waiting: tokio::sync::Semaphore,
 }
 impl PublicationBarrier {
+    pub(crate) fn try_browser_commit(&self) -> Option<OwnedMutexGuard<()>> {
+        self.browser_commit.clone().try_lock_owned().ok()
+    }
+    pub(crate) async fn enter_browser_commit(&self) -> OwnedMutexGuard<()> {
+        #[cfg(not(feature = "test-hooks"))]
+        { self.browser_commit.clone().lock_owned().await }
+        #[cfg(feature = "test-hooks")]
+        {
+            let mut lock = Box::pin(self.browser_commit.clone().lock_owned());
+            let mut reported = false;
+            std::future::poll_fn(|cx| {
+                use std::future::Future;
+                let result = lock.as_mut().poll(cx);
+                if result.is_pending() && !reported {
+                    reported = true; self.browser_waiting.add_permits(1);
+                }
+                result
+            }).await
+        }
+    }
+    #[cfg(feature = "test-hooks")]
+    pub async fn browser_commit_waiter_pending(&self) {
+        self.browser_waiting.acquire().await.unwrap().forget();
+    }
+
     // Try only: never wait on restore I/O while holding metadata/publication.
     // Retain the barrier Arc alongside each owned guard (the registry is weak).
     pub(crate) fn try_restore(&self) -> Option<OwnedRwLockWriteGuard<()>> {
@@ -138,6 +169,9 @@ impl Barriers {
             restore: Arc::new(RwLock::new(())),
             round: Mutex::new(None),
             mcp: Arc::new(AsyncMutex::new(())),
+            browser_commit: Arc::new(AsyncMutex::new(())),
+            #[cfg(feature = "test-hooks")]
+            browser_waiting: tokio::sync::Semaphore::new(0),
             #[cfg(feature = "test-hooks")]
             mcp_waiting: tokio::sync::Semaphore::new(0),
             #[cfg(feature = "test-hooks")]

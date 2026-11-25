@@ -199,7 +199,7 @@ fn check_oauth(root: &DataRoot, original: &oauth::Authority, write: bool) -> Res
 }
 
 fn secret() -> Result<[u8; 32]> { crypto::bearer(&crypto::random_token()?) }
-struct Runtime;
+pub(crate) struct Runtime;
 impl WriteRuntime for Runtime {
     fn now_millis(&self) -> Result<i64> {
         i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos().div_euclid(1_000_000))

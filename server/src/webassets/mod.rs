@@ -11,7 +11,7 @@ pub struct Asset {
 }
 
 pub const NAVIGATION: &[&str] = &[
-    "/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/settings", "/accounts", "/oauth/consent",
+    "/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/browse", "/settings", "/accounts", "/oauth/consent",
 ];
 
 include!(concat!(env!("OUT_DIR"), "/meguri_web_assets.rs"));

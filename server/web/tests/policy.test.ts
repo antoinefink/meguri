@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canonicalUsername, passwordError, usernameError } from "../src/policy.js";
+import { canonicalUsername, passwordError, usernameError, navigation, protectedPath } from "../src/policy.js";
 test("username rules match the HTTP account boundary without Unicode trimming", () => {
   assert.equal(canonicalUsername(" \tA.B-c_1\r\n"), "a.b-c_1");
   assert.equal(usernameError("abc"), undefined);
@@ -17,4 +17,10 @@ test("new passwords count UTF-8 bytes exactly and preserve spaces and normalizat
   const value = "  e\u0301 A long password  ";
   assert.equal(passwordError(value), undefined);
   assert.notEqual(value, value.normalize("NFC"));
+});
+
+test("Browse is an exact protected account navigation route", () => {
+  assert.ok(navigation.includes("/browse"));
+  assert.equal(protectedPath("/browse"), true);
+  assert.equal(protectedPath("/browse/"), false);
 });

@@ -130,12 +130,12 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 6806,
-        "sha256": "1cc8591266d6499db67d507154075aae1f4288794bb063f5196763ec968dd239"
+        "bytes": 11874,
+        "sha256": "fee24cd8cfd5c3f9564632b7395dd0a19f16af62a96cfb4257258fa5cbbae1da"
       },
       "src/app.tsx": {
-        "bytes": 13821,
-        "sha256": "2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d"
+        "bytes": 14758,
+        "sha256": "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69"
       },
       "src/apple-touch-icon.png": {
         "bytes": 50588,
@@ -144,6 +144,10 @@
       "src/bootstrap.ts": {
         "bytes": 1111,
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
+      },
+      "src/browse.tsx": {
+        "bytes": 23642,
+        "sha256": "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -174,16 +178,16 @@
         "sha256": "f1c21dbde4da1fc705470cb7853d88b378d9ea047213ee7950023a2b39dd407c"
       },
       "src/policy.ts": {
-        "bytes": 1108,
-        "sha256": "d5e5a802944792c447eec3aedfd219eac889624d213490a2c375897aea9bc0e4"
+        "bytes": 1130,
+        "sha256": "8ff913d0b244adabd6aa10e9e176c28f487bbfac2b173fa55c77f24f57bbb2e7"
       },
       "src/storage.ts": {
         "bytes": 346,
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 14530,
-        "sha256": "39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b"
+        "bytes": 16893,
+        "sha256": "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -193,25 +197,37 @@
         "bytes": 7210,
         "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
+      "tests/browse-api.test.ts": {
+        "bytes": 4968,
+        "sha256": "69914d921adddb199ea8631c029c2b3fc9586d79d9ffac7eea6d37d5d453c3ae"
+      },
       "tests/browser/account-actions.spec.ts": {
         "bytes": 8792,
         "sha256": "3845ec64412198ca04dee9cd87e9887a5c0669a294ecb1c76e10974f579f4abd"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 48309,
-        "sha256": "e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3"
+        "bytes": 49133,
+        "sha256": "8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c"
       },
       "tests/browser/backups.spec.ts": {
         "bytes": 31304,
         "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
+      },
+      "tests/browser/browse-real.spec.ts": {
+        "bytes": 15395,
+        "sha256": "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797"
+      },
+      "tests/browser/browse.spec.ts": {
+        "bytes": 40365,
+        "sha256": "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,
         "sha256": "261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10"
       },
       "tests/policy.test.ts": {
-        "bytes": 1397,
-        "sha256": "e0167e6a57d1104c175553167c493e8d1fbb80c29a00f8b8d8753f41d8735016"
+        "bytes": 1642,
+        "sha256": "7c9a4469608ae2361c525567e54182c855f9c337d7563e998873ad64701c28fe"
       },
       "tests/prepared-consumer.test.ts": {
         "bytes": 6130,
@@ -231,7 +247,7 @@
       },
       "upstream-records.json": {
         "bytes": 7364,
-        "sha256": "a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099"
+        "sha256": "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385"
       },
       "vite.config.ts": {
         "bytes": 1520,
@@ -281,12 +297,12 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 27662,
-        "sha256": "d3c7d5e496d2d59a7f5afd2f1ebd4b5b8e51063f6c5a71947a6aac1bb6f8cb67"
+        "bytes": 28768,
+        "sha256": "6c9d655965151371e5416b72e897c720f7972b05fa3b0d1d0af4c09308f27dea"
       },
       "server/src/webassets/mod.rs": {
-        "bytes": 4512,
-        "sha256": "425a127952bd8194275c19669a315e9e3367d60e361f569ac1135884429975f2"
+        "bytes": 4523,
+        "sha256": "52d3a14023360ffba94e379afe975ec207d0cd44eb2a87beaf78b8a8a87897d6"
       },
       "server/tools/package-context.py": {
         "bytes": 4733,
@@ -305,8 +321,8 @@
         "sha256": "8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22"
       },
       "tools/mg.d/sync-web.sh": {
-        "bytes": 34117,
-        "sha256": "5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914"
+        "bytes": 34227,
+        "sha256": "4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255"
       }
     }
   },

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+pub(crate) mod browse;
 mod administration;
 mod barrier;
 mod credentials;

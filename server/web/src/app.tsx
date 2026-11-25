@@ -10,6 +10,7 @@ import { CredentialsForm } from "./forms";
 import type { FormMode } from "./forms";
 import { Accounts } from "./accounts";
 import { Collection } from "./collection";
+import { Browse } from "./browse";
 import { Connection } from "./connection";
 import { Consent } from "./consent";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
@@ -43,6 +44,7 @@ function SignOutIcon() {
 function NavigationIcon({ path }: { path: string }) {
   const drawing = path === "/connection" ? <><path d="M3 8h6m6 8h6M7 4v8m10 0v8M9 8h3v8h3" /></>
     : path === "/collection" ? <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0" /></>
+    : path === "/browse" ? <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M12 8h6m-6 4h6m-6 4h6" /></>
     : path === "/settings" ? <><circle cx="8" cy="9" r="4" /><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3" /></>
     : <><circle cx="8" cy="7" r="3" /><path d="M2 20v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m2 3a5 5 0 0 1 4 5v2" /></>;
   return <svg className="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{drawing}</svg>;
@@ -54,14 +56,17 @@ export function App() {
     const token = consumeInitialToken();
     return { path: location.pathname, token: ["/setup", "/invite", "/reset", "/oauth/consent"].includes(location.pathname) ? token : "", visit: 0 };
   });
+  const currentUrl = useRef(location.pathname + location.search);
   const [me, setMe] = useState<Me | null>(null), [setup, setSetup] = useState(false), [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<OutcomeValue | null>(null), [notice, setNotice] = useState<OutcomeValue | null>(null);
   const [signingOut, setSigningOut] = useState(false), logoutBusy = useRef(false);
   const [identityVisit, setIdentityVisit] = useState(0);
   const identityRequest = useRef<AbortController | null>(null);
   const main = useRef<HTMLElement>(null), startup = useRef(false), alive = useRef(true);
+  const navigationGuard = useRef<(() => boolean) | null>(null);
   const go = (path: string, message?: string, replace = false) => {
     if (replace) history.replaceState(null, "", path); else history.pushState(null, "", path);
+    currentUrl.current = path;
     setPage(previous => ({ path, token: "", visit: previous.visit + 1 }));
     setNotice(message ? { text: message } : null);
   };
@@ -88,6 +93,10 @@ export function App() {
     void bootstrap();
     const onHistory = () => {
       const token = takeFragment(location, history);
+      if (navigationGuard.current && !navigationGuard.current()) {
+        history.pushState(null, "", currentUrl.current); return;
+      }
+      currentUrl.current = location.pathname + location.search;
       setPage(previous => ({ path: location.pathname, token, visit: previous.visit + 1 })); setNotice(null);
     };
     const onHash = () => { if (location.hash) onHistory(); };
@@ -126,11 +135,11 @@ export function App() {
   }, [page.visit, loading]);
   function intercept(event: MouseEvent<HTMLAnchorElement>, path: string) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault(); go(path);
+    event.preventDefault(); if (navigationGuard.current && !navigationGuard.current()) return; go(path);
   }
   function link(path: string, label: string): ReactNode { return <a href={path} onClick={event => intercept(event, path)}>{label}</a>; }
   async function logout(keepCapability = false) {
-    if (logoutBusy.current) return;
+    if (logoutBusy.current || (navigationGuard.current && !navigationGuard.current())) return;
     logoutBusy.current = true; setSigningOut(true); setNotice(null);
     try {
       await api("/api/logout", {});
@@ -157,11 +166,12 @@ export function App() {
   else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link(accountHomePath, "Return to Collection")}</CardContent></Card>;
   else if (page.path === "/accounts" && me) content = <Accounts me={me} sessionLoss={sessionLoss} />;
   else if (page.path === "/collection" && me) content = <Collection key={`${page.visit}:${me.id}`} accountId={me.id} sessionLoss={sessionLoss} />;
+  else if (page.path === "/browse" && me) content = <Browse key={`${page.visit}:${me.id}`} accountId={me.id} sessionLoss={sessionLoss} refreshIdentity={() => setIdentityVisit(value => value + 1)} guardNavigation={guard => { navigationGuard.current = guard; }} />;
   else if (page.path === "/connection" && me) content = <Connection key={`${page.visit}:${me.id}`} me={me} sessionLoss={sessionLoss} refreshIdentity={() => setIdentityVisit(value => value + 1)} />;
   else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link(accountHomePath, "Open Collection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
   else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go(accountHomePath, "Signed in.", true); }} onSuccess={message => { clearIdentity(); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
   else content = <p role="status">Opening account page…</p>;
-  const links: [string, string][] = [["/collection", "Collection"], ["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
+  const links: [string, string][] = [["/collection", "Collection"], ["/browse", "Browse"], ["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
   const accountIdentity = me && <>
     <IdentityIcon />
     <div className="footer-identity">
