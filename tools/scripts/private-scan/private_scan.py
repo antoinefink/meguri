@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
+        'a2c98300371f81cb18abe2847ca1de877c8df8fd1e40ba555bde6461943882d9',
     'server/src/accounts/backups.rs':
         'd7fccc4c211bf95228b7a63a20c89477922073ffecd000a4ee43809fc43c4001',
     'server/tests/support/mod.rs':
@@ -1092,7 +1094,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: owned_diagnostic_review, 2026-11-19.
     "docs/process/verification-status.md":
-        "72169adb46c2ff96e675b412cfc1a5959a8c9037bca6689fcf59d73f0d093f41",
+        "5accd9f059712aa180d62515ab215d93e886faf911a4fbc3e2dbb93a662e8764",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
