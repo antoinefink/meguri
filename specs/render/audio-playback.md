@@ -69,15 +69,19 @@ U69 owns Ogg Vorbis/Opus/Speex decoding and video-tag presentation/unsupported-v
 
 ## A6. Preloading and timing
 
-During preparation, resolve and prepare the first playable native clip for the next side without starting playback, activating ducking or fetching an entire large file into memory. Skip TTS/missing entries to find that first playable entry. Answer preparation may prepare its first clip while the question is visible. Bound prepared resources to the current/next side and release them on invalidation, replacement, owner closure or cancellation; a stale preparation cannot start audio.
+During preparation, resolve and prepare the first playable native clip for the next side without playing the clip, activating ducking or fetching an entire large file into memory. Skip TTS/missing entries to find that first playable entry. Answer preparation may prepare its first clip while the question is visible. Bound prepared resources to the current/next side and release them on invalidation, replacement, owner closure or cancellation; a stale preparation cannot start audio.
 
 R554 requires ≤50 ms from presentation until playback, and ≤100 ms between clips. Observe the player, with a monotonic clock. Include a missing middle file. A fake player proves policy only; use generated files to exercise playback, then hardware to verify device timing. API calls alone prove neither.
 
 Do not delay page presentation until audio starts or require a JavaScript round trip to begin native playback. Under interrupt-off, the new side's first clip is intentionally held until the surviving old clip ends; that policy wait is reported separately from startup latency rather than treated as a slow first-start implementation.
 
+For foreground native review on iPhone and iPad with Bluetooth audio output, start sending silence to the selected output when preparing the first playable native clip eligible for autoplay. With autoplay disabled, an explicit play or replay of a playable clip can start the stream. Start the clip at its usual presentation or manual command even if silent output has only just begun or could not start. Never add a warm-up delay or silence to the beginning of each clip.
+
 ## A7. iOS/iPadOS audio-session and lifecycle policy
 
-R555 uses category playback and temporary ducking. The silent switch cannot silence the clip. Preparation does not activate the session. Activate for play/resume; release on pause/stop/empty queue after the last card resource finishes, including HTML media using that session. Other apps then regain normal volume.
+R555 uses the playback category so clips play with the silent switch on. Duck other apps only while audible card media plays, including HTML media using the session. Restore their volume when the last such resource pauses, stops, fails or finishes.
+
+The Bluetooth stream in A6 keeps the route carrying audio between words. Once started, it continues across reveals, card changes, empty queues and thinking pauses of any length during the same foreground review. Silence alone mixes at other apps' normal volume. Releasing ducking between clips must preserve output continuity. On other routes and in previews, preparation leaves the audio session inactive until playback needs it. HTML media alone does not start the Bluetooth stream.
 
 Apple's [playback category](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playback) and [duckOthers option](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/duckothers) define the platform mechanisms. The following lifecycle policy is Meguri's requirement even where the platform permits more:
 
@@ -89,6 +93,8 @@ Apple's [playback category](https://developer.apple.com/documentation/avfaudio/a
 | headphones/old audio route becomes unavailable | pause current clip and retain position, not audible fallback to speaker; explicit resume may continue on the new route |
 | usable route selected, headphones retained | use that route; no extra automatic play or Replay |
 | pause, queue empty or playback failure | release ducking when no card resource is still playing |
+
+End the silent stream on foreground loss, review suspension or exit, interruption, or loss of its Bluetooth route. Release the session when no resource still needs it. Discard pending work that could restart the stream or play a pending clip over the speaker after disconnection. Returning to the review, a route notification or an interruption ending does not itself restart output. A fresh eligible review event can establish the stream again under A6 and the playback rules above.
 
 Backgrounding/interruptions override interrupt-off. A pending load completion cannot restart sound in background. No background-audio capability is needed to continue card playback, because continuing it is forbidden here. Do not publish `MPNowPlayingInfoCenter` metadata or install lock-screen/remote transport controls (R557). This controller does not enable recording or request microphone access.
 
@@ -130,10 +136,15 @@ Use small generated clips and a controllable player clock to test policy indepen
 | background race | item still loading; background; load completes | no playback, no queue revival, no Now Playing metadata |
 | stale completion | Replay replaces old generation; old completion fires twice | newer queue untouched by both callbacks |
 | pre-render | idle payload includes Q1; prepare completes, later present | no sound/ducking while idle; Q1 starts once at present |
+| Bluetooth review with autoplay | prepare Q1 on Bluetooth, present and finish Q1, spend several minutes thinking, reveal A1 | silent output starts during preparation and continues throughout the gap; other audio returns to normal volume during the gap; A1 starts at presentation |
+| Bluetooth review with manual play | prepare and present the first card with autoplay off, then tap Replay | output stays inactive until Replay; Q1 starts on the tap without an added wait; subsequent silence preserves the route without ducking |
+| Bluetooth teardown | during a thinking pause, background or close review, interrupt it or disconnect the headphones; deliver an old preparation callback | stream ends in each case; callback cannot restart it; no speaker playback or automatic replay on return |
 | HTML media gate | card1 autoplay off, question `<audio src="x.mp3" autoplay controls>`, answer `{{FrontSide}}`; show, reveal, tap the element's play control; then card2 with autoplay on and the same question | card1: x silent on question and answer until the tap, then plays; card2: x starts when its question is presented. Native queue unchanged throughout |
 | AE18 native admission | idle Mac front requests reveal; another card visible; then matching present | old card unchanged; reveal only the newly presented matching card. iOS has no pycmd and stays on question |
 
 Also assert: home-deck rather than filtered-deck settings, autoplay-off manual Replay, repeated shown receipt, invalid command with active audio unchanged, filenames with raw percent text, empty AV lists, cancel during preload, seek while paused/loading, two card surfaces with independent identities and balanced shared session ducking. Injected spies must see no synthesized speech, native arbitrary path, remote file fetch, microphone request or Now Playing registration.
+
+Check the audible onset on a physical iPhone or iPad with AirPods and a synthetic spoken clip that begins immediately. Compare the first presentation after a long thinking pause with immediate Replay, with other audio apps silent. Repeat with another app playing to check its volume during the word and the pause. A simulator can verify event ordering and resource lifetimes. Only the listening check establishes whether the first syllable reaches those headphones intact.
 
 ## A10. Evidence and pending owners
 

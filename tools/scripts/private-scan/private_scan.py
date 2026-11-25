@@ -835,6 +835,14 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
+        '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
+        '836c8128dd2bd184b1a41329cf2920e59ef5cf000736d2ed561fbd3fd84bc1b7',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':
+        '5c88bf3b94b11c8a7dcea45903bb551d5db4826f9f6f8e59c5fbe6f00a8edcd9',
+    'specs/render/audio-playback.md':
+        '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
         '7c0b0a10b44ae639c53a312462f26a50cd71368853473614c4745431e949ba56',
     'server/src/accounts/backups.rs':
