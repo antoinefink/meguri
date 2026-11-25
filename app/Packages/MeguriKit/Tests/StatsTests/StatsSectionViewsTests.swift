@@ -139,7 +139,48 @@ import Testing
         #expect(StatsCardCountsPie.state(at: CGPoint(x: 2, y: 2), in: size, counts: counts) == nil)
     }
 
-    /// Beside a taller box the pie takes the height it is given, up to its limit and never
+    /// The overview's pie follows width and leaves the table its measured width. Its sizing
+    /// has no height input: neither a tall neighbor nor large text can enlarge it.
+    @Test func overviewPieUsesAThirdOfTheWidthWithACap() {
+        #expect(StatsOverviewPieBesideTable.pieSide(width: 450, tableWidth: 220) == 150)
+        #expect(StatsOverviewPieBesideTable.pieSide(width: 600, tableWidth: 220) == 160)
+        #expect(StatsOverviewPieBesideTable.pieSide(width: 1_000, tableWidth: 220) == 160)
+        // A long localized table takes priority over the pie's preferred third.
+        #expect(StatsOverviewPieBesideTable.pieSide(width: 480, tableWidth: 320) == 144)
+        #expect(StatsPlotSize.overview.height == 120)
+        #expect(StatsPlotSize.regular.height == 150 && StatsPlotSize.page.height == 320)
+    }
+
+    @Test func addedOverviewHasFourLocalizedRealValues() throws {
+        let set = Fixture.set(values: [
+            .added: .added(Fixture.map([-3: 12_345])),
+            .started: .started(StatsStarted(days: Fixture.map([-10: 6_789]), firstDay: -700)),
+        ])
+        for identifier in ["en_GB", "fr_FR"] {
+            let locale = Locale(identifier: identifier)
+            let presenter = try #require(StatsPresenter(
+                set: set, period: .oneMonth, selection: StatsPageSelection(deck: nil, period: .oneMonth),
+                decks: StatsDeckDirectory(nodes: Fixture.nodes()), calendar: Self.calendar, locale: locale
+            ))
+            let content = try #require(Fixture.content(.addedAndStarted, presenter))
+            let figures = StatsAddedAndStartedBox.summaryFigures(content, text: StatsText(locale: locale))
+            let format = StatsChartFormat(locale: locale, calendar: Self.calendar, now: .distantPast)
+            #expect(figures.map(\.label) == ["Added", "Started", "Added a Day", "Started a Day"])
+            #expect(figures.map(\.value) == [format.count(12_345), format.count(6_789)] + content.figures.map(\.value))
+            #expect(content.figure?.sentence == StatsText(locale: locale).startedSentence(format.count(6_789)))
+            #expect(content.data.legendNames == ["Added", "Started"])
+            #expect(content.data.series.map(\.mark) == [.bar, .line()])
+        }
+    }
+
+    @Test func addedOverviewKeepsLabelsAndDashesUntilReady() {
+        let waiting = StatsBoxContent(phase: .loading(fraction: nil), data: StatsChartData(bins: [], series: []))
+        let figures = StatsAddedAndStartedBox.summaryFigures(waiting, text: StatsText(locale: Self.locale))
+        #expect(figures.map(\.label) == ["Added", "Started", "Added a Day", "Started a Day"])
+        #expect(figures.allSatisfy { $0.value == nil })
+    }
+
+    /// Detail and mobile: beside a taller box the pie takes the height it is given, up to its limit and never
     /// width the table needs; at its own height, or with no room, it keeps its side.
     @Test func thePieGrowsIntoTheRowsHeight() {
         let side = StatsCardCountsBox.side, limit = StatsCardCountsBox.largeSide

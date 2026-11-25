@@ -835,6 +835,24 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "server/web/tests/browser/browse.spec.ts":
+        "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
+    "server/web/tests/browser/browse-real.spec.ts":
+        "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797",
+    "server/web/src/browse.tsx":
+        "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a",
+    "server/tests/browse.rs":
+        "d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a",
+    'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
+        '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
+    'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
+        '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
+        '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
+        '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
+    'app/MeguriUITests/MacBrowseInspectorTests.swift':
+        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
@@ -901,9 +919,15 @@ PUBLIC_ARTIFACTS = {
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
-    # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
+    # Complete-content PUBLIC review: compact card statistics, privacy_review, 2026-11-25.
+    'app/Packages/MeguriKit/Sources/Features/Stats/Page/Sections/StatsCardsSection.swift':
+        'e4259a20833050402de0cb3727ad09b489321ba511751470e57626d558f88508',
+    'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
+        'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '50c5a5853c9f846cc214bd20fe336d5b1da2898716f05709aa0cad9908574624',
+        '7531d22a4d8a6f998388d5c0a001c6bbfd1857b170d966a0b9122b4277a0ea81',
+    'specs/stats/statistics-page.md':
+        '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
@@ -983,7 +1007,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'e4726bf8b73dac5b88b54cb33be38c06d30630d414f7dcff4fe62e8eddfc3dc2',
+        "35d049ed611bbf8e6b2d43943c906727d7dfc2ea5f2840b84564bd22f51fc2cc",
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1179,19 +1203,19 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
-        '5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914',
+        "4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255",
     'server/web/THIRD_PARTY_NOTICES.txt':
         '793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9',
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        'a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099',
+        "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385",
     'server/web/src/style.css':
-        '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
+        "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc",
     'server/web/src/app.tsx':
-        '2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d',
+        "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69",
     'server/web/tests/browser/accounts.spec.ts':
-        'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
+        "8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c",
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1275,8 +1299,10 @@ PUBLIC_ARTIFACTS = {
         "ae5b10969d39c9bae94095fdb81d025d63b502cdb1d87720e5983fdd9559c5bf",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
+    "docs/plans/2026-11-25-1512-feat-online-browse-plan.md":
+        "42ece08d046176f26f02f6e6f6e2d68f26f5029d9ddca6f5b7ff77f38b81d798",
     "specs/servers/meguri-sync-web.md":
-        '2a4303891cc65b73e0667511fb3d2ef941999a255f9caa816bcb5516ff599d33',
+        "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1425,6 +1451,50 @@ PUBLIC_ARTIFACTS = {
     'server/tools/package-smoke.mjs': '8a4ac4d7a54677a9fee3f64c4132de34e088d2f514c74c16083dbe9236ac456b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
+    # Independent full-file review in cleanroom/20261125T093743Z-19179.
+    'docs/process/review-log/duo-posture-rework-20261124.md':
+        'bbad727f0553d5bf9f23e6835b3a46f62fe4346ef3fffd2ad021ab47d15e3f25',
+    # Complete-file reviews recorded in duo-posture-rework-20261124.md.
+    'tools/vm/vnc-hosted.py':
+        'c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba',
+    'tools/vm/tests/test_hosted_posture.py':
+        '3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0',
+    'docs/process/sim-posture.md':
+        'c25258d6c316996e858f3cd1e6f248d1c702f5e38b48b7604909680d4ab236bc',
+    'tools/vm/sim-posture-visual.swift':
+        '69330e3a690576dd8a97e4072579c65c81145b48de69fe4225e1aa2ff3c789a0',
+    'tools/vm/sim-posture.py':
+        '71edf3b55e6058b98b025f9c38c536107d19f96faf24a1f3fd3566b275c309fe',
+    'tools/vm/tests/test_sim_posture.py':
+        'd91c8097797b98c7c249f20c361ef991e3ad7d6a907427a14777aeb2a677fec3',
+    # Independent reviews in duo-posture-rework-20261124.md.
+    'tools/scripts/vm-claim.py':
+        'f71d76cc817da0a7e83b3232c710f58da883b8e10c96eeca484abb459d3034c8',
+    'tools/vm/fold-claim.py':
+        '564946f07653219766b95394d127c760c4705ae0bdf02d70748b0b6c1392095c',
+    'tools/vm/tests/test_fold_claim.py':
+        '86fc1ba9df429f7fd4d32a5d38e631e861019922deea7ccc6bbb8ed4220a947d',
+    # Independent reviews in duo-posture-rework-20261124.md.
+    'tools/vm/AGENTS.md':
+        '01acd3234d195b3e59b52a4c63c115b144295dbd9a06134d688cdf959899e7fd',
+    'tools/vm/sim-posture-ocr.swift':
+        'e50ac5439716639e79a6f892332164440afac67be61efad7caee47867e2f50d1',
+    'docs/process/mac-ui-vm.md':
+        'd92608224bcd7d2dcff83454be03856dde7bab9a9420e9546dad123b41d0b0ee',
+    'tools/vm/duo-fold.sh':
+        '92ee39fb80652d04bbd1fd004b1aa0af4bc7c6c02e77a3c283422e6418a739f9',
+    # Complete-file review of the Duo transport repair, 2026-11-24.
+    'docs/process/new-machine.md':
+        '2e72954d450e927909eb814f062570b9dcf8aae54c81529bafd07e42a527c7eb',
+    'tools/tests/vnc_session_test.py':
+        '12f2aac01221f01874cc62b0559b1fba9797e01b8801870a6b13fa44dcb857e4',
+    'tools/vm/vnc-holder.py':
+        'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
+    # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
+    'docs/process/review-log/duo-simulator-posture-20261124.md':
+        '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',
+    'tools/vm/sim-posture-inspect.py':
+        '77b2400f8950ab9ec31ded8dbc093a41e9b1b88c8fd1104889ec32daeca7a239',
     'tools/tests/remote_wrapper.bats': '4c167356b41f7f6b30467e109e1855169fbfa2bbf6f4a06c83a98fd60912af5c',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',

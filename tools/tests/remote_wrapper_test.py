@@ -130,6 +130,11 @@ class RemoteWrapperTests(unittest.TestCase):
                          "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=8", "-o",
                          "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o",
                          "ForwardAgent=no", "-o", "RequestTTY=no", "--", "test-alias"])
+        dedicated = m.ssh_arguments("test-alias", dedicated=True)
+        self.assertEqual(dedicated, [*argv[:-3], "-o", "ControlMaster=no",
+                                    "-o", "ControlPath=none", "--", "test-alias"])
+        self.assertNotIn("ControlMaster=no", argv)
+        self.assertNotIn("ControlPath=none", argv)
         for value in ({}, {"host": "-bad", "runtime": "/kit"},
                       {"host": "bad\nhost", "runtime": "/kit"},
                       {"host": "alias", "runtime": "relative"}, []):

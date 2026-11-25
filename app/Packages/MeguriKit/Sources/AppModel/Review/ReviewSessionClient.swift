@@ -12,6 +12,13 @@ public protocol ReviewSessionClient {
     func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead
     func studyState(deckID: Int64) async throws -> ReviewDeckStudyState
     func end(sessionID: UInt64) async throws
+    /// A card's question as one plain-text line (`browser/columns#C16`), for the
+    /// leech notice (N16.11); nil when the card has no such line to show.
+    func question(cardID: Int64) async throws -> String?
+}
+
+extension ReviewSessionClient {
+    public func question(cardID: Int64) async throws -> String? { nil }
 }
 
 #if DEBUG
@@ -54,4 +61,11 @@ public struct CoreReviewSessionClient: ReviewSessionClient {
     }
     public func studyState(deckID: Int64) async throws -> ReviewDeckStudyState { try await decks.studyState(deckID: deckID) }
     public func end(sessionID: UInt64) async throws { try await Core.endSessionJob(sessionID: sessionID).value() }
+    public func question(cardID: Int64) async throws -> String? {
+        guard case .found(_, let question, _) = try await Core.cardExcerpts([cardID]).first else { return nil }
+        switch question {
+        case .text(let text), .missingCloze(_, let text): return text.isEmpty ? nil : text
+        case .templateError: return nil
+        }
+    }
 }

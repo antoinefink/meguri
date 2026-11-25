@@ -86,7 +86,7 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   await brand(page);
   const mobile = page.viewportSize()!.width <= 768;
   const navigation = page.getByRole("navigation", { name: "Account", exact: true });
-  const names = admin ? ["Collection", "Connection", "Password", "Accounts"] : ["Collection", "Connection", "Password"];
+  const names = admin ? ["Collection", "Browse", "Connection", "Password", "Accounts"] : ["Collection", "Browse", "Connection", "Password"];
   await expect(navigation.getByRole("link")).toHaveCount(names.length);
   await expect(navigation.getByRole("link")).toHaveText(names);
   for (const name of names) {
@@ -120,16 +120,20 @@ async function accountShell(page: Page, username: string, admin: boolean) {
         fits: label.left >= bounds.left && label.right <= bounds.right
           && label.bottom <= bounds.bottom && element.scrollWidth <= element.clientWidth };
     }));
-    expect(links[0]!.left).toBeCloseTo(links[0]!.menuLeft, 0);
-    expect(links.at(-1)!.right).toBeCloseTo(links[0]!.menuRight, 0);
-    for (const [index, link] of links.entries()) {
-      expect(link.width).toBeCloseTo(links[0]!.width, 0);
-      expect(link.top).toBeCloseTo(links[0]!.top, 0);
-      expect(Math.abs(link.groupOffset)).toBeLessThanOrEqual(1);
-      expect(link.fits).toBe(true);
-      expect(link.labelLines).toBe(1);
-      expect(link.width).toBeGreaterThanOrEqual(44);
-      if (index) expect(link.left - links[index - 1]!.right).toBeGreaterThanOrEqual(0);
+    const rowTops = [...new Set(links.map(link => link.top))];
+    expect(rowTops.length).toBeLessThanOrEqual(2);
+    for (const top of rowTops) {
+      const row = links.filter(link => link.top === top);
+      expect(row[0]!.left).toBeCloseTo(row[0]!.menuLeft, 0);
+      expect(row.at(-1)!.right).toBeCloseTo(row[0]!.menuRight, 0);
+      for (const [index, link] of row.entries()) {
+        expect(link.width).toBeCloseTo(row[0]!.width, 0);
+        expect(Math.abs(link.groupOffset)).toBeLessThanOrEqual(1);
+        expect(link.fits).toBe(true);
+        expect(link.labelLines).toBe(1);
+        expect(link.width).toBeGreaterThanOrEqual(44);
+        if (index) expect(link.left - row[index - 1]!.right).toBeGreaterThanOrEqual(0);
+      }
     }
     for (const link of await navigation.getByRole("link").all()) {
       await expect(link).toHaveCSS("border-bottom-width", "2px");
@@ -299,7 +303,7 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
     await page.setViewportSize({ width: 1280, height: 900 });
     await accountShell(page, username, admin);
     await page.setViewportSize({ width: 320, height: 844 });
-    // Text zoom wraps tab labels; only the mobile username may ellipsize.
+    // Text zoom wraps complete navigation links; only the username may ellipsize.
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator('[data-slot="sidebar-menu-button"], [data-slot="sidebar-menu-button"] span, .mobile-account, .mobile-account p').evaluateAll(elements =>
@@ -310,11 +314,17 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
     await expect(identity).toHaveText(username);
     await expect(identity).toHaveAttribute("title", username);
     expect(await page.locator(".mobile-account").ariaSnapshot()).toContain(username);
-    expect(await page.getByRole("link", { name: "Connection", exact: true }).locator("span").evaluate(element => {
-      const text = document.createRange();
-      text.selectNodeContents(element);
-      return text.getClientRects().length;
-    })).toBeGreaterThan(1);
+    const zoomedLinks = page.getByRole("navigation", { name: "Account", exact: true }).getByRole("link");
+    const zoomedGeometry = await zoomedLinks.evaluateAll(links => links.map(link => {
+      const range=document.createRange(); range.selectNodeContents(link.querySelector("span")!);
+      const bounds=link.getBoundingClientRect();
+      return { top:bounds.top, lines:range.getClientRects().length, width:bounds.width, height:bounds.height,
+        fits:link.scrollWidth<=link.clientWidth && link.scrollHeight<=link.clientHeight };
+    }));
+    expect(new Set(zoomedGeometry.map(link => link.top)).size).toBeGreaterThan(1);
+    for (const link of zoomedGeometry) { expect(link.lines).toBe(1); expect(link.fits).toBe(true); }
+    await zoomedLinks.first().focus();
+    for (const link of (await zoomedLinks.all()).slice(1)) { await page.keyboard.press("Tab"); await expect(link).toBeFocused(); }
     for (const link of await page.getByRole("navigation", { name: "Account", exact: true }).getByRole("link").all()) {
       const target = await link.boundingBox();
       expect(target!.width).toBeGreaterThanOrEqual(44);
