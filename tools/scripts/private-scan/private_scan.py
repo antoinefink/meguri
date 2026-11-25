@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
         '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
+        'be6fc4377c722f0f5c1ce422a59305618958f4409f0238333f2e8b0ba56ecd89',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
@@ -913,7 +913,7 @@ PUBLIC_ARTIFACTS = {
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
     'docs/design/native-interface-contract.md':
-        '50c5a5853c9f846cc214bd20fe336d5b1da2898716f05709aa0cad9908574624',
+        '0ca25d0f6a846d37c2540c6d7fd3bc5857a16bc205e309a2fe2c2bce3c86dd08',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
