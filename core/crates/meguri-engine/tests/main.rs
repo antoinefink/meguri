@@ -172,3 +172,6 @@ pub mod undo_holdback_props;
 pub mod undo_merge;
 #[path = "undo_truncation.rs"]
 pub mod undo_truncation;
+
+#[path = "mining_writer.rs"]
+pub mod mining_writer;

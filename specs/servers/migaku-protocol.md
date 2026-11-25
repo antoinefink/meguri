@@ -15,12 +15,18 @@ This file owns the route table, the origin policy, the CORS headers, preflight, 
 
 ## P1. Terms
 
-- **Migaku server**: the listener set of `servers/host-security` for the Migaku integration. Its port is always 44432; no setting changes it (R1675).
+- **Migaku server**: the listener set of `servers/host-security` for the Migaku integration. Its default port is 44432. P1.1 covers changing it in the macOS integration.
 - **Origin value**: the value of the request's `Origin` header, exactly as sent (no trimming). A request has **no Origin** when it has no `Origin` header at all.
 - **Path**: the path part of the request target, before any `?`, compared byte for byte: no percent-decoding, no case folding, no removal of a trailing `/`. An absolute-form target (`http://127.0.0.1:44432/srs-check`) has the path of its URL. The query is ignored everywhere in this file.
 - **Available**: the collection is available as `engine/lifecycle` L6 defines it for the local servers: the lifecycle state is `Ready` and the long-operation slot is free, or held only by a `CloudAdopt` that has not entered its exclusive phase. Every other case is unavailable: any other lifecycle state (`NoCollection`, `Opening`, `Upgrading`, `ExclusiveBusy`, `Failed{reason}`, `Failed{Corrupt}`) and a slot held by anything else, Check Database included. This is the same test that `servers/migaku-receive` P14 uses for a busy collection.
 - **JSON reply**: a reply whose body is one JSON value encoded in UTF-8, with `Content-Type: application/json; charset=UTF-8`. Meguri writes compact JSON (no white space between tokens), members in the order this file lists them. Clients and transcripts compare JSON values, not bytes.
 - **Error shape**: the JSON reply body `{"success":false,"error":<message>}`. The message strings of this file are interface strings (P8.2).
+
+### P1.1 Port setting for the Mac mining integration
+
+Mac Settings offers two independent loopback endpoints, Migaku on 44432 and AnkiConnect on 8765. Both start off. The user can enable either endpoint or both. The two selections persist on this Mac. Both ports serve the same supported mining routes and AnkiConnect actions and write through the same collection receiver, destination and duplicate checks. This user decision on 2026-11-24 replaces the earlier single editable port for the first Mac integration.
+
+Each endpoint reports its own listening or conflict state. Enabling or disabling one leaves the other endpoint and its established connections working. Turning an endpoint off closes its listener and rejects stale work, while an admitted collection write finishes under the existing transaction rules. Each request's Host check uses the port that actually accepted it. The app keeps receiving while either endpoint is enabled. After restart, a previously enabled single-port preference for 44432 or 8765 restores only its matching endpoint. An unrecognized legacy port leaves both endpoints off.
 
 ## P2. Requests in order
 
