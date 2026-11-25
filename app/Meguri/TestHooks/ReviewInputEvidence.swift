@@ -7,7 +7,7 @@ import SwiftUI
 
 extension TestHooks {
     /// Only the authored review-editor recipe installs this probe. It reports
-    /// actual audio-controller queue facts, never field text or media names.
+    /// actual audio-controller queue and key-window facts, never field text or media names.
     /// Native queued repeat events exercise the production local monitors.
     struct ReviewInputEvidence: ViewModifier {
         @MainActor final class Source {
@@ -69,7 +69,8 @@ extension TestHooks {
                         else if responder is NSControl { focus = "native" }
                         else { focus = responder == nil ? "none" : "other" }
                         let fields = ["requests": String(audio?.replayRequests ?? 0), "sides": sides,
-                                      "live": source.collection == nil ? "false" : "true", "focus": focus]
+                                      "live": source.collection == nil ? "false" : "true", "focus": focus,
+                                      "addWindowKey": NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"]
                         let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
                         guard let data, let text = String(data: data, encoding: .utf8) else { return }
                         DistributedNotificationCenter.default().postNotificationName(

@@ -89,18 +89,10 @@ import XCTest
     func testAddWindowPickersAddAnotherMainWorkspaceAndDiscard() throws {
         let (app, bundle) = try launch()
         defer { app.terminate() }
-        let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
-            .first { !$0.isTerminated })
-        let application = AXUIElementCreateApplication(running.processIdentifier)
         func waitForKeyAddWindow() {
             XCTAssertTrue(wait {
-                var focused: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &focused) == .success,
-                      let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
-                var identifier: CFTypeRef?
-                return AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXIdentifierAttribute as CFString, &identifier) == .success
-                    && identifier as? String == "editor.add.window"
-            }, "Add must be the native focused window before keyboard input; AX trusted=\(AXIsProcessTrusted())")
+                (try? inputEvidence(bundle: bundle)["addWindowKey"]) == "true"
+            }, "Add must be the native key window before keyboard input")
             XCTAssertEqual(app.windows.matching(identifier: "editor.add.window").count, 1, "New Note reuses the single Add window")
         }
         app.typeKey("n", modifierFlags: .command)
@@ -273,11 +265,16 @@ import XCTest
         let otherDeck = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", "Synthetic Summary")).firstMatch
         XCTAssertTrue(otherDeck.waitForExistence(timeout: 10)); otherDeck.click()
-        XCTAssertTrue(wait { table.outlineRows.count == 1 && !element(app, "editor.fields").exists })
+        XCTAssertTrue(wait { table.outlineRows.count == 1 })
+        table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+        XCTAssertTrue(wait {
+            table.outlineRows.element(boundBy: 0).isSelected && fields.count == 2
+                && (fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic summary question")
+        }, "the summary note must replace the many-field editor before returning")
         filter.click()
         XCTAssertTrue(wait { table.outlineRows.count == 2 })
         table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
-        XCTAssertTrue(wait { fields.count == 13 })
+        XCTAssertTrue(wait { table.outlineRows.element(boundBy: 0).isSelected && fields.count == 13 })
         for _ in 0..<8 where !edited.isHittable { fieldScroll.scroll(byDeltaX: 0, deltaY: -450) }
         XCTAssertTrue(edited.isHittable)
         XCTAssertTrue(wait { (fields.element(boundBy: 11).value as? String ?? "").contains("Synthetic field twelve saved") })
@@ -298,21 +295,24 @@ import XCTest
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 25))
         return (app, bundle)
     }
-    private func selectDeck(_ name: String, app: XCUIApplication) throws {
+    @discardableResult
+    private func selectDeck(_ name: String, app: XCUIApplication) throws -> String {
         let rows = HomeControls.deckRows(app, labelContaining: name)
-        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 15))
-        (HomeControls.hittable(rows) ?? rows.firstMatch).click()
-        XCTAssertTrue(wait { element(app, "home.deck.title").label == name }, "the selected deck page must finish changing")
-        let study = element(app, "home.deck.study")
+        XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
+        let row = try XCTUnwrap(HomeControls.hittable(rows))
+        let deckID = try XCTUnwrap(HomeControls.deckID(row.identifier))
+        let pageIdentifier = "home.deck.page.\(deckID)"
+        row.click()
+        let page = element(app, pageIdentifier)
+        XCTAssertTrue(page.waitForExistence(timeout: 10), "the selected deck page must finish changing")
+        let study = page.buttons["home.deck.study"].firstMatch
         XCTAssertTrue(study.waitForExistence(timeout: 10))
+        return pageIdentifier
     }
     @discardableResult
     private func study(_ name: String, app: XCUIApplication, bundle: String) throws -> String {
-        try selectDeck(name, app: app)
-        let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
-        XCTAssertTrue(page.waitForExistence(timeout: 10))
-        let pageIdentifier = page.identifier
-        let study = element(app, "home.deck.study")
+        let pageIdentifier = try selectDeck(name, app: app)
+        let study = element(app, pageIdentifier).buttons["home.deck.study"].firstMatch
         XCTAssertTrue(wait { study.exists && study.isEnabled && study.isHittable }); study.clickOrTap()
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
         try app.bringToFront(bundleIdentifier: bundle)
@@ -329,7 +329,11 @@ import XCTest
             object: command, userInfo: nil, deliverImmediately: true)
     }
     private func audio(_ app: XCUIApplication, bundle: String) throws -> (count: UInt64, sides: String, focus: String) {
-        let reply = expectation(description: "Actual review audio queue")
+        let fields = try inputEvidence(bundle: bundle)
+        return (try XCTUnwrap(UInt64(fields["requests"] ?? "")), fields["sides"] ?? "", fields["focus"] ?? "none")
+    }
+    private func inputEvidence(bundle: String) throws -> [String: String] {
+        let reply = expectation(description: "Actual review input state")
         let received = Mutex<[String: String]?>(nil)
         let center = DistributedNotificationCenter.default()
         let observer = center.addObserver(forName: .init(bundle + ".testhooks.reviewInputReply"), object: nil, queue: .main) { note in
@@ -342,7 +346,7 @@ import XCTest
         wait(for: [reply], timeout: 10)
         let fields = received.withLock { $0 }
         XCTAssertEqual(fields?["live"], "true", "the snapshot must read the live collection and audio controller")
-        return (try XCTUnwrap(UInt64(fields?["requests"] ?? "")), fields?["sides"] ?? "", fields?["focus"] ?? "none")
+        return try XCTUnwrap(fields)
     }
     private func capture(_ window: XCUIElement, _ name: String) {
         let attachment = XCTAttachment(screenshot: window.screenshot())
