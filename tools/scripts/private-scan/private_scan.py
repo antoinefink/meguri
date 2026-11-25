@@ -835,6 +835,14 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "server/web/tests/browser/browse.spec.ts":
+        "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
+    "server/web/tests/browser/browse-real.spec.ts":
+        "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797",
+    "server/web/src/browse.tsx":
+        "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a",
+    "server/tests/browse.rs":
+        "d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
         '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
@@ -843,8 +851,11 @@ PUBLIC_ARTIFACTS = {
         '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
         '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
+    # Whole-file review in cleanroom 20261125T154052Z-94614.
+    'app/Packages/MeguriKit/Tests/BrowseTests/BrowseTagFieldTests.swift':
+        'f8389c31bf475893b70ff473535c3f347d09f78a5ad06a037743d1355c6611ab',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
+        'f06c35d2865435fd06062d139805e5247e496eaa0c7e21e5afc8cc01ab200736',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
@@ -917,7 +928,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '22cff2ec7c5c71540d5e6326c2c62993a9e7f8ee01021d354522c2abcabc5707',
+        '779ed4470a5cee15e0032580b31b6053ec425ea9c33865c87c6909936b0fca4f',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -999,7 +1010,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'e4726bf8b73dac5b88b54cb33be38c06d30630d414f7dcff4fe62e8eddfc3dc2',
+        "35d049ed611bbf8e6b2d43943c906727d7dfc2ea5f2840b84564bd22f51fc2cc",
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1195,19 +1206,19 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
-        '5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914',
+        "4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255",
     'server/web/THIRD_PARTY_NOTICES.txt':
         '793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9',
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        'a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099',
+        "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385",
     'server/web/src/style.css':
-        '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
+        "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc",
     'server/web/src/app.tsx':
-        '2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d',
+        "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69",
     'server/web/tests/browser/accounts.spec.ts':
-        'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
+        "8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c",
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1291,8 +1302,10 @@ PUBLIC_ARTIFACTS = {
         "ae5b10969d39c9bae94095fdb81d025d63b502cdb1d87720e5983fdd9559c5bf",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
+    "docs/plans/2026-11-25-1512-feat-online-browse-plan.md":
+        "42ece08d046176f26f02f6e6f6e2d68f26f5029d9ddca6f5b7ff77f38b81d798",
     "specs/servers/meguri-sync-web.md":
-        '2a4303891cc65b73e0667511fb3d2ef941999a255f9caa816bcb5516ff599d33',
+        "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
