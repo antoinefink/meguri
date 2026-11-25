@@ -71,16 +71,19 @@ extension TestHooks {
                         else if responder is NSText || responder is NSTextField { focus = "field" }
                         else if reviewWindowActive && responderInWindow { focus = "native" }
                         else { focus = responder == nil ? "none" : "other" }
-                        let fields = ["requests": String(audio?.replayRequests ?? 0), "sides": sides,
-                                      "live": source.collection == nil ? "false" : "true", "focus": focus,
-                                      "firstResponderClass": responder.map { NSStringFromClass($0.classForCoder) } ?? "none",
-                                      "workspaceKey": workspace != nil && window === workspace ? "true" : "false",
-                                      "collectionIdentity": source.collection.map { String(describing: ObjectIdentifier($0)) } ?? "none",
-                                      "collectionGeneration": source.collection.map { String($0.generation) } ?? "none",
-                                      "collectionReady": source.collection?.state == .ready ? "true" : "false",
-                                      "reviewPhase": source.collection?.review.map { String(describing: $0.phase) } ?? "none",
-                                      "reviewPresented": source.collection?.navigation.review == nil ? "false" : "true",
-                                      "addWindowKey": NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"]
+                        var fields: [String: String] = [:]
+                        fields["requests"] = String(audio?.replayRequests ?? 0)
+                        fields["sides"] = sides
+                        fields["live"] = source.collection == nil ? "false" : "true"
+                        fields["focus"] = focus
+                        fields["firstResponderClass"] = responder.map { NSStringFromClass($0.classForCoder) } ?? "none"
+                        fields["workspaceKey"] = workspace != nil && window === workspace ? "true" : "false"
+                        fields["collectionIdentity"] = source.collection.map { String(describing: ObjectIdentifier($0)) } ?? "none"
+                        fields["collectionGeneration"] = source.collection.map { String($0.generation) } ?? "none"
+                        fields["collectionReady"] = source.collection?.state == .ready ? "true" : "false"
+                        fields["reviewPhase"] = source.collection?.review.map { String(describing: $0.phase) } ?? "none"
+                        fields["reviewPresented"] = source.collection?.navigation.review == nil ? "false" : "true"
+                        fields["addWindowKey"] = NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"
                         let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
                         guard let data, let text = String(data: data, encoding: .utf8) else { return }
                         DistributedNotificationCenter.default().postNotificationName(
