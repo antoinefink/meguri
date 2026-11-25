@@ -632,6 +632,7 @@ async fn expected_account_mismatch_precedes_any_restore_changes_even_with_a_vali
 
 #[tokio::test]
 async fn orphan_payloads_are_reclaimed_before_a_failed_fresh_capture_without_pruning_history() {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let h = Harness::new().await;
     let account = h.setup().await;
     let id = account["id"].as_str().unwrap().to_owned();
@@ -640,7 +641,9 @@ async fn orphan_payloads_are_reclaimed_before_a_failed_fresh_capture_without_pru
     let before = history(&h, &cookie).await;
     let directory = h.path().join("state/accounts").join(&id).join("backups");
     let orphan = directory.join("ff".repeat(32));
-    std::fs::write(&orphan, b"unpublished payload from an earlier failure").unwrap();
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&orphan).unwrap()
+        .write_all(b"unpublished payload from an earlier failure").unwrap();
+    assert_eq!(std::fs::metadata(&orphan).unwrap().permissions().mode() & 0o777, 0o600);
     // Invalid live collection fails after pre-capture reclamation, so the old
     // cleanup-after-success ordering would leave this orphan behind forever.
     let c = meguri_sync_server::collection::schema::open(&current(&h, &id), true).unwrap();

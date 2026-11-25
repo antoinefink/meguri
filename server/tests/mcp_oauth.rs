@@ -1280,7 +1280,7 @@ async fn mcp_collection_download_and_staged_upload_are_fenced_by_online_backup_r
     attachment_collection(&h,identity["id"].as_str().unwrap());
     h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
     let points:Value=h.get("/api/me/backups",Some(&cookie)).await.json().await.unwrap();
-    let backup=points["data"][0]["id"].as_str().unwrap();
+    let backup=points["data"]["backups"][0]["id"].as_str().unwrap();
     let tokens=grant(&h,&c,&cookie,true,false).await;let access=tokens["access_token"].as_str().unwrap();
     let ticket=collection_ticket(&h,&c,access).await;
     let staged=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;

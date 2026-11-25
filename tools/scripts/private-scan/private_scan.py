@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     'server/tests/deletion.rs':
         'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
     'server/tests/backups.rs':
-        '99f4f18195e3ce372b5b79857654e78761cddb4d407238878a91835443ef2c25',
+        '04217e3055f0b6a346f277d2ed22540847c9318ac4256a81a3c5a5fea1de6873',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -895,7 +895,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_transport/descriptors.rs':
         'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
     'server/tests/mcp_oauth.rs':
-        '1f3ce3b66d64e98c22f10b6a2411147895ebe7e03870ef77dd92fb11513c7a1d',
+        'fb74eaa7b7aa836199eb566f51034baf429477c3303d7c8dd049dd56932cc578',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     # Complete-content PUBLIC review: mcp-search-candidates, 2026-11-22.
@@ -1226,7 +1226,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/media/recovery.rs':
         'c5388c9f59ef653beb7d7472f3195dc106bb732ecb797475cfc4671c0735eba5',
     'server/tests/media.rs':
-        '5486def4419d639fb6e21dbfa8b46c4faa1586fc93b4eb552e187cc49fae61ec',
+        '9aa88101ecdefc8c46120f1adac02655aa3bfe628f458dca7b6f80a6b3297a93',
     'server/tests/media_disk_full.rs':
         '98c3a131c1bb05110a2338ae9aee42fd37d8608e8f2ea854475a33ad1518ac57',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
