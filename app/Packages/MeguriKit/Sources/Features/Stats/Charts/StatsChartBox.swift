@@ -58,6 +58,7 @@ public struct StatsChartBox<Accessory: View>: View {
     private let phase: StatsBoxPhase
     private let size: StatsPlotSize
     private let figures: [StatsSmallFigure]
+    private let summaryFigures: [StatsSmallFigure]?
     private let footnote: String?
     private let footnoteLines: Int
     private let separatesSeries: Bool?
@@ -83,10 +84,13 @@ public struct StatsChartBox<Accessory: View>: View {
     ///     (S8.4); nil offers none.
     ///   - summary: the chart element's label and Audio Graph title when ready
     ///     (S15); nil reads the figure and its sentence.
+    ///   - summaryFigures: replaces the large figure and bottom figures with adaptive
+    ///     summaries above the plot (macOS overview, S7.8); nil keeps the standard layout.
     public init(
         box: String, title: String, figure: StatsBoxFigure?, data: StatsChartData,
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
+        summaryFigures: [StatsSmallFigure]? = nil,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
         open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
         @ViewBuilder accessory: () -> Accessory
@@ -100,6 +104,7 @@ public struct StatsChartBox<Accessory: View>: View {
         self.phase = phase
         self.size = size
         self.figures = figures
+        self.summaryFigures = summaryFigures
         self.footnote = footnote
         self.footnoteLines = max(footnoteLines, footnote == nil ? 0 : 1)
         self.separatesSeries = separatesSeries
@@ -125,17 +130,17 @@ public struct StatsChartBox<Accessory: View>: View {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 header
                 #if os(macOS)
-                figureView
+                headline
                 plot
                     .contextMenu { if isReady { exportMenu } }
                 #else
                 // On touch a hold on the plot selects (S8.3), so Copy Image
                 // and Copy Values are on a hold of the figure instead.
-                figureView
+                headline
                     .contextMenu { if isReady { exportMenu } }
                 plot
                 #endif
-                if !figures.isEmpty { figuresView }
+                if summaryFigures == nil, !figures.isEmpty { figuresView }
                 if footnoteLines > 0 { footnoteView }
             }
         }
@@ -151,6 +156,15 @@ public struct StatsChartBox<Accessory: View>: View {
 
     private var figureView: some View {
         StatsBoxFigureView(figure: figure, ready: isReady)
+    }
+
+    @ViewBuilder private var headline: some View {
+        if let summaryFigures {
+            StatsBoxSmallFigures(figures: summaryFigures, ready: isReady)
+                .environment(\.statsNarrow, true)
+        } else {
+            figureView
+        }
     }
 
     private var plot: some View {
@@ -253,12 +267,14 @@ extension StatsChartBox where Accessory == EmptyView {
         box: String, title: String, figure: StatsBoxFigure?, data: StatsChartData,
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
+        summaryFigures: [StatsSmallFigure]? = nil,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
         open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
     ) {
         self.init(
             box: box, title: title, figure: figure, data: data, phase: phase, size: size,
             figures: figures, footnote: footnote, footnoteLines: footnoteLines,
+            summaryFigures: summaryFigures,
             separatesSeries: separatesSeries, selection: selection, open: open, showInBrowse: showInBrowse,
             summary: summary
         ) { EmptyView() }

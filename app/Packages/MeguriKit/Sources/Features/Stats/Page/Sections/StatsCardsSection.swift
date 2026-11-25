@@ -51,35 +51,72 @@ struct StatsAddedAndStartedBox: View {
     /// Show in Browse for an Added bar, given the bin; nil offers none.
     let showInBrowse: ((Int) -> Void)?
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        #if os(macOS)
+        if slot.size == .regular {
+            if dynamicTypeSize.isAccessibilitySize {
+                overview(size: .regular)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    overview(size: .overview)
+                        .frame(minWidth: StatsNarrowLayout.figureMinimum * 4 + Spacing.medium * 5)
+                    overview(size: .regular)
+                }
+            }
+        } else {
+            standard
+        }
+        #else
+        standard
+        #endif
+    }
+
+    private var standard: some View {
         let content = slot.content
         let title = slot.title(locale: locale)
-        StatsChartBox(
+        return StatsChartBox(
             box: slot.id.rawValue, title: title, figure: content.figure, data: content.data,
             phase: content.phase, size: slot.size, figures: content.figures, footnote: content.footnote,
             footnoteLines: slot.id.footnoteLines, selection: slot.selection, open: slot.open, showInBrowse: showInBrowse,
             summary: StatsSectionText.summary(title, content.figure)
         )
     }
+
+    private func overview(size: StatsPlotSize) -> some View {
+        let content = slot.content
+        let title = slot.title(locale: locale)
+        return StatsChartBox(
+            box: slot.id.rawValue, title: title, figure: content.figure, data: content.data,
+            phase: content.phase, size: size,
+            summaryFigures: Self.summaryFigures(content, text: StatsText(locale: locale)),
+            selection: slot.selection, open: slot.open, showInBrowse: showInBrowse,
+            summary: StatsSectionText.summary(title, content.figure)
+        )
+    }
+
+    /// Totals are formatted by the presenter, never recovered from the localized sentence.
+    static func summaryFigures(_ content: StatsBoxContent, text: StatsText) -> [StatsSmallFigure] {
+        let totals: (String?, String?)
+        if case let .addedAndStarted(added, started)? = content.detail {
+            totals = (added, started)
+        } else {
+            totals = (nil, nil)
+        }
+        return [StatsSmallFigure(label: text.added, value: totals.0),
+                StatsSmallFigure(label: text.started, value: totals.1),
+                StatsSmallFigure(label: text.figureAddedADay, value: content.figures.first?.value),
+                StatsSmallFigure(label: text.figureStartedADay, value: content.figures.dropFirst().first?.value)]
+    }
 }
 
-/// S7.7, as Antoine changed it on 2026-11-23 (a pie chart instead of the single stacked bar):
-/// today's cards by state, suspended and buried always their own rows (C4.1's
-/// `excluding_inactive`), as a donut (Swift Charts' sectors, the states in their colours and
-/// the table's order from 12 o'clock clockwise, the total in its centre with "cards" under it)
-/// beside the table when the box is wide, above it when narrow. The table has a row per state
-/// with its swatch, name, count and share of all cards (a state with none stays, in grey, and
-/// takes no sector), then Total and Notes; it is the chart's accessible form. The sectors keep
-/// their true angles: a very small state is a thin sector and the table carries it. Hovering
-/// or clicking a sector or a row highlights both. The header says "Now"; the period never
-/// changes it. The Mature figure shows only at compact width, where the strip has no Mature
-/// tile (S6). While loading, the ring is a grey track with the progress indicator in its
-/// centre and the table shows its names with dashes (S10.3).
-///
-/// Beside a taller box (Antoine, 2026-11-24: "there is just too much vertical height") the pie
-/// and the table take the row's height instead of floating in its middle: the pie grows up to
-/// a chart page's plot height, the rows share the pie's height and a hairline parts them.
+/// Today's seven card states as a full pie and an accessible table (S7.7). Zero states
+/// keep their rows and take no sector. Pie and row hover/selection highlight each other;
+/// the period does not affect these present counts. Loading keeps the names with dashes
+/// and a grey pie with progress. The narrow page adds Mature, absent from its strip.
+/// The macOS overview uses a width-based, capped pie and compact rows (2026-11-25).
+/// Detail and touch retain the earlier layout, which can grow beside a taller neighbor.
 struct StatsCardCountsBox: View {
     let slot: StatsBoxSlot
     /// Show in Browse for a state's row, given its label and Q4.1's search text; nil offers none.
@@ -87,6 +124,7 @@ struct StatsCardCountsBox: View {
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.statsNarrow) private var statsNarrow
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var hoveredRow: Int?
     /// Whether the pie is larger than its own side, so the rows are spread beside it.
     @State private var grown = false
@@ -96,6 +134,14 @@ struct StatsCardCountsBox: View {
     static let side = StatsPlotSize.regular.height
     static let smallSide = StatsPlotSize.panel.height + Spacing.large
     static let largeSide = StatsPlotSize.page.height
+
+    private var compactOverview: Bool {
+        #if os(macOS)
+        slot.size == .regular
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         let content = slot.content
@@ -110,28 +156,12 @@ struct StatsCardCountsBox: View {
                 // No figure line (Antoine, 2026-11-23: "Remove the xxx cards in xxx notes"). The
                 // pie beside the table where both fit the box's width, a smaller pie where that
                 // fits, else the pie centred above the table: never past the box's inset.
-                ViewThatFits(in: .horizontal) {
-                    StatsPieBesideTable(side: Self.side, limit: Self.largeSide, spacing: Spacing.large) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side, grows: true)
-                        rows(table, highlighted: highlighted)
-                    }
-                    StatsPieBesideTable(side: Self.smallSide, limit: Self.largeSide, spacing: Spacing.medium) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.smallSide, grows: true)
-                        rows(table, highlighted: highlighted)
-                    }
-                    VStack(alignment: .leading, spacing: Spacing.medium) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side, grows: false)
-                            .frame(maxWidth: .infinity)
-                        rows(table, highlighted: highlighted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                if compactOverview {
+                    overview(table, phase: content.phase, highlighted: highlighted, title: title)
+                        .contextMenu { if let table { exportMenu(table) } }
+                } else {
+                    legacyLayout(table, phase: content.phase, highlighted: highlighted, title: title)
                 }
-                // Beside a taller box the row's height is more than the pie and table need: the
-                // pair takes it (`StatsPieBesideTable`), and past the pie's limit sits in the
-                // middle of what is left under the header. Alone in its row the box keeps its
-                // own height.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .contextMenu { if let table { exportMenu(table) } }
                 // The narrow page (N25.6), the Duo held tall included, whatever its size class.
                 if statsNarrow ?? (horizontalSizeClass == .compact) {
                     StatsBoxSmallFigures(figures: content.figures, ready: ready)
@@ -140,6 +170,56 @@ struct StatsCardCountsBox: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("stats.box.\(slot.id.rawValue)")
+    }
+
+    private func overview(_ table: StatsCardCountsTable?, phase: StatsBoxPhase, highlighted: Int?, title: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                StatsOverviewPieBesideTable {
+                    overviewPie(table, phase: phase, highlighted: highlighted, title: title)
+                    rows(table, highlighted: highlighted)
+                }
+            }
+            VStack(alignment: .leading, spacing: Spacing.medium) {
+                overviewPie(table, phase: phase, highlighted: highlighted, title: title)
+                    .frame(width: StatsOverviewPieBesideTable.limit, height: StatsOverviewPieBesideTable.limit)
+                    .frame(maxWidth: .infinity)
+                rows(table, highlighted: highlighted)
+            }
+        }
+    }
+
+    private func overviewPie(_ table: StatsCardCountsTable?, phase: StatsBoxPhase, highlighted: Int?, title: String) -> some View {
+        StatsCardCountsPie(
+            table: table, phase: phase, highlighted: highlighted,
+            summary: StatsSectionText.summary(title, slot.content.figure) ?? title,
+            selection: slot.selection, hovered: $hoveredRow
+        )
+    }
+
+    private func legacyLayout(_ table: StatsCardCountsTable?, phase: StatsBoxPhase, highlighted: Int?, title: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            StatsPieBesideTable(side: Self.side, limit: Self.largeSide, spacing: Spacing.large) {
+                pie(table, phase: phase, highlighted: highlighted, summary: title, side: Self.side, grows: true)
+                rows(table, highlighted: highlighted)
+            }
+            StatsPieBesideTable(side: Self.smallSide, limit: Self.largeSide, spacing: Spacing.medium) {
+                pie(table, phase: phase, highlighted: highlighted, summary: title, side: Self.smallSide, grows: true)
+                rows(table, highlighted: highlighted)
+            }
+            VStack(alignment: .leading, spacing: Spacing.medium) {
+                pie(table, phase: phase, highlighted: highlighted, summary: title, side: Self.side, grows: false)
+                    .frame(maxWidth: .infinity)
+                rows(table, highlighted: highlighted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        // Beside a taller box the row's height is more than the pie and table need: the
+        // pair takes it (`StatsPieBesideTable`), and past the pie's limit sits in the
+        // middle of what is left under the header. Alone in its row the box keeps its
+        // own height.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .contextMenu { if let table { exportMenu(table) } }
     }
 
     /// The pie at its side, or with `grows` at the square its layout gives it, never under its
@@ -207,7 +287,7 @@ struct StatsCardCountsBox: View {
             StatsLegendSwatch(color: row?.count == 0 ? .buried : color)
             Text(verbatim: name)
                 .foregroundStyle(grey ? .secondary : .primary)
-                .lineLimit(1)
+                .lineLimit(compactOverview ? nil : 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             StatsColumnText(text: row?.countText ?? "—", widest: counts)
                 .foregroundStyle(grey ? .secondary : .primary)
@@ -216,7 +296,7 @@ struct StatsCardCountsBox: View {
         }
         .padding(.vertical, Spacing.xxSmall / 2)
         // Given more height than the rows need (beside a grown pie), they share it out.
-        .frame(maxHeight: .infinity)
+        .frame(maxHeight: compactOverview ? nil : .infinity)
         // The highlight reaches a little past the row without widening it: a wider row would
         // push the box past its inset.
         .background {
@@ -226,7 +306,7 @@ struct StatsCardCountsBox: View {
         }
         // A hairline between rows that share a grown pie's height, none between rows at their own.
         .overlay(alignment: .top) {
-            if grown, !first {
+            if (compactOverview || grown), !first {
                 Divider().accessibilityHidden(true)
             }
         }
@@ -252,6 +332,42 @@ struct StatsCardCountsBox: View {
         } else {
             cells
         }
+    }
+}
+
+/// macOS overview only: about a third of the inner width, capped at 160 pt. The pair
+/// measures at its natural height; an equal-height grid row never enlarges either child.
+struct StatsOverviewPieBesideTable: Layout {
+    static let limit: CGFloat = 160
+    static var minimum: CGFloat { StatsCardCountsBox.smallSide }
+
+    static func pieSide(width: CGFloat, tableWidth: CGFloat) -> CGFloat {
+        min(limit, max(minimum, width / 3), max(0, width - Spacing.medium - tableWidth))
+    }
+
+    private func sizes(width: CGFloat?, subviews: Subviews) -> (width: CGFloat, pie: CGFloat, table: CGSize) {
+        let ideal = subviews[1].sizeThatFits(.unspecified)
+        let minimumWidth = Self.minimum + Spacing.medium + ideal.width
+        let width = max(width ?? minimumWidth, minimumWidth)
+        let pie = Self.pieSide(width: width, tableWidth: ideal.width)
+        let table = subviews[1].sizeThatFits(ProposedViewSize(width: width - pie - Spacing.medium, height: nil))
+        return (width, pie, table)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let sizes = sizes(width: proposal.width, subviews: subviews)
+        return CGSize(width: sizes.width, height: max(sizes.pie, sizes.table.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let sizes = sizes(width: bounds.width, subviews: subviews)
+        let height = max(sizes.pie, sizes.table.height)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + height / 2), anchor: .leading,
+                          proposal: ProposedViewSize(width: sizes.pie, height: sizes.pie))
+        subviews[1].place(at: CGPoint(x: bounds.minX + sizes.pie + Spacing.medium, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: sizes.width - sizes.pie - Spacing.medium, height: sizes.table.height))
     }
 }
 
