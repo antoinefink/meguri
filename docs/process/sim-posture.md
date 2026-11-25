@@ -15,6 +15,9 @@ schedule other VM jobs. Folding waits on MG's guest-wide claim before guest
 access, including when reusing the resident VNC connection. After a guest
 reboot, it waits for the claim to be reacquired before readiness checks or
 drain cleanup (`tools/vm/AGENTS.md`).
+A normal folding request waits before taking the M5 scheduler slot when a
+still-live older keeper cannot prove its acquisition, so the keeper can release
+naturally. Normal shared-claim admission remains required.
 M5 posture analysis still uses `build/vm-fold/venv`. Mutations recheck routing
 and VM metadata under the scheduler lease.
 
@@ -180,11 +183,14 @@ A foreign front app or foreign, incorrect or unknown top window refuses input,
 even when the requested device/title appears behind it. No other device is
 closed or selected through guest input to obtain this layout.
 
-Native validation of this revision is **pending**: local OCR/guest observer
+Native validation requires local OCR/guest observer
 compilation, live full-frame VNC refresh, compact/expanded title-bar OCR,
 CG/RFB coordinate scale, exact control labels, tooltip localization/placement
-at 1x/2x, the synchronous holder input path, and both pose transitions need the
-coordinator's M5/M3 lab run. Synthetic tests exercise the production controller
+at 1x/2x, the synchronous holder input path, and both pose transitions in the
+coordinator's M5/M3 lab run. The cycle is pending at writing; the integrator
+records actual native acceptance with sanitized run IDs, click counts and
+inner/outer classifications in the [verification section of PR #205](https://github.com/antoinefink/meguri/pull/205).
+That section carries the evolving status. Synthetic tests exercise the production controller
 with fake guest evidence and OCR subprocesses; they do not establish native acceptance.
 
 The supplied Apple Device Hub documentation describes three buttons below
@@ -454,4 +460,5 @@ Coordinator checks: `tools/mg image-tools-selftest -k posture`,
 `tools/mg selftest tools/tests/vnc_session.bats`, then the lab procedure and
 both production commands, including deliberately moved/resized/wrong-target
 windows, a missing tooltip, sleeping displays and an expired/foreign lease.
-Record the native outcomes privately and publish only sanitized classifications.
+Keep native evidence private; record only sanitized run IDs, click counts and
+inner/outer classifications in PR #205's verification section.

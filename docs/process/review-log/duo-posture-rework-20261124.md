@@ -132,3 +132,16 @@ Independent complete-file review by `s-20261124T123814Z-b6a481ac`.
 | `docs/process/sim-posture.md` | `be4fecbe5e3cbc522e3233317f3338735686d86673122a1ab710f7e5353ffbbd` | `20261125T122435Z-47844` |
 | `tools/vm/sim-posture.py` | `ba1d4671b5908fde12b7a9d9792af2825232b5d2f80d9023d9e3544864218b04` | `20261125T122435Z-47844` |
 | `tools/vm/tests/test_sim_posture.py` | `6fd677428d02d01c615591cc2dc6425f881743efe1b84d5873ad28c3b107db7b` | `20261125T122435Z-47844` |
+
+## Wait for an older VM claim keeper
+
+A fold on the M5 refused before guest input when it could not confirm the shared claim at handoff. Folding now waits before creating its local holder when a live matching older keeper still owns the claim. It takes the ordinary shared claim after natural release. All 128 scoped VM wrapper, lease and VNC tests passed, including handoff and cross-Mac claim cases. The PR verification section tracks native fold acceptance.
+
+Independent complete-file review by `s-20261124T123814Z-b6a481ac`.
+
+| Public file | SHA-256 | Cleanroom run |
+| --- | --- | --- |
+| `docs/process/mac-ui-vm.md` | `d92608224bcd7d2dcff83454be03856dde7bab9a9420e9546dad123b41d0b0ee` | `20261125T133956Z-45073` |
+| `docs/process/sim-posture.md` | `0925ee0e393b456197a8836c79099a954bd00bc7b77ca750ca87d5b7fbf529e0` | `20261125T133956Z-45073` |
+| `tools/tests/vnc_session_test.py` | `12f2aac01221f01874cc62b0559b1fba9797e01b8801870a6b13fa44dcb857e4` | `20261125T131915Z-21453` |
+| `tools/vm/duo-fold.sh` | `92ee39fb80652d04bbd1fd004b1aa0af4bc7c6c02e77a3c283422e6418a739f9` | `20261125T131915Z-21453` |

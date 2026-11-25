@@ -403,6 +403,135 @@ while True:
             time.sleep(.02)
         self.fail("fold did not report waiting for the foreign claim")
 
+    @contextlib.contextmanager
+    def ordinary_holder(self):
+        # Use the real local mutex, like an ordinary job taking the free lease.
+        mutex = Path(str(self.lease) + ".mutex")
+        with mutex.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.lease.mkdir()
+            holder = self.lease / "holder.json"
+            holder.write_text(json.dumps(dict(pid=os.getpid(), job="ordinary-ui")))
+        try:
+            yield holder
+        finally:
+            with mutex.open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                holder.unlink()
+                self.lease.rmdir()
+
+    @contextlib.contextmanager
+    def legacy_keeper(self, state="taken"):
+        # The actual keeper and guest flock, advertising the legacy format.
+        # Only a fixture marker observes entry into its natural beat/grace.
+        script = self.root / "legacy/vm-claim.py"
+        script.parent.mkdir()
+        source = (ROOT / "tools/scripts/vm-claim.py").read_text()
+        self.assertEqual(source.count('if state == "taken":'), 1)
+        source = source.replace('if state == "taken":', 'if False:')
+        if state == "starting":
+            source = source.replace('write("taken")', 'write("starting")')
+        anchor = '        wake = time.monotonic() + args.beat\n'
+        self.assertEqual(source.count(anchor), 1)
+        source = source.replace(anchor, anchor +
+            '        with open(args.state + ".sleeping", "w"): pass\n')
+        script.write_text(source)
+        self.lease.parent.mkdir(parents=True, exist_ok=True)
+        with self.ordinary_holder():
+            keeper = subprocess.Popen([sys.executable, str(script),
+                "--ssh", str(self.bin / "vm-ssh"), "--lease", str(self.lease),
+                "--state", str(self.lease) + ".claim", "--token", "legacy-test",
+                "--holder", '{"job":"ordinary-ui"}',
+                "--path", self.env["MEGURI_MAC_VM_CLAIM_PATH"], "--beat", "10"],
+                env=self.env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                m.wait_until(lambda: Path(str(self.lease) + ".claim.sleeping").exists(),
+                             5, "legacy keeper never entered its handoff grace")
+            except BaseException:
+                keeper.terminate()
+                keeper.wait(timeout=5)
+                raise
+        try:
+            yield keeper
+        finally:
+            # No fixture nudge or signal shortens the natural handoff.
+            self.assertEqual(keeper.wait(timeout=15), 0)
+
+    def test_legacy_taken_waits_without_holder_then_naturally_hands_off(self):
+        self.env["MEGURI_MAC_VM_LEASE_WAIT_SECONDS"] = "20"
+        error = self.root / "legacy-wait.err"
+        with self.legacy_keeper() as keeper, error.open("wb") as err:
+            state = Path(str(self.lease) + ".claim")
+            original = state.read_bytes()
+            child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+                                     env=self.env, stdout=subprocess.PIPE, stderr=err)
+            try:
+                m.wait_until(lambda: b"waiting for the ordinary VM keeper" in error.read_bytes(),
+                             5, "fold did not yield to the legacy keeper")
+
+                def still_waiting():
+                    self.assertIsNone(keeper.poll())
+                    self.assertIsNone(child.poll())
+                    self.assertEqual(state.read_bytes(), original)
+                    self.assertFalse(Path(str(state) + ".nudge").exists())
+                    self.assertFalse((self.root / "guest-ops").exists())
+                    self.assertEqual(self.trace(), "")
+
+                still_waiting()
+                self.assertFalse(self.lease.exists())
+                # Several ordinary jobs retain priority through the grace.
+                for _ in range(2):
+                    with self.ordinary_holder() as holder:
+                        identity = holder.read_bytes()
+                        time.sleep(1.1)  # Cover an actual fold scheduler poll.
+                        still_waiting()
+                        self.assertEqual(holder.read_bytes(), identity)
+                    self.assertFalse(self.lease.exists())
+                output, _ = child.communicate(timeout=20)
+                self.assertEqual(child.returncode, 0, error.read_text())
+                self.assertEqual(output, b"")
+                self.assertEqual(keeper.wait(timeout=2), 0)
+                self.assertEqual(error.read_text().count("waiting for the ordinary VM keeper"), 1)
+                self.assertIn("stop guest", self.trace())
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+                    child.communicate(timeout=10)
+
+    def test_legacy_starting_wait_is_bounded_without_holder_or_guest_access(self):
+        self.env["MEGURI_MAC_VM_LEASE_WAIT_SECONDS"] = "2"
+        with self.legacy_keeper("starting") as keeper:
+            state = Path(str(self.lease) + ".claim")
+            original = state.read_bytes()
+            started = time.monotonic()
+            result = self.call("prepare", 3)
+            self.assertGreaterEqual(time.monotonic() - started, 1)
+            self.assertEqual(result.stderr.count(b"waiting for the ordinary VM keeper"), 1)
+            self.assertFalse(self.lease.exists())
+            self.assertFalse(Path(str(state) + ".nudge").exists())
+            self.assertEqual(state.read_bytes(), original)
+            self.assertIsNone(keeper.poll())
+            self.assertFalse((self.root / "guest-ops").exists())
+            self.assertEqual(self.trace(), "")
+
+    def test_invalid_or_unrelated_legacy_state_still_requires_full_shared_admission(self):
+        self.env["MEGURI_MAC_VM_LEASE_WAIT_SECONDS"] = "0"
+        self.lease.parent.mkdir(parents=True)
+        state = Path(str(self.lease) + ".claim")
+        with self.foreign_claim():
+            for record in ('{', '[]', json.dumps(dict(state="taken", pid=os.getpid(),
+                                                     token="unrelated-live-process")),
+                           json.dumps(dict(state="starting", pid=0, token="invalid-pid"))):
+                with self.subTest(record=record):
+                    state.write_text(record)
+                    result = self.call("prepare", 1)
+                    self.assertNotIn(b"waiting for the ordinary VM keeper", result.stderr)
+                    self.assertEqual(json.loads(state.read_text())["state"], "busy")
+                    self.assertFalse(self.lease.exists())
+                    self.assertFalse((self.root / "guest-ops").exists())
+                    self.assertEqual(self.trace(), "")
+
     def test_foreign_claim_refuses_all_guest_work_without_force_or_job_retry(self):
         self.env.update(MEGURI_MAC_VM_LEASE_WAIT_SECONDS="0", DUO_FOLD_FORCE="1",
                         MEGURI_MAC_VM_SHARED_CLAIM="0")
@@ -431,6 +560,7 @@ while True:
                 try:
                     self.wait_claim(error)
                     self.assertIsNone(child.poll())
+                    self.assertEqual(json.loads((self.lease / "holder.json").read_text())["pid"], child.pid)
                     self.assertEqual(self.trace(), before)
                     self.assertFalse(guest_ops.exists())
                 except BaseException:

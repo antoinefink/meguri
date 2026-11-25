@@ -253,8 +253,25 @@ finish() {
   exit "$rc"
 }
 
+# Read-only pre-admission check, under the local lease mutex. Taking a holder
+# would keep an old ordinary keeper alive instead of letting its grace end.
+# This is only a reason to yield; normal shared admission and final proof
+# checks remain mandatory when the keeper leaves or the evidence changes.
+legacy_claim_keeper() {
+  local state="$1.claim" record pid
+  record="$(cat "$state" 2>/dev/null)" || return 1
+  pid="$(jq -er '
+    select(type == "object" and (.state == "taken" or .state == "starting"))
+    | select((.token | type) == "string" and (.token | length) > 0)
+    | select((.proof // "") == "" or (.acquisition // "") == "")
+    | .pid | select(type == "number" and . > 0 and floor == .)
+  ' <<<"$record" 2>/dev/null)" || return 1
+  mg__mac_vm_claim_keeper "$state" "$pid" || return 1
+  [ "$(cat "$state" 2>/dev/null)" = "$record" ]
+}
+
 lease() {
-  local dir start
+  local dir start announced=""
   dir="$(mvl_lease_dir "$ROOT" "$PRIMARY")"
   mkdir -p "$(dirname "$dir")" || exit 1
   start="$(mvl_epoch)"
@@ -264,7 +281,12 @@ lease() {
   trap 'cancel 143' TERM
   while :; do
     host_lease_lock "$dir" || exit 1
-    if mkdir "$dir" 2>/dev/null; then
+    if legacy_claim_keeper "$dir"; then
+      if [ -z "$announced" ]; then
+        log "waiting for the ordinary VM keeper to release naturally"
+        announced=1
+      fi
+    elif mkdir "$dir" 2>/dev/null; then
       LEASE="$dir" LEASE_WRITING=1
       # Keep stale-holder reclamation excluded until metadata is complete.
       if ! jq -nc --argjson pid $$ --arg wt "$ROOT" --arg job "$1" \

@@ -1390,14 +1390,14 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
     # Independent full-file review in cleanroom/20261125T093743Z-19179.
     'docs/process/review-log/duo-posture-rework-20261124.md':
-        'cb04847219017c8e333b828bd5b50504553c2d717d0fcb1df19d21ed16267f82',
+        '207229516f394abce26d14368432013524624e47bbbc495d3292044e482ae517',
     # Complete-file reviews recorded in duo-posture-rework-20261124.md.
     'tools/vm/vnc-hosted.py':
         'c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba',
     'tools/vm/tests/test_hosted_posture.py':
         '3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0',
     'docs/process/sim-posture.md':
-        'be4fecbe5e3cbc522e3233317f3338735686d86673122a1ab710f7e5353ffbbd',
+        '0925ee0e393b456197a8836c79099a954bd00bc7b77ca750ca87d5b7fbf529e0',
     'tools/vm/sim-posture-visual.swift':
         '69330e3a690576dd8a97e4072579c65c81145b48de69fe4225e1aa2ff3c789a0',
     'tools/vm/sim-posture.py':
@@ -1416,11 +1416,15 @@ PUBLIC_ARTIFACTS = {
         '01acd3234d195b3e59b52a4c63c115b144295dbd9a06134d688cdf959899e7fd',
     'tools/vm/sim-posture-ocr.swift':
         'e50ac5439716639e79a6f892332164440afac67be61efad7caee47867e2f50d1',
+    'docs/process/mac-ui-vm.md':
+        'd92608224bcd7d2dcff83454be03856dde7bab9a9420e9546dad123b41d0b0ee',
+    'tools/vm/duo-fold.sh':
+        '92ee39fb80652d04bbd1fd004b1aa0af4bc7c6c02e77a3c283422e6418a739f9',
     # Complete-file review of the Duo transport repair, 2026-11-24.
     'docs/process/new-machine.md':
         '2e72954d450e927909eb814f062570b9dcf8aae54c81529bafd07e42a527c7eb',
     'tools/tests/vnc_session_test.py':
-        '6531765f99542b9ac88ccc7d5cd64b8dde387d237906728973b07a614c776c31',
+        '12f2aac01221f01874cc62b0559b1fba9797e01b8801870a6b13fa44dcb857e4',
     'tools/vm/vnc-holder.py':
         'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
