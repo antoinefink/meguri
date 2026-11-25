@@ -7,11 +7,10 @@ public struct SentenceMiningPane: View {
     public init(model: SentenceMining) { self.model = model }
     public var body: some View {
         Form {
-            Section {
+            Section("Connectors") {
                 receiverRow(.migaku, name: "Migaku", label: "Migaku (44432)", key: "migaku")
                 receiverRow(.ankiConnect, name: "AnkiConnect", label: "AnkiConnect (8765)", key: "ankiConnect")
-            } header: { Text("Sentence Mining") }
-            footer: { Text("Choose Anki in Migaku. Keep Meguri running to save sentences.") }
+            }
             Section {
                 Picker("Deck", selection: Binding(get: { model.selectedDeck }, set: model.selectDeck)) {
                     Text("Choose a deck").tag(Int64(0))
