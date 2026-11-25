@@ -198,6 +198,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
             [" ", "\r", "1", "2", "3", "4", "r", "e", "-", "@", UIKeyCommand.inputEscape].map {
                 let command = UIKeyCommand(input: $0, modifierFlags: [], action: #selector(pressed(_:)))
                 command.wantsPriorityOverSystemBehavior = false
+                if $0 == "r" { command.repeatBehavior = .nonRepeatable }
                 return command
             } + [UIKeyCommand(input: "z", modifierFlags: .command, action: #selector(pressed(_:))),
                  UIKeyCommand(input: "z", modifierFlags: [.command, .shift], action: #selector(pressed(_:)))]
