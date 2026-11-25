@@ -22,7 +22,7 @@ public struct AddNoteWindowPresentation: ViewModifier {
                   collection.addNoteFlow.isPresented else { return }
             AddNoteWindow.show(AddNoteView(collection: collection)
                 .environment(\.locale, locale).environment(\.timeZone, timeZone).environment(\.appClock, clock),
-                collection: collection, over: NSApp.keyWindow)
+                collection: collection, over: NSApp.mainWindow)
         }
     }
 }
@@ -38,6 +38,8 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
 
     static func show(_ form: some View, collection: ReviewCollection, over parent: NSWindow?) {
         if let current, current.collection === collection {
+            // The workspace may have closed and reopened while Add stayed open.
+            if let parent, parent.isVisible { current.parent = parent }
             current.window.makeKeyAndOrderFront(nil)
             return
         }
@@ -50,9 +52,9 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
         let controller = NSHostingController(rootView: AnyView(EmptyView()))
         window = AddNoteKeyWindow(contentViewController: controller)
         super.init()
-        controller.rootView = AnyView(form.onChange(of: collection.addNoteFlow.isPresented, initial: true) { [weak self] _, shown in
-            if !shown { self?.close() }
-        })
+        controller.rootView = AnyView(form.modifier(AddNoteWindowLifetime(flow: collection.addNoteFlow) { [weak self] in
+            self?.close()
+        }))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.title = String(localized: "Add Note", bundle: .module)
         window.identifier = NSUserInterfaceItemIdentifier("editor.add.window")
@@ -74,7 +76,8 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
         closing = true
         window.close()
         if Self.current === self { Self.current = nil }
-        parent?.makeKeyAndOrderFront(nil)
+        // Closing Add must not reopen a workspace the person already closed.
+        if let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if closing || !collection.addNoteFlow.isPresented { return true }
@@ -88,6 +91,9 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
 }
 
 private final class AddNoteKeyWindow: NSWindow {
+    // Add takes the keyboard; the workspace remains the main document window.
+    override var canBecomeMain: Bool { false }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "w" {
@@ -95,6 +101,20 @@ private final class AddNoteKeyWindow: NSWindow {
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// Read the observable state during SwiftUI evaluation, not once in the
+/// NSWindow owner's initializer. A child form update cannot replace a captured
+/// onChange value, including after Add hands its page to a fresh draft.
+private struct AddNoteWindowLifetime: ViewModifier {
+    let flow: AddNoteFlow
+    let close: () -> Void
+
+    func body(content: Content) -> some View {
+        content.onChange(of: flow.isPresented, initial: true) { _, presented in
+            if !presented { close() }
+        }
     }
 }
 #endif
