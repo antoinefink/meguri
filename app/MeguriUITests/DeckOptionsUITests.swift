@@ -169,6 +169,8 @@ final class DeckOptionsUITests: XCTestCase {
         capture(app, "deck-options-expanded")
         let newPreset = app.buttons["deckOptions.options.newPreset"]
         XCTAssertTrue(bringIntoView(newPreset, in: scroll, app: app))
+        XCTAssertTrue(waitForEnabled(newPreset))
+        XCTAssertTrue(newPreset.isHittable)
         newPreset.click()
         let name = element(app, "deckOptions.newPreset.name")
         let create = element(app, "deckOptions.newPreset.create")
@@ -193,40 +195,59 @@ final class DeckOptionsUITests: XCTestCase {
         app.typeKey("o", modifierFlags: []) // The deck-page O route opens the same saved draft.
         XCTAssertTrue(save.waitForExistence(timeout: 20))
         XCTAssertFalse(gather.exists, "The disclosure opens collapsed after Save too")
+        let footer = app.staticTexts["deckOptions.options.presetFooter"]
         let savedPresetTitle = "Native Options (used by 1 deck)"
-        let savedPresetMenu = openPopupMenu(preset, containing: savedPresetTitle)
-        XCTAssertTrue(popupItem(savedPresetMenu, titled: savedPresetTitle).exists)
-        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertFalse(save.isEnabled)
+
+        // Observe the closed popup: dismissing its tracking menu with Escape
+        // here can reach the page's leave command or consume the next click.
+        XCTAssertTrue(waitForValue(preset, "Native Options"), "The saved name is trimmed and selected")
+        XCTAssertTrue(waitForValue(footer, "Used by this deck only."),
+                      "The saved preset is assigned to this deck only")
         // A second staged preset is discarded through the existing leave prompt.
-        element(app, "deckOptions.options.newPreset").clickOrTap()
-        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForEnabled(newPreset), "New Preset is enabled after reopening")
+        XCTAssertTrue(newPreset.isHittable, "New Preset is hittable after reopening")
+        newPreset.click()
+        XCTAssertTrue(name.waitForExistence(timeout: 10), "New Preset presents its naming field")
         name.clickOrTap(); app.typeText("Discarded Native")
-        XCTAssertTrue(waitForEnabled(create))
+        XCTAssertTrue(waitForEnabled(create), "The second name enables Create")
         create.clickOrTap()
-        XCTAssertTrue(name.waitForNonExistence(timeout: 20))
-        element(app, "deckOptions.options.cancel").clickOrTap()
-        let window = app.windows.containing(.button, identifier: "deckOptions.options.save").firstMatch
-        let prompt = window.sheets.firstMatch
+        XCTAssertTrue(name.waitForNonExistence(timeout: 20), "Create closes the naming sheet")
+        XCTAssertTrue(waitForValue(preset, "Discarded Native"), "The second preset is selected in the draft")
+        let cancel = app.buttons["deckOptions.options.cancel"]
+        cancel.click()
+        // Native confirmation containers vary across macOS versions.
+        let prompt = app.descendants(matching: .any).matching(NSPredicate(
+            format: "elementType IN %@", [XCUIElement.ElementType.sheet.rawValue,
+                                         XCUIElement.ElementType.alert.rawValue,
+                                         XCUIElement.ElementType.dialog.rawValue]))
+            .containing(.button, identifier: "Discard").firstMatch
         let discard = prompt.buttons["Discard"]
-        XCTAssertTrue(prompt.waitForExistence(timeout: 10))
-        XCTAssertTrue(discard.exists)
-        // macOS confirmationDialog supplies the native Cancel caption for
-        // the cancel role, even though the source label is Keep Editing.
-        let keep = prompt.buttons["Cancel"]
-        XCTAssertTrue(keep.exists)
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "The leave prompt contains its actual Discard button")
+        XCTAssertTrue(discard.isEnabled && discard.isHittable, "The prompt's Discard button is actionable")
+        // The system may replace the cancel-role source title with Cancel.
+        let keep = prompt.buttons.matching(NSPredicate(
+            format: "label == %@ OR label == %@", "Cancel", "Keep Editing")).firstMatch
+        XCTAssertTrue(keep.exists && keep.isEnabled && keep.isHittable, "The prompt offers native cancellation")
         keep.click()
-        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10))
-        XCTAssertTrue(save.exists, "Cancelling the confirmation keeps the staged draft")
-        element(app, "deckOptions.options.cancel").clickOrTap()
-        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10), "Cancelling dismisses the prompt")
+        XCTAssertTrue(save.exists && waitForEnabled(save), "Cancelling the confirmation keeps the staged draft")
+        XCTAssertTrue(waitForValue(preset, "Discarded Native"), "The unsaved preset survives cancellation")
+        cancel.click()
+        XCTAssertTrue(discard.waitForExistence(timeout: 10), "Leaving again presents Discard")
+        XCTAssertTrue(discard.isEnabled && discard.isHittable, "The presented prompt's Discard button is actionable")
         discard.click()
-        XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10), "Discard dismisses the leave prompt")
+        XCTAssertTrue(save.waitForNonExistence(timeout: 20), "Discard closes Deck Options")
         app.typeKey("o", modifierFlags: [.command, .option])
-        XCTAssertTrue(save.waitForExistence(timeout: 20))
-        let keptPresetMenu = openPopupMenu(preset, containing: savedPresetTitle)
-        XCTAssertFalse(keptPresetMenu.children(matching: .menuItem).matching(NSPredicate(
-            format: "title BEGINSWITH %@", "Discarded Native")).firstMatch.exists)
+        XCTAssertTrue(save.waitForExistence(timeout: 20), "Deck Options reopens after Discard")
+        preset.click()
+        let keptPresetMenu = preset.menus.firstMatch
+        XCTAssertTrue(popupItem(keptPresetMenu, titled: savedPresetTitle).waitForExistence(timeout: 10),
+                      "The final native menu retains the saved preset and its full used-by count")
+        XCTAssertTrue(!keptPresetMenu.children(matching: .menuItem).matching(NSPredicate(
+            format: "title BEGINSWITH %@", "Discarded Native")).firstMatch.exists,
+                      "The final native menu contains no discarded preset")
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
