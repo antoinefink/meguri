@@ -103,6 +103,10 @@ public struct DeckOptionsPage: View {
             } footer: {
                 Text(DeckOptionsStrings.presetFooter(count: model.selectedUseCount, locale: locale))
                     .accessibilityIdentifier("deckOptions.options.presetFooter")
+                if model.presetValidationFailed {
+                    Text("deckOptions.preset.validationFailed", bundle: .module)
+                        .accessibilityIdentifier("deckOptions.options.presetValidationFailure")
+                }
             }
             Section {
                 numberRow(.newPerDay)

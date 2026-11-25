@@ -28,7 +28,7 @@ public struct NewDeckOptionsPresetForm: View {
             Section {
                 TextField(text: $model.presetName) { Text("deckOptions.preset.name", bundle: .module) }
                     .focused($nameFocused)
-                    .disabled(model.addingPreset || model.presetCreationFailed)
+                    .disabled(model.addingPreset)
                     .onSubmit { model.createPreset() }
                     .accessibilityIdentifier("deckOptions.newPreset.name")
             } footer: {
@@ -56,7 +56,7 @@ public struct NewDeckOptionsPresetForm: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button { model.createPreset() } label: { Text("deckOptions.preset.create", bundle: .module) }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!model.canCreatePreset || model.presetCreationFailed)
+                    .disabled(!model.canCreatePreset)
                     .accessibilityIdentifier("deckOptions.newPreset.create")
             }
         }

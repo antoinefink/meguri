@@ -356,7 +356,17 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The preset could not be prepared. Cancel and reopen Deck Options to try again."
+            "value": "The preset could not be prepared. Cancel to return to your options."
+          }
+        }
+      }
+    },
+    "deckOptions.preset.validationFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The preset was prepared, but its options could not be checked. Save to try again."
           }
         }
       }

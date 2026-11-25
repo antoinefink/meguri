@@ -172,6 +172,8 @@ public final class DeckOptionsPageModel {
     public private(set) var addingPreset = false
     public private(set) var selectingPreset = false
     public private(set) var presetCreationFailed = false
+    /// Add succeeded; Save can safely retry the core's validation before writing.
+    public private(set) var presetValidationFailed = false
     /// The text of each row's field; committed by `commit(_:)` (O15.3).
     public var fieldText: [DeckOptionsPageRow: String] = [:]
     @ObservationIgnored public var locale = Locale.autoupdatingCurrent
@@ -214,6 +216,7 @@ public final class DeckOptionsPageModel {
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false; saveFailure = nil; outcome = nil
         advancedExpanded = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
+        presetValidationFailed = false
         leftWhileSaving = false; saveCancelled = false; changedWhileLoading = false
         self.deckID = deckID; deckName = owner.fullDeckName(deckID) ?? ""
         generation = owner.generation; phase = .loading
@@ -259,6 +262,7 @@ public final class DeckOptionsPageModel {
         deckName = snapshot.deckName; presets = snapshot.presets; selectedPreset = snapshot.openingPreset
         ownLimits = snapshot.ownLimits; ownRetention = snapshot.ownRetention
         self.issues = issues
+        presetValidationFailed = false
         pendingNumericValidations = 0
         for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
         phase = .editing
@@ -307,7 +311,7 @@ public final class DeckOptionsPageModel {
     /// Another preset can be chosen once numeric edits are validated and the
     /// selected one has no error, so an error never hides behind another preset's rows.
     public var canSwitchPreset: Bool {
-        phase == .editing && !addingPreset && !namingPreset && pendingNumericValidations == 0
+        phase == .editing && !addingPreset && !namingPreset && !presetValidationFailed && pendingNumericValidations == 0
             && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
     }
 
@@ -394,16 +398,33 @@ public final class DeckOptionsPageModel {
     }
 
     public func beginNewPreset() {
+        guard phase == .editing, !addingPreset, !namingPreset, !selectingPreset else { return }
         commitAll()
-        guard canSwitchPreset, !selectingPreset, let owner, owner.generation == generation,
-              owner.deckOptionsAllowed else { return }
         selectionRequest &+= 1
+        if pendingNumericValidations > 0 {
+            let current = revision, request = selectionRequest, typed = fieldText, pending = editTask
+            selectingPreset = true
+            selectionTask = Task { [weak self] in
+                await pending?.value
+                guard let self, self.revision == current, self.selectionRequest == request else { return }
+                self.selectingPreset = false
+                guard self.fieldText == typed else { return }
+                self.presentNewPreset()
+            }
+            return
+        }
+        presentNewPreset()
+    }
+
+    private func presentNewPreset() {
+        guard canSwitchPreset, !selectingPreset, !changedElsewhere, let owner, owner.generation == generation,
+              owner.deckOptionsAllowed else { return }
         presetName = ""; presetCreationFailed = false
         owner.navigation.present(.newDeckOptionsPreset)
     }
 
     public var canCreatePreset: Bool {
-        phase == .editing && namingPreset && !addingPreset && !presetCreationFailed
+        phase == .editing && namingPreset && !addingPreset && !changedElsewhere
             && !presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && owner?.generation == generation
             && owner?.deckNamesAllowed(host: .main, route: .newDeckOptionsPreset) == true
@@ -434,20 +455,41 @@ public final class DeckOptionsPageModel {
                 addingPreset = false; finishNamingPreset()
                 return
             }
-            do {
-                let updated = try await session.addPreset(name: name)
-                let checked = try await session.issues()
-                guard current == revision else { return }
-                presets = updated.presets; selectedPreset = updated.openingPreset; issues = checked
-                for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
-                addingPreset = false; finishNamingPreset()
-            } catch {
+            let updated: DeckOptionsPageSnapshot
+            do { updated = try await session.addPreset(name: name) }
+            catch {
                 guard current == revision else { return }
                 addingPreset = false; presetCreationFailed = true
-                // An edit may have reached the core before validation failed.
-                // Refuse a later save until that draft has been reloaded.
-                changedElsewhere = true
+                // A rejected Add leaves the core draft, including earlier edits, intact.
+                handlePresetFailure(error)
+                return
             }
+            guard current == revision else { return }
+            // Add committed its staged draft. Reflect it even if the separate
+            // validation read fails, and never offer to retry this Add.
+            presets = updated.presets; selectedPreset = updated.openingPreset
+            for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
+            do {
+                let checked = try await session.issues()
+                guard current == revision else { return }
+                issues = checked; presetValidationFailed = false
+            } catch {
+                guard current == revision else { return }
+                presetValidationFailed = true
+                handlePresetFailure(error)
+            }
+            guard current == revision else { return }
+            addingPreset = false; finishNamingPreset()
+        }
+    }
+
+    private func handlePresetFailure(_ error: any Error) {
+        switch error as? BridgeError {
+        case .staleGeneration?: end(.ended)
+        case .stale?, .notFound?: changedElsewhere = true
+        case .deckOptionsInvalid(let raw)?:
+            issues = raw.compactMap(DeckOptionsPageIssue.init); presetValidationFailed = false
+        default: break
         }
     }
 
@@ -515,7 +557,7 @@ public final class DeckOptionsPageModel {
             do {
                 try await edit(session)
                 let issues = try await session.issues()
-                if current == revision { self.issues = issues }
+                if current == revision { self.issues = issues; presetValidationFailed = false }
             } catch {
                 // The core draft no longer matches this page; read it again.
                 if current == revision { changedElsewhere = true }
@@ -563,7 +605,8 @@ public final class DeckOptionsPageModel {
                 phase = .editing
                 if leftWhileSaving { end(.left); return }
                 switch error as? BridgeError {
-                case .deckOptionsInvalid(let raw)?: issues = raw.compactMap(DeckOptionsPageIssue.init)
+                case .deckOptionsInvalid(let raw)?:
+                    issues = raw.compactMap(DeckOptionsPageIssue.init); presetValidationFailed = false
                 case .stale?, .notFound?: reload(); saveFailure = .failed
                 case .staleGeneration?: end(.ended)
                 case .cancelled?: break
@@ -605,6 +648,7 @@ public final class DeckOptionsPageModel {
         let previous = session, closing = deckID
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false
+        presetValidationFailed = false
         finishNamingPreset(); addingPreset = false; selectingPreset = false
         deckID = nil; phase = .closed; self.outcome = outcome
         if let previous { Task { await previous.cancel() } }

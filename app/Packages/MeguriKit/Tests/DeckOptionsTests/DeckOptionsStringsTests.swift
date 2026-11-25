@@ -65,6 +65,8 @@ import Testing
             "deckOptions.option.newMix": "New/review order", "deckOptions.option.interdayLearningMix": "Interday learning/review order",
             "deckOptions.option.reviewOrder": "Review sort order", "deckOptions.preset.new": "New Preset…",
             "deckOptions.preset.newTitle": "New Preset", "deckOptions.preset.name": "Name", "deckOptions.preset.create": "Create",
+            "deckOptions.preset.createFailed": "The preset could not be prepared. Cancel to return to your options.",
+            "deckOptions.preset.validationFailed": "The preset was prepared, but its options could not be checked. Save to try again.",
             "deckOptions.displayOrder.footer": "Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear.",
         ]
         for (key, text) in expected {
