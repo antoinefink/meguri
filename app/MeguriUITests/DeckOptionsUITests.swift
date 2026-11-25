@@ -152,22 +152,18 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(gather.waitForExistence(timeout: 10))
         XCTAssertTrue(bringIntoView(gather, in: scroll, app: app))
         // This is the native menu's spec order, including the nonsequential value 5.
-        gather.clickOrTap()
         let gatherLabels = ["Deck", "Deck, then random notes", "Ascending position", "Descending position", "Random notes", "Random cards"]
-        let menu = app.menus.firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        let titles = menuTitles(menu)
-        XCTAssertEqual(titles, gatherLabels)
-        menuItem(menu, titled: "Deck, then random notes").click()
+        let gatherMenu = openPopupMenu(gather, containing: "Deck, then random notes")
+        XCTAssertEqual(popupTitles(gatherMenu), gatherLabels)
+        popupItem(gatherMenu, titled: "Deck, then random notes").click()
         XCTAssertTrue(waitForEnabled(save))
         XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
-        review.click()
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        XCTAssertEqual(menuTitles(menu),
+        let reviewMenu = openPopupMenu(review, containing: "Descending intervals")
+        XCTAssertEqual(popupTitles(reviewMenu),
                        ["Due date, then random", "Due date, then deck", "Deck, then due date", "Ascending intervals",
                         "Descending intervals", "Easy cards first", "Difficult cards first", "Ascending retrievability",
                         "Descending retrievability", "Relative overdueness", "Random", "Order added", "Latest added first"])
-        menuItem(menu, titled: "Descending intervals").click()
+        popupItem(reviewMenu, titled: "Descending intervals").click()
         XCTAssertTrue(waitForValue(review, "Descending intervals"))
         XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
         capture(app, "deck-options-expanded")
@@ -180,12 +176,12 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertFalse(create.isEnabled)
         name.clickOrTap(); app.typeText("   ")
         XCTAssertFalse(create.isEnabled, "Whitespace is not a name")
-        app.typeKey("a", modifierFlags: .command); app.typeText("  Native Options  ")
+        app.typeKey("a", modifierFlags: .command); app.typeText(" Native Options ")
         XCTAssertTrue(waitForEnabled(create))
         capture(app, "deck-options-new-preset-name")
         create.clickOrTap()
         XCTAssertTrue(name.waitForNonExistence(timeout: 20))
-        let preset = element(app, "deckOptions.options.presetPicker")
+        let preset = app.popUpButtons["deckOptions.options.presetPicker"]
         XCTAssertTrue(preset.exists)
         // Add uses defaults and selects a staged preset; it has not assigned the deck yet.
         XCTAssertTrue(waitForValue(element(app, "deckOptions.options.option.newPerDay"), "20"))
@@ -197,14 +193,16 @@ final class DeckOptionsUITests: XCTestCase {
         app.typeKey("o", modifierFlags: []) // The deck-page O route opens the same saved draft.
         XCTAssertTrue(save.waitForExistence(timeout: 20))
         XCTAssertFalse(gather.exists, "The disclosure opens collapsed after Save too")
-        preset.clickOrTap()
-        XCTAssertTrue(menuItem(app, titled: "Native Options (used by 1 deck)").waitForExistence(timeout: 10))
+        let savedPresetTitle = "Native Options (used by 1 deck)"
+        let savedPresetMenu = openPopupMenu(preset, containing: savedPresetTitle)
+        XCTAssertTrue(popupItem(savedPresetMenu, titled: savedPresetTitle).exists)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertFalse(save.isEnabled)
         // A second staged preset is discarded through the existing leave prompt.
         element(app, "deckOptions.options.newPreset").clickOrTap()
         XCTAssertTrue(name.waitForExistence(timeout: 10))
         name.clickOrTap(); app.typeText("Discarded Native")
+        XCTAssertTrue(waitForEnabled(create))
         create.clickOrTap()
         XCTAssertTrue(name.waitForNonExistence(timeout: 20))
         element(app, "deckOptions.options.cancel").clickOrTap()
@@ -226,8 +224,9 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(save.waitForNonExistence(timeout: 20))
         app.typeKey("o", modifierFlags: [.command, .option])
         XCTAssertTrue(save.waitForExistence(timeout: 20))
-        preset.clickOrTap()
-        XCTAssertFalse(app.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Discarded Native")).firstMatch.exists)
+        let keptPresetMenu = openPopupMenu(preset, containing: savedPresetTitle)
+        XCTAssertFalse(keptPresetMenu.children(matching: .menuItem).matching(NSPredicate(
+            format: "title BEGINSWITH %@", "Discarded Native")).firstMatch.exists)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
@@ -339,9 +338,22 @@ final class DeckOptionsUITests: XCTestCase {
         // Native Mac menus can expose their captions as either title or label.
         menu.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@", title, title)).firstMatch
     }
-    private func menuTitles(_ menu: XCUIElement) -> [String] {
-        menu.menuItems.allElementsBoundByIndex.map { $0.title.isEmpty ? $0.label : $0.title }.filter { !$0.isEmpty }
+    private func popupItem(_ menu: XCUIElement, titled title: String) -> XCUIElement {
+        menu.children(matching: .menuItem).matching(NSPredicate(format: "title == %@", title)).firstMatch
     }
+
+    private func openPopupMenu(_ picker: XCUIElement, containing title: String,
+                               file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        picker.click()
+        let menu = picker.menus.firstMatch
+        XCTAssertTrue(popupItem(menu, titled: title).waitForExistence(timeout: 10), file: file, line: line)
+        return menu
+    }
+
+    private func popupTitles(_ menu: XCUIElement) -> [String] {
+        menu.children(matching: .menuItem).allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty }
+    }
+
     private func bringIntoView(_ control: XCUIElement, in scroll: XCUIElement, app: XCUIApplication) -> Bool {
         // A visible native control needs no scroll-area or scrollbar AX node.
         if control.exists, !control.frame.isEmpty,
