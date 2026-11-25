@@ -174,16 +174,18 @@ impl Service {
         // consent/grant action before its committing recheck.
         let gate = self.barriers.get(&id)?;
         let guard = gate.enter_browser_commit().await;
-        self.metadata.files_try(move |root| {
+        #[cfg(feature = "test-hooks")]
+        let hooks = self.hooks.clone();
+        self.metadata.run(move |c| {
             let _browser_commit = (gate, guard);
-            let c = crate::storage::open(root.database(), false)?;
-            c.busy_timeout(std::time::Duration::ZERO)?;
-            admission(&c)?;
+            admission(c)?;
             // Retain revoked rows for idempotent sign-out of a formerly valid
             // cookie. An absent/foreign cookie never revokes another session.
             let stored = c.query_row("SELECT hash FROM credentials WHERE hash=?1 AND account_id=?2 AND kind='session'",
                 params![hash.as_slice(),id], |r|r.get::<_,Vec<u8>>(0)).optional()?;
             if !stored.is_some_and(|v|crypto::same_digest(&v,&hash)) {return Err(Error::new("authentication_failed"));}
+            #[cfg(feature = "test-hooks")]
+            tokio::runtime::Handle::current().block_on(hooks.hit("browser_logout_before_revocation"));
             c.execute("UPDATE credentials SET revoked=1 WHERE hash=?1 AND kind='session'",[hash.as_slice()])?;
             Ok(())
         }).await

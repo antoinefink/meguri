@@ -13,14 +13,14 @@ pub(crate) enum Operation {
     Create(browse::Create), Edit(mcp::EditInput), Delete(browse::Delete),
 }
 impl Service {
-    pub(crate) async fn browse(&self, original:BrowserAuthority, expected:Option<String>, op:Operation) -> Result<serde_json::Value> {
+    pub(crate) async fn browse(&self, original:BrowserAuthority, expected:String, op:Operation) -> Result<serde_json::Value> {
         let actor=original.clone();
         // Resolve and validate identity before queueing. No OAuth exchange and
         // no caller-supplied identifier ever selects an account or file.
         let epoch=self.metadata.run(move |c| {
             admission(c)?;
             let account=check_browser(c,&actor,"authentication_failed")?;
-            if expected.as_ref().is_some_and(|id|*id!=account.identity.id){return Err(Error::new("stale_authority"));}
+            if expected!=account.identity.id{return Err(Error::new("stale_authority"));}
             crate::storage::reset::admitted_epoch(c,&account.identity.id)
         }).await?;
         let id=original.identity().id.clone();

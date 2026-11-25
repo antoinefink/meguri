@@ -836,13 +836,13 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "server/web/tests/browser/browse.spec.ts":
-        "069269d7a09c0d48abe640490f2e486287453f588040ee4125f9160690e9526f",
+        "c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0",
     "server/web/tests/browser/browse-real.spec.ts":
-        "e8b068d84678caa5654dcdd7d425100354442c33beb492c5399770be2a4c95a9",
+        "4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261",
     "server/web/src/browse.tsx":
-        "095a096d756cc03d00dccd61548d1d81bf9f32afde9910fd49512f94793bd832",
+        "6248591f5718c951e888a783bc14eb800ba407dc5d4e22c2cba749e717beb961",
     "server/tests/browse.rs":
-        "07151331ac0489f0bf4b9ce42ca6fadf87ee0b555d8c1f5bac99c5678b0c69ea",
+        "a4ac2b397dc035bedcc7ed8ae221fe8e872293f4bf0e71e6218ff976542e845a",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
         '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':

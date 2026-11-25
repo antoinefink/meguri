@@ -19,3 +19,12 @@ The independent web reviewer inspected all changed web sources and tests, their 
 - `server/web/tests/browser/browse.spec.ts` — `069269d7a09c0d48abe640490f2e486287453f588040ee4125f9160690e9526f`
 
 The first typecheck found a catalog declaration error. The review requested corrections to draft ownership, sparse search and list restoration. The web dependency graph and the build-time matcher inputs remain subject to the existing fixed assessment.
+
+Fixer run `20261125T144821Z-18347` exported the identity, projection, logout and draft fixes. Independent Rust and web reviewers inspected the revised files and regenerated frontend manifest. The real HTTP and incremental sync selection passed 20 tests in `sync-server-test/20261125T145953Z-25765`. The real server browser journey produced desktop and compact captures. Reviewed operational metadata and synthetic file admissions for this round follow.
+
+- `docs/process/provenance/sessions/s-20261125T144613Z-16dfc2f0.json` — `d09ccad0311df29bd8cc27c050574d64e27eedc73f6420d629e7885773c47910`
+- `server/tests/browse.rs` — `a4ac2b397dc035bedcc7ed8ae221fe8e872293f4bf0e71e6218ff976542e845a`
+- `server/web/src/browse.tsx` — `6248591f5718c951e888a783bc14eb800ba407dc5d4e22c2cba749e717beb961`
+- `server/web/tests/browser/browse-real.spec.ts` — `4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261`
+- `server/web/tests/browser/browse.spec.ts` — `c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0`
+- `server/web/scripts/audit-assessment.json` — `c5e9b8f26705263e67a795794d096d86b4ec0ea653008a183a9f7f2c1a6c4eb7`

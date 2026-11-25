@@ -27,7 +27,7 @@ fn seed(h:&Harness,id:&str) {
         for (ord,name) in fields.iter().enumerate() {tx.execute("INSERT INTO fields VALUES(?1,?2,?3,?4)",params![mid,ord as i64,name,ProtoBlob::new(FieldConfig::default()).to_bytes().into_owned()]).unwrap();}
         for ord in 0..count {
             let mut config=TemplateConfig::default();config.q_format=format!("{{{{{}}}}}",fields[ord]);config.a_format="{{Spanish}} {{English}}".into();
-            tx.execute("INSERT INTO templates VALUES(?1,?2,?3,0,0,?4)",params![mid,ord,if ord==0 {"Forward"} else {"Reverse"},ProtoBlob::new(config).to_bytes().into_owned()]).unwrap();
+            tx.execute("INSERT INTO templates VALUES(?1,?2,?3,0,0,?4)",params![mid,ord as i64,if ord==0 {"Forward"} else {"Reverse"},ProtoBlob::new(config).to_bytes().into_owned()]).unwrap();
         }
     }
     tx.execute("INSERT INTO config VALUES('nextPos',0,0,?1)",[b"1".as_slice()]).unwrap();tx.commit().unwrap();
@@ -86,8 +86,8 @@ async fn field_examples_visible_text_sparse_card_keysets_and_exact_identities() 
     let nid=literal["note_id"].as_str().unwrap().parse::<i64>().unwrap();
     for i in 1..=405 {db.execute("INSERT INTO cards SELECT ?1,nid,2,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE nid=?2 LIMIT 1",params![i,nid]).unwrap();}
     db.execute("UPDATE cards SET did=1 WHERE id=405",[]).unwrap();
-    let sparse=page(&h,&cookie,id,json!({"deck_id":"1","query":"[a.b]"})).await;assert_eq!(sparse["cards"],json!([]));assert!(sparse["next_cursor"].is_string());
-    let next=page(&h,&cookie,id,json!({"deck_id":"1","query":"[a.b]","cursor":sparse["next_cursor"]})).await;assert_eq!(next["cards"],json!([]));assert!(next["next_cursor"].is_string());
+    let sparse=page(&h,&cookie,id,json!({"deck_id":"1","query":"[a.b]"})).await;assert_eq!(sparse["cards"],json!([]));assert!(sparse["next_cursor"].is_string());assert_eq!(sparse["examined_through"],"200");
+    let next=page(&h,&cookie,id,json!({"deck_id":"1","query":"[a.b]","cursor":sparse["next_cursor"]})).await;assert_eq!(next["cards"],json!([]));assert!(next["next_cursor"].is_string());assert_eq!(next["examined_through"],"400");
     let last=page(&h,&cookie,id,json!({"deck_id":"1","query":"[a.b]","cursor":next["next_cursor"]})).await;assert!(last["cards"].as_array().unwrap().iter().any(|c|c["card_id"]=="405"));
     db.execute("INSERT INTO cards SELECT 9007199254740993,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=405",[]).unwrap();
     let exact=data(&h,&cookie,id,"detail",json!({"card_id":"9007199254740993"})).await;assert_eq!(exact["card"]["card_id"],"9007199254740993");drop(db);h.stop().await;
@@ -140,6 +140,7 @@ async fn strict_account_binding_epoch_publication_and_session_revalidation() {
         ("delete",json!({"note_id":"1","revision":"r","confirmation":"c"})),
     ] {
         error(h.post(&format!("/api/me/browse/{action}"),body.clone(),None).await,401,"authentication_failed").await;
+        error(h.post(&format!("/api/me/browse/{action}"),body.clone(),Some(&cookie)).await,400,"invalid_request").await;
         error(request(&h,&member_cookie,id,action,body).await,409,"stale_authority").await;
     }
     assert!(page(&h,&member_cookie,other,json!({})).await["cards"].as_array().unwrap().is_empty());
@@ -216,5 +217,67 @@ async fn sign_out_serializes_with_browser_collection_commit() {
     let (response,())=tokio::join!(write,logout);assert_eq!(response.status(),200);
     error(request(&h,&cookie,id,"page",json!({})).await,401,"authentication_failed").await;
     let cookie=h.login("root.admin",PASSWORD).await;assert_eq!(detail(&h,&cookie,id,&p["cards"][0]).await["note"]["fields"]["Example"],"committed before sign-out");
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn browse_projection_passes_mcp_caps_and_large_unchecked_cards_do_not_block_later_matches() {
+    let h = Harness::new().await;
+    let account = h.setup().await;
+    let id = account["id"].as_str().unwrap();
+    let cookie = h.login("root.admin", PASSWORD).await;
+    seed(&h, id);
+    let projected = create(&h, &cookie, id, "10", "Searchable imported note", "before").await;
+    let oversized = create(&h, &cookie, id, "10", "Large imported note", "before").await;
+    let later = create(&h, &cookie, id, "10", "Later ordinary match", "A café with 3 < 5 and 7 > 6.").await;
+    let db = schema::open(&current(&h, id), true).unwrap();
+    // Synthetic sync-imported sizes: over MCP's text/object limits, then over
+    // Browse's bounded text projection. No full note/hash read is needed here.
+    let fields = format!("Searchable imported note\u{1f}untouched\u{1f}{} café", "x".repeat(140_000));
+    db.execute("UPDATE notes SET flds=?1,data=?2 WHERE id=?3", params![fields, "opaque".repeat(100_000), projected["note_id"].as_str().unwrap().parse::<i64>().unwrap()]).unwrap();
+    let fields = format!("Large imported note\u{1f}untouched\u{1f}{}", "x".repeat(2 * 1024 * 1024));
+    db.execute("UPDATE notes SET flds=?1 WHERE id=?2", params![fields, oversized["note_id"].as_str().unwrap().parse::<i64>().unwrap()]).unwrap();
+    let all = page(&h, &cookie, id, json!({})).await;
+    assert_eq!(all["cards"].as_array().unwrap().len(), 3);
+    assert!(all["cards"][1]["unavailable"].as_str().unwrap().contains("not searched"));
+    let first = page(&h, &cookie, id, json!({"query":"CAFÉ","limit":1})).await;
+    assert_eq!(first["cards"][0]["note_id"], projected["note_id"]);
+    let unchecked = page(&h, &cookie, id, json!({"query":"CAFÉ","limit":1,"cursor":first["next_cursor"]})).await;
+    assert_eq!(unchecked["cards"][0]["note_id"], oversized["note_id"]);
+    assert!(unchecked["cards"][0]["unavailable"].is_string());
+    assert!(unchecked["next_cursor"].is_string());
+    let last = page(&h, &cookie, id, json!({"query":"CAFÉ","limit":1,"cursor":unchecked["next_cursor"]})).await;
+    assert_eq!(last["cards"][0]["note_id"], later["note_id"]);
+    assert!(last["next_cursor"].is_null());
+    let comparisons = page(&h, &cookie, id, json!({"query":"3 < 5 and 7 > 6"})).await;
+    assert!(comparisons["cards"].as_array().unwrap().iter().any(|card|card["note_id"] == later["note_id"]));
+    drop(db);
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn sign_out_uses_ordinary_metadata_wait_and_remains_idempotent_without_publication() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    let (_, key) = h.service.native_login(IP, "root.admin", PASSWORD.into()).await.unwrap();
+    let native = h.service.validate_hostkey(&key).await.unwrap();
+    let barrier = h.service.publication_barrier(&native).await.unwrap();
+    let held_publication = barrier.enter().await;
+    let token = cookie.split_once('=').unwrap().1.to_owned();
+    let service = h.service.clone();
+    let original = token.clone();
+    let pause = h.service.hooks.arm("browser_logout_before_revocation");
+    let mut logout = tokio::spawn(async move { service.logout(&original).await });
+    pause.arrived().await;
+    let writer = rusqlite::Connection::open(h.database()).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    pause.resume();
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(100), &mut logout).await.is_err(), "sign-out must wait for the ordinary metadata writer");
+    writer.execute_batch("ROLLBACK").unwrap();
+    logout.await.unwrap().unwrap();
+    h.service.logout(&token).await.unwrap();
+    drop(held_publication);
+    error(request(&h, &cookie, native.account_id(), "page", json!({})).await, 401, "authentication_failed").await;
     h.stop().await;
 }

@@ -15,7 +15,7 @@ async function fixture(page: Page, origin: string, many = false) {
   const notes = samples.map(([Spanish, Example], i) => ({ note_id: String(101 + i), note_type_id: "10", fields: { Spanish: Spanish!, English: "<b>keep this field</b>", Example: Example! }, tags: ["study"], revision: "r1" }));
   const state = { account: "synthetic-a", responseAccount: "synthetic-a", notes, pages: [] as BrowseScope[], writes: [] as { path: string; body: Record<string, unknown> }[],
     pageGate: null as Promise<void> | null, detailGate: null as Promise<void> | null, writeGate: null as Promise<void> | null,
-    conflict: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
+    conflict: false, detailError: false, pageError: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
   const card = (i: number, scope: BrowseScope): BrowseCard => {
     const note = notes[i % notes.length]!;
     const field = scope.field || (scope.query && note.fields.Spanish.toLowerCase().includes(scope.query.toLowerCase()) ? "Spanish" : "Example");
@@ -37,15 +37,19 @@ async function fixture(page: Page, origin: string, many = false) {
     if (path.endsWith("/catalog")) return reply({ account_id: state.responseAccount, generation: "g1", decks: [{ deck_id: "1", name: "Spanish", filtered: false }, { deck_id: "2", name: "Filtered", filtered: true }], note_types: [{ note_type_id: "10", name: "Vocabulary", field_names: ["Spanish", "English", "Example"] }], next_cursor: null });
     if (path.endsWith("/page")) {
       state.pages.push(body as BrowseScope); state.pageReads++;
-      const cards = Array.from({ length: many ? 50 : 3 }, (_, i) => card(i, body as BrowseScope)).filter(c => {
+      if (state.pageError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });
+      const position = state.sparse ? Number(body.cursor ?? 0) + 200 : 0;
+      const indexes = state.sparse ? position === 600 ? [399] : position === 1200 ? [800, 801] : [] : Array.from({ length: many ? 50 : 3 }, (_, i) => i);
+      const cards = indexes.map(i => card(i, body as BrowseScope)).filter(c => {
         const note = notes.find(n => n.note_id === c.note_id)!;
         return body.deck_id !== "2" && (!body.query || Object.entries(note.fields).some(([name, text]) => (!body.field || body.field === name) && text.toLowerCase().includes(String(body.query).toLowerCase())));
       });
-      const result = { account_id: state.responseAccount, cards, next_cursor: body.query === "sparse" && !body.cursor ? "continue" : null };
+      const result = { account_id: state.responseAccount, cards, next_cursor: state.sparse && position < 1200 ? String(position) : null, examined_through: state.sparse ? String(position) : cards.at(-1)?.card_id ?? null };
       await state.pageGate; return reply(result);
     }
     if (path.endsWith("/detail")) {
       state.detailReads++;
+      if (state.detailError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });
       const c = card(Number(body.card_id) - 201, { query: "", field: null, deck_id: null });
       const note = notes.find(n => n.note_id === c.note_id)!;
       const result: BrowseDetail = { account_id: state.responseAccount, card: c, note: structuredClone(note), field_names: ["Spanish", "English", "Example"], sibling_ids: [c.card_id, "9007199254740993"], confirmation: "confirm-r1" };
@@ -82,16 +86,17 @@ test("field examples, inert highlights, shared editing and unchanged markup", as
 test("compact Back retains scope, scroll and row focus; dirty drafts require a decision", async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 }); await fixture(page, baseURL!, true); await page.goto("/browse"); await expect(rows(page)).toHaveCount(50);
   await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(50);
-  await page.locator(".browse-results").evaluate(el => { el.scrollTop = 600; });
-  const selected = rows(page).nth(12); await selected.click();
-  const before = await page.locator(".browse-results").evaluate(el => el.scrollTop); await expect(page.getByLabel("Example", { exact: true })).toBeVisible();
+  const selected = rows(page).nth(12);
+  await selected.focus(); await selected.scrollIntoViewIfNeeded();
+  // Observe the live scrolling element before compact detail hides the list.
+  const before = await page.locator(".browse-results").evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+  await selected.press("Enter"); await expect(page.getByLabel("Example", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Search note fields")).toBeHidden(); await page.getByLabel("Example", { exact: true }).fill("draft");
   page.once("dialog", dialog => void dialog.dismiss()); await page.getByRole("button", { name: "Back to results" }).click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("draft");
   page.once("dialog", dialog => void dialog.accept()); await page.getByRole("button", { name: "Back to results" }).click();
   await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(selected).toBeFocused();
-  // Clicking can scroll the selected row into view first; Back restores that
-  // position, which remains well below the top of the bounded list.
-  expect(await page.locator(".browse-results").evaluate(el => el.scrollTop)).toBeGreaterThanOrEqual(before);
+  await expect.poll(() => page.locator(".browse-results").evaluate(el => el.scrollTop)).toBeCloseTo(before, 0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 test("conflicts retain proposed fields and deletion requires the displayed sibling confirmation", async ({ page, baseURL }) => {
@@ -112,9 +117,14 @@ test("superseded detail reads cannot overwrite another selection", async ({ page
   state.detailGate = null; await rows(page).nth(1).click(); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("aprovechar");
   old.release(); await page.getByLabel("Example", { exact: true }).fill("current draft"); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("aprovechar");
 });
-test("sparse pages offer continuation and account mismatches clear all collection controls", async ({ page, baseURL }) => {
+test("sparse pages automatically advance and account mismatches clear collection controls", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
-  await search(page, "sparse"); await expect(page.getByRole("button", { name: "Load more cards" })).toBeVisible(); await page.getByRole("button", { name: "Load more cards" }).click();
+  state.sparse = true;
+  const before = state.pageReads;
+  await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
+  expect(state.pageReads - before).toBe(3); await expect(rows(page).first()).toHaveAttribute("data-card", "600");
+  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  expect(state.pageReads - before).toBe(6);
   await expect(page.getByRole("button", { name: "Load more cards" })).toHaveCount(0);
   state.responseAccount = "synthetic-b"; await search(page, "aprovechar");
   await expect(page.getByRole("alert")).toContainText("account changed"); await expect(rows(page)).toHaveCount(0); await expect(page.getByRole("button", { name: "Add note", exact: true })).toBeDisabled();
@@ -152,4 +162,89 @@ test("identity changes unmount drafts and disregard a pending old-account read",
   await page.getByRole("link", { name: "Browse", exact: true }).click(); await expect(rows(page).first()).toContainText("New account only");
   held.release(); await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(page.getByText("old-account draft", { exact: true })).toHaveCount(0);
   await expect(rows(page).first()).toContainText("New account only");
+});
+
+test("selection handover fences typing in the previous editor during a delayed response", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  const previous = page.getByLabel("Example", { exact: true });
+  await expect(previous).toHaveValue(samples[0]![1]!);
+  const held = barrier(); state.detailGate = held.promise;
+  await rows(page).nth(1).focus(); await rows(page).nth(1).press("Enter");
+  await expect.poll(() => state.detailReads).toBe(2);
+  await expect(previous).toBeDisabled(); await expect(page.getByLabel("Tags", { exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  // Keyboard input during the handover cannot create a draft that the response
+  // would silently replace. The selected row still owns keyboard focus.
+  await page.keyboard.type("typing while selection is pending");
+  await expect(previous).toHaveValue(samples[0]![1]!);
+  held.release(); await expect(previous).toBeEnabled(); await expect(previous).toHaveValue(samples[1]![1]!);
+  await previous.fill("new selection draft"); await expect(previous).toHaveValue("new selection draft");
+  expect(state.writes).toHaveLength(0);
+});
+
+test("saving a later sparse result replays the examined range and keeps nearby matches", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
+  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  await rows(page).nth(1).click(); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("la oportunidad");
+  const before = state.pageReads;
+  await page.getByLabel("Example", { exact: true }).fill("This row no longer matches.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await expect(rows(page)).toHaveCount(2);
+  expect(state.pageReads - before).toBe(6);
+  await expect(rows(page).first()).toHaveAttribute("data-card", "600");
+  await expect(rows(page).last()).toHaveAttribute("data-card", "1002");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Back to results" }).click();
+  await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(rows(page).last()).toBeFocused();
+  expect(state.writes[0]!.body.revision).toBe("r1");
+});
+
+test("changed search and selection cancel automatic sparse continuation", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  const old = barrier(); state.sparse = true; state.pageGate = old.promise;
+  const before = state.pageReads; await search(page, "aprovechar"); await expect.poll(() => state.pageReads).toBe(before + 1);
+  state.sparse = false; state.pageGate = null;
+  await search(page, "oportunidad"); await expect(rows(page)).toHaveCount(1);
+  old.release(); await expect(rows(page)).toHaveCount(1); await expect(rows(page).first()).toContainText("la oportunidad");
+  state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
+  const pending = barrier(); state.pageGate = pending.promise;
+  const reads = state.pageReads;
+  await page.getByRole("button", { name: "Load more cards" }).click(); await expect.poll(() => state.pageReads).toBe(reads + 1);
+  await rows(page).first().press("Enter"); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("el viaje");
+  pending.release(); await expect(page.getByLabel("Example", { exact: true })).toBeEnabled();
+  expect(state.pageReads).toBe(reads + 1);
+});
+
+test("a committed edit adopts its revision even if detail refresh fails", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  state.detailError = true;
+  await page.getByLabel("Example", { exact: true }).fill("first committed edit"); await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("alert")).toContainText("Note 101 saved. Could not refresh");
+  await expect(page.getByLabel("Example", { exact: true })).toHaveValue("first committed edit");
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+  await page.getByLabel("Example", { exact: true }).fill("second edit with committed revision");
+  await page.getByRole("button", { name: "Save changes" }).click(); await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.writes[1]!.body.revision).toBe("r2");
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  state.detailError = false; await page.getByRole("button", { name: "Load server copy" }).click();
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+});
+
+test("creation and deletion stay acknowledged when result refresh fails", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  await page.getByRole("button", { name: "Add note", exact: true }).click(); await page.getByLabel("Spanish", { exact: true }).fill("created once");
+  state.pageError = true; await page.getByRole("button", { name: "Create note" }).click();
+  await expect(page.getByRole("alert")).toContainText("Note 101 saved. Could not refresh");
+  await expect(page.getByRole("button", { name: "Create note" })).toHaveCount(0);
+  expect(state.writes).toHaveLength(1);
+  state.pageError = false; await search(page, ""); await rows(page).first().click();
+  await page.getByRole("button", { name: "Delete note", exact: true }).click(); state.pageError = true;
+  await page.getByRole("button", { name: "Confirm delete note" }).click();
+  await expect(page.getByRole("alert")).toContainText("Note and its cards deleted. Could not refresh");
+  await expect(page.getByRole("button", { name: "Confirm delete note" })).toHaveCount(0);
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
+  expect(state.writes).toHaveLength(2);
 });

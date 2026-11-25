@@ -31,9 +31,14 @@ pub(crate) struct Row {
     pub card_id: String, pub note_id: String, pub title: String,
     pub field: Option<String>, pub excerpt: Vec<Fragment>,
     pub deck: String, pub template: String,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub unavailable: Option<String>,
 }
 #[derive(Serialize)]
-pub(crate) struct CardPage { pub cards: Vec<Row>, pub next_cursor: Option<String> }
+pub(crate) struct CardPage {
+    pub cards: Vec<Row>, pub next_cursor: Option<String>,
+    pub examined_through: Option<String>,
+}
 #[derive(Serialize)]
 pub(crate) struct Detail {
     pub card: Row, pub note: NoteResult, pub field_names: Vec<String>,
@@ -70,8 +75,34 @@ fn hidden_attribute(tag: &str, name: &str) -> bool {
 fn raw_hidden(name: &str) -> bool { matches!(name,"script"|"style"|"template"|"head"|"audio"|"video") }
 fn void_tag(name: &str) -> bool { matches!(name,"area"|"base"|"br"|"col"|"embed"|"hr"|"img"|"input"|"link"|"meta"|"param"|"source"|"track"|"wbr") }
 
-// A bounded text projection, never a card renderer. Attributes, media names,
-// comments and executable/style contents cannot become search hits or titles.
+// Only a letter (optionally after /) can begin a tag. Comparisons remain text.
+fn tag_start(tail: &str) -> bool {
+    let body = tail.strip_prefix("</").or_else(||tail.strip_prefix('<')).unwrap_or("");
+    body.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+}
+
+// Both success and malformed input consume the examined span. In particular an
+// unterminated quoted tag never causes another scan of the remaining suffix.
+fn tag_end(tail: &str) -> std::result::Result<usize, usize> {
+    let mut quote = None;
+    for (i, ch) in tail.char_indices().skip(1) {
+        if let Some(q) = quote {
+            if ch == q { quote = None; }
+        } else {
+            match ch {
+                '\'' | '"' => quote = Some(ch),
+                '>' => return Ok(i),
+                '<' => return Err(i),
+                _ => {},
+            }
+        }
+    }
+    Err(tail.len())
+}
+
+// A bounded text projection, never a card renderer. Decode entities after
+// tokenization so escaped markup stays literal. Each source byte is scanned a
+// constant number of times, including malformed markup and sound tokens.
 pub(crate) fn visible_text(raw: &str) -> String {
     let mut out = String::new();
     let mut at = 0;
@@ -79,36 +110,50 @@ pub(crate) fn visible_text(raw: &str) -> String {
     while at < raw.len() {
         let tail = &raw[at..];
         if tail.starts_with("<!--") {
-            at += tail.find("-->").map_or(tail.len(), |n| n + 3); continue;
+            if let Some(end) = tail.find("-->") { at += end + 3; continue; }
+            if hidden.is_empty() { out.push_str(tail); }
+            break;
         }
-        if tail.starts_with('<') {
-            let mut quote = None;
-            let mut end = None;
-            for (i, ch) in tail.char_indices().skip(1) {
-                if let Some(q) = quote { if ch == q { quote = None; } }
-                else if matches!(ch, '\'' | '"') { quote = Some(ch); }
-                else if ch == '>' { end = Some(i); break; }
+        if tag_start(tail) {
+            let end = match tag_end(tail) {
+                Ok(end) => end,
+                Err(consumed) => {
+                    if hidden.is_empty() { out.push_str(&tail[..consumed]); }
+                    at += consumed;
+                    continue;
+                },
+            };
+            let tag = tail[1..end].to_ascii_lowercase();
+            let closing = tag.starts_with('/');
+            let body = tag.strip_prefix('/').unwrap_or(&tag);
+            let name_end = body.find(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '-' | ':')).unwrap_or(body.len());
+            let name = &body[..name_end];
+            // A name must end at a real tag delimiter, not punctuation in text.
+            if body[name_end..].starts_with(|ch: char| !ch.is_whitespace() && ch != '/') {
+                if hidden.is_empty() { out.push_str(&tail[..end+1]); }
+                at += end+1;
+                continue;
             }
-            if let Some(end) = end {
-                let tag = tail[1..end].trim().to_ascii_lowercase();
-                let closing = tag.starts_with('/');
-                let name = tag.trim_start_matches('/').split(|ch: char| !ch.is_ascii_alphanumeric()).next().unwrap_or("");
-                if closing {
-                    if hidden.last().is_some_and(|n| n == name) { hidden.pop(); }
-                } else if !void_tag(name) && !tag.ends_with('/') {
-                    let hide = match hidden.last() {
-                        None => raw_hidden(name) || hidden_attribute(&tag,name),
-                        Some(parent) if raw_hidden(parent) => name=="template" && parent=="template",
-                        Some(_) => true,
-                    };
-                    if hide { hidden.push(name.into()); }
-                }
-                if hidden.is_empty() && matches!(name, "br" | "div" | "p" | "li" | "tr" | "hr") { out.push(' '); }
-                at += end + 1; continue;
+            if closing {
+                if hidden.last().is_some_and(|n| n == name) { hidden.pop(); }
+            } else if !void_tag(name) && !tag.ends_with('/') {
+                let hide = match hidden.last() {
+                    None => raw_hidden(name) || hidden_attribute(&tag, name),
+                    Some(parent) if raw_hidden(parent) => name == "template" && parent == "template",
+                    Some(_) => true,
+                };
+                if hide { hidden.push(name.into()); }
             }
+            if hidden.is_empty() && matches!(name, "br" | "div" | "p" | "li" | "tr" | "hr") { out.push(' '); }
+            at += end+1;
+            continue;
         }
         if tail.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("[sound:")) {
-            if let Some(end) = tail.find(']') { at += end + 1; continue; }
+            let end = tail[7..].find(['[', ']']).map(|n|n+7).unwrap_or(tail.len());
+            if tail.as_bytes().get(end) == Some(&b']') { at += end+1; continue; }
+            if hidden.is_empty() { out.push_str(&tail[..end]); }
+            at += end;
+            continue;
         }
         let ch = tail.chars().next().expect("nonempty");
         if hidden.is_empty() { out.push(ch); }
@@ -133,6 +178,7 @@ fn excerpt(text: &str, query: Option<&Regex>) -> Vec<Fragment> {
     let mut at = 0;
     if let Some(q) = query {
         for m in q.find_iter(text) {
+            if m.start() >= boundaries[end] { break; }
             let left=m.start().max(boundaries[start]);
             let right=m.end().min(boundaries[end]);
             if left>=right {continue;}
@@ -157,18 +203,57 @@ fn siblings(c:&Connection, id:i64) -> Result<Vec<String>> {
     if ids.len()>2048 {return Err(too_large());}
     Ok(ids.into_iter().map(|id|id.to_string()).collect())
 }
-fn row(c:&Connection, card:&Card, nt:&meguri_model::notetype::Notetype, fields:&str, query:Option<&Regex>, field:Option<&str>) -> Result<Row> {
-    let values:Vec<_>=fields.split('\u{1f}').map(visible_text).collect();
+fn row(c:&Connection, card:&Card, nt:&meguri_model::notetype::Notetype, values:&[String], query:Option<&Regex>, field:Option<&str>) -> Result<Row> {
     if values.len()!=nt.fields.len() {return Err(unsupported());}
-    let matched = nt.fields.iter().zip(&values).find(|(f,v)|field.is_none_or(|name|f.name==name) && query.is_some_and(|q|q.is_match(v)));
-    let selected = matched.or_else(||if query.is_none() {nt.fields.iter().zip(&values).find(|(f,_)|field.is_none_or(|name|f.name==name))} else {None});
+    let matched = nt.fields.iter().zip(values).find(|(f,v)|field.is_none_or(|name|f.name==name) && query.is_some_and(|q|q.is_match(v)));
+    let selected = matched.or_else(||if query.is_none() {nt.fields.iter().zip(values).find(|(f,_)|field.is_none_or(|name|f.name==name))} else {None});
     let deck=read::deck(c,card.did)?.ok_or_else(unsupported)?;
     let template=if nt.config.kind==1 {nt.templates.first()} else {nt.templates.iter().find(|t|t.ord==card.ord)}.ok_or_else(unsupported)?;
     Ok(Row {card_id:card.id.to_string(), note_id:card.nid.to_string(),
         title:short(values.get(nt.config.sort_field_idx as usize).ok_or_else(unsupported)?,120),
         field:selected.map(|(f,_)|f.name.clone()), excerpt:selected.map_or_else(Vec::new,|(_,v)|excerpt(v,query)),
-        deck:deck.human_name(),template:template.name.clone()})
+        deck:deck.human_name(),template:template.name.clone(),unavailable:None})
 }
+enum CandidateProjection {
+    BudgetReached,
+    NoMatch,
+    Matched(Row),
+}
+
+fn project_candidate(c: &Connection, card: &Card, input: &PageInput, query: Option<&Regex>, work: &mut usize) -> Result<CandidateProjection> {
+    // Browse needs only bounded field text, never the MCP edit hash, tags,
+    // guid, sfld or data. Large opaque note members do not block card listing.
+    let (mid, bytes): (i64, i64) = c.query_row(
+        "SELECT mid,octet_length(flds) FROM notes WHERE id=?1", [card.nid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(sql_error)?;
+    let bytes = usize::try_from(bytes).map_err(|_| unsupported())?;
+    if bytes <= MAX_PAGE_WORK_BYTES && *work > 0 && *work + bytes > MAX_PAGE_WORK_BYTES {
+        return Ok(CandidateProjection::BudgetReached);
+    }
+    let nt = read::notetype(c, mid)?;
+    if bytes > MAX_PAGE_WORK_BYTES {
+        // Include unchecked cards during search too. An unavailable projection
+        // is explicit uncertainty, never evidence of an exhausted search.
+        let placeholders = vec![String::new(); nt.fields.len()];
+        let mut unavailable = row(c, card, &nt, &placeholders, None, None)?;
+        unavailable.title = "Content unavailable".into();
+        unavailable.field = None;
+        unavailable.excerpt.clear();
+        unavailable.unavailable = Some("This note exceeds the browser text limit. Its fields were not searched. Open it in a synced app.".into());
+        return Ok(CandidateProjection::Matched(unavailable));
+    }
+    *work += bytes;
+    let fields: String = c.query_row("SELECT flds FROM notes WHERE id=?1", [card.nid], |r| r.get(0)).map_err(sql_error)?;
+    let values: Vec<_> = fields.split('\u{1f}').map(visible_text).collect();
+    if values.len() != nt.fields.len() { return Err(unsupported()); }
+    let matches = nt.fields.iter().zip(&values).any(|(field, value)|
+        input.field.as_ref().is_none_or(|name| field.name == *name)
+        && query.is_none_or(|q| q.is_match(value)));
+    if !matches { return Ok(CandidateProjection::NoMatch); }
+    Ok(CandidateProjection::Matched(row(c, card, &nt, &values, query, input.field.as_deref())?))
+}
+
 impl Backend {
     pub(crate) fn browse_generation(&self, a:&impl Authority) -> Result<String> {
         self.page_token(a.context(),"browse-generation","",0,0)
@@ -188,29 +273,33 @@ impl Backend {
             // A changed collection is a stale page, never an exhausted result.
             let page=self.page(input.cursor.as_deref(),a.context(),"browse-cards",&shape).map_err(|e|if e.code=="invalid_input" && input.cursor.is_some(){conflict()}else{e})?;
             let mut after=page.map_or(0,|p|p.after);
-            let mut result=CardPage {cards:vec![],next_cursor:None};
+            let mut result=CardPage {cards:vec![],next_cursor:None,examined_through:if after==0 {None} else {Some(after.to_string())}};
             let mut work=0;
             for _ in 0..MAX_CANDIDATES {
                 // Integer primary-key traversal bounds sparse filters too; no
                 // OFFSET, result-wide join/sort, or query-language expansion.
-                let candidate:Option<(i64,i64,i64,i64)>=c.query_row("SELECT id,nid,did,odid FROM cards WHERE id>?1 ORDER BY id LIMIT 1",[after],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(sql_error)?;
-                let Some((id,nid,did,odid))=candidate else {return Ok(result);};
-                if deck.is_none_or(|d|d==if odid!=0 {odid}else{did}) {
-                    let note=read::stored_note(c,nid)?.ok_or_else(unsupported)?;
-                    if work>0 && work+note.fields.len()>MAX_PAGE_WORK_BYTES {break;}
-                    work+=note.fields.len();
-                    let nt=read::notetype(c,note.mid)?;
-                    let values:Vec<_>=note.fields.split('\u{1f}').collect();
-                    if values.len()!=nt.fields.len(){return Err(unsupported());}
-                    let matches=nt.fields.iter().zip(values).any(|(f,v)|input.field.as_ref().is_none_or(|name|f.name==*name) && query.as_ref().is_none_or(|q|q.is_match(&visible_text(v))));
-                    if matches {
-                        result.cards.push(row(c,&card(c,id)?,&nt,&note.fields,query.as_ref(),input.field.as_deref())?);
-                        if size(&result)?+TOKEN_RESERVE>MAX_RESULT_BYTES {
-                            result.cards.pop(); if result.cards.is_empty(){return Err(too_large());} break;
-                        }
+                let candidate = c.query_row(
+                    "SELECT id,nid,did,ord,odid FROM cards WHERE id>?1 ORDER BY id LIMIT 1", [after],
+                    |r| Ok((Card { id:r.get(0)?, nid:r.get(1)?, did:r.get(2)?, ord:r.get(3)? }, r.get::<_,i64>(4)?)),
+                ).optional().map_err(sql_error)?;
+                let Some((card,odid))=candidate else {return Ok(result);};
+                let id=card.id;
+                if deck.is_none_or(|d|d==if odid!=0 {odid}else{card.did}) {
+                    match project_candidate(c,&card,&input,query.as_ref(),&mut work)? {
+                        CandidateProjection::BudgetReached => break,
+                        CandidateProjection::NoMatch => {},
+                        CandidateProjection::Matched(row) => {
+                            result.cards.push(row);
+                            if size(&result)?+TOKEN_RESERVE>MAX_RESULT_BYTES {
+                                result.cards.pop();
+                                if result.cards.is_empty(){return Err(too_large());}
+                                break;
+                            }
+                        },
                     }
                 }
                 after=id;
+                result.examined_through=Some(id.to_string());
                 if result.cards.len()==limit {break;}
             }
             let more=c.query_row("SELECT id FROM cards WHERE id>?1 ORDER BY id LIMIT 1",[after],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_some();
@@ -226,7 +315,8 @@ impl Backend {
             let note=self.note_result(a.context(),&stored,&nt)?;
             let sibling_ids=siblings(c,card.nid)?;
             let confirmation=self.delete_confirmation(a.context(),&note.revision,&sibling_ids)?;
-            let result=Detail {card:row(c,&card,&nt,&stored.fields,None,None)?,note,field_names:nt.fields.iter().map(|f|f.name.clone()).collect(),sibling_ids,confirmation};
+            let values:Vec<_>=stored.fields.split('\u{1f}').map(visible_text).collect();
+            let result=Detail {card:row(c,&card,&nt,&values,None,None)?,note,field_names:nt.fields.iter().map(|f|f.name.clone()).collect(),sibling_ids,confirmation};
             Self::result_json(&result)?; Ok(result)
         })
     }
@@ -253,5 +343,33 @@ impl Backend {
             c.execute("DELETE FROM notes WHERE id=?1",[id]).map_err(sql_error)?;
             stamps.save(c)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visible_comparisons_escaped_markup_accents_and_hidden_content() {
+        let raw = "<p>3 < 5 and 7 > 6; café &amp; café.</p> \
+            &lt;b&gt;literal&lt;/b&gt; &unknown; &eacute; \
+            <span title='3 > 2'>shown</span><span hidden>secret</span> \
+            <script>const x = '<audio>secret';</script>[sound:secret.mp3]";
+        let text = visible_text(raw);
+        assert_eq!(text, "3 < 5 and 7 > 6; café & café. <b>literal</b> &unknown; é shown");
+        let query = RegexBuilder::new("CAFÉ").case_insensitive(true).build().unwrap();
+        let fragments = excerpt(&text, Some(&query));
+        assert_eq!(fragments.iter().filter(|part|part.matched).map(|part|part.text.as_str()).collect::<Vec<_>>(), ["café", "café"]);
+        assert_eq!(fragments.iter().map(|part|part.text.as_str()).collect::<String>(), text);
+    }
+
+    #[test]
+    fn malformed_tokens_have_safe_literal_fallback_without_suffix_rescans() {
+        for raw in ["<a ".repeat(10_000), "[sound:unfinished ".repeat(10_000), "<a title='".repeat(10_000), "<!--unfinished".into()] {
+            assert_eq!(visible_text(&raw), raw.trim_end());
+        }
+        assert_eq!(visible_text("x <a <b>café</b> y [sound:bad [sound:ok.mp3] done"), "x <a café y [sound:bad done");
+        assert_eq!(visible_text("3 < 5 and 7 > 6; <42> <a,b>"), "3 < 5 and 7 > 6; <42> <a,b>");
     }
 }

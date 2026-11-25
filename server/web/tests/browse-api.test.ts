@@ -4,17 +4,21 @@ import assert from "node:assert/strict";
 import { ApiError, parseBrowse } from "../src/api.js";
 const card = { card_id: "9007199254740993", note_id: "42", title: "<script>literal</script>", field: "Example", excerpt: [{ text: "[a.b]", matched: true }], template: "Forward", deck: "Spanish" };
 test("Browse preserves exact IDs and typed inert highlight text", () => {
-  const page = parseBrowse("page", { account_id: "account", cards: [card], next_cursor: "next" }, "account");
+  const page = parseBrowse("page", { account_id: "account", cards: [card], next_cursor: "next", examined_through: card.card_id }, "account");
   assert.equal(page.cards[0]!.card_id, "9007199254740993");
+  assert.equal(page.examined_through, "9007199254740993");
   assert.deepEqual(page.cards[0]!.excerpt, [{ text: "[a.b]", matched: true }]);
   assert.equal(page.cards[0]!.title, "<script>literal</script>");
+  assert.throws(() => parseBrowse("page", { ...page, examined_through: 9007199254740993 }, "account"));
+  const unavailable = { ...card, unavailable: "Fields were not searched." };
+  assert.equal(parseBrowse("page", { ...page, cards: [unavailable] }, "account").cards[0]!.unavailable, unavailable.unavailable);
 });
 test("Browse rejects mismatched accounts before interpreting collection records", () => {
   for (const kind of ["catalog", "page", "detail", "create", "edit", "delete"] as const) {
     assert.throws(() => parseBrowse(kind, { account_id: "other" }, "account"), (e: unknown) => e instanceof ApiError && e.code === "stale_authority");
   }
-  for (const broken of [null, {}, { account_id: "account", cards: [{ ...card, card_id: 9007199254740993 }], next_cursor: null },
-    { account_id: "account", cards: [{ ...card, excerpt: [{ text: "word", matched: "true" }] }], next_cursor: null }]) {
+  for (const broken of [null, {}, { account_id: "account", cards: [{ ...card, card_id: 9007199254740993 }], next_cursor: null, examined_through: "9007199254740993" },
+    { account_id: "account", cards: [{ ...card, excerpt: [{ text: "word", matched: "true" }] }], next_cursor: null, examined_through: "9007199254740993" }]) {
     assert.throws(() => parseBrowse("page", broken, "account"), (e: unknown) => e instanceof ApiError && e.code === "invalid_response");
   }
 });

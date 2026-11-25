@@ -568,8 +568,8 @@ async fn dispatch(
             _ => return Err(Error::new("route_not_found")),
         };
         let a = authority(service, &parts.headers).await?;
-        let expected = expected_account(&parts.headers)?;
-        if expected.as_ref().is_some_and(|id| *id != a.identity().id) { return Err(Error::new("stale_authority")); }
+        let expected = expected_account(&parts.headers)?.ok_or_else(|| Error::new("invalid_request"))?;
+        if expected != a.identity().id { return Err(Error::new("stale_authority")); }
         return Ok(data(service.browse(a, expected, op).await?, false));
     }
     match path {

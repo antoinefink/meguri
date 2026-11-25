@@ -131,8 +131,8 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 11274,
-        "sha256": "5d9dc85b456e2e1fcf73cf3419fd00d7fc777f2aecf55f028d13fa7c40a9b9d7"
+        "bytes": 11483,
+        "sha256": "d8bd9a07788a42a5ff222ca2f33ead49f77bfec2ec22222ccce70201d299b764"
       },
       "src/app.tsx": {
         "bytes": 14667,
@@ -147,8 +147,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/browse.tsx": {
-        "bytes": 19303,
-        "sha256": "095a096d756cc03d00dccd61548d1d81bf9f32afde9910fd49512f94793bd832"
+        "bytes": 22475,
+        "sha256": "6248591f5718c951e888a783bc14eb800ba407dc5d4e22c2cba749e717beb961"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -199,8 +199,8 @@
         "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
       "tests/browse-api.test.ts": {
-        "bytes": 2912,
-        "sha256": "8518db72d8e53ef8f3e49fda59c644f7812d0077b6e12681a7930c1ef3334ee8"
+        "bytes": 3390,
+        "sha256": "51fa1701313b5d8c87019ac928b1b0abc0423c0e2cf069d69ee29fb377b5bcaa"
       },
       "tests/browser/account-actions.spec.ts": {
         "bytes": 8792,
@@ -215,12 +215,12 @@
         "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
       },
       "tests/browser/browse-real.spec.ts": {
-        "bytes": 12440,
-        "sha256": "e8b068d84678caa5654dcdd7d425100354442c33beb492c5399770be2a4c95a9"
+        "bytes": 13575,
+        "sha256": "4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261"
       },
       "tests/browser/browse.spec.ts": {
-        "bytes": 16352,
-        "sha256": "069269d7a09c0d48abe640490f2e486287453f588040ee4125f9160690e9526f"
+        "bytes": 23683,
+        "sha256": "c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0"
       },
       "tests/browser/fixtures/browse.sql": {
         "bytes": 3485,
@@ -302,8 +302,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 28753,
-        "sha256": "f70c83a58cb1c3eeee2b150b820969c1bb587b6bda86f2435ec424c5892e77ee"
+        "bytes": 28768,
+        "sha256": "6c9d655965151371e5416b72e897c720f7972b05fa3b0d1d0af4c09308f27dea"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4523,

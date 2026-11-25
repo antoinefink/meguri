@@ -51,21 +51,39 @@ async function round(request: APIRequestContext, origin: string, key: string, mi
   expect(await native<number>(request, origin, key, "finish", {})).toBeGreaterThan(0);
   return { min: meta.usn, graves, chunk };
 }
-test("real Browse field examples, compact editing, siblings, conflict and native incremental sync", async ({ page, browser, baseURL }) => {
+test("real Browse field examples, compact editing, siblings, conflict and native incremental sync", async ({ page, browser, baseURL }, testInfo) => {
   const admin = await browser.newContext({ ignoreHTTPSErrors: true });
   try {
     const origin = baseURL!, headers = { Origin: origin };
+    const secrets = [rootPassword, memberPassword];
     const status = await (await admin.request.get(`${origin}/api/status`)).json() as { data: { setup_required: boolean } };
     if (status.data.setup_required) {
       const fixture = JSON.parse(readFileSync("/fixture/fixture.json", "utf8")) as { setup_token: string };
+      secrets.push(fixture.setup_token);
       expect((await admin.request.post(`${origin}/api/setup`, { headers, data: { token: fixture.setup_token, username: "root.admin", password: rootPassword } })).status()).toBe(201);
     }
     expect((await admin.request.post(`${origin}/api/login`, { headers, data: { username: "root.admin", password: rootPassword } })).status()).toBe(200);
     const invitation = await (await admin.request.post(`${origin}/api/admin/invitations`, { headers, data: {} })).json() as { data: { url: string } };
+    secrets.push(invitation.data.url, new URL(invitation.data.url).hash.slice(7));
     const username = `browse.${randomUUID().slice(0, 12)}`;
     expect((await admin.request.post(`${origin}/api/invitations/claim`, { headers, data: { token: new URL(invitation.data.url).hash.slice(7), username, password: memberPassword } })).status()).toBe(201);
     const host = await native<{ key: string }>(admin.request, origin, "", "hostKey", { u: username, p: memberPassword });
+    secrets.push(host.key);
     expect((await wire(admin.request, origin, host.key, "upload", collection())).toString()).toBe("OK");
+    async function capture(name: string) {
+      await test.step(`Capture ${name}`, async () => {
+        await expect(page).toHaveURL(/\/browse$/);
+        await expect(page.locator('input[type="password"]')).toHaveCount(0);
+        const visible = await page.evaluate(() => [
+          document.body.innerText,
+          ...Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select"), control => control.value),
+        ].join("\n"));
+        for (const secret of secrets) expect(visible.includes(secret), "capture must exclude credentials and capability URLs").toBe(false);
+        const path = `/out/browser-artifacts/${name}.png`;
+        await page.screenshot({ path, fullPage: true });
+        await testInfo.attach(name, { path, contentType: "image/png" });
+      });
+    }
     await page.goto("/browse"); await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel("Username", { exact: true }).fill(username); await page.getByLabel("Password", { exact: true }).fill(memberPassword);
     await page.getByRole("button", { name: "Sign in", exact: true }).click(); await expect(page).toHaveURL(/\/collection$/);
@@ -85,7 +103,7 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     const first = await round(admin.request, origin, host.key, 0, 3, 3); expect(first.chunk.notes).toHaveLength(3); expect(first.chunk.cards).toHaveLength(3);
     await rows().first().click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue(samples[0]![2]!);
     await page.getByText("Card info", { exact: true }).click(); await expect(page.getByText("Forward", { exact: true })).toBeVisible();
-    await page.screenshot({ path: "/out/browser-artifacts/browse-real-desktop.png", fullPage: true });
+    await capture("browse-real-desktop");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByLabel("Example", { exact: true }).fill("Quiero aprovechar el viaje para ver a mi hermana."); await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("status").filter({ hasText: /^Note \d+ saved\.$/ })).toBeVisible();
@@ -108,10 +126,12 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     await rows().first().click(); await expect(page.getByText("2 cards share this note.")).toBeVisible(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
     const confirmation = page.getByRole("region", { name: "Confirm note deletion" }); await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
     await confirmation.getByRole("button", { name: "Cancel" }).click(); await page.getByRole("button", { name: "Back to results" }).click(); await expect(rows()).toHaveCount(2);
-    await rows().last().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click(); await page.screenshot({ path: "/out/browser-artifacts/browse-real-compact.png", fullPage: true });
+    await rows().last().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click(); await capture("browse-real-compact");
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await confirmation.getByRole("button", { name: "Confirm delete note" }).click(); await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible(); await expect(rows()).toHaveCount(0);
     const deleted = await round(admin.request, origin, host.key, added.min, 3, 3); expect(deleted.graves.cards.sort()).toEqual(siblings.map(c => c[0]).sort()); expect(deleted.graves.notes).toHaveLength(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(testInfo.attachments.filter(attachment => attachment.name.startsWith("browse-real-")).map(attachment => attachment.name))
+      .toEqual(["browse-real-desktop", "browse-real-compact"]);
   } finally { await admin.close(); }
 });
