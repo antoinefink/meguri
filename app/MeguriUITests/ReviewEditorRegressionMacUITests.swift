@@ -227,7 +227,7 @@ import XCTest
             }
             XCTAssertTrue(closed, "main must close via \(keyboard ? "Cmd-W" : "its native close button")")
             XCTAssertTrue(addStayedOpen, "main close must not cancel Add")
-            app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
+            app.menuBars.menuBarItems["Window"].click(); app.menuBars.menuBarItems["Window"].menuItems["Meguri"].click()
             XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
                 "Window > Meguri brings the workspace to the front")
             let reopened = try inputEvidence(bundle: bundle)
