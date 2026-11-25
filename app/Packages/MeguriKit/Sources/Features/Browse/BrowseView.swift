@@ -92,7 +92,12 @@ public struct BrowseView: View {
     /// Return or a double click shows it over the table.
     @ViewBuilder private var detail: some View {
         #if os(macOS)
-        content
+        // N21.2 (2026-11-24): the query's filters in a bar over the table and
+        // over the no-results state, where they are what there is to change.
+        VStack(spacing: 0) {
+            BrowseFilterBar(model: model)
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
             .overlay(alignment: .trailing) {
                 if inspector.narrow, inspector.overlay {
                     HStack(spacing: 0) {

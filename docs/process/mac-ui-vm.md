@@ -1,9 +1,14 @@
 # Mac UI tests and simulators in a VM
 
-Current topology (2026-11-24): M5 is the sole MG scheduler and build
-coordinator. The dedicated headless `meguri-mac` VM lives on T9 attached to
-M3 Max. The private coordinator wrappers use the kit at `/Volumes/T9/Meguri VM`
-on the M3 Max. See
+Current topology (2026-11-25): M5 is the build coordinator and schedules VM
+jobs over SSH; M3 Max, which hosts the VM, may schedule its own (Antoine,
+2026-11-25: "you being able to use the VM on this machine and the other
+agents using it over SSH"). The dedicated headless `meguri-mac` VM lives on T9
+attached to M3 Max. Each Mac keeps its own VM lease; the VM's claim, a lock
+inside the VM, lets one Mac's job in at a time (`tools/vm/AGENTS.md`). The
+private coordinator wrappers use the kit at `/Volumes/T9/Meguri VM`
+on the M3 Max; M3 Max's own `mac-vm.json` names the kit's `bin/tart` and
+`bin/vm-ssh` directly. See
 [`new-machine.md`](new-machine.md#current-coordinator-and-remote-test-vm) for
 atomic installation, removal of old activation overrides and verification.
 The provisioning and dated results below describe the original installation.

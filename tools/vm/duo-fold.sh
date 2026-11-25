@@ -21,6 +21,9 @@
 # The fold buttons are screen positions, right for Device Hub's window where it
 # opened on 2026-11-01. Check with `screen`, and set DUO_FOLD_Y and
 # DUO_FOLD_CLOSED_X, DUO_FOLD_HALF_X and DUO_FOLD_OPEN_X if the window moved.
+# `start` and `stop` also take the VM's claim before the restart and refuse
+# while a job of another Mac holds it. A VM that runs but does not answer is
+# not restarted unless DUO_FOLD_FORCE=1.
 # Exit codes: 0 done, 1 failed, 2 usage, 3 the lease stayed busy.
 
 set -u
@@ -70,15 +73,74 @@ wait_for_vm() {
     { log "$VM did not answer: ${MVL_REASON:-unknown}"; exit 1; }
 }
 
+# A restart ends every claim on the VM (tools/mg.d/mac-vm.sh), so it takes
+# the claim first and keeps it up to the restart: another Mac's job can then
+# neither be running in the VM nor start there meanwhile. The keeper holds
+# it while this script's lease lasts and takes it again after the restart.
+# A VM that Tart lists as stopped, suspended or absent runs no job and has no
+# claim. One that runs but does not answer, or that Tart could not list, has
+# an unknown claim: no restart, unless
+# DUO_FOLD_FORCE=1 says the VM is to be recovered whatever runs in it.
+claim_take() {
+  local state="$LEASE.claim" token="duo-fold.$$" record st="" i
+  [ "${MEGURI_MAC_VM_SHARED_CLAIM:-1}" != 0 ] || return 0
+  case "$(mvl_state "$TART" "$VM")" in
+    running) ;;
+    stopped | suspended | missing) return 0 ;;
+    *)
+      # Tart gave no list: the VM may be running a job of another Mac.
+      if [ "${DUO_FOLD_FORCE:-}" = 1 ]; then
+        log "Tart did not say whether $VM runs, so whether a job holds it is unknown; restarting it anyway (DUO_FOLD_FORCE=1)"
+        return 0
+      fi
+      log "Tart did not say whether $VM runs, so whether another Mac's job holds it is unknown; not restarting it (DUO_FOLD_FORCE=1 restarts it anyway)"
+      exit 1
+      ;;
+  esac
+  # A keeper of the job that just gave up the lease is leaving.
+  for i in $(seq 1 40); do [ -e "$state" ] || break; sleep 0.5; done
+  rm -f "$state.nudge"
+  (
+    cd / && exec perl -MPOSIX=setsid -e 'fork and exit 0; setsid(); exec @ARGV or die "exec $ARGV[0]: $!\n"' \
+      /usr/bin/env python3 "$ROOT/tools/scripts/vm-claim.py" --ssh "$SSH" --lease "$LEASE" --state "$state" --token "$token" \
+      --holder "$(jq -nc --arg m "$(hostname -s 2>/dev/null || hostname)" --arg wt "$ROOT" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{machine: $m, job: "duo-fold", worktree: $wt, started_at: $at}')" \
+      --path "${MEGURI_MAC_VM_CLAIM_PATH:-/tmp/meguri-vm-claim.lock}" \
+      </dev/null >>"$STATE/claim.log" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  )
+  for i in $(seq 1 180); do
+    record="$(cat "$state" 2>/dev/null)"
+    if [ "$(jq -r '.token // empty' <<<"$record" 2>/dev/null)" = "$token" ]; then
+      st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
+      [ "$st" = starting ] || break
+    fi
+    sleep 0.5
+  done
+  case "$st" in
+    taken) return 0 ;;
+    busy)
+      log "$VM is in use by another Mac's job ($(jq -r '.holder // "" | (fromjson? // {}) | "\(.job // "a job") on \(.machine // "?") in \(.worktree // "?") since \(.started_at // "?")"' <<<"$record" 2>/dev/null || echo unknown)); not restarting it"
+      exit 1
+      ;;
+  esac
+  if [ "${DUO_FOLD_FORCE:-}" = 1 ]; then
+    log "$VM did not answer, so whether a job holds it is unknown; restarting it anyway (DUO_FOLD_FORCE=1)"
+    return 0
+  fi
+  log "$VM runs but did not answer, so whether another Mac's job holds it is unknown; not restarting it (DUO_FOLD_FORCE=1 restarts it anyway)"
+  exit 1
+}
+
 start() {
   local url i
   [ "${1:-}" = --vm ] && [ -n "${2:-}" ] && VM="$2"
-  lease vm-fold-start
   mkdir -p "$STATE"
+  lease vm-fold-start
   [ -x "$STATE/venv/bin/python" ] || {
     python3 -m venv "$STATE/venv" &&
       "$STATE/venv/bin/pip" install --quiet "vncdotool==$VNCDOTOOL_VERSION"
   } || { log "could not install vncdotool"; exit 1; }
+  claim_take
   "$TART" stop "$VM" --timeout 60 2>/dev/null
   : >"$STATE/tart.log"
   (
@@ -110,7 +172,9 @@ stop() {
     sleep 2
   fi
   rm -f "$FIFO" "$STATE/holder.pid"
+  mkdir -p "$STATE"
   lease vm-fold-stop
+  claim_take
   "$TART" stop "$VM" --timeout 60 || exit 1
   : >"$STATE/tart.log"
   mvl_start "$TART" "$VM" "$STATE/tart.log"

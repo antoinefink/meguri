@@ -6,6 +6,7 @@ pub mod delete;
 pub mod deleted_log;
 pub mod fields;
 pub mod guid;
+pub mod mining;
 pub mod update;
 
 pub use add::{AddFieldIdentity, AddNote, AddScreenNote, Added, add, add_for_screen, add_in, bulk_add, bulk_add_in};
