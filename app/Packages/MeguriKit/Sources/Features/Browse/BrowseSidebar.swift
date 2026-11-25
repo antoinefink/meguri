@@ -113,65 +113,35 @@ public struct BrowseSidebar<Header: View>: View {
     /// back to the Browse row after that event: the list keeps a selection
     /// it made itself, and the rows draw the query's values (`active`).
     @State private var selection: Set<BrowseSidebarTag> = []
-    /// The filter row the arrow keys moved to: Return and Space are a click on it.
-    @State private var keyRow: BrowseSidebarTag?
-    /// The filter row clicked last: Return and Space are a second click on it (T9).
-    @State private var clickedRow: BrowseSidebarTag?
 
     private func selectionChanged(_ rows: Set<BrowseSidebarTag>) {
-        guard rows != model.listSelection else { return keyRow = nil }
-        if let keyRow, rows == [keyRow] { return }
-        // A ⌘-click on the row the keys stand on empties the list's selection.
-        if let keyRow, rows.isEmpty, !Self.byKey() { return clicked(keyRow) }
-        let filters = rows.filter { if case .section = $0 { false } else { true } }
-        // The arrow keys move through the rows without changing the query.
-        if Self.byKey(), filters.count == 1, filters == rows, let row = filters.first {
-            keyRow = row
-            return
-        }
-        // The row the keys stood on is still in the list's selection after a
-        // ⌘-click on another row; it was not clicked.
-        var rows = rows
-        if let keyRow, rows.count > 1 { rows.remove(keyRow) }
-        let clicked = rows.filter { if case .section = $0 { false } else { true } }
-        keyRow = nil
-        clickedRow = clicked.count == 1 ? clicked.first : nil
-        if let section = model.listSelectionChanged(to: rows, click: Self.click()) {
+        switch model.sidebarSelectionChanged(to: rows, byKey: Self.byKey(), click: Self.click()) {
+        case .keep:
+            break
+        case .restore:
+            if selection != model.listSelection { selection = model.listSelection }
+        case .restoreAfterEvent:
+            Task { @MainActor in
+                if model.keyRow == nil, selection != model.listSelection { selection = model.listSelection }
+            }
+        case .navigate(let section):
             navigate(section)
-            return
-        }
-        Task { @MainActor in
-            if keyRow == nil, selection != model.listSelection { selection = model.listSelection }
         }
     }
 
-    /// A click on the row the arrow keys stand on. A plain or ⌥-click leaves
-    /// the list's selection as it is, so the list reports nothing and the
-    /// row's own tap does (`row`); it is T9's click on that row all the same.
+    /// A click on a row: the list's selection reports it, except on the row
+    /// the arrow keys stand on (`BrowseModel.sidebarRowClicked`).
     private func clicked(_ row: BrowseSidebarTag) {
-        guard keyRow == row else { return }
-        keyRow = nil
-        clickedRow = row
-        model.activate(row, click: Self.click())
+        guard model.sidebarRowClicked(row, click: Self.click()) else { return }
         if selection != model.listSelection { selection = model.listSelection }
     }
 
     private func forgetKeyRow() {
-        keyRow = nil
-        clickedRow = nil
+        model.forgetSidebarKeyRow()
         if selection != model.listSelection { selection = model.listSelection }
     }
 
-    /// T9: Return or Space on the row the keys stand on is a click on it;
-    /// after a click, a second click on that row where it removes its filter.
-    @discardableResult private func activateByKey() -> Bool {
-        if let keyRow {
-            model.activate(keyRow)
-            return true
-        }
-        guard let clickedRow else { return false }
-        return model.activateByKey([clickedRow])
-    }
+    @discardableResult private func activateByKey() -> Bool { model.activateSidebarRowByKey() }
 
     /// Whether a key, not a click, changed the selection.
     private static func byKey() -> Bool {

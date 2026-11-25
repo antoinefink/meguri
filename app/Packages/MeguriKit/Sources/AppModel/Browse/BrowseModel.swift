@@ -76,6 +76,10 @@ public final class BrowseModel {
     /// Raised when a selection the list made is not the query's, so the
     /// list draws the query's selection again.
     public private(set) var selectionEcho: UInt64 = 0
+    /// The filter row the arrow keys moved to: Return and Space are a click on it.
+    @ObservationIgnored public private(set) var keyRow: BrowseSidebarTag?
+    /// The filter row clicked last: Return and Space are a second click on it (T9).
+    @ObservationIgnored public private(set) var clickedRow: BrowseSidebarTag?
 
     /// Tag disclosures toggled in this launch, before the tree is read again.
     private var tagExpansion: [String: Bool] = [:]
@@ -568,6 +572,83 @@ public final class BrowseModel {
             if rows.count == 1, let row = rows.first { activate(row, click: click) }
         }
         return nil
+    }
+
+    // MARK: The arrow keys in the sidebar (T9)
+
+    /// What the sidebar's list does once its selection was read.
+    public nonisolated enum ListSelectionOutcome: Sendable, Hashable {
+        /// The list keeps the selection it has: the arrow keys stand on a row.
+        case keep
+        /// A click on the row the keys stood on: the list draws `listSelection` again now.
+        case restore
+        /// Any other click: the list draws `listSelection` again after the event.
+        case restoreAfterEvent
+        case navigate(AppSection)
+    }
+
+    /// The list reported a selection it made itself. The arrow keys (`byKey`)
+    /// move through the filter rows without changing the query, and the row
+    /// they stand on is the list's whole selection. A click is then read
+    /// without that row: a ⌘-click on another row leaves it in the list's
+    /// selection, and it was not clicked; a ⌘-click on it empties the
+    /// selection, and is a ⌘-click on it.
+    public func sidebarSelectionChanged(to rows: Set<BrowseSidebarTag>, byKey: Bool, click: Click) -> ListSelectionOutcome {
+        guard rows != listSelection else {
+            keyRow = nil
+            return .keep
+        }
+        if let keyRow, rows == [keyRow] { return .keep }
+        if let keyRow, rows.isEmpty, !byKey {
+            sidebarRowClicked(keyRow, click: click)
+            return .restore
+        }
+        if byKey, rows.count == 1, let row = rows.first, !Self.isSection(row) {
+            keyRow = row
+            return .keep
+        }
+        var rows = rows
+        if let keyRow, rows.count > 1 { rows.remove(keyRow) }
+        let clicked = rows.filter { !Self.isSection($0) }
+        keyRow = nil
+        clickedRow = clicked.count == 1 ? clicked.first : nil
+        if let section = listSelectionChanged(to: rows, click: click) { return .navigate(section) }
+        return .restoreAfterEvent
+    }
+
+    /// A click landed on `row`. Where the arrow keys stand on it, a plain or
+    /// ⌥-click leaves the list's selection as it is, so the list reports
+    /// nothing; it is T9's click on that row all the same. True when it was
+    /// read here; on any other row the list's selection reports the click.
+    @discardableResult
+    public func sidebarRowClicked(_ row: BrowseSidebarTag, click: Click) -> Bool {
+        guard keyRow == row else { return false }
+        keyRow = nil
+        clickedRow = row
+        activate(row, click: click)
+        return true
+    }
+
+    /// T9: Return or Space on the row the keys stand on is a click on it;
+    /// after a click, a second click on that row where it removes its filter.
+    @discardableResult
+    public func activateSidebarRowByKey() -> Bool {
+        if let keyRow {
+            activate(keyRow)
+            return true
+        }
+        guard let clickedRow else { return false }
+        return activateByKey([clickedRow])
+    }
+
+    /// The rows shown changed: Return and Space never act on a row out of sight.
+    public func forgetSidebarKeyRow() {
+        keyRow = nil
+        clickedRow = nil
+    }
+
+    private static func isSection(_ row: BrowseSidebarTag) -> Bool {
+        if case .section = row { true } else { false }
     }
 
     // MARK: Rows and counts
