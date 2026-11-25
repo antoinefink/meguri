@@ -123,7 +123,7 @@ Browser sign-out is idempotent for a formerly valid cookie: clear it even if alr
 
 Bound password/capability attempts with in-memory expiring entries: per effective client IP, twenty attempts in a rolling five minutes; per canonical username or capability digest, ten attempts in five minutes. Count failed and successful attempts in these sensitive routes, never ordinary authenticated sync chunks. Hold at most 10,000 distinct limiter entries; when full, refuse new buckets with 429 rather than growing unbounded. A process restart may clear these budgets, but never revives revoked/consumed credentials. Responses use Retry-After seconds for exhausted budgets. Limiter keys and logs never hold plaintext capability/password values. Setup/invite/reset and native login use the same bounded sensitive-work admission, with no password hash for a clearly invalid/expired capability.
 
-Errors are authentication_failed (401), permission_denied/origin_rejected/capability_invalid (403), username_unavailable/claim_in_progress/sole_administrator/stale_authority (409), validation_failed (422 with field), rate_limited (429), provision_unavailable/storage_unavailable/admission_closed (503), invalid_request (400), unsupported_content_type (415), request_too_large (413), route_not_found (404), or internal_error (500). Secret failure text remains generic. A malformed capability and an expired/consumed one share capability_invalid. Name validation/conflict never consumes an available capability. A storage failure cannot be reported as a completed claim/reset/disable/delete. Internal diagnostics contain opaque IDs and phase/outcome only.
+Errors are authentication_failed (401), permission_denied/origin_rejected/capability_invalid (403), username_unavailable/claim_in_progress/sole_administrator/stale_authority/busy (409), validation_failed (422 with field), rate_limited (429), provision_unavailable/storage_unavailable/admission_closed (503), invalid_request (400), unsupported_content_type (415), request_too_large (413), route_not_found (404), or internal_error (500). Secret failure text remains generic. A malformed capability and an expired/consumed one share capability_invalid. Name validation/conflict never consumes an available capability. A storage failure cannot be reported as a completed claim/reset/disable/delete. Internal diagnostics contain opaque IDs and phase/outcome only.
 
 Changed 2026-11-21: account-metadata storage work runs in a bounded set of slots shared by browser, native sync and MCP requests. Each storage job that finds every slot busy waits up to five seconds for one; a job still without a slot fails with storage_unavailable (503), or, for a per-account storage measurement, leaves that value unavailable as above. A request may run several such jobs. A burst of ordinary requests is not overload. Decided by Claude (coordinator) under Antoine's permission of 2026-11-20, after independent review.
 
@@ -154,3 +154,53 @@ Verify the exact built browser flow in Chrome with generated accounts. Cover the
 Show the approval account returned by the consent read that bound the pending request to its browser session and credential generation. If the session changes before a decision, clear the consent and show the restart message. Issue no code and navigate to no callback.
 
 Show a grant list only when the response account matches the current screen account. Clear its controls, pending status and confirmation on account change, disregard stale results, and refresh identity on a response mismatch. Announce revocation only when the response and current screen both match the account that started the action. Test these rules by changing the session between identity lookup and consent, between consent read and Allow, and while grant-list and revoke requests are pending. Verify both mismatch and ordinary successful revocation.
+
+## W11. Signed-in collection backup API
+
+The signed-in collection history uses `sync/server-lifecycle#L9`. Both routes
+inherit W1's session authentication, response envelope, no-store/security headers,
+browser admission, query rejection and closing-body handling. The account comes
+only from the captured browser session. The web client must send
+`X-Meguri-Expected-Account` with the opaque account ID displayed by the tab on
+both routes. Account IDs are the canonical unpadded URL-safe base64 encoding
+of 32 bytes (43 characters, with canonical trailing bits). This is an equality
+precondition, never an account selector: reject a well-formed different ID as
+`stale_authority` (409) before staging, safety capture or any mutation.
+Callers without this header retain session-scoped admission; malformed, comma-joined
+or duplicate headers are `invalid_request` (400). Never echo the supplied ID. The client validates response `account_id` against
+its displayed identity before rendering history or announcing success.
+
+| Method and route | Input | Success `data` |
+|---|---|---|
+| `GET /api/me/backups` | No query | `{account_id: string, backups: [...]}`, with backups newest first of `{id: string, created_at: number, kind: "daily"\|"weekly"\|"monthly"\|"before_restore", size_bytes: number}` |
+| `POST /api/me/backups/{id}/restore` | Strict JSON `{}` and exact configured Origin | `{account_id: string}` |
+
+Times are Unix seconds and sizes are bytes. Empty history returns `{account_id, backups: []}`.
+The restore ID is a single opaque path component. Unknown and foreign IDs both
+return `route_not_found` (404) after authentication. Restore accepts the existing
+JSON content type and body bounds and rejects extra fields, malformed bodies,
+wrong content types and origins using existing errors. History is also available
+to administrators for their own account only. Members cannot select an
+administrator's history. History enumerates metadata; it does not open, hash or
+read every saved database or media file. Restore verifies the selected database
+and media payloads and reports corruption as `storage_unavailable` (503).
+A same-account admitted restore excludes history for its entire operation,
+including preparation, safety capture and cleanup, even if its HTTP caller
+disconnects before durable intent. For authenticated, matching-account requests,
+this in-process lease returns `busy` (409) before testing durable intent, for both
+history and another restore. Authority and expected-account failures still take
+precedence. Before acquiring the restore lease, cancellation of the HTTP caller
+must prevent subsequent admission, even when its detached ingress worker remains
+blocked. A fresh successful history response after that cancellation rules out
+that request later creating a safety point or changing live state. Cancellation
+and account lease acquisition share a strict linearization boundary; after
+admission the worker finishes while retaining its ingress/root and restore leases.
+Without an active restore lease, a pending durable reset/restore intent still
+returns `storage_unavailable` (503).
+A history snapshot excludes restore admission until its rows have been read.
+Normal daily capture and work on independent accounts do not exclude history.
+A second restore or a live state changed since safety capture produces `busy`
+(409). Failures never disclose private
+paths or media names. Existing browser credentials survive successful restore.
+No web request is required for daily scheduling, and opening history does not
+trigger a native collection download or alter stamps.

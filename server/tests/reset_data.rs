@@ -250,6 +250,9 @@ async fn reset_crash_boundaries_recover_before_ready_validation_and_never_purge_
         let cookie=h.login("reset.member",PASSWORD).await;
         let (_,key)=h.service.native_login(IP,"reset.member",PASSWORD.into()).await.unwrap();
         let account=h.path().join("state/accounts").join(id);
+        // Capture every ready fixture before measuring unchanged siblings.
+        // Harness has joined startup, and this sweep joins its own cleanup.
+        h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
         let other=store_bytes(&h.path().join("state/accounts")).into_iter().filter(|(p,_)|!p.starts_with(id)).collect::<std::collections::BTreeMap<_,_>>();
         let temp=h.stop().await; let owner=temp.path().join("owner"); let signal=temp.path().join("reset-phase");
         let (mut child,base)=child_service(&owner,phase,true,&signal).await;

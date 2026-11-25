@@ -46,6 +46,18 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// Browse's inspector: a sound chip or a thumbnail was clicked.
     public var onPlayMedia: (@MainActor (String) -> Void)?
     public var onOpenMedia: (@MainActor (String) -> Void)?
+    /// The page's thumbnails load from the collection's media folder, a sound
+    /// chip plays its file and, on the Mac, a thumbnail opens its file.
+    /// Without a folder the page shows no media.
+    public func show(media: MediaFolder?) {
+        mediaDirectory = media?.directory
+        onPlayMedia = { [weak media] in media?.play($0) }
+        #if os(macOS)
+        onOpenMedia = { [weak media] name in
+            if let url = media?.image(name) { NSWorkspace.shared.open(url) }
+        }
+        #endif
+    }
     private let isCurrent: @MainActor () -> Bool
     private let document: EditorDocument
     private let relay: EditorMessageRelay
@@ -507,8 +519,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         case "contentHeight": contentHeight = EditorBridgeMessage.number(message.body["height"])!
         case "caret":
             caret = EditorBridgeMessage.number(message.body["top"])!...EditorBridgeMessage.number(message.body["bottom"])!
-        case "playMedia": if let name = MediaName.plain(message.body["name"] as! String) { onPlayMedia?(name) }
-        case "openMedia": if let name = MediaName.plain(message.body["name"] as! String) { onOpenMedia?(name) }
+        case "playMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onPlayMedia?(name) }
+        case "openMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onOpenMedia?(name) }
         default: throw EditorRuntimeError.invalidMessage
         }
         refreshAccessory()
@@ -605,18 +617,20 @@ private struct FieldEditorMount: UIViewRepresentable {
 #endif
 
 #if os(macOS)
-/// In Browse's inspector the page is as tall as its fields and sits in the
+/// The page paints no background of its own, so the sheet's, panel's or
+/// pane's shows through (the page's own CSS is transparent on the Mac). In
+/// Browse's inspector the page is as tall as its fields and sits in the
 /// pane's scroll view: it never scrolls itself, so the wheel goes to the
-/// scroll view, and it paints no background of its own, so the pane's shows
-/// through (the page's own CSS is transparent there).
+/// scroll view.
 final class FieldEditorMacWebView: WKWebView {
-    var inInspector = false {
-        didSet {
-            // WebKit's background switch has no public setter on the Mac; KVC reaches it
-            // only where it exists, and the page stays readable on its default otherwise.
-            if responds(to: NSSelectorFromString("_setDrawsBackground:")) { setValue(!inInspector, forKey: "drawsBackground") }
-        }
+    var inInspector = false
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        // WebKit's background switch has no public setter on the Mac; KVC reaches it
+        // only where it exists, and the page stays readable on its default otherwise.
+        if responds(to: NSSelectorFromString("_setDrawsBackground:")) { setValue(false, forKey: "drawsBackground") }
     }
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     override func scrollWheel(with event: NSEvent) {
         if inInspector, let next = nextResponder { next.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
     }

@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     sync::{Mutex, Weak},
 };
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock, OwnedRwLockReadGuard, OwnedRwLockWriteGuard};
 /// Must immediately roll back/drop retained round state without client waits.
 /// Invoked under the target barrier and committing metadata writer, only after
 /// current authority is validated. Never acquire a barrier or wait for clients.
@@ -13,6 +13,9 @@ pub trait RoundRetirer: Send + Sync {
 }
 pub struct PublicationBarrier {
     lock: Arc<AsyncMutex<()>>,
+    backup: Arc<AsyncMutex<()>>,
+    // History snapshots exclude only restores, not ordinary daily capture.
+    restore: Arc<RwLock<()>>,
     round: Mutex<Option<Arc<dyn RoundRetirer>>>,
     // MCP collection jobs queue here before touching the publication lock.
     mcp: Arc<AsyncMutex<()>>,
@@ -22,6 +25,17 @@ pub struct PublicationBarrier {
     waiting: tokio::sync::Semaphore,
 }
 impl PublicationBarrier {
+    // Try only: never wait on restore I/O while holding metadata/publication.
+    // Retain the barrier Arc alongside each owned guard (the registry is weak).
+    pub(crate) fn try_restore(&self) -> Option<OwnedRwLockWriteGuard<()>> {
+        self.restore.clone().try_write_owned().ok()
+    }
+    pub(crate) fn try_history(&self) -> Option<OwnedRwLockReadGuard<()>> {
+        self.restore.clone().try_read_owned().ok()
+    }
+    pub(crate) fn try_backup(&self) -> Option<OwnedMutexGuard<()>> {
+        self.backup.clone().try_lock_owned().ok()
+    }
     /// Standalone writes refuse contention without joining the waiter queue.
     /// Bounded MCP reads use enter() with their asynchronous timeout instead.
     /// Keep this barrier's Arc alongside the returned guard until work ends.
@@ -120,6 +134,8 @@ impl Barriers {
         }
         let gate = Arc::new(PublicationBarrier {
             lock: Arc::new(AsyncMutex::new(())),
+            backup: Arc::new(AsyncMutex::new(())),
+            restore: Arc::new(RwLock::new(())),
             round: Mutex::new(None),
             mcp: Arc::new(AsyncMutex::new(())),
             #[cfg(feature = "test-hooks")]

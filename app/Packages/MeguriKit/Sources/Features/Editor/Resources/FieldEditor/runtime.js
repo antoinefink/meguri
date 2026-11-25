@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false;
+    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false, media = false;
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -20,8 +20,8 @@
     };
     const inline = node => !Array.from(node.querySelectorAll("*")).some(element =>
         blocks.has(element.localName) || (element.hasAttribute("block") && element.getAttribute("block") !== "false"));
-    // Browse's inspector shows a sound reference as a chip that plays on a
-    // click; the chip stands for its reference's exact text, which is what
+    // Browse's inspector and Edit Note show a sound reference as a chip that
+    // plays on a click; the chip stands for its reference's exact text, which is what
     // serialization writes back, so the field's bytes never change by it.
     const soundReference = /\[sound:([^\]]+)\]/g;
     const middle = name => name.length <= 28 ? name : `${name.slice(0, 13)}…${name.slice(-12)}`;
@@ -57,7 +57,7 @@
     }
     const loadParse = html => {
         const fragment = parse(html);
-        if (browsing) chips(fragment);
+        if (media) chips(fragment);
         if (inline(fragment)) fragment.append(document.createElement("br"));
         return fragment;
     };
@@ -495,7 +495,9 @@
         const style = document.createElement("style");
         style.textContent = ":host { display:block; position:relative } meguri-field-content { display:block; min-height:1.3em; outline:none; overflow-wrap:anywhere } " +
             ".placeholder { position:absolute; inset-block-start:0; inset-inline-start:0; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; color:GrayText } [hidden] { display:none !important }" +
-            (browsing ? " meguri-field-content { min-height:1.2em } img { max-height:64px; max-width:100%; vertical-align:middle; border-radius:4px; cursor:zoom-in }" +
+            (browsing ? " meguri-field-content { min-height:1.2em } img { max-height:64px }" : "") +
+            (media ? " img { max-width:100%; vertical-align:middle; border-radius:4px; cursor:zoom-in }" +
+                (browsing ? "" : " img { max-height:120px }") +
                 " [data-meguri-chip] { display:inline-flex; align-items:center; gap:4px; max-width:100%; padding:1px 8px 1px 6px; margin:1px 0;" +
                 " border-radius:999px; font-size:12px; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;" +
                 " cursor:default; user-select:none; color:-apple-system-label; background:-apple-system-quaternary-label }" +
@@ -507,10 +509,11 @@
         placeholderLabel.className = "placeholder"; placeholderLabel.textContent = value.description;
         placeholderLabel.setAttribute("aria-hidden", "true");
         // CSS properties are assigned as data. A field font cannot inject CSS.
-        // In Browse's inspector the text takes the system font at the body size;
-        // the note type's fonts belong to the card (its preview), and an
+        // In Browse's inspector and the Mac's columns form the text takes the
+        // system font (the form's 13 pt, beside its 13 pt labels); the note
+        // type's fonts belong to the card (its preview). In the inspector an
         // unmarked field reads in its own content's direction.
-        if (!browsing) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
+        if (!browsing && !document.documentElement.classList.contains("mac")) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
         host.style.direction = value.rtl ? "rtl" : browsing ? "" : "ltr";
         if (browsing && !value.rtl) rich.dir = "auto";
         rich.replaceChildren(loadParse(value.html)); root.append(style, rich, placeholderLabel);
@@ -532,15 +535,23 @@
             if (event.target === boundary && !held && !field.collapsed) active(field).focus();
         });
         wire(field, rich); wire(field, source); show(field);
-        if (browsing) {
+        if (media) {
             // A chip plays its sound; a thumbnail opens the larger view (the host does both).
             rich.addEventListener("click", event => {
                 const chip = event.target.closest?.("[data-meguri-chip]");
-                if (chip) { event.preventDefault(); void emit("playMedia", {name: chip.getAttribute("data-meguri-name")}); return; }
+                // A chip the note's own HTML imitates may carry no name: it plays nothing.
+                if (chip) {
+                    event.preventDefault();
+                    const name = chip.getAttribute("data-meguri-name");
+                    if (name) void emit("playMedia", {name});
+                    return;
+                }
                 if (event.target.localName === "img" && event.target.getAttribute("src")) {
                     void emit("openMedia", {name: event.target.getAttribute("src")});
                 }
             });
+        }
+        if (browsing) {
             const follow = () => reportCaret(field);
             for (const type of ["input", "keyup", "mouseup", "focus"]) rich.addEventListener(type, follow);
             source.addEventListener("input", () => { grow(source); follow(); });
@@ -582,6 +593,8 @@
             for (const field of fields) clearTimeout(field.timer);
             loadId = message.loadId; seq = 0; current = null;
             browsing = message.mode === "browse";
+            // Edit Note shows the same media as the inspector (2026-11-24, option A).
+            media = browsing || message.mode === "edit";
             document.documentElement.classList.toggle("inspector", browsing);
             held = true; container.replaceChildren(); fields = message.fields.map(makeField);
             held = false; container.inert = false;
