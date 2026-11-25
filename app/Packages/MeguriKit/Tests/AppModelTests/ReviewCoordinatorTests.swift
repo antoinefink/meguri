@@ -416,6 +416,72 @@ extension ReviewCollectionStartupTests {
         #expect(await fixture.model.end())
     }
 
+    @Test(arguments: [false, true])
+    func automaticRefreshAfterReadFailurePresentsSameCardAgain(answerSide: Bool) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        if answerSide { fixture.model.reveal(); await fixture.model.settled() }
+        try #require(fixture.surface.presented == [1])
+        fixture.client.onHeadResult = { throw BridgeError.internal("synthetic transient read failure") }
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.model.phase == .error)
+        #expect(!fixture.model.canReveal && !fixture.model.canRate)
+        #expect(fixture.surface.audioInvalidations == 1)
+
+        fixture.client.onHeadResult = nil
+        // A reveal must use a fresh presentation after the old page was invalidated.
+        fixture.surface.onReveal = { [surface = fixture.surface] in
+            guard surface.presented == [1, 1] else { throw CardPage.Failure.notPrepared }
+        }
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.client.headReads == 2)
+        #expect(fixture.surface.presented == [1, 1])
+        #expect(fixture.model.phase == (answerSide ? .answer : .question))
+        #expect(fixture.model.canReveal == !answerSide)
+        #expect(fixture.model.canRate == answerSide)
+        if !answerSide { fixture.model.reveal(); await fixture.model.settled() }
+        #expect(fixture.model.phase == .answer && fixture.model.canRate)
+        #expect(fixture.surface.reveals == (answerSide ? 2 : 1))
+        fixture.surface.onReveal = nil
+        #expect(await fixture.model.end())
+    }
+
+    @Test func presentationFailureInvalidatesAudioAndRetryPresentsAgain() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.surface.onPresent = { throw BridgeError.internal("synthetic presentation failure") }
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.model.phase == .error)
+        #expect(fixture.surface.audioInvalidations == 1)
+        let historyBeforeRetry = fixture.surface.presented
+        #expect(historyBeforeRetry.last == 2)
+        fixture.surface.onPresent = nil
+        fixture.model.retry(); await fixture.model.settled()
+        #expect(fixture.surface.presented == historyBeforeRetry + [2])
+        #expect(fixture.model.phase == .question)
+        #expect(!fixture.surface.calls.contains("resume"))
+        #expect(await fixture.model.end())
+    }
+
+    @Test(arguments: [false, true])
+    func terminalInvalidatesAudioAndExplicitContinuePresentsAgain(waiting: Bool) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        let terminal: ReviewTerminalState = waiting ? .waitingUntil(instant: 1_800_000_600) : .finished
+        fixture.client.currentHead = Self.emptyHead(terminal)
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.model.phase == (waiting ? .waiting : .finished))
+        #expect(fixture.surface.audioInvalidations == 1)
+        fixture.client.currentHead = Self.head(2)
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.surface.presented == [1])
+        fixture.model.continueReview(); await fixture.model.settled()
+        #expect(fixture.model.phase == .question && fixture.surface.presented == [1, 2])
+        #expect(!fixture.surface.calls.contains("resume"))
+        #expect(await fixture.model.end())
+    }
+
     @Test func undoRedoUsesRestoreAndPersistsActualRecord() async throws {
         let fixture = Fixture()
         await fixture.model.start()
@@ -1481,6 +1547,8 @@ extension ReviewCollectionStartupTests {
         var onRecovery: (() -> Void)?
         var editing = false
         var reveals = 0
+        var audioInvalidations = 0
+        func invalidatePresentationAudio() { audioInvalidations += 1 }
         var presented: [Int64] = []
         var calls: [String] = []
         var onLoad: (() async throws -> Void)?

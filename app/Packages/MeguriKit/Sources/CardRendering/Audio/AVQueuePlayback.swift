@@ -17,6 +17,8 @@ public final class AVQueuePlayback: CardAudioBackend {
     // Internal deterministic close/cancel barrier after native initialization.
     // Nil in production; never receives the player or its private URL.
     var beforeNativeTransfer: (@Sendable () -> Void)?
+    // Operation gate before file admission; nil during normal playback.
+    var beforeNativePlay: (@Sendable () async -> Void)?
     public init() {}
     public func prepare(_ file: MediaFile) async throws -> any CardAudioClip {
         let onPreparation = onNativePreparationInterval
@@ -33,7 +35,7 @@ public final class AVQueuePlayback: CardAudioBackend {
             }
             ownsNativeInput = true
             let owner = PlayerOwner(player: try await Self.makePlayer(at: url, beforeTransfer: beforeNativeTransfer,
-                                                                    onPreparation: onPreparation), file: file)
+                                                                    onPreparation: onPreparation), file: file, beforePlay: beforeNativePlay)
             do {
                 let metadata: PlayerOwner.Metadata
                 do {
@@ -114,15 +116,20 @@ public final class AVQueuePlayback: CardAudioBackend {
         }
         private let player: AVAudioPlayer
         private let file: MediaFile
+        private let beforePlay: (@Sendable () async -> Void)?
         private var delegate: CompletionDelegate?
         private var stopped = false
-        init(player: sending AVAudioPlayer, file: MediaFile) { self.player = player; self.file = file }
+        init(player: sending AVAudioPlayer, file: MediaFile, beforePlay: (@Sendable () async -> Void)?) {
+            self.player = player; self.file = file; self.beforePlay = beforePlay
+        }
         func metadata() -> Metadata { Metadata(duration: player.duration, seekable: player.duration.isFinite) }
         private func setDelegate(_ delegate: CompletionDelegate?) {
             self.delegate = delegate
             player.delegate = delegate
         }
-        func play(delegate: CompletionDelegate) async throws -> (TimeInterval, TimeInterval) {
+        func play(delegate: CompletionDelegate, permit: CardAudioPlayPermit) async throws -> (TimeInterval, TimeInterval) {
+            await beforePlay?()
+            try Task.checkCancellation()
             try await file.requireNativePlaybackOpen()
             try Task.checkCancellation()
             guard !stopped else { throw Failure.unsupported }
@@ -136,7 +143,8 @@ public final class AVQueuePlayback: CardAudioBackend {
                 throw Failure.unsupported
             }
             #endif
-            guard player.play(atTime: player.deviceCurrentTime + 0.005) else {
+            try Task.checkCancellation()
+            guard try permit.trySchedule({ player.play(atTime: player.deviceCurrentTime + 0.005) }) else {
                 player.stop()
                 setDelegate(nil)
                 throw Failure.unsupported
@@ -240,10 +248,12 @@ public final class AVQueuePlayback: CardAudioBackend {
             let owner = self.owner
             Task { await owner.stop() }
         }
-        func play() async throws {
+        func play(permit: CardAudioPlayPermit) async throws {
             do {
-                let (startedAt, finishedAt) = try await owner.play(delegate: completion.makeDelegate())
+                let (startedAt, finishedAt) = try await owner.play(delegate: completion.makeDelegate(), permit: permit)
                 onPlay?(startedAt, finishedAt)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 onEnd = nil
                 await owner.stop()
