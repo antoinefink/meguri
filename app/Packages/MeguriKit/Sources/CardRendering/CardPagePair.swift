@@ -88,6 +88,7 @@ public final class CardPagePair {
     private var generation: UInt64 = 0
     private var suspended = false
     private var lifecycleSuspended = false
+    private var reviewPresentationInvalidated = false
     private var preparedAnswer: (question: CardUpdate, answer: CardUpdate)?
     private var closed = false
     private var commitSerial: UInt64 = 0
@@ -158,7 +159,7 @@ public final class CardPagePair {
             }
             page.onSignal = { [weak self] page, signal, body in
                 guard let self, let update = page.update else { return }
-                if signal == "mediaPlayback", page === self.current, page.behaviorAvailable, !self.suspended, !self.lifecycleSuspended {
+                if signal == "mediaPlayback", page === self.current, page.behaviorAvailable, !self.suspended, !self.lifecycleSuspended, !self.reviewPresentationInvalidated {
                     if body["playing"] as? Bool == true {
                         if self.htmlAudioOwner == nil {
                             let lease = UUID()
@@ -305,6 +306,8 @@ public final class CardPagePair {
     public func present(_ update: CardUpdate, inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime, audioIntent: UInt64? = nil) throws -> SwapToken {
         guard !closed, !suspended, !lifecycleSuspended, idle.update == update, idle.settled else { throw CardPage.Failure.notPrepared }
         let audioIntent = audioIntent ?? audio.audioIntent
+        guard !reviewPresentationInvalidated || audio.allowsAudio(audioIntent) else { throw CardPage.Failure.superseded }
+        reviewPresentationInvalidated = false
         let old = current
         let next = idle
         // A tap counts only for the card it was on: the next card needs its own.
@@ -483,7 +486,7 @@ public final class CardPagePair {
     }
 
     public func replay() {
-        guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable, let update = current.update, let payload = current.payload else { return }
+        guard !closed, !suspended, !lifecycleSuspended, !reviewPresentationInvalidated, current.behaviorAvailable, let update = current.update, let payload = current.payload else { return }
         audio.replay(payload: payload, update: update)
     }
     /// R412: blurs the visible page's focused field, which puts the software
@@ -516,8 +519,18 @@ public final class CardPagePair {
         for page in pages { page.pauseMediaWithoutWaiting() }
         releaseHTMLAudio()
     }
+    /// The card left review for a terminal/error screen. Keep rendering eligible,
+    /// but only a new presentation may reopen this visit's media admission.
+    public func invalidateReviewPresentation() {
+        guard !closed else { return }
+        reviewPresentationInvalidated = true
+        // In-flight reveal/host work must lose its binding too; it cannot
+        // become eligible merely because a later presentation clears the fence.
+        current.invalidate()
+        beginSuspension()
+    }
     public func pauseAudio() { audio.pause() }
-    public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended { audio.resume() } }
+    public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended && !reviewPresentationInvalidated { audio.resume() } }
     public func seekAudio(by seconds: TimeInterval) async { await audio.seek(by: seconds) }
 
     /// Returns names with no retryable element/stylesheet on the visible side.
@@ -623,7 +636,7 @@ public final class CardPagePair {
     /// both document bindings after each await; cancellation releases probes.
     private func beginResumption() -> Task<Void, Never>? {
         cancelPresentationWork()
-        guard !closed, !suspended, !lifecycleSuspended else { return nil }
+        guard !closed, !suspended, !lifecycleSuspended, !reviewPresentationInvalidated else { return nil }
         let resumeEpoch = presentationEpoch, boundPage = current
         let updateBindings = pages.map { $0.update }, documentBindings = pages.map { $0.documentID }
         let pendingResume = Task { [weak self, weak boundPage] in
@@ -730,7 +743,7 @@ public final class CardPagePair {
         recovery?.cancel(); recovery = nil
     }
     private func scheduleRecovery() {
-        guard !closed, !suspended, !lifecycleSuspended, recovery == nil,
+        guard !closed, !suspended, !lifecycleSuspended, !reviewPresentationInvalidated, recovery == nil,
               current.needsReconstruction, let priorBinding = current.update,
               let cardContent = current.payload, let sideHTML = current.renderedHTML else { return }
         let surface = current

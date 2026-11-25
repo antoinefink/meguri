@@ -416,6 +416,39 @@ extension ReviewCollectionStartupTests {
         #expect(await fixture.model.end())
     }
 
+    @Test func presentationFailureInvalidatesAudioAndRetryPresentsAgain() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.surface.onPresent = { throw BridgeError.internal("synthetic presentation failure") }
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.model.phase == .error)
+        #expect(fixture.surface.audioInvalidations == 1)
+        fixture.surface.onPresent = nil
+        fixture.model.retry(); await fixture.model.settled()
+        #expect(fixture.model.phase == .question && fixture.surface.presented.last == 2)
+        #expect(!fixture.surface.calls.contains("resume"))
+        #expect(await fixture.model.end())
+    }
+
+    @Test(arguments: [false, true])
+    func terminalInvalidatesAudioAndExplicitContinuePresentsAgain(waiting: Bool) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        let terminal: ReviewTerminalState = waiting ? .waitingUntil(instant: 1_800_000_600) : .finished
+        fixture.client.currentHead = Self.emptyHead(terminal)
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.model.phase == (waiting ? .waiting : .finished))
+        #expect(fixture.surface.audioInvalidations == 1)
+        fixture.client.currentHead = Self.head(2)
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.surface.presented == [1])
+        fixture.model.continueReview(); await fixture.model.settled()
+        #expect(fixture.model.phase == .question && fixture.surface.presented == [1, 2])
+        #expect(!fixture.surface.calls.contains("resume"))
+        #expect(await fixture.model.end())
+    }
+
     @Test func undoRedoUsesRestoreAndPersistsActualRecord() async throws {
         let fixture = Fixture()
         await fixture.model.start()
@@ -1481,6 +1514,8 @@ extension ReviewCollectionStartupTests {
         var onRecovery: (() -> Void)?
         var editing = false
         var reveals = 0
+        var audioInvalidations = 0
+        func invalidatePresentationAudio() { audioInvalidations += 1 }
         var presented: [Int64] = []
         var calls: [String] = []
         var onLoad: (() async throws -> Void)?

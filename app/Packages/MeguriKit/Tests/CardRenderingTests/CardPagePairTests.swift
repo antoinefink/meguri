@@ -462,10 +462,14 @@ extension WebKitSuites {
             #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
         }
 
-        @Test func reviewAudioRevocationPausesBothPagesAndFencesHTMLReportsUntilResume() async throws {
+        @Test(arguments: [false, true])
+        func reviewAudioRevocationPausesBothPagesAndFencesHTMLReportsUntilEligiblePresentation(terminal: Bool) async throws {
             let fixture = MediaFixture()
             fixture.add("/clip.mp4", try await TestMedia.mp4(), "video/mp4")
-            let pair = try await make(fixture)
+            let resolver = try await fixture.resolved()
+            let audio = CardAudioController(resolver: resolver, backend: CardAudioControllerTests.Backend(),
+                                            session: CardAudioControllerTests.Session())
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio)
             let window = SpikeWindow(pair.container)
             defer { pair.close(); window.close() }
             try await pair.load()
@@ -480,7 +484,10 @@ extension WebKitSuites {
             }
             pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
             #expect(pair.htmlAudioOwner != nil)
-            pair.revokeReviewAudio()
+            let oldIntent = pair.audioIntent
+            if terminal { pair.invalidateReviewPresentation() } else { pair.revokeReviewAudio() }
+            #expect(!audio.allowsAudio(oldIntent))
+            audio.admitReview(intent: oldIntent)
             #expect(pair.htmlAudioOwner == nil)
             // Model a report already on its way when review admission closed.
             pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
@@ -490,11 +497,35 @@ extension WebKitSuites {
                     try await page.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true
                 }
             }
-            await pair.suspend()
-            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
-            #expect(pair.htmlAudioOwner == nil)
-            await pair.resume()
-            pair.admitReviewAudio()
+            if terminal {
+                // Neither transport Resume nor lifecycle availability may reopen old HTML.
+                pair.resumeAudio()
+                await pair.resume()
+                pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+                #expect(pair.htmlAudioOwner == nil && !pair.current.presented)
+                _ = try await pair.current.webView.callAsyncJavaScript("await document.getElementById('media').play().catch(()=>{});", contentWorld: .page)
+                try await CardBehaviorFixture.until("old HTML stays fenced") {
+                    try await pair.current.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true
+                }
+                let fresh = try await pair.prepare(CardPayload(cardID: 3, question: html, answer: "answer"))
+                #expect(throws: CardPage.Failure.self) { try pair.present(fresh, audioIntent: oldIntent) }
+                pair.admitReviewAudio(intent: pair.audioIntent)
+                _ = try pair.present(fresh)
+                try await pair.current.waitForShown(fresh)
+                #expect(audio.allowsAudio(pair.audioIntent) && !audio.allowsAudio(oldIntent))
+                #expect(try await pair.current.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true)
+            } else {
+                await pair.suspend()
+                pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+                #expect(pair.htmlAudioOwner == nil)
+                // Audio admission does not lift lifecycle suspension.
+                pair.admitReviewAudio()
+                await #expect(throws: CardPage.Failure.self) {
+                    try await pair.prepare(CardPayload(cardID: 3, question: html, answer: "answer"))
+                }
+                await pair.resume()
+                pair.admitReviewAudio()
+            }
             _ = try await pair.current.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
             pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
             #expect(pair.htmlAudioOwner != nil)

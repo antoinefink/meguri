@@ -1,5 +1,6 @@
 import CoreBridge
 import Foundation
+import Synchronization
 
 /// The caller supplies the home-deck and collection playback policy.
 public nonisolated struct CardAudioPolicy: Sendable, Equatable {
@@ -19,15 +20,41 @@ public nonisolated struct CardAudioSample: Sendable {
     }
 }
 
+/// One play attempt's authority to submit output. Scheduling and revocation
+/// share a lock: no asynchronous work may occur inside the scheduling closure.
+public nonisolated final class CardAudioPlayPermit: Sendable {
+    private enum State { case pending, revoked, submitted }
+    private let state = Mutex<State>(.pending)
+
+    public init() {}
+    public var hasSubmitted: Bool { state.withLock { $0 == .submitted } }
+    public func revoke() { state.withLock { if $0 == .pending { $0 = .revoked } } }
+
+    /// A false result means the backend refused scheduling, so no output exists.
+    public func trySchedule(_ schedule: () throws -> Bool) throws -> Bool {
+        try state.withLock { state in
+            guard state == .pending else { throw CancellationError() }
+            // Consume even a failed attempt; retries need a fresh permit.
+            state = .revoked
+            let submitted = try schedule()
+            if submitted { state = .submitted }
+            return submitted
+        }
+    }
+}
+
 public protocol CardAudioClip: AnyObject {
     var duration: TimeInterval? { get }
     var seekable: Bool { get }
     var onEnd: ((Bool) -> Void)? { get set }
-    func play() async throws
+    func play(permit: CardAudioPlayPermit) async throws
     func pause() async
     func stop() async
     func sample() async -> CardAudioSample
     func seek(to time: TimeInterval) async throws
+}
+public extension CardAudioClip {
+    func play() async throws { try await play(permit: CardAudioPlayPermit()) }
 }
 public protocol CardAudioBackend: AnyObject {
     func prepare(_ file: MediaFile) async throws -> any CardAudioClip
@@ -444,7 +471,7 @@ public final class CardAudioController {
             audioRevision += 1
             continuityAllowed = false
             session.releaseContinuity(continuityOwner)
-            // Preserve only the current word whose play call was issued.
+            // Preserve only the current word actually submitted to the backend.
             // Pending activation/decode belongs to the disconnected route.
             if let clip, current != nil, transport.canPreserve(clip, serial: generation) {
                 cancelPreload()
@@ -517,7 +544,7 @@ private final class AudioTransport {
         var intent: Intent
         var playing = false
         var hasStarted = false
-        var playIssued = false
+        var playPermit: CardAudioPlayPermit?
         var readinessStage: CardAudioController.Readiness.Stage?
         var pauseRequired = false
         var keepSession = false
@@ -533,9 +560,9 @@ private final class AudioTransport {
     private var owned: OwnedClip?
     private var running = false
     private var playAttempt: Task<Void, Error>?
-    // An issued call may already have scheduled native output before its return
-    // reaches MainActor. Preserve that decoded item for explicit resume too.
-    private var hasSubmittedOutput: Bool { owned.map { $0.hasStarted || $0.playIssued } == true }
+    // Submission is published inside the scheduling lock, before the async
+    // play return reaches MainActor. Entering play alone proves nothing.
+    private var hasSubmittedOutput: Bool { owned.map { $0.hasStarted || $0.playPermit?.hasSubmitted == true } == true }
     var isEmpty: Bool { owned == nil }
     func canPreserve(_ clip: any CardAudioClip, serial: UInt64) -> Bool {
         guard let owned else { return false }
@@ -576,12 +603,14 @@ private final class AudioTransport {
     func stop(keepSession: Bool) {
         guard let owned else { if !keepSession { releaseIfIdle() }; return }
         owned.intent = .stopped
+        owned.playPermit?.revoke()
         playAttempt?.cancel()
         owned.keepSession = keepSession
         owned.seek = nil
         owned.clip.onEnd = nil
     }
     func revokePendingOutput() {
+        owned?.playPermit?.revoke()
         playAttempt?.cancel()
         if !hasSubmittedOutput { release() }
     }
@@ -650,11 +679,12 @@ private final class AudioTransport {
                 continue
             }
             if item.readinessStage != nil { item.readinessStage = .playPending }
+            let permit = CardAudioPlayPermit()
+            item.playPermit = permit
             let attempt = Task { @MainActor in
                 try Task.checkCancellation()
                 guard item.intent == .playing, !item.pauseRequired else { throw CancellationError() }
-                item.playIssued = true
-                try await item.clip.play()
+                try await item.clip.play(permit: permit)
                 // Publish before this attempt finishes, without a parent-task hop.
                 // Cancellation can arrive after native scheduling succeeded.
                 item.playing = true; item.hasStarted = true

@@ -282,6 +282,55 @@ import AVFoundation
         #expect(backend.events == ["word.mp3"])
     }
 
+    @Test func reviewStopReleasesIdleContinuityAndFencesOldIntentWithoutAffectingAnotherReview() async throws {
+        let fixture = MediaFixture()
+        fixture.add("/word.mp3", Data([1]), "audio/mpeg")
+        let resolver = try await fixture.resolved()
+        let output = Output(), backend = CardAudioControllerTests.Backend()
+        let hardware = SessionHardware(perform: output.perform)
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true })
+        let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+        let other = UUID()
+        defer { audio.close(); session.releaseContinuity(other) }
+        audio.admitReview()
+        await session.hardwareSettled()
+        #expect(output.operations.isEmpty) // Admission alone has no playable resource.
+        let payload = CardPayload(cardID: 1, question: "", answer: "", questionAudio: [.sound(name: "word.mp3")])
+        let update = CardUpdate(card: 1, generation: 1, side: .question)
+        audio.present(payload: payload, update: update)
+        #expect(await backend.nextPlay() == "word.mp3")
+        let clip = try #require(backend.clips.first)
+        clip.onEnd?(true)
+        await audio.transportSettled()
+        await session.hardwareSettled()
+        #expect(audio.current == nil && output.operations.contains(.startSilence))
+        session.maintainContinuity(other)
+        let oldIntent = audio.audioIntent
+        audio.stop() // The pair's terminal/error teardown uses this same physical stop.
+        await audio.transportSettled()
+        await session.hardwareSettled()
+        #expect(!output.operations.contains(.deactivate))
+        session.releaseContinuity(other)
+        await session.hardwareSettled()
+        #expect(output.operations.suffix(2) == [.stopSilence, .deactivate])
+        let stopped = output.operations
+        audio.admitReview(intent: oldIntent)
+        await audio.prepare(payload: payload, update: update, intent: oldIntent)?.value
+        audio.present(payload: payload, update: update, intent: oldIntent)
+        audio.resume()
+        await audio.transportSettled()
+        await session.hardwareSettled()
+        #expect(output.operations == stopped && backend.events == ["word.mp3"])
+        let fresh = CardUpdate(card: 1, generation: 2, side: .question)
+        audio.admitReview(intent: audio.audioIntent)
+        audio.present(payload: payload, update: fresh, intent: audio.audioIntent)
+        #expect(await backend.nextPlay() == "word.mp3")
+        audio.stop()
+        await audio.transportSettled()
+        await session.hardwareSettled()
+        #expect(output.operations.filter { $0 == .deactivate }.count == 2)
+    }
+
     @Test func failedSilentStartupCleansUpAndNormalPlaybackStillStarts() async throws {
         let output = Output(), keeper = UUID(), word = UUID()
         output.fail(.startSilence)
@@ -364,6 +413,34 @@ import AVFoundation
         #expect(output.operations.filter { $0 == .startSilence }.count == 2)
         session.releaseContinuity(first)
         await session.hardwareSettled()
+    }
+
+    @Test(arguments: [false, true])
+    func failedActivationAndCleanupRequireFreshActivation(audible: Bool) async throws {
+        let output = Output()
+        let cleanupAttempts = audible ? 1 : 2
+        let failures = Mutex([SessionHardware.Operation.activate]
+            + Array(repeating: .deactivate, count: cleanupAttempts))
+        let hardware = SessionHardware(perform: { operation in
+            try output.perform(operation)
+            try failures.withLock {
+                if $0.first == operation {
+                    $0.removeFirst()
+                    throw Output.Failure.synthetic
+                }
+            }
+        })
+        await #expect(throws: Output.Failure.self) {
+            try await hardware.set(audible: audible, continuity: !audible, revision: 1)
+        }
+        // Keep the existing cleanup attempts, including the idle-continuity catch.
+        #expect(output.operations.filter { $0 == .activate }.count == 1)
+        #expect(output.operations.filter { $0 == .deactivate }.count == cleanupAttempts)
+        try await hardware.set(audible: true, continuity: false, revision: 2)
+        #expect(output.operations.last == .activate)
+        #expect(output.operations.filter { $0 == .activate }.count == 2)
+        try await hardware.set(audible: false, continuity: false, revision: 3)
+        #expect(output.operations.filter { $0 == .deactivate }.count == cleanupAttempts + 1)
     }
 
     @Test func partialActivationAndFailedReleaseAreReconciled() async throws {

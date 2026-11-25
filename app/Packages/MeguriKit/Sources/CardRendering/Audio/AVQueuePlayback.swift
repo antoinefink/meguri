@@ -127,7 +127,7 @@ public final class AVQueuePlayback: CardAudioBackend {
             self.delegate = delegate
             player.delegate = delegate
         }
-        func play(delegate: CompletionDelegate) async throws -> (TimeInterval, TimeInterval) {
+        func play(delegate: CompletionDelegate, permit: CardAudioPlayPermit) async throws -> (TimeInterval, TimeInterval) {
             await beforePlay?()
             try Task.checkCancellation()
             try await file.requireNativePlaybackOpen()
@@ -144,7 +144,7 @@ public final class AVQueuePlayback: CardAudioBackend {
             }
             #endif
             try Task.checkCancellation()
-            guard player.play(atTime: player.deviceCurrentTime + 0.005) else {
+            guard try permit.trySchedule({ player.play(atTime: player.deviceCurrentTime + 0.005) }) else {
                 player.stop()
                 setDelegate(nil)
                 throw Failure.unsupported
@@ -248,9 +248,9 @@ public final class AVQueuePlayback: CardAudioBackend {
             let owner = self.owner
             Task { await owner.stop() }
         }
-        func play() async throws {
+        func play(permit: CardAudioPlayPermit) async throws {
             do {
-                let (startedAt, finishedAt) = try await owner.play(delegate: completion.makeDelegate())
+                let (startedAt, finishedAt) = try await owner.play(delegate: completion.makeDelegate(), permit: permit)
                 onPlay?(startedAt, finishedAt)
             } catch is CancellationError {
                 throw CancellationError()

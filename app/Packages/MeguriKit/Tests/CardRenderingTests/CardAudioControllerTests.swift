@@ -71,11 +71,14 @@ import AVFoundation
         var onSample: (() -> Void)?
         var plays = 0, pauses = 0, stops = 0, seeks = 0, samples = 0
         init(_ file: MediaFile, backend: Backend) { self.name = file.name; self.file = file; self.backend = backend }
-        func play() async throws {
+        func play(permit: CardAudioPlayPermit) async throws {
             plays += 1
             await playHold?.wait()
             if checksPlayCancellation { try Task.checkCancellation() }
-            isPaused = false; backend?.played(name)
+            _ = try permit.trySchedule {
+                isPaused = false; backend?.played(name)
+                return true
+            }
             await submittedHold?.wait()
         }
         func pause() async {
@@ -419,14 +422,15 @@ import AVFoundation
     }
 
     @Test(arguments: [true, false])
-    func routeLossDuringIssuedPlayPreservesDecodedClipForExplicitResume(_ scheduled: Bool) async throws {
+    func routeLossPreservesOnlyActuallySubmittedPlayForExplicitResume(_ scheduled: Bool) async throws {
         let rig = try await self.rig()
         defer { rig.controller.close() }
         await rig.controller.prepare(payload: payload(), update: question)?.value
         let clip = try #require(rig.backend.clips.first)
         let play = Hold()
         defer { play.release() }
-        clip.checksPlayCancellation = true
+        // Ignore task cancellation here: the permit itself must fence a late
+        // submission when route loss wins while play is held.
         if scheduled { clip.submittedHold = play } else { clip.playHold = play }
         rig.controller.present(payload: payload(), update: question)
         await play.reached()
@@ -435,17 +439,30 @@ import AVFoundation
             clip.time = 1
         }
         rig.controller.sessionEvent(.pause)
-        #expect(rig.controller.paused && rig.controller.current?.name == "q1.mp3")
-        #expect(rig.session.owners.count == 1)
+        if scheduled {
+            #expect(rig.controller.paused && rig.controller.current?.name == "q1.mp3")
+            #expect(rig.session.owners.count == 1)
+        } else {
+            #expect(!rig.controller.paused && rig.controller.current == nil)
+            #expect(rig.session.owners.isEmpty)
+        }
         play.release(); clip.playHold = nil; clip.submittedHold = nil
         await rig.controller.transportSettled()
         rig.controller.sessionEvent(.available)
-        #expect(clip.isPaused && !clip.stopped && rig.session.owners.isEmpty)
+        #expect(rig.session.owners.isEmpty)
         #expect(rig.backend.events == (scheduled ? ["q1.mp3"] : []))
         #expect(clip.time == (scheduled ? 1 : 0))
+        if scheduled { #expect(clip.isPaused && !clip.stopped) }
         rig.controller.resume()
-        #expect(await rig.backend.nextPlay() == "q1.mp3")
-        #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 1)
+        if scheduled {
+            #expect(await rig.backend.nextPlay() == "q1.mp3")
+            #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 1)
+        } else {
+            #expect(clip.stopped && rig.backend.events.isEmpty && rig.controller.current == nil)
+            rig.controller.replay(payload: payload(), update: question)
+            #expect(await rig.backend.nextPlay() == "q1.mp3")
+            #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 2)
+        }
     }
 
     @Test func heldPlayKeepsUIResponsiveAndBurstPauseResumeCoalesces() async throws {

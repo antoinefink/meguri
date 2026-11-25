@@ -10,6 +10,8 @@ public protocol ReviewCardSurface: AnyObject {
     var editing: Bool { get }
     func load() async throws
     func beginPresentationAudio()
+    /// Terminal/error teardown; the next eligible card presentation reopens audio.
+    func invalidatePresentationAudio()
     func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws
     func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws
     func preload(item: ReviewHeadItem) async throws
@@ -35,6 +37,7 @@ public protocol ReviewCardSurface: AnyObject {
 
 extension ReviewCardSurface {
     public func beginPresentationAudio() {}
+    public func invalidatePresentationAudio() { pair?.invalidateReviewPresentation() }
     public var onWillPresent: (() -> Void)? { get { nil } set {} }
     public var reusable: Bool { true }
     public func prepareFirst(item: ReviewHeadItem, payload: CardPayload) async throws {}

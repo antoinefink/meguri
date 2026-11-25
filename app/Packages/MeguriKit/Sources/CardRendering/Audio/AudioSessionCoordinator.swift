@@ -237,7 +237,8 @@ actor SessionHardware {
     // Tests replace only physical effects, retaining the real state machine.
     private let performOverride: (@Sendable (Operation) throws -> Void)?
     private var revision: UInt64 = 0
-    private var active = false
+    private enum Activation { case inactive, uncertain, active }
+    private var activation = Activation.inactive
     private var ducking: Bool?
     private var continuityLifetime: UInt64 = 0
     private var silenceRequested = false
@@ -266,10 +267,10 @@ actor SessionHardware {
                     try perform(.category(ducking: audible))
                     ducking = audible
                 }
-                if !active {
+                if activation != .active {
                     // Activation can partially succeed before throwing.
-                    active = true
-                    do { try perform(.activate) }
+                    activation = .uncertain
+                    do { try perform(.activate); activation = .active }
                     catch { try? deactivate(); throw error }
                 }
                 if needsSilence { requestSilence(true, revision: revision, restart: lifetimeChanged && silenceRequested) }
@@ -324,7 +325,7 @@ actor SessionHardware {
     private var outputRevision: UInt64 = 0
     func settled() async { await outputWork?.value; await recoveryWork?.value }
     private func deactivate() throws {
-        guard active else { return }
+        guard activation != .inactive else { return }
         do { try perform(.deactivate) }
         catch {
             #if os(iOS)
@@ -336,7 +337,7 @@ actor SessionHardware {
             throw error
             #endif
         }
-        active = false
+        activation = .inactive
     }
     private func perform(_ operation: Operation) throws {
         if let performOverride { try performOverride(operation); return }
