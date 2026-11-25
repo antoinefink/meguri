@@ -21,6 +21,8 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   const [outcome, setOutcome] = useState<OutcomeValue | null>(null), [conflict, setConflict] = useState(false), [confirmDelete, setConfirmDelete] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [detailFresh, setDetailFresh] = useState(true), [pagesChecked, setPagesChecked] = useState(0);
+  const committedReplay = useRef<AbortController | null>(null);
+  const restoreRowFocus = useRef(false);
   const examinedThrough = useRef<string | null>(null);
   const alive = useRef(true), locked = useRef(false), writing = useRef(false);
   const listRequest = useRef<AbortController | null>(null), detailRequest = useRef<AbortController | null>(null);
@@ -65,17 +67,21 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
           all = all ? { ...result, decks: [...all.decks, ...result.decks], note_types: [...all.note_types, ...result.note_types] } : result;
           next = result.next_cursor;
         } while (next);
-        setCatalog(all); setNewDeck(all?.decks.find(d => !d.filtered)?.deck_id ?? ""); setNewType(all?.note_types[0]?.note_type_id ?? "");
+        setCatalog(all); setNewDeck(all?.decks.find(d => !d.filtered && !d.unavailable)?.deck_id ?? ""); setNewType(all?.note_types.find(nt => !nt.unavailable)?.note_type_id ?? "");
       } catch (caught) { if (!controller.signal.aborted) fail(caught); }
     })();
     return () => { alive.current = false; controller.abort(); listRequest.current?.abort(); detailRequest.current?.abort(); };
   }, []);
-  function stopList() {
-    listRequest.current?.abort();
+  function stopList(navigation = false) {
+    // A committed write must reconcile this query even if its editor closes.
+    if (navigation && listRequest.current === committedReplay.current) return;
+    listRequest.current?.abort(); listRequest.current = null;
+    committedReplay.current = null;
     setLoading(false);
   }
   function changeScope(next: BrowseScope) {
-    stopList();
+    stopList(); restoreRowFocus.current = false;
+    setCards([]); setCursor(null); examinedThrough.current = null; scroll.current = 0;
     currentScope.current = next;
     setScope(next);
   }
@@ -83,11 +89,12 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     listRequest.current?.abort();
     const controller = new AbortController();
     listRequest.current = controller;
+    committedReplay.current = committedMessage ? controller : null;
     setLoading(true); setPagesChecked(0);
     try {
       // Replay the actual examined key range after a mutation, then continue
       // through empty sparse pages until a visible row or exhaustion. Each
-      // request is bounded and can be cancelled by scope or navigation changes.
+      // request is bounded; new queries always cancel, navigation preserves write replay.
       let next = after, rows: BrowseCard[] = [], pages = 0;
       do {
         const result = await browseApi("page", { ...target, limit: 50, ...(next ? { cursor: next } : {}) }, accountId, controller.signal);
@@ -113,10 +120,18 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   }
   useEffect(() => {
     if (locked.current) return;
-    setCards([]); setCursor(null); examinedThrough.current = null; scroll.current = 0;
     void readPage(scope);
   }, [scope]);
-  useLayoutEffect(() => { if (list.current) list.current.scrollTop = scroll.current; }, [cards, detail, adding]);
+  useLayoutEffect(() => {
+    if (list.current) list.current.scrollTop = scroll.current;
+    if (!detail && !adding && restoreRowFocus.current) focusResult();
+  }, [cards, detail, adding]);
+  function focusResult() {
+    const buttons = Array.from(list.current?.querySelectorAll<HTMLButtonElement>("button[data-card]") ?? []);
+    const selected = buttons.find(el => el.dataset.card === listFocus.current);
+    const nearby = listFocus.current ? buttons.find(el => BigInt(el.dataset.card!) > BigInt(listFocus.current!)) ?? buttons.at(-1) : buttons[0];
+    (selected ?? nearby ?? document.getElementById("browse-query"))?.focus({ preventScroll: true });
+  }
   useLayoutEffect(() => {
     if (!detail && !adding) return;
     const input = matchField.current ? Array.from(editor.current?.querySelectorAll<HTMLTextAreaElement>("textarea") ?? []).find(el => el.dataset.field === matchField.current) : null;
@@ -125,7 +140,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   async function open(card: BrowseCard, discard = false) {
     if (locked.current || writing.current || (!discard && !mayLeave())) return;
     detailRequest.current?.abort(); const controller = new AbortController(); detailRequest.current = controller;
-    stopList();
+    stopList(true); restoreRowFocus.current = false;
     if (list.current && list.current.offsetParent !== null) scroll.current = list.current.scrollTop;
     if (!detail && !adding) pageScroll.current = window.scrollY;
     listFocus.current = card.card_id; matchField.current = card.field;
@@ -133,26 +148,24 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     try {
       const result = await browseApi("detail", { card_id: card.card_id }, accountId, controller.signal);
       if (!alive.current || controller.signal.aborted || locked.current || detailRequest.current !== controller) return;
+      if (!("note" in result)) { setOutcome({ error: true, text: result.card.unavailable }); return; }
       setDetail(result); setAdding(false); setFields({ ...result.note.fields }); setTags(result.note.tags.join(" ")); setConflict(false); setDetailFresh(true);
     } catch (caught) { if (!controller.signal.aborted && detailRequest.current === controller) fail(caught); }
     finally { if (alive.current && !controller.signal.aborted && detailRequest.current === controller) setOpening(false); }
   }
   function back() {
     if (!mayLeave()) return;
-    stopList();
+    stopList(true); restoreRowFocus.current = true;
     detailRequest.current?.abort(); setOpening(false); setDetail(null); setAdding(false); setConfirmDelete(false); setOutcome(null); setFields({}); setTags("");
     requestAnimationFrame(() => {
       window.scrollTo(0, pageScroll.current);
       if (list.current) list.current.scrollTop = scroll.current;
-      const buttons = Array.from(list.current?.querySelectorAll<HTMLButtonElement>("button[data-card]") ?? []);
-      const selected = buttons.find(el => el.dataset.card === listFocus.current);
-      const nearby = listFocus.current ? buttons.find(el => BigInt(el.dataset.card!) > BigInt(listFocus.current!)) ?? buttons.at(-1) : null;
-      (selected ?? nearby)?.focus({ preventScroll: true });
+      focusResult();
     });
   }
   function add() {
     if (locked.current || !catalog || !mayLeave()) return;
-    stopList();
+    stopList(true); restoreRowFocus.current = false;
     detailRequest.current?.abort(); setOpening(false); setAdding(true); setDetail(null); setFields({}); setTags(""); setConflict(false); setConfirmDelete(false); setOutcome(null);
   }
   async function save(event: FormEvent) {
@@ -187,11 +200,12 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
         setAdding(false); setFields({}); setTags(""); listFocus.current = null;
       }
       setOutcome({ text: savedMessage });
-      // List replay is cancellable browsing work, not part of the write lease.
+      // Replay belongs to this query, beyond the editor navigation/write lease.
       void readPage(currentScope.current, null, true, restoreThrough, savedMessage);
       if (originalDetail && !wasAdding) {
         const saved = await browseApi("detail", { card_id: originalDetail.card.card_id }, accountId);
         if (!alive.current || locked.current) return;
+        if (!("note" in saved)) throw new Error(saved.card.unavailable);
         setDetail(saved); setFields({ ...saved.note.fields }); setTags(saved.note.tags.join(" ")); setDetailFresh(true);
       } else focusSearch();
     } catch (caught) {
@@ -236,11 +250,11 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
           <div className="browse-filters"><Field><FieldLabel htmlFor="browse-field">Field</FieldLabel><select id="browse-field" value={field} onChange={event => { setField(event.target.value); if (!busy) changeScope({ query, field: event.target.value || null, deck_id: deck || null }); }} disabled={disabled || !catalog}>
             <option value="">All fields</option>{[...new Set(catalog?.note_types.flatMap(nt => nt.field_names) ?? [])].map(name => <option key={name}>{name}</option>)}</select></Field>
           <Field><FieldLabel htmlFor="browse-deck">Deck</FieldLabel><select id="browse-deck" value={deck} onChange={event => { setDeck(event.target.value); if (!busy) changeScope({ query, field: field || null, deck_id: event.target.value || null }); }} disabled={disabled || !catalog}>
-            <option value="">All decks</option>{catalog?.decks.map(d => <option value={d.deck_id} key={d.deck_id}>{d.name}</option>)}</select></Field></div>
+            <option value="">All decks</option>{catalog?.decks.map(d => <option disabled={!!d.unavailable} value={d.deck_id} key={d.deck_id}>{d.name}</option>)}</select></Field></div>
           <Button type="submit" disabled={disabled}>Search</Button>
         </form>
         <p role="status">{loading ? `Loading cards… (${pagesChecked} pages checked)` : opening ? "Opening card…" : `${cards.length} cards shown${cursor ? ", more available" : ""}.`}</p>
-        <div className="browse-results" ref={list} onScroll={event => { if (event.currentTarget.offsetParent !== null) scroll.current = event.currentTarget.scrollTop; }}>
+        <div className="browse-results" ref={list} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) restoreRowFocus.current = false; }} onScroll={event => { if (event.currentTarget.offsetParent !== null) scroll.current = event.currentTarget.scrollTop; }}>
           <ul aria-label="Cards">{cards.map(card => <li key={card.card_id}><button type="button" data-card={card.card_id} className="browse-result" aria-current={detail?.card.card_id === card.card_id ? "true" : undefined} disabled={disabled} onClick={() => { if (card.unavailable) setOutcome({ error: true, text: card.unavailable }); else void open(card); }}>
             <strong>{card.title || "Untitled note"}</strong><span className="muted">{card.template} · {card.deck}</span>
             {card.unavailable && <span>Card {card.card_id} · Note {card.note_id}. {card.unavailable}</span>}
@@ -254,8 +268,8 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
         {detail || adding ? <Card><CardHeader><Button className="browse-back" variant="outline" disabled={busy} onClick={back}>Back to results</Button><h2 ref={heading} tabIndex={-1}>{adding ? "Add note" : detail?.card.title || "Untitled note"}</h2></CardHeader><CardContent className="stack">
           {detail && <><p>{detail.sibling_ids.length} {detail.sibling_ids.length === 1 ? "card uses" : "cards share"} this note.</p><details><summary>Card info</summary><dl className="browse-info"><dt>Card ID</dt><dd>{detail.card.card_id}</dd><dt>Note ID</dt><dd>{detail.note.note_id}</dd><dt>Template</dt><dd>{detail.card.template}</dd><dt>Deck</dt><dd>{detail.card.deck}</dd></dl></details></>}
           <form className="stack" onSubmit={event => void save(event)}>
-            {adding && <><Field><FieldLabel htmlFor="new-deck">Deck</FieldLabel><select id="new-deck" value={newDeck} disabled={editorDisabled} required onChange={event => setNewDeck(event.target.value)}>{catalog?.decks.filter(d => !d.filtered).map(d => <option value={d.deck_id} key={d.deck_id}>{d.name}</option>)}</select></Field>
-              <Field><FieldLabel htmlFor="new-type">Note type</FieldLabel><select id="new-type" value={newType} disabled={editorDisabled} required onChange={event => { if (!mayLeave()) return; setNewType(event.target.value); setFields({}); setTags(""); }}>{catalog?.note_types.map(nt => <option value={nt.note_type_id} key={nt.note_type_id}>{nt.name}</option>)}</select></Field></>}
+            {adding && <><Field><FieldLabel htmlFor="new-deck">Deck</FieldLabel><select id="new-deck" value={newDeck} disabled={editorDisabled} required onChange={event => setNewDeck(event.target.value)}>{catalog?.decks.filter(d => !d.filtered && !d.unavailable).map(d => <option value={d.deck_id} key={d.deck_id}>{d.name}</option>)}</select></Field>
+              <Field><FieldLabel htmlFor="new-type">Note type</FieldLabel><select id="new-type" value={newType} disabled={editorDisabled} required onChange={event => { if (!mayLeave()) return; setNewType(event.target.value); setFields({}); setTags(""); }}>{catalog?.note_types.map(nt => <option disabled={!!nt.unavailable} value={nt.note_type_id} key={nt.note_type_id}>{nt.name}</option>)}</select></Field></>}
             {names.map((name, i) => <Field key={name}><FieldLabel htmlFor={`note-field-${i}`}>{name}</FieldLabel><textarea id={`note-field-${i}`} data-field={name} value={fields[name] ?? ""} disabled={editorDisabled} rows={4} onChange={event => { setConfirmDelete(false); setFields(previous => ({ ...previous, [name]: event.target.value })); }} /></Field>)}
             <Field><FieldLabel htmlFor="note-tags">Tags</FieldLabel><Input id="note-tags" value={tags} disabled={editorDisabled} onChange={event => { setConfirmDelete(false); setTags(event.target.value); }} /><p className="muted">Separate tags with spaces. Field markup is preserved as written.</p></Field>
             <div className="actions"><Button type="submit" disabled={editorDisabled || conflict || (adding ? !newDeck || !newType : !dirty)}>{busy ? "Saving…" : adding ? "Create note" : "Save changes"}</Button>

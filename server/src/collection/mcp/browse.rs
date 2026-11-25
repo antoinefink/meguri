@@ -2,6 +2,7 @@
 //! Browser-only card reads. MCP's tools and search contract remain independent.
 use super::*;
 use regex::{Regex, RegexBuilder};
+use super::browse_projection as projection;
 use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -190,7 +191,7 @@ fn excerpt(text: &str, query: Option<&Regex>) -> Vec<Fragment> {
     if at<slice.len() {out.push(Fragment {text:slice[at..].into(), matched:false});}
     if end<boundaries.len()-1 {out.push(Fragment {text:"…".into(),matched:false});} out
 }
-struct Card { id:i64, nid:i64, did:i64, ord:u32 }
+struct Card { id:i64, nid:i64, did:i64, ord:i64 }
 fn card(c:&Connection, id:i64) -> Result<Card> {
     c.query_row("SELECT id,nid,did,ord FROM cards WHERE id=?1",[id],|r|Ok(Card {id:r.get(0)?,nid:r.get(1)?,did:r.get(2)?,ord:r.get(3)?}))
         .optional().map_err(sql_error)?.ok_or_else(||Error::new("not_found"))
@@ -203,16 +204,21 @@ fn siblings(c:&Connection, id:i64) -> Result<Vec<String>> {
     if ids.len()>2048 {return Err(too_large());}
     Ok(ids.into_iter().map(|id|id.to_string()).collect())
 }
-fn row(c:&Connection, card:&Card, nt:&meguri_model::notetype::Notetype, values:&[String], query:Option<&Regex>, field:Option<&str>) -> Result<Row> {
-    if values.len()!=nt.fields.len() {return Err(unsupported());}
-    let matched = nt.fields.iter().zip(values).find(|(f,v)|field.is_none_or(|name|f.name==name) && query.is_some_and(|q|q.is_match(v)));
-    let selected = matched.or_else(||if query.is_none() {nt.fields.iter().zip(values).find(|(f,_)|field.is_none_or(|name|f.name==name))} else {None});
-    let deck=read::deck(c,card.did)?.ok_or_else(unsupported)?;
-    let template=if nt.config.kind==1 {nt.templates.first()} else {nt.templates.iter().find(|t|t.ord==card.ord)}.ok_or_else(unsupported)?;
+fn unavailable_row(card: &Card, message: &str) -> Row {
+    Row { card_id:card.id.to_string(), note_id:card.nid.to_string(), title:"Content unavailable".into(),
+        field:None, excerpt:vec![], deck:format!("Deck {}",card.did), template:format!("Template {}",card.ord),
+        unavailable:Some(format!("Card {} · Note {}. {message}",card.id,card.nid)) }
+}
+fn row(c:&Connection, card:&Card, nt:&projection::NoteType, values:&[String], query:Option<&Regex>, field:Option<&str>) -> Result<Row> {
+    if values.len()!=nt.fields.len() {return Err(projection::unavailable());}
+    let matched = nt.fields.iter().zip(values).find(|(f,v)|field.is_none_or(|name|f.as_str()==name) && query.is_some_and(|q|q.is_match(v)));
+    let selected = matched.or_else(||if query.is_none() {nt.fields.iter().zip(values).find(|(f,_)|field.is_none_or(|name|f.as_str()==name))} else {None});
+    let deck=projection::deck(c,card.did)?;
+    let template=if nt.kind==1 {nt.templates.first()} else {nt.templates.iter().find(|(ord,_)|i64::from(*ord)==card.ord)}.ok_or_else(projection::unavailable)?;
     Ok(Row {card_id:card.id.to_string(), note_id:card.nid.to_string(),
-        title:short(values.get(nt.config.sort_field_idx as usize).ok_or_else(unsupported)?,120),
-        field:selected.map(|(f,_)|f.name.clone()), excerpt:selected.map_or_else(Vec::new,|(_,v)|excerpt(v,query)),
-        deck:deck.human_name(),template:template.name.clone(),unavailable:None})
+        title:short(values.get(nt.sort).ok_or_else(projection::unavailable)?,120),
+        field:selected.map(|(f,_)|f.clone()), excerpt:selected.map_or_else(Vec::new,|(_,v)|excerpt(v,query)),
+        deck:deck.name,template:projection::short(&template.1),unavailable:None})
 }
 enum CandidateProjection {
     BudgetReached,
@@ -223,15 +229,11 @@ enum CandidateProjection {
 fn project_candidate(c: &Connection, card: &Card, input: &PageInput, query: Option<&Regex>, work: &mut usize) -> Result<CandidateProjection> {
     // Browse needs only bounded field text, never the MCP edit hash, tags,
     // guid, sfld or data. Large opaque note members do not block card listing.
-    let (mid, bytes): (i64, i64) = c.query_row(
-        "SELECT mid,octet_length(flds) FROM notes WHERE id=?1", [card.nid],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    ).map_err(sql_error)?;
-    let bytes = usize::try_from(bytes).map_err(|_| unsupported())?;
+    let (mid, bytes) = projection::note_head(c,card.nid)?;
     if bytes <= MAX_PAGE_WORK_BYTES && *work > 0 && *work + bytes > MAX_PAGE_WORK_BYTES {
         return Ok(CandidateProjection::BudgetReached);
     }
-    let nt = read::notetype(c, mid)?;
+    let nt = projection::notetype(c, mid)?;
     if bytes > MAX_PAGE_WORK_BYTES {
         // Include unchecked cards during search too. An unavailable projection
         // is explicit uncertainty, never evidence of an exhausted search.
@@ -244,17 +246,66 @@ fn project_candidate(c: &Connection, card: &Card, input: &PageInput, query: Opti
         return Ok(CandidateProjection::Matched(unavailable));
     }
     *work += bytes;
-    let fields: String = c.query_row("SELECT flds FROM notes WHERE id=?1", [card.nid], |r| r.get(0)).map_err(sql_error)?;
+    let fields=projection::note_fields(c,card.nid)?;
     let values: Vec<_> = fields.split('\u{1f}').map(visible_text).collect();
-    if values.len() != nt.fields.len() { return Err(unsupported()); }
+    if values.len() != nt.fields.len() { return Err(projection::unavailable()); }
     let matches = nt.fields.iter().zip(&values).any(|(field, value)|
-        input.field.as_ref().is_none_or(|name| field.name == *name)
+        input.field.as_ref().is_none_or(|name| field.as_str() == name)
         && query.is_none_or(|q| q.is_match(value)));
     if !matches { return Ok(CandidateProjection::NoMatch); }
     Ok(CandidateProjection::Matched(row(c, card, &nt, &values, query, input.field.as_deref())?))
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(crate) enum DetailResult { Available(Detail), Unavailable { card:Row } }
+#[derive(Serialize)]
+pub(crate) struct Catalog { decks:Vec<CatalogDeck>, note_types:Vec<CatalogType>, next_cursor:Option<String> }
+#[derive(Serialize)]
+struct CatalogDeck { deck_id:String, name:String, filtered:bool, #[serde(skip_serializing_if="Option::is_none")] unavailable:Option<String> }
+#[derive(Serialize)]
+struct CatalogType { note_type_id:String, name:String, field_names:Vec<String>, #[serde(skip_serializing_if="Option::is_none")] unavailable:Option<String> }
+
 impl Backend {
+    pub(crate) fn browse_catalog<A:Authority>(&self,path:&Path,a:&A,input:CatalogInput) -> Result<Catalog> {
+        input::bounded_input(&input)?;
+        let limit=input::limit(input.limit)?; let kind=input.kind.unwrap_or_default();
+        let shape=tokens::shape(&(kind,limit))?;
+        let page=self.page(input.cursor.as_deref(),a.context(),"browse-catalog",&shape)?;
+        let (mut phase,mut after)=page.map_or((if kind==input::CatalogKind::NoteType {1} else {0},0),|p|(p.kind,p.after));
+        if (kind==input::CatalogKind::Deck && phase!=0) || (kind==input::CatalogKind::NoteType && phase!=1) {return Err(invalid());}
+        self.transaction(path,a,false,|c| {
+            let mut result=Catalog {decks:vec![],note_types:vec![],next_cursor:None};
+            let mut count=0;
+            loop {
+                let table=if phase==0 {"decks"} else {"notetypes"};
+                let id=c.query_row(&format!("SELECT id FROM {table} WHERE id>?1 ORDER BY id LIMIT 1"),[after],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?;
+                let Some(id)=id else {
+                    if phase==0 && kind==input::CatalogKind::All {phase=1;after=0;continue;} break;
+                };
+                if count==limit {result.next_cursor=Some(self.page_token(a.context(),"browse-catalog",&shape,phase,after)?);break;}
+                if phase==0 {
+                    let item=match projection::deck(c,id) {
+                        Ok(d)=>CatalogDeck {deck_id:id.to_string(),name:d.name,filtered:d.filtered,unavailable:None},
+                        Err(e) if projection::is_content_error(&e)=>CatalogDeck {deck_id:id.to_string(),name:format!("Deck {id} · Unavailable"),filtered:false,unavailable:Some("Deck metadata is unavailable.".into())},
+                        Err(e)=>return Err(e),
+                    };result.decks.push(item);
+                } else {
+                    let item=match projection::notetype(c,id) {
+                        Ok(nt)=>CatalogType {note_type_id:id.to_string(),name:nt.name,field_names:nt.fields,unavailable:None},
+                        Err(e) if projection::is_content_error(&e)=>CatalogType {note_type_id:id.to_string(),name:format!("Note type {id} · Unavailable"),field_names:vec![],unavailable:Some("Note type metadata is unavailable.".into())},
+                        Err(e)=>return Err(e),
+                    };result.note_types.push(item);
+                }
+                if size(&result)?+TOKEN_RESERVE>MAX_RESULT_BYTES {
+                    if phase==0 {result.decks.pop();} else {result.note_types.pop();}
+                    if count==0 {return Err(too_large());}
+                    result.next_cursor=Some(self.page_token(a.context(),"browse-catalog",&shape,phase,after)?);break;
+                }
+                after=id;count+=1;
+            } Ok(result)
+        })
+    }
     pub(crate) fn browse_generation(&self, a:&impl Authority) -> Result<String> {
         self.page_token(a.context(),"browse-generation","",0,0)
     }
@@ -285,7 +336,11 @@ impl Backend {
                 let Some((card,odid))=candidate else {return Ok(result);};
                 let id=card.id;
                 if deck.is_none_or(|d|d==if odid!=0 {odid}else{card.did}) {
-                    match project_candidate(c,&card,&input,query.as_ref(),&mut work)? {
+                    let projected = match project_candidate(c,&card,&input,query.as_ref(),&mut work) {
+                        Err(e) if projection::is_content_error(&e) => CandidateProjection::Matched(unavailable_row(&card,"Its content could not be inspected and was not searched. Open it in a synced app.")),
+                        other => other?,
+                    };
+                    match projected {
                         CandidateProjection::BudgetReached => break,
                         CandidateProjection::NoMatch => {},
                         CandidateProjection::Matched(row) => {
@@ -307,17 +362,30 @@ impl Backend {
             Ok(result)
         })
     }
-    pub(crate) fn browse_detail<A:Authority>(&self,path:&Path,a:&A,input:DetailInput) -> Result<Detail> {
+    pub(crate) fn browse_detail<A:Authority>(&self,path:&Path,a:&A,input:DetailInput) -> Result<DetailResult> {
         let id=input::id(&input.card_id)?;
         self.transaction(path,a,false,|c| {
-            let card=card(c,id)?; let stored=read::stored_note(c,card.nid)?.ok_or_else(||Error::new("not_found"))?;
-            let nt=read::notetype(c,stored.mid)?;
-            let note=self.note_result(a.context(),&stored,&nt)?;
-            let sibling_ids=siblings(c,card.nid)?;
-            let confirmation=self.delete_confirmation(a.context(),&note.revision,&sibling_ids)?;
-            let values:Vec<_>=stored.fields.split('\u{1f}').map(visible_text).collect();
-            let result=Detail {card:row(c,&card,&nt,&values,None,None)?,note,field_names:nt.fields.iter().map(|f|f.name.clone()).collect(),sibling_ids,confirmation};
-            Self::result_json(&result)?; Ok(result)
+            let card=card(c,id)?;
+            let detail = (|| {
+                let (mid,bytes)=projection::note_head(c,card.nid)?;
+                if bytes>MAX_RECORD_BYTES {return Err(too_large());}
+                let labels=projection::notetype(c,mid)?;
+                projection::deck(c,card.did)?;
+                let _=projection::note_fields(c,card.nid)?;
+                let stored=read::stored_note(c,card.nid)?.ok_or_else(projection::unavailable)?;
+                let nt=read::notetype(c,stored.mid)?;
+                let note=self.note_result(a.context(),&stored,&nt)?;
+                let sibling_ids=siblings(c,card.nid)?;
+                let confirmation=self.delete_confirmation(a.context(),&note.revision,&sibling_ids)?;
+                let values:Vec<_>=stored.fields.split('\u{1f}').map(visible_text).collect();
+                let result=Detail {card:row(c,&card,&labels,&values,None,None)?,note,field_names:nt.fields.iter().map(|f|f.name.clone()).collect(),sibling_ids,confirmation};
+                Self::result_json(&result)?; Ok(result)
+            })();
+            match detail {
+                Ok(detail) => Ok(DetailResult::Available(detail)),
+                Err(e) if projection::is_content_error(&e) => Ok(DetailResult::Unavailable {card:unavailable_row(&card,"This content is unavailable for browser editing. Open it in a synced app.")}),
+                Err(e) => Err(e),
+            }
         })
     }
     fn delete_confirmation(&self,context:&Context,revision:&str,siblings:&[String]) -> Result<String> {

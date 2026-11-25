@@ -836,13 +836,13 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "server/web/tests/browser/browse.spec.ts":
-        "c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0",
+        "bdf575d6a2885aad21e79fcdb908c4419ad37a21c1ab2f57ad428c54c705a45e",
     "server/web/tests/browser/browse-real.spec.ts":
-        "4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261",
+        "eb93107249c9590a1b076c4a8d8962bb95d7bbe8873989e04c69dc92d1f6735f",
     "server/web/src/browse.tsx":
-        "6248591f5718c951e888a783bc14eb800ba407dc5d4e22c2cba749e717beb961",
+        "f423c0ef1598a5e58ef781af2e1fb728d74c05463b81927f77cb97a1735cb24c",
     "server/tests/browse.rs":
-        "a4ac2b397dc035bedcc7ed8ae221fe8e872293f4bf0e71e6218ff976542e845a",
+        "854b682a4ed4d0974acfdc7c59eff71e55882cae668743ec0458df0edcd75dd2",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
         '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
@@ -1197,7 +1197,7 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
-        '5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914',
+        "4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255",
     'server/web/THIRD_PARTY_NOTICES.txt':
         '793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9',
     'server/web/src/IBMPlexSans-Variable.woff2':
@@ -1205,11 +1205,11 @@ PUBLIC_ARTIFACTS = {
     'server/web/upstream-records.json':
         'a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099',
     'server/web/src/style.css':
-        '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
+        "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc",
     'server/web/src/app.tsx':
         '2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d',
     'server/web/tests/browser/accounts.spec.ts':
-        'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
+        "8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c",
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':

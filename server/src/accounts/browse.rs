@@ -6,7 +6,7 @@ use crate::storage::collection::ReadPin;
 use std::{path::{Path, PathBuf}, time::Duration};
 
 #[derive(Serialize)]
-struct Catalog { generation:String, #[serde(flatten)] catalog:mcp::CatalogResult }
+struct Catalog { generation:String, #[serde(flatten)] catalog:browse::Catalog }
 
 pub(crate) enum Operation {
     Catalog(mcp::CatalogInput), Page(browse::PageInput), Detail(browse::DetailInput),
@@ -51,7 +51,7 @@ impl Service {
             };
             let backend=Backend::new(key);
             let value=match op {
-                Operation::Catalog(input)=>serde_json::to_value(Catalog {generation:backend.browse_generation(&a)?,catalog:backend.list_decks_and_note_types(&path,&a,input)?}),
+                Operation::Catalog(input)=>serde_json::to_value(Catalog {generation:backend.browse_generation(&a)?,catalog:backend.browse_catalog(&path,&a,input)?}),
                 Operation::Page(input)=>serde_json::to_value(backend.browse_page(&path,&a,input)?),
                 Operation::Detail(input)=>serde_json::to_value(backend.browse_detail(&path,&a,input)?),
                 Operation::Create(input)=>{

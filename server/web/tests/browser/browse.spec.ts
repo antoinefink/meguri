@@ -15,7 +15,7 @@ async function fixture(page: Page, origin: string, many = false) {
   const notes = samples.map(([Spanish, Example], i) => ({ note_id: String(101 + i), note_type_id: "10", fields: { Spanish: Spanish!, English: "<b>keep this field</b>", Example: Example! }, tags: ["study"], revision: "r1" }));
   const state = { account: "synthetic-a", responseAccount: "synthetic-a", notes, pages: [] as BrowseScope[], writes: [] as { path: string; body: Record<string, unknown> }[],
     pageGate: null as Promise<void> | null, detailGate: null as Promise<void> | null, writeGate: null as Promise<void> | null,
-    conflict: false, detailError: false, pageError: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
+    pageGateAt: null as number | null, releasedPages: 0, conflict: false, detailError: false, pageError: false, detailUnavailable: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
   const card = (i: number, scope: BrowseScope): BrowseCard => {
     const note = notes[i % notes.length]!;
     const field = scope.field || (scope.query && note.fields.Spanish.toLowerCase().includes(scope.query.toLowerCase()) ? "Spanish" : "Example");
@@ -45,13 +45,18 @@ async function fixture(page: Page, origin: string, many = false) {
         return body.deck_id !== "2" && (!body.query || Object.entries(note.fields).some(([name, text]) => (!body.field || body.field === name) && text.toLowerCase().includes(String(body.query).toLowerCase())));
       });
       const result = { account_id: state.responseAccount, cards, next_cursor: state.sparse && position < 1200 ? String(position) : null, examined_through: state.sparse ? String(position) : cards.at(-1)?.card_id ?? null };
-      await state.pageGate; return reply(result);
+      const gate = state.pageGateAt === null || state.pageReads === state.pageGateAt ? state.pageGate : null;
+      await gate;
+      await reply(result);
+      if (gate) state.releasedPages++;
+      return;
     }
     if (path.endsWith("/detail")) {
       state.detailReads++;
       if (state.detailError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });
       const c = card(Number(body.card_id) - 201, { query: "", field: null, deck_id: null });
       const note = notes.find(n => n.note_id === c.note_id)!;
+      if (state.detailUnavailable) return reply({ account_id: state.responseAccount, card: { ...c, unavailable: `Card ${c.card_id} · Note ${c.note_id}. Unavailable for browser editing.` } });
       const result: BrowseDetail = { account_id: state.responseAccount, card: c, note: structuredClone(note), field_names: ["Spanish", "English", "Example"], sibling_ids: [c.card_id, "9007199254740993"], confirmation: "confirm-r1" };
       await state.detailGate; return reply(result);
     }
@@ -65,7 +70,12 @@ async function fixture(page: Page, origin: string, many = false) {
   });
   return state;
 }
-async function search(page: Page, query: string) { await page.getByLabel("Search note fields").fill(query); await page.getByRole("button", { name: "Search", exact: true }).click(); }
+async function search(page: Page, query: string) {
+  await page.getByLabel("Search note fields").fill(query);
+  const requested = page.waitForRequest(request => request.url().endsWith("/browse/page") && request.method() === "POST"
+    && request.postDataJSON().query === query && !request.postDataJSON().cursor);
+  await page.getByRole("button", { name: "Search", exact: true }).click(); await requested;
+}
 const rows = (page: Page) => page.getByRole("list", { name: "Cards", exact: true }).getByRole("button");
 test("field examples, inert highlights, shared editing and unchanged markup", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
@@ -204,17 +214,29 @@ test("saving a later sparse result replays the examined range and keeps nearby m
 test("changed search and selection cancel automatic sparse continuation", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
   const old = barrier(); state.sparse = true; state.pageGate = old.promise;
-  const before = state.pageReads; await search(page, "aprovechar"); await expect.poll(() => state.pageReads).toBe(before + 1);
-  state.sparse = false; state.pageGate = null;
+  const before = state.pageReads; state.pageGateAt = before + 2;
+  await search(page, "aprovechar"); await expect.poll(() => state.pageReads).toBe(before + 2);
+  await expect(page.getByRole("status").filter({ hasText: "Loading cards" })).toContainText("1 pages checked");
+  await expect(page.getByLabel("Search note fields")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Search", exact: true })).toBeEnabled();
+  state.sparse = false; state.pageGate = null; state.pageGateAt = null;
   await search(page, "oportunidad"); await expect(rows(page)).toHaveCount(1);
-  old.release(); await expect(rows(page)).toHaveCount(1); await expect(rows(page).first()).toContainText("la oportunidad");
-  state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
+  expect(state.pages.at(-1)?.query).toBe("oportunidad");
+  old.release(); await expect.poll(() => state.releasedPages).toBe(1);
+  await expect(rows(page)).toHaveCount(1); await expect(rows(page).first()).toContainText("la oportunidad");
+  await expect(page.getByRole("status").filter({ hasText: "cards shown" })).toContainText("1 cards shown");
+  state.sparse = true; await search(page, "aprovechar");
+  await expect(rows(page).first()).toHaveAttribute("data-card", "600");
+  await expect(page.getByRole("status").filter({ hasText: "cards shown" })).toContainText("1 cards shown");
   const pending = barrier(); state.pageGate = pending.promise;
-  const reads = state.pageReads;
-  await page.getByRole("button", { name: "Load more cards" }).click(); await expect.poll(() => state.pageReads).toBe(reads + 1);
+  const reads = state.pageReads; state.pageGateAt = reads + 2;
+  await page.getByRole("button", { name: "Load more cards" }).click(); await expect.poll(() => state.pageReads).toBe(reads + 2);
+  await expect(rows(page).first()).toBeEnabled();
   await rows(page).first().press("Enter"); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("el viaje");
-  pending.release(); await expect(page.getByLabel("Example", { exact: true })).toBeEnabled();
-  expect(state.pageReads).toBe(reads + 1);
+  pending.release(); await expect.poll(() => state.releasedPages).toBe(2);
+  await expect(page.getByLabel("Example", { exact: true })).toBeEnabled();
+  await expect(rows(page)).toHaveCount(1);
+  expect(state.pageReads).toBe(reads + 2);
 });
 
 test("a committed edit adopts its revision even if detail refresh fails", async ({ page, baseURL }) => {
@@ -247,4 +269,63 @@ test("creation and deletion stay acknowledged when result refresh fails", async 
   await expect(page.getByRole("button", { name: "Confirm delete note" })).toHaveCount(0);
   await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
   expect(state.writes).toHaveLength(2);
+});
+
+for (const removeMatch of [false, true]) test(`compact Back preserves a delayed committed replay (${removeMatch ? "removed match" : "updated excerpt"})`, async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
+  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await rows(page).nth(1).click();
+  await page.getByLabel("Example", { exact: true }).fill(removeMatch ? "No longer a match." : "aprovechar the committed excerpt");
+  const held = barrier(); const before = state.pageReads; state.pageGate = held.promise; state.pageGateAt = before + 2;
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => state.pageReads).toBe(before + 2);
+  const back = page.getByRole("button", { name: "Back to results" }); await expect(back).toBeEnabled(); await back.click();
+  await expect(rows(page).nth(1)).toBeFocused();
+  held.release(); await expect(page.getByRole("status").filter({ hasText: "cards shown" })).toBeVisible();
+  expect(state.pageReads - before).toBe(6);
+  await expect(rows(page)).toHaveCount(removeMatch ? 2 : 3);
+  await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar");
+  if (removeMatch) { await expect(rows(page).last()).toHaveAttribute("data-card", "1002"); await expect(rows(page).last()).toBeFocused(); }
+  else { await expect(rows(page).nth(1)).toContainText("the committed excerpt"); await expect(rows(page).nth(1)).toBeFocused(); }
+});
+
+test("another selection preserves committed replay but a new query supersedes it", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  await search(page, "aprovechar"); await rows(page).first().click();
+  const held = barrier(); state.pageGate = held.promise; const before = state.pageReads;
+  await page.getByLabel("Example", { exact: true }).fill("aprovechar updated after selection");
+  await page.getByRole("button", { name: "Save changes" }).click(); await expect.poll(() => state.pageReads).toBe(before + 1);
+  await expect(rows(page).nth(1)).toBeEnabled(); await rows(page).nth(1).click();
+  await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("aprovechar");
+  held.release(); await expect(rows(page).first()).toContainText("updated after selection");
+  await expect(page.getByLabel("Example", { exact: true })).toBeFocused();
+  const obsolete = barrier(); state.pageGate = obsolete.promise;
+  await page.getByLabel("Example", { exact: true }).fill("aprovechar another save");
+  const next = state.pageReads; await page.getByRole("button", { name: "Save changes" }).click(); await expect.poll(() => state.pageReads).toBe(next + 1);
+  await expect(page.getByRole("button", { name: "Search", exact: true })).toBeEnabled();
+  state.pageGate = null; await search(page, "oportunidad"); await expect(rows(page)).toHaveCount(1);
+  obsolete.release(); await expect.poll(() => state.releasedPages).toBe(2);
+  await expect(rows(page)).toHaveCount(1); await expect(rows(page).first()).toContainText("la oportunidad");
+});
+
+test("skip link stays clipped while scrolled and becomes visible only for keyboard focus", async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 }); await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  await page.getByLabel("Example", { exact: true }).focus(); await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const skip = page.getByRole("link", { name: "Skip to content", exact: true });
+  await expect(skip).toHaveCSS("clip-path", "inset(50%)");
+  await skip.focus(); await expect(skip).toBeInViewport(); await expect(skip).toHaveCSS("clip-path", "none");
+  await page.keyboard.press("Enter"); await expect(page.getByRole("main")).toBeFocused();
+  await expect(skip).toHaveCSS("clip-path", "inset(50%)");
+});
+
+test("an individually unavailable detail keeps its identity and the next card usable", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  state.detailUnavailable = true; await rows(page).first().click();
+  await expect(page.getByRole("alert")).toContainText("Card 201 · Note 101. Unavailable");
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+  state.detailUnavailable = false; await rows(page).nth(1).click();
+  await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("aprovechar");
 });

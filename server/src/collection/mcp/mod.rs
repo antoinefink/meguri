@@ -15,6 +15,7 @@
 pub(crate) mod browse;
 mod input;
 mod read;
+mod browse_projection;
 mod search_index;
 mod search_cache;
 pub(crate) use search_cache::SearchCache;

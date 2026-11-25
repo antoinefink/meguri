@@ -281,3 +281,68 @@ async fn sign_out_uses_ordinary_metadata_wait_and_remains_idempotent_without_pub
     error(request(&h, &cookie, native.account_id(), "page", json!({})).await, 401, "authentication_failed").await;
     h.stop().await;
 }
+
+#[tokio::test]
+async fn browse_metadata_projection_skips_large_opaque_blobs_and_advances_past_unavailable_items() {
+    let h=Harness::new().await; let account=h.setup().await; let id=account["id"].as_str().unwrap();
+    let cookie=h.login("root.admin",PASSWORD).await; seed(&h,id);
+    let large=create(&h,&cookie,id,"10","needle first","bounded example").await;
+    let damaged=create(&h,&cookie,id,"10","needle damaged","damaged metadata").await;
+    let ordinary=create(&h,&cookie,id,"20","needle ordinary","later matching example").await;
+    let db=schema::open(&current(&h,id),true).unwrap();
+    let big="generated metadata ".repeat(40_000);
+    let mut config=NotetypeConfig::default(); config.css=big.clone(); config.sort_field_idx=2;
+    db.execute("UPDATE notetypes SET config=?1 WHERE id=10",[ProtoBlob::new(config).to_bytes().as_ref()]).unwrap();
+    let mut template=TemplateConfig::default(); template.q_format=big.clone();
+    db.execute("UPDATE templates SET name=?1,config=?2 WHERE ntid=10",params!["Template label ".repeat(30),ProtoBlob::new(template).to_bytes().as_ref()]).unwrap();
+    let mut normal=NormalDeck::default();normal.config_id=1;normal.description=big.clone();
+    let kind=ProtoBlob::new(DeckKindMessage::new(DeckKind::Normal(normal))).to_bytes().into_owned();
+    db.execute("UPDATE decks SET name=?1,common=?2,kind=?3 WHERE id=1",params!["Deck label ".repeat(30),vec![0u8;600_000],kind]).unwrap();
+    db.execute("INSERT INTO notetypes VALUES(5,'Broken type',0,0,x'1aff')",[]).unwrap();
+    db.execute("INSERT INTO notetypes VALUES(6,?1,0,0,x'')",["oversized label".repeat(50_000)]).unwrap();
+    db.execute("INSERT INTO decks VALUES(3,'Broken deck',0,0,x'',x'0aff')",[]).unwrap();
+    let large_id=large["note_id"].as_str().unwrap().parse::<i64>().unwrap();
+    let damaged_id=damaged["note_id"].as_str().unwrap().parse::<i64>().unwrap();
+    db.execute("UPDATE notes SET mid=5 WHERE id=?1",[damaged_id]).unwrap();
+    db.execute("UPDATE cards SET id=10 WHERE nid=?1",[large_id]).unwrap();
+    db.execute("UPDATE cards SET id=20 WHERE nid=?1",[damaged_id]).unwrap();
+    let ordinary_id=ordinary["note_id"].as_str().unwrap().parse::<i64>().unwrap();
+    db.execute("UPDATE cards SET id=30+ord,did=2 WHERE nid=?1",[ordinary_id]).unwrap();
+    // Browse ignores CSS/template/deck payloads even when they exceed MCP's cap.
+    let first=page(&h,&cookie,id,json!({"query":"needle","limit":1})).await;
+    assert_eq!(first["cards"][0]["card_id"],"10"); assert_eq!(first["cards"][0]["title"],"bounded example");
+    assert!(first["cards"][0]["unavailable"].is_null());
+    for label in ["deck","template","title"] {assert!(first["cards"][0][label].as_str().unwrap().chars().count()<=121);}
+    let broken=page(&h,&cookie,id,json!({"query":"needle","limit":1,"cursor":first["next_cursor"]})).await;
+    assert_eq!(broken["cards"][0]["card_id"],"20"); assert_eq!(broken["cards"][0]["note_id"],damaged["note_id"]);
+    assert!(broken["cards"][0]["unavailable"].as_str().unwrap().contains("not searched"));
+    let later=page(&h,&cookie,id,json!({"query":"needle","limit":1,"cursor":broken["next_cursor"]})).await;
+    assert_eq!(later["cards"][0]["note_id"],ordinary["note_id"]);
+    // A browser detail cannot use an over-cap MCP revision, but reports its
+    // exact identity explicitly. Ordinary direct editing remains available.
+    let direct=data(&h,&cookie,id,"detail",json!({"card_id":"10"})).await;
+    assert_eq!(direct["card"]["card_id"],"10");assert!(direct["card"]["unavailable"].as_str().unwrap().contains("Note"));assert!(direct["note"].is_null());
+    let direct=data(&h,&cookie,id,"detail",json!({"card_id":"20"})).await;assert!(direct["card"]["unavailable"].is_string());
+    let direct=data(&h,&cookie,id,"detail",json!({"card_id":"30"})).await;assert_eq!(direct["note"]["note_id"],ordinary["note_id"]);
+    // Small catalog pages advance through corrupt entries and bounded labels.
+    let mut cursor=Value::Null;let mut decks=vec![];let mut types=vec![];
+    loop {
+        let mut input=json!({"limit":1});if !cursor.is_null(){input["cursor"]=cursor;}
+        let catalog=data(&h,&cookie,id,"catalog",input).await;
+        decks.extend(catalog["decks"].as_array().unwrap().iter().cloned());types.extend(catalog["note_types"].as_array().unwrap().iter().cloned());
+        cursor=catalog["next_cursor"].clone();if cursor.is_null(){break;}
+    }
+    assert_eq!(decks.len(),3);assert_eq!(types.len(),4);
+    assert!(decks.iter().find(|d|d["deck_id"]=="3").unwrap()["unavailable"].is_string());
+    assert!(types.iter().find(|t|t["note_type_id"]=="5").unwrap()["unavailable"].is_string());
+    assert!(types.iter().find(|t|t["note_type_id"]=="6").unwrap()["name"].as_str().unwrap().contains("6"));
+    assert_eq!(types.iter().find(|t|t["note_type_id"]=="10").unwrap()["field_names"],json!(["Spanish","English","Example"]));
+    for item in decks.iter().chain(types.iter()) {assert!(item["name"].as_str().unwrap().chars().count()<=121);}
+    // Malformed field content is local uncertainty; an actual missing table
+    // remains a database failure, rather than an unavailable/exhausted page.
+    db.execute("UPDATE notes SET flds=CAST(x'ff' AS TEXT) WHERE id=?1",[large_id]).unwrap();
+    assert!(page(&h,&cookie,id,json!({"limit":1})).await["cards"][0]["unavailable"].is_string());
+    db.execute("DROP TABLE templates",[]).unwrap();
+    error(request(&h,&cookie,id,"page",json!({})).await,503,"storage_unavailable").await;
+    drop(db);h.stop().await;
+}

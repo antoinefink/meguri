@@ -29,6 +29,16 @@ test("Browse detail checks note/card relationship and required field names", () 
   assert.throws(() => parseBrowse("detail", { ...detail, sibling_ids: [] }, "account"));
 });
 
+test("Browse accepts explicit unavailable details and catalog entries without inventing edit authority", () => {
+  const unavailable = { account_id: "account", card: { ...card, unavailable: "Card 9007199254740993 · Note 42. Unavailable for browser editing." } };
+  assert.deepEqual(parseBrowse("detail", unavailable, "account"), unavailable);
+  assert.throws(() => parseBrowse("detail", { ...unavailable, card: { ...card, unavailable: true } }, "account"));
+  const catalog = { account_id: "account", generation: "g", decks: [{ deck_id: "1", name: "Deck 1 · Unavailable", filtered: false, unavailable: "Unavailable" }],
+    note_types: [{ note_type_id: "10", name: "Note type 10 · Unavailable", field_names: [], unavailable: "Unavailable" }], next_cursor: null };
+  assert.deepEqual(parseBrowse("catalog", catalog, "account"), catalog);
+  assert.throws(() => parseBrowse("catalog", { ...catalog, decks: [{ ...catalog.decks[0], unavailable: 1 }] }, "account"));
+});
+
 test("Browse transport binds each operation to the displayed account without retries", async t => {
   const { browseApi } = await import("../src/api.js");
   const seen: string[] = [];

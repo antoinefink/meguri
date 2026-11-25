@@ -17,7 +17,8 @@ function collection(): Buffer {
   const directory = mkdtempSync(join(tmpdir(), "meguri-web-browse-")), path = join(directory, "synthetic.anki2");
   try {
     const db = new DatabaseSync(path);
-    db.exec(readFileSync("tests/browser/fixtures/browse.sql", "utf8"));
+    // Node SQLite uses its built-in collation for this synthetic fixture.
+    db.exec(readFileSync("/collection-schema.sql", "utf8").replaceAll("COLLATE unicase", "COLLATE NOCASE"));
     db.exec("INSERT INTO col VALUES(1,123,100,100,18,0,0,0,'','','','','')");
     db.prepare("INSERT INTO decks VALUES(1,'Spanish',0,0,?,?)").run(Buffer.alloc(0), Buffer.from([10, 2, 8, 1]));
     db.prepare("INSERT INTO deck_config VALUES(1,'Ordered',0,0,?)").run(Buffer.from([160, 1, 1]));
@@ -80,7 +81,7 @@ test("real Browse field examples, compact editing, siblings, conflict and native
         ].join("\n"));
         for (const secret of secrets) expect(visible.includes(secret), "capture must exclude credentials and capability URLs").toBe(false);
         const path = `/out/browser-artifacts/${name}.png`;
-        await page.screenshot({ path, fullPage: true });
+        await page.screenshot({ path, fullPage: name !== "browse-real-compact" });
         await testInfo.attach(name, { path, contentType: "image/png" });
       });
     }
@@ -126,7 +127,11 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     await rows().first().click(); await expect(page.getByText("2 cards share this note.")).toBeVisible(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
     const confirmation = page.getByRole("region", { name: "Confirm note deletion" }); await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
     await confirmation.getByRole("button", { name: "Cancel" }).click(); await page.getByRole("button", { name: "Back to results" }).click(); await expect(rows()).toHaveCount(2);
-    await rows().last().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click(); await capture("browse-real-compact");
+    await rows().last().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await confirmation.scrollIntoViewIfNeeded();
+    await expect(confirmation).toBeInViewport({ ratio: 1 });
+    await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
+    await capture("browse-real-compact");
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await confirmation.getByRole("button", { name: "Confirm delete note" }).click(); await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible(); await expect(rows()).toHaveCount(0);
     const deleted = await round(admin.request, origin, host.key, added.min, 3, 3); expect(deleted.graves.cards.sort()).toEqual(siblings.map(c => c[0]).sort()); expect(deleted.graves.notes).toHaveLength(1);

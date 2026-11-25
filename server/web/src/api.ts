@@ -91,12 +91,12 @@ export type BrowseCard = { card_id: string; note_id: string; title: string; fiel
 export type BrowseNote = { note_id: string; note_type_id: string; fields: Record<string, string>; tags: string[]; revision: string };
 export type BrowseDetail = { account_id: string; card: BrowseCard; note: BrowseNote; field_names: string[]; sibling_ids: string[]; confirmation: string };
 export type BrowsePage = { account_id: string; cards: BrowseCard[]; next_cursor: string | null; examined_through: string | null };
-export type BrowseDeck = { deck_id: string; name: string; filtered: boolean };
-export type BrowseNoteType = { note_type_id: string; name: string; field_names: string[] };
+export type BrowseDeck = { deck_id: string; name: string; filtered: boolean; unavailable?: string };
+export type BrowseNoteType = { note_type_id: string; name: string; field_names: string[]; unavailable?: string };
 export type BrowseCatalog = { account_id: string; generation: string; decks: BrowseDeck[]; note_types: BrowseNoteType[]; next_cursor: string | null };
 export type BrowseWrite = { account_id: string; note_id: string; revision: string };
 export type BrowseScope = { query: string; field: string | null; deck_id: string | null };
-type BrowseResponses = { catalog: BrowseCatalog; page: BrowsePage; detail: BrowseDetail; create: BrowseWrite; edit: BrowseWrite; delete: { account_id: string } };
+type BrowseResponses = { catalog: BrowseCatalog; page: BrowsePage; detail: BrowseDetail | { account_id: string; card: BrowseCard & { unavailable: string } }; create: BrowseWrite; edit: BrowseWrite; delete: { account_id: string } };
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function strings(value: unknown): value is string[] { return Array.isArray(value) && value.every(item => typeof item === "string"); }
 const exactId = (value: unknown): value is string => typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value);
@@ -112,10 +112,10 @@ export function parseBrowse<K extends keyof BrowseResponses>(kind: K, value: unk
   const cursor = value.next_cursor === null || typeof value.next_cursor === "string";
   let valid = false;
   if (kind === "catalog") valid = typeof value.generation === "string" && cursor && Array.isArray(value.decks)
-    && value.decks.every(deck => record(deck) && exactId(deck.deck_id) && typeof deck.name === "string" && typeof deck.filtered === "boolean")
-    && Array.isArray(value.note_types) && value.note_types.every(nt => record(nt) && exactId(nt.note_type_id) && typeof nt.name === "string" && strings(nt.field_names));
+    && value.decks.every(deck => record(deck) && exactId(deck.deck_id) && typeof deck.name === "string" && typeof deck.filtered === "boolean" && (deck.unavailable === undefined || typeof deck.unavailable === "string"))
+    && Array.isArray(value.note_types) && value.note_types.every(nt => record(nt) && exactId(nt.note_type_id) && typeof nt.name === "string" && strings(nt.field_names) && (nt.unavailable === undefined || typeof nt.unavailable === "string"));
   if (kind === "page") valid = cursor && (value.examined_through === null || exactId(value.examined_through)) && Array.isArray(value.cards) && value.cards.length <= 50 && value.cards.every(browseCard);
-  if (kind === "detail") valid = browseCard(value.card) && record(value.note) && value.card.note_id === value.note.note_id
+  if (kind === "detail") valid = (browseCard(value.card) && typeof value.card.unavailable === "string") || browseCard(value.card) && record(value.note) && value.card.note_id === value.note.note_id
     && exactId(value.note.note_id) && exactId(value.note.note_type_id) && typeof value.note.revision === "string"
     && strings(value.note.tags) && record(value.note.fields) && Object.values(value.note.fields).every(field => typeof field === "string")
     && strings(value.field_names) && value.field_names.every(name => Object.hasOwn((value.note as BrowseNote).fields, name))

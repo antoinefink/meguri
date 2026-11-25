@@ -16,8 +16,7 @@
       "scripts",
       "src",
       "tests",
-      "tests/browser",
-      "tests/browser/fixtures"
+      "tests/browser"
     ],
     "files": {
       ".gitignore": {
@@ -131,8 +130,8 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 11483,
-        "sha256": "d8bd9a07788a42a5ff222ca2f33ead49f77bfec2ec22222ccce70201d299b764"
+        "bytes": 11818,
+        "sha256": "f19533df2233862fb2aab364ae6ea1c5aaed22ab5ead6d8b537bd6100f83cae0"
       },
       "src/app.tsx": {
         "bytes": 14667,
@@ -147,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/browse.tsx": {
-        "bytes": 22475,
-        "sha256": "6248591f5718c951e888a783bc14eb800ba407dc5d4e22c2cba749e717beb961"
+        "bytes": 23644,
+        "sha256": "f423c0ef1598a5e58ef781af2e1fb728d74c05463b81927f77cb97a1735cb24c"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -187,8 +186,8 @@
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 16876,
-        "sha256": "0aff05cd15ee414eefd46f2348714e70829d91847fc556ac7b37ec78b4901f97"
+        "bytes": 16893,
+        "sha256": "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -199,32 +198,28 @@
         "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
       "tests/browse-api.test.ts": {
-        "bytes": 3390,
-        "sha256": "51fa1701313b5d8c87019ac928b1b0abc0423c0e2cf069d69ee29fb377b5bcaa"
+        "bytes": 4359,
+        "sha256": "ad85b1cc4682e5ddc5836295e87efb1a0f238a8fbaae7a049d94a5613dc91747"
       },
       "tests/browser/account-actions.spec.ts": {
         "bytes": 8792,
         "sha256": "3845ec64412198ca04dee9cd87e9887a5c0669a294ecb1c76e10974f579f4abd"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 48329,
-        "sha256": "98b8493948260044e414424258fc121e028a53dcf516c9c96dcba6e22d40725c"
+        "bytes": 49133,
+        "sha256": "8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c"
       },
       "tests/browser/backups.spec.ts": {
         "bytes": 31304,
         "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
       },
       "tests/browser/browse-real.spec.ts": {
-        "bytes": 13575,
-        "sha256": "4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261"
+        "bytes": 13949,
+        "sha256": "eb93107249c9590a1b076c4a8d8962bb95d7bbe8873989e04c69dc92d1f6735f"
       },
       "tests/browser/browse.spec.ts": {
-        "bytes": 23683,
-        "sha256": "c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0"
-      },
-      "tests/browser/fixtures/browse.sql": {
-        "bytes": 3485,
-        "sha256": "824f9a65edf25fdf85bfdd9cbc924ead8d662b9c2c024b6fa2f2036ff8b71c83"
+        "bytes": 30070,
+        "sha256": "bdf575d6a2885aad21e79fcdb908c4419ad37a21c1ab2f57ad428c54c705a45e"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,
@@ -326,8 +321,8 @@
         "sha256": "8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22"
       },
       "tools/mg.d/sync-web.sh": {
-        "bytes": 34117,
-        "sha256": "5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914"
+        "bytes": 34227,
+        "sha256": "4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255"
       }
     }
   },

@@ -28,3 +28,15 @@ Fixer run `20261125T144821Z-18347` exported the identity, projection, logout and
 - `server/web/tests/browser/browse-real.spec.ts` — `4f018f173ceea78f439a885e5526f7485c0265ffbd94968f4423d2e8d3e7a261`
 - `server/web/tests/browser/browse.spec.ts` — `c4d33db8a44eea9fc10c9e238e02538389b09cfb90f7f52babdcafa9bfa5c1c0`
 - `server/web/scripts/audit-assessment.json` — `c5e9b8f26705263e67a795794d096d86b4ec0ea653008a183a9f7f2c1a6c4eb7`
+
+Independent reviewers inspected the Rust projection, browser changes, generated tests, schema mount and fixer session from cleanroom runs `20261125T150654Z-30795` and `20261125T150839Z-31584`. Browser fixtures now read the tracked server schema. The reviewers approved the following whole-file snapshots and session metadata. They also identified a repeated metadata blob read for follow-up.
+
+- `server/tests/browse.rs` — `854b682a4ed4d0974acfdc7c59eff71e55882cae668743ec0458df0edcd75dd2`
+- `server/web/scripts/audit-assessment.json` — `8287f2b2f2b87a74dcc15599d5074c97381e728bdadc5e44d7e673c59e6a5dc8`
+- `server/web/src/browse.tsx` — `f423c0ef1598a5e58ef781af2e1fb728d74c05463b81927f77cb97a1735cb24c`
+- `server/web/src/style.css` — `1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc`
+- `server/web/tests/browser/accounts.spec.ts` — `8aa9c1df0f2e3b89cae275d25e57e7c8f46ba51644b07b63eac2fa38e57c076c`
+- `server/web/tests/browser/browse-real.spec.ts` — `eb93107249c9590a1b076c4a8d8962bb95d7bbe8873989e04c69dc92d1f6735f`
+- `server/web/tests/browser/browse.spec.ts` — `bdf575d6a2885aad21e79fcdb908c4419ad37a21c1ab2f57ad428c54c705a45e`
+- `tools/mg.d/sync-web.sh` — `4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255`
+- `docs/process/provenance/sessions/s-20261125T150342Z-453d824d.json` — `ed382bc21324f5d47c9419f0f8d50839fd5d9922e0dfc058b833a337b86817c5`
