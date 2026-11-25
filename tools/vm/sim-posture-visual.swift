@@ -8,10 +8,18 @@ func emit(_ value: Any) throws {
     print(String(decoding: data, as: UTF8.self))
 }
 
+func identity(_ app: NSRunningApplication?) -> [String: Any] {
+    guard let app = app else { return [:] }
+    return ["pid": app.processIdentifier, "bundle_id": app.bundleIdentifier ?? "",
+            "active": app.isActive, "terminated": app.isTerminated,
+            "finished_launching": app.isFinishedLaunching,
+            "bundle": app.bundleURL?.resolvingSymlinksInPath().path ?? "",
+            "executable": app.executableURL?.resolvingSymlinksInPath().path ?? ""]
+}
+
 do {
     if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "window" {
         guard let app = NSWorkspace.shared.frontmostApplication,
-              let bundle = app.bundleURL, let executable = app.executableURL,
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]] else {
             throw NSError(domain: "posture", code: 1)
@@ -26,24 +34,33 @@ do {
         }
         let screen = CGDisplayBounds(display)
         let normal = windows.filter { ($0[kCGWindowLayer as String] as? Int) == 0 }
-        let owned = normal.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier }
-        // Refuse the library plus device, multiple devices, and an occluding app.
-        guard owned.count == 1, let window = owned.first, let first = normal.first,
-              (first[kCGWindowNumber as String] as? Int) == (window[kCGWindowNumber as String] as? Int),
-              let bounds = window[kCGWindowBounds as String] as? [String: Any],
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary), screen.contains(rect),
-              rect.width > 100, rect.height > 150 else {
-            throw NSError(domain: "posture", code: 4)
+        // Preserve CG front-to-back order. Admission checks the selected signed
+        // installation across PIDs; the launcher need not own the device window.
+        let evidence = try normal.map { window -> [String: Any] in
+            guard let pid = window[kCGWindowOwnerPID as String] as? Int32,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else {
+                throw NSError(domain: "posture", code: 4)
+            }
+            var row: [String: Any] = [:]
+            if pid > 0, let owner = NSRunningApplication(processIdentifier: pid) {
+                row = identity(owner)
+                // AppKit may return -1 even for the object looked up by CG PID.
+                // Preserve its identity/flags and report that PID separately.
+                let lookupPID = row.removeValue(forKey: "pid")
+                row["lookup_pid"] = lookupPID
+            }
+            row["pid"] = pid
+            row["id"] = window[kCGWindowNumber as String] as? Int ?? -1
+            row["title"] = window[kCGWindowName as String] as? String ?? ""
+            row["rect"] = [rect.minX, rect.minY, rect.width, rect.height]
+            return row
         }
         guard let pointer = CGEvent(source: nil)?.location else {
             throw NSError(domain: "posture", code: 6)
         }
-        try emit(["pid": app.processIdentifier, "bundle": bundle.resolvingSymlinksInPath().path,
-                  "executable": executable.resolvingSymlinksInPath().path,
-                  "id": window[kCGWindowNumber as String] as? Int ?? -1,
-                  "title": window[kCGWindowName as String] as? String ?? "",
+        try emit(["front": identity(app), "normal": evidence,
                   "pointer": [pointer.x, pointer.y],
-                  "rect": [rect.minX, rect.minY, rect.width, rect.height],
                   "screen": [screen.minX, screen.minY, screen.width, screen.height]])
     } else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "text" {
         let handler = VNImageRequestHandler(url: URL(fileURLWithPath: CommandLine.arguments[2]))

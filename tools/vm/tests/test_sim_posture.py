@@ -5,10 +5,12 @@ Transport/inspection regressions also remain in tools/tests/vnc_session.bats.
 """
 import base64
 import copy
+import ctypes
 import importlib.util
 import io
 import json
 import os
+import pathlib
 from pathlib import Path
 import plistlib
 import subprocess
@@ -30,9 +32,18 @@ UDID = "11111111-2222-3333-4444-555555555555"
 
 
 def window():
-    return dict(id=23, pid=123, title=NAME, bundle="/Selected/DeviceHub.app",
-                executable="/Selected/DeviceHub.app/Contents/MacOS/DevicesTrampoline",
+    return dict(id=23, pid=123, lookup_pid=123, active=True, terminated=False, finished_launching=True,
+                title=NAME, bundle="/Selected/DeviceHub.app",
+                bundle_id="com.apple.dt.Devices",
+                executable="/Selected/DeviceHub.app/Contents/MacOS/DeviceHub",
                 rect=[100, 50, 400, 700], screen=[0, 0, 800, 900], pointer=[0, 0])
+
+
+def native_window(owner):
+    return dict(front={k: owner[k] for k in ("pid", "active", "terminated", "finished_launching",
+                                           "bundle", "bundle_id", "executable")},
+                normal=[{k: v for k, v in owner.items() if k not in ("screen", "pointer")}],
+                screen=owner["screen"], pointer=owner["pointer"])
 
 
 def png(color):
@@ -53,7 +64,7 @@ class EvidenceTests(unittest.TestCase):
                 mock.patch.object(p.os, "write", side_effect=lambda fd, data: len(data)), \
                 mock.patch.object(p.os, "read", side_effect=answers) as read:
             self.assertEqual(p.operator_controls(Path("/private/capture.png"), NAME, dict(scale=2)),
-                             dict(closed=[170, 650], open=[230, 650]))
+                             ("compact", dict(closed=[170, 650], open=[230, 650])))
             opened.assert_called_once_with("/dev/tty", os.O_RDWR | os.O_NOCTTY)
             self.assertEqual(read.call_args_list, [mock.call(99, 256), mock.call(99, 128), mock.call(99, 128)])
             closed.assert_called_once_with(99)
@@ -63,6 +74,37 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 p.operator_controls(Path("/private/capture.png"), NAME, dict(scale=1))
             read.assert_not_called()
+
+    def test_posture_expanded_confirmation_names_the_target_and_keeps_a_distinct_schema(self):
+        w = dict(window(), rect=[140, 80, 960, 760], screen=[0, 0, 1500, 1000])
+        geometry = p.window_binding(w, (1500, 1000), NAME)
+        controls = dict(closed=[700, 715], open=[760, 715])
+        for confirmation, accepted in (("EXPANDED " + NAME, True), ("COMPACT " + NAME, True),
+                                       ("EXPANDED Library", False), ("EXPANDED", False),
+                                       ("EXPANDED " + NAME + " other", False)):
+            with self.subTest(confirmation=confirmation), mock.patch.object(p, "operator_terminal", return_value=99), \
+                    mock.patch.object(p.os, "close"), \
+                    mock.patch.object(p.select, "select", return_value=([99], [], [])), \
+                    mock.patch.object(p.os, "write", side_effect=lambda fd, data: len(data)), \
+                    mock.patch.object(p.os, "read", side_effect=[(confirmation + "\n").encode(),
+                                                               b"700 715\n", b"760 715\n"]):
+                if not accepted:
+                    with self.assertRaises(RuntimeError):
+                        p.operator_controls(Path("/private/capture.png"), NAME, geometry)
+                    continue
+                viewport, measured = p.operator_controls(Path("/private/capture.png"), NAME, geometry)
+                record = dict(schema=2, viewport=viewport, binding=dict(name=NAME),
+                              geometry=geometry, controls=measured)
+                self.assertEqual(p.validate_calibration(record, record["binding"], geometry), controls)
+                # The expanded canvas still needs the exact top-40pt title,
+                # not its selected sidebar row, and the existing tooltip proof.
+                p.title_evidence([(NAME, (400, 90, 250, 18))], w, 1, NAME)
+                with self.assertRaises(RuntimeError):
+                    p.title_evidence([(NAME, (155, 230, 250, 18))], w, 1, NAME)
+                for changed in (dict(record, schema=1), dict(record, compact=True),
+                                dict(record, viewport="library"), dict(record, viewport=True)):
+                    with self.assertRaises(RuntimeError):
+                        p.validate_calibration(changed, record["binding"], geometry)
 
     def test_posture_geometry_handles_scale_and_movement_and_refuses_mismatch(self):
         w = window()
@@ -475,6 +517,227 @@ class ProductionFlowTests(unittest.TestCase):
 
 
 class GuardTests(unittest.TestCase):
+    def test_posture_kernel_path_lookup_is_bounded_and_uses_only_the_positive_cg_pid(self):
+        scope = dict(require=p.require)
+        exec(p.WINDOW_ADMISSION, scope)
+        lookup = scope["kernel_executable"]
+        path = b"/Selected/DeviceHub.app/Contents/MacOS/DeviceHub"
+        libproc = mock.Mock()
+        def proc_pidpath(pid, buffer, size):
+            self.assertEqual(pid, 123)
+            self.assertEqual(size, 4096)
+            buffer.value = path
+            return len(path)
+        libproc.proc_pidpath.side_effect = proc_pidpath
+        with mock.patch.object(ctypes, "CDLL", return_value=libproc) as load:
+            self.assertEqual(lookup(123), path.decode())
+            load.assert_called_once_with("/usr/lib/libproc.dylib")
+            self.assertEqual(libproc.proc_pidpath.argtypes,
+                             [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32])
+            self.assertIs(libproc.proc_pidpath.restype, ctypes.c_int)
+            for pid in (-1, 0, True, 2147483648):
+                with self.assertRaises(RuntimeError):
+                    lookup(pid)
+            for result in (0, -1, 4097):
+                libproc.proc_pidpath.side_effect = None
+                libproc.proc_pidpath.return_value = result
+                with self.assertRaises(RuntimeError):
+                    lookup(123)
+            def unterminated(pid, buffer, size):
+                buffer.raw = b"x" * size
+                return size
+            libproc.proc_pidpath.side_effect = unterminated
+            with self.assertRaises(RuntimeError):
+                lookup(123)
+
+    def test_posture_split_front_launcher_and_window_owner_require_the_exact_signed_installation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            hub = Path(folder) / "Selected/DeviceHub.app"
+            binaries = hub / "Contents/MacOS"
+            binaries.mkdir(parents=True)
+            for name in ("DeviceHub", "DevicesTrampoline", "OtherAppleTool"):
+                (binaries / name).write_bytes(b"synthetic")
+            (hub / "Contents/Info.plist").write_bytes(plistlib.dumps(dict(
+                CFBundleIdentifier="com.apple.dt.Devices", CFBundleExecutable="DevicesTrampoline")))
+            requirement = '=anchor apple and identifier "com.apple.dt.Devices"'
+            signed = mock.Mock()
+            scope = dict(hub=hub, hub_requirement=requirement, pathlib=pathlib, plistlib=plistlib,
+                         require=p.require, run=signed)
+            exec(p.WINDOW_ADMISSION, scope)
+            lookup = mock.Mock(return_value=str(binaries / "DeviceHub"))
+            scope["kernel_executable"] = lookup
+            admit = scope["admit_window"]
+            owner = dict(window(), bundle=str(hub), executable=str(binaries / "DeviceHub"))
+            evidence = native_window(owner)
+            evidence["front"].update(pid=456, executable=str(binaries / "DevicesTrampoline"))
+            original = admit(evidence)
+            self.assertEqual(original, owner)  # Bind the actual window owner, not the launcher.
+            lookup.assert_called_once_with(owner["pid"])
+            expected = [mock.call("/usr/bin/codesign", "--verify", "--strict", "-R", requirement, str(path))
+                        for path in (hub, binaries / "DevicesTrampoline", binaries / "DeviceHub")]
+            self.assertEqual(signed.call_args_list, expected)
+            # Actual observed combination: separate launcher, sentinel lookup
+            # for the real CG owner, active/finished and exact kernel binary.
+            sentinel = copy.deepcopy(evidence)
+            sentinel["front"]["pid"] = -1
+            sentinel["normal"][0]["lookup_pid"] = -1
+            admitted = admit(sentinel)
+            self.assertEqual(admitted["pid"], 123)
+            self.assertEqual(admitted["lookup_pid"], -1)
+            self.assertTrue(admitted["active"])
+            self.assertFalse(admitted["terminated"])
+            self.assertTrue(admitted["finished_launching"])
+            guest = mock.Mock()
+            guest.call.side_effect = lambda *args: admit(sentinel)
+            p.stable_window(guest, original)  # The verified lookup PID isn't the CG binding.
+            for wrong in (str(binaries / "DevicesTrampoline"), str(binaries / "OtherAppleTool"),
+                          str(hub.parent / "Other.app/Contents/MacOS/DeviceHub"), ""):
+                lookup.return_value = wrong
+                with self.assertRaises(RuntimeError):
+                    admit(sentinel)
+                self.assertEqual(scope["stage"], "window-owner-kernel")
+            lookup.return_value = str(binaries / "DeviceHub")
+            for lookup_pid in (456, 0, -2, True, None):
+                wrong = copy.deepcopy(sentinel)
+                wrong["normal"][0]["lookup_pid"] = lookup_pid
+                with self.assertRaises(RuntimeError):
+                    admit(wrong)
+                self.assertEqual(scope["stage"], "window-owner-lookup")
+            missing = copy.deepcopy(sentinel)
+            del missing["normal"][0]["lookup_pid"]
+            with self.assertRaises(RuntimeError):
+                admit(missing)
+            self.assertEqual(scope["stage"], "window-owner-lookup")
+            missing = copy.deepcopy(sentinel)
+            missing["normal"][0] = {k: missing["normal"][0][k] for k in ("pid", "id", "rect", "title")}
+            with self.assertRaises(RuntimeError):
+                admit(missing)
+            for field in ("active", "terminated", "finished_launching"):
+                wrong = copy.deepcopy(sentinel)
+                wrong["normal"][0][field] = not wrong["normal"][0][field]
+                with self.assertRaises(RuntimeError):
+                    admit(wrong)
+                self.assertEqual(scope["stage"], "window-owner-identity")
+            lower = dict(pid=789, id=24, rect=[20, 20, 300, 200], title="")
+            foreign_path = str(hub.parent / "Other.app/Contents/MacOS/Other")
+            foreign = dict(lower, lookup_pid=789, bundle=str(hub.parent / "Other.app"),
+                           executable=foreign_path)
+            # Missing secondary AppKit lookup still counts every selected
+            # internal binary, including the launcher and other companions.
+            cases = [(lower, str(binaries / name), False)
+                     for name in ("DeviceHub", "DevicesTrampoline", "OtherAppleTool")]
+            cases += [
+                (lower, None, False),  # An unresolved PID cannot prove uniqueness.
+                (dict(lower, pid=0), foreign_path, False),
+                (dict(lower, pid=-1), foreign_path, False),
+                (dict(lower, pid=True), foreign_path, False),
+                (lower, foreign_path, True),  # Kernel-only unrelated owner.
+                (foreign, foreign_path, True),  # Known unrelated lower window.
+                (foreign, str(binaries / "DeviceHub"), False),  # Conflicting bundle/path.
+                (foreign, foreign_path + "Changed", False),  # Conflicting executables.
+                (dict(foreign, lookup_pid=456), foreign_path, False),
+                (dict(lower, pid=owner["pid"]), foreign_path, False),  # Owned/unknown overlap.
+                (dict(lower, executable=str(binaries / "DeviceHub")), foreign_path, False),
+                (dict(lower, bundle=str(hub)), foreign_path, False),
+            ]
+            for row, path, accepted in cases:
+                with self.subTest(row=row, path=path, accepted=accepted):
+                    def kernel(pid):
+                        p.require(type(pid) is int and 0 < pid <= 2147483647)
+                        if pid == owner["pid"]:
+                            return str(binaries / "DeviceHub")
+                        self.assertEqual(pid, 789)
+                        p.require(path is not None)
+                        return path
+                    lookup.reset_mock()
+                    lookup.side_effect = kernel
+                    changed = dict(evidence, normal=evidence["normal"] + [row])
+                    if accepted:
+                        self.assertEqual(admit(changed), owner)
+                        self.assertEqual(lookup.call_args_list,
+                                         [mock.call(789), mock.call(owner["pid"])])
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            admit(changed)
+            lookup.side_effect = None
+            other = dict(sentinel["normal"][0], pid=456, id=24)
+            with self.assertRaises(RuntimeError):
+                admit(dict(sentinel, normal=sentinel["normal"] + [other]))
+            self.assertEqual(scope["stage"], "window-unique")
+            for front in (dict(evidence["front"], pid=-1), dict(evidence["front"], pid=789),
+                          native_window(owner)["front"]):
+                fresh = dict(evidence, front=front)
+                guest = mock.Mock()
+                guest.call.side_effect = lambda *args: admit(fresh)
+                p.stable_window(guest, original)  # Freshly admitted front PID may change.
+            bad = []
+            for part in ("front", "owner"):
+                for field, value in (("pid", 0), ("pid", -2), ("pid", True),
+                                     ("active", False), ("terminated", True), ("finished_launching", False),
+                                     ("bundle", str(hub.parent / "Other/DeviceHub.app")),
+                                     ("bundle_id", "com.apple.other"),
+                                     ("executable", str(binaries / "OtherAppleTool"))):
+                    changed = copy.deepcopy(evidence)
+                    target = changed["front"] if part == "front" else changed["normal"][0]
+                    target[field] = value
+                    bad.append(changed)
+                    if part == "front":
+                        sentinel = copy.deepcopy(changed)
+                        sentinel["front"]["pid"] = -1
+                        if field != "pid":
+                            bad.append(sentinel)
+            bad.append(dict(evidence, normal=[dict(evidence["normal"][0], pid=-1)]))
+            bad.append(dict(evidence, normal=[dict(evidence["normal"][0], bundle="/Other.app"),
+                                             evidence["normal"][0]]))  # Obscured.
+            bad.append(dict(evidence, normal=evidence["normal"] +
+                            [dict(evidence["normal"][0], pid=456, id=24)]))  # Launcher library too.
+            for changed in bad:
+                with self.assertRaises(RuntimeError):
+                    admit(changed)
+            # The native helper's observed -1 front entry never supplies the
+            # bound owner, and never admits an initially unrelated top window.
+            ready = copy.deepcopy(evidence)
+            ready["front"]["pid"] = -1
+            obscured = dict(ready, normal=[dict(ready["normal"][0], bundle="/Other.app"),
+                                           ready["normal"][0]])
+            check_lease = mock.Mock()
+            clock = mock.Mock()
+            clock.monotonic.return_value = 0
+            read = mock.Mock(side_effect=[json.dumps(obscured), json.dumps(ready)])
+            def observe_run(*args):
+                return read(*args) if args == ("visual", "window") else signed(*args)
+            scope.update(visual="visual", json=json, time=clock, check_lease=check_lease, run=observe_run)
+            observe = scope["observe_window"]
+            self.assertEqual(observe(True), owner)
+            self.assertEqual(read.call_count, 2)
+            self.assertEqual(check_lease.call_count, 2)
+            clock.sleep.assert_called_once_with(.25)
+            for initial in (False, True):
+                with self.subTest(initial=initial):
+                    read.reset_mock(side_effect=True)
+                    read.side_effect = [json.dumps(obscured)] * 2
+                    clock.reset_mock(side_effect=True)
+                    clock.monotonic.side_effect = [0, 0, 5]
+                    with self.assertRaises(RuntimeError):
+                        observe(initial)
+                    self.assertEqual(read.call_count, 2 if initial else 1)
+                    self.assertEqual(clock.sleep.call_count, 1 if initial else 0)
+            read.reset_mock(side_effect=True)
+            read.side_effect = [json.dumps(obscured), json.dumps(ready)]
+            clock.reset_mock(side_effect=True)
+            clock.monotonic.return_value = 0
+            check_lease.side_effect = [None, RuntimeError("lease changed during initial transition")]
+            with self.assertRaisesRegex(RuntimeError, "lease changed"):
+                observe(True)
+            self.assertEqual(read.call_count, 1)
+            for invalid in (hub, binaries / "DevicesTrampoline", binaries / "DeviceHub"):
+                def verify(*args):
+                    if args[-1] == str(invalid):
+                        raise RuntimeError("invalid signature or code identifier")
+                signed.side_effect = verify
+                with self.assertRaises(RuntimeError):
+                    admit(evidence)
+
     def test_posture_guest_mutex_holds_exact_lease_through_input_and_proof(self):
         self.check_guard_scenarios(("read-only", "armed-only", "short", "error", "joined", "pending", "timeout", "bad-frame"))
 
@@ -491,6 +754,7 @@ class GuardTests(unittest.TestCase):
                 hub = developer.parent / "Applications/DeviceHub.app"
                 (hub / "Contents/MacOS").mkdir(parents=True)
                 (hub / "Contents/MacOS/DevicesTrampoline").write_bytes(b"synthetic")
+                (hub / "Contents/MacOS/DeviceHub").write_bytes(b"synthetic")
                 (hub / "Contents/Info.plist").write_bytes(plistlib.dumps(dict(
                     CFBundleIdentifier="com.apple.dt.Devices", CFBundleExecutable="DevicesTrampoline")))
                 (developer.parent / "Info.plist").write_bytes(plistlib.dumps(dict(CFBundleShortVersionString="27.2")))
@@ -528,8 +792,11 @@ class GuardTests(unittest.TestCase):
                     if args[0] in ("/usr/bin/codesign", "/usr/bin/open"):
                         return b""
                     if args[0].endswith("/visual"):
-                        return json.dumps(dict(window(), bundle=str(hub),
-                            executable=str(hub / "Contents/MacOS/DevicesTrampoline"))).encode()
+                        evidence = native_window(dict(window(), bundle=str(hub),
+                            executable=str(hub / "Contents/MacOS/DeviceHub")))
+                        evidence["front"]["pid"] = -1
+                        evidence["normal"][0]["lookup_pid"] = -1
+                        return json.dumps(evidence).encode()
                     self.assertEqual(args[0], str(developer / "usr/bin/simctl"))
                     if args[1] == "io":
                         self.assertEqual(args[2:4], (UDID, "screenshot"))
@@ -585,7 +852,15 @@ class GuardTests(unittest.TestCase):
                 def reply(value, **kwargs):
                     if racing and '"published": true' in value:
                         self.assertTrue(terminal_done.wait(5))
+                def proc_pidpath(pid, buffer, size):
+                    self.assertEqual(pid, 123)
+                    self.assertEqual(size, 4096)
+                    buffer.value = str(hub / "Contents/MacOS/DeviceHub").encode()
+                    return len(buffer.value)
+                libproc = mock.Mock()
+                libproc.proc_pidpath.side_effect = proc_pidpath
                 with mock.patch.object(sys, "argv", ["guard", json.dumps(request)]), \
+                        mock.patch.object(ctypes, "CDLL", return_value=libproc), \
                         mock.patch.object(sys, "stdin", source), mock.patch.object(os, "getuid", return_value=501), \
                         mock.patch.object(Path, "stat", path_stat), \
                         mock.patch.object(subprocess, "check_output", side_effect=output), \

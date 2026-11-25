@@ -35,3 +35,19 @@ Independent fixer session `s-20261124T123814Z-b6a481ac` checked the interrupted 
 - `tools/vm/vnc-session.py` at `d08738cffa81959447e282fb90a74424da923f534cb280929cfc6562e813fc5a`
 - `tools/vm/duo-fold.sh` at `e6383914de7e7f6bfcc44fdc7f31d4f7e29d644606888c0e6443248c64705b17`
 - `tools/tests/vnc_session_test.py` at `9222a6d7de7567b7a4c45fbca38b33689ca4f28c83891325ecdeadbaaab42fc0`
+
+## Verifying the signed Device Hub canvas
+
+On the remote M3, three scheduler-held observations of the leased Duo identified the positive WindowServer owner PID and its exact signed Device Hub executable through the kernel. AppKit returned an active application with PID `-1` when queried for the same owner. The guest confirmed that the explicit Apple signature requirement verifies for the selected launcher and companion. The 3840 × 2400 VNC capture showed the exact leased title and the Closed, Partially Open and Open controls. Full pose transitions are tracked separately.
+
+All 25 posture tests passed in `image-tools-selftest/20261125T075703Z-17098`. The 84 scheduler, transport and pool cases passed in `selftest/20261125T075603Z-13651`. Independent fixer session `s-20261124T123814Z-b6a481ac` reviewed the complete files and confirmed the secondary-window correction.
+
+| Public file | SHA-256 | Cleanroom review |
+|---|---|---|
+| `docs/process/mac-ui-vm.md` | `36343bc8419f3501ec205974e6f87af6adef15e1e70b0527e575bf2cf1750ffa` | `20261125T073516Z-82423` |
+| `docs/process/sim-posture.md` | `a87f540c272faf095e96b739bd8ea8aa0c4a5480339cff37618f2d0732bb77d9` | `20261125T073516Z-82423` |
+| `tools/tests/vnc_session_test.py` | `a360d51acf0b86a82ef244eea57c395683707d9a12c6752c2263851aa8d26793` | `20261125T073516Z-82423` |
+| `tools/vm/sim-posture-inspect.py` | `52d009284114d9eb0305b0f087d8ca0a5efe534943a7872735d58cc98b99adc5` | `20261125T073516Z-82423` |
+| `tools/vm/sim-posture-visual.swift` | `4a7cfd87ed798ea236eb8d68d349f134107d7841ac26ee984f0c95c25bd4bc1a` | `20261125T073516Z-82423` |
+| `tools/vm/sim-posture.py` | `096611e99ab9cebe2884b29423e68c0ba5b1e0366dc269f74f832f7b331f8d83` | `20261125T075726Z-18350` |
+| `tools/vm/tests/test_sim_posture.py` | `937e1e3fea17395a3849ba1a03e039824fac6d682ce240df41457f2150f53531` | `20261125T075726Z-18350` |

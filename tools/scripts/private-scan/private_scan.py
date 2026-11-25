@@ -1371,27 +1371,30 @@ PUBLIC_ARTIFACTS = {
     'server/tools/package-smoke.mjs': '8a4ac4d7a54677a9fee3f64c4132de34e088d2f514c74c16083dbe9236ac456b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
+    # Independent full-file review in cleanroom/20261125T080122Z-27863.
+    'docs/process/review-log/duo-posture-rework-20261124.md':
+        '1a27b76d2b30e60bf5a2279367a8ef2ef94da19abfd4ad21836b6ebdde2e4fb9',
     # Complete-file reviews recorded in duo-posture-rework-20261124.md.
     'docs/process/sim-posture.md':
-        'e7e4722c12dcb9705a1e8cd8264b70cc6c3a4f9b8ec8af3a216e5689e317e928',
+        'a87f540c272faf095e96b739bd8ea8aa0c4a5480339cff37618f2d0732bb77d9',
     'tools/vm/sim-posture-visual.swift':
-        '56471e99fdc7acc4dec76d99248c68859a46758e50498a67cf53cdb743a87d3d',
+        '4a7cfd87ed798ea236eb8d68d349f134107d7841ac26ee984f0c95c25bd4bc1a',
     'tools/vm/sim-posture.py':
-        '9fc732f45ad90e732c973bc5451ed30c4edcfc47378598681c6b7b55e700cff4',
+        '096611e99ab9cebe2884b29423e68c0ba5b1e0366dc269f74f832f7b331f8d83',
     'tools/vm/tests/test_sim_posture.py':
-        '56c62162ec9250725310815970941bb0287bc06a4385bcef7f55b7e3e3f7fc9b',
+        '937e1e3fea17395a3849ba1a03e039824fac6d682ce240df41457f2150f53531',
     # Complete-file review of the Duo transport repair, 2026-11-24.
     'docs/process/new-machine.md':
         'ca64a19aae880b88be34955af62194f9f8a358f361aa20d801e789a287534b6a',
     'tools/tests/vnc_session_test.py':
-        '9222a6d7de7567b7a4c45fbca38b33689ca4f28c83891325ecdeadbaaab42fc0',
+        'a360d51acf0b86a82ef244eea57c395683707d9a12c6752c2263851aa8d26793',
     'tools/vm/vnc-holder.py':
         'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
     'docs/process/review-log/duo-simulator-posture-20261124.md':
         '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',
     'tools/vm/sim-posture-inspect.py':
-        '0c71d599fb3bdcb658abd5bd919afca39b907cf4e3c8c4ec4d8bdf4cdeba567e',
+        '52d009284114d9eb0305b0f087d8ca0a5efe534943a7872735d58cc98b99adc5',
     'tools/tests/remote_wrapper.bats': '4c167356b41f7f6b30467e109e1855169fbfa2bbf6f4a06c83a98fd60912af5c',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',

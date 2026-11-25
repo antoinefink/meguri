@@ -1403,7 +1403,8 @@ class InspectionTests(unittest.TestCase):
         self.developer = self.root / "Selected Xcode.app/Contents/Developer"
         self.developer.mkdir(parents=True)
         self.hub = self.developer.parent / "Applications/DeviceHub.app"
-        (self.hub / "Contents").mkdir(parents=True)
+        (self.hub / "Contents/MacOS").mkdir(parents=True)
+        (self.hub / "Contents/MacOS/DevicesTrampoline").write_bytes(b"synthetic")
         (self.hub / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "DevicesTrampoline", "CFBundleIdentifier": "com.apple.dt.Devices"}))
         self.device = dict(udid=self.udid, name="Meguri-Pool-foldable-1", state="Booted",
                            isAvailable=True, deviceTypeIdentifier="duo-type")
@@ -1446,7 +1447,9 @@ class InspectionTests(unittest.TestCase):
 
     def test_guest_exact_selected_signed_hub_uid_and_udid(self):
         self.guest()
-        self.assertIn(("/usr/bin/codesign", "--verify", "--strict", str(self.hub)), self.calls)
+        for target in (self.hub, self.hub / "Contents/MacOS/DevicesTrampoline"):
+            self.assertIn(("/usr/bin/codesign", "--verify", "--strict", "-R",
+                           '=anchor apple and identifier "com.apple.dt.Devices"', str(target)), self.calls)
         self.assertIn(("/usr/bin/open", "-a", str(self.hub), "--args", "-CurrentDeviceUDID", self.udid), self.calls)
         self.assertEqual(json.loads(self.lease_path.read_text()), self.lease)
 

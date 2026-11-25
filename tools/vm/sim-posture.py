@@ -80,6 +80,103 @@ def posture_mark(owner, token, state):
     if os.pwrite(owner, state, len(token.encode()) + 1) != 1:
         raise RuntimeError("posture state write failed")
 '''
+# Shared verbatim with the guest and behavioral tests. Native evidence carries
+# separate front-app and window-owner identities; only the owner is pinned
+# between fresh checks, after both have passed exact installation admission.
+WINDOW_ADMISSION = r'''
+def kernel_executable(pid):
+    import ctypes
+    require(type(pid) is int and 0 < pid <= 2147483647)
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    lookup = libproc.proc_pidpath
+    lookup.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    lookup.restype = ctypes.c_int
+    buffer = ctypes.create_string_buffer(4096)  # PROC_PIDPATHINFO_MAXSIZE
+    size = lookup(pid, buffer, len(buffer))
+    require(0 < size <= len(buffer) and b"\0" in buffer.raw)
+    path = buffer.value.decode("utf-8")
+    require(path.startswith("/"))
+    return path
+
+def admit_window(evidence):
+    global stage
+    stage = "window-installation"
+    require(hub.resolve(strict=True) == hub)
+    info = plistlib.loads((hub / "Contents/Info.plist").read_bytes())
+    require(info.get("CFBundleIdentifier") == "com.apple.dt.Devices"
+            and info.get("CFBundleExecutable") == "DevicesTrampoline")
+    run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(hub))
+    def admit_app(app, owner=False):
+        require(app.get("active") is True and app.get("terminated") is False
+                and app.get("finished_launching") is True and app["bundle"] == str(hub)
+                and app["bundle_id"] == "com.apple.dt.Devices")
+        executable = pathlib.Path(app["executable"])
+        allowed = (hub / "Contents/MacOS/DeviceHub",) if owner else (
+            hub / "Contents/MacOS/DevicesTrampoline", hub / "Contents/MacOS/DeviceHub")
+        require(executable in allowed
+                and executable.resolve(strict=True) == executable)
+        run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(executable))
+    stage = "window-front"
+    front_pid = evidence["front"].get("pid")
+    require(type(front_pid) is int and (front_pid > 0 or front_pid == -1))
+    admit_app(evidence["front"])
+    stage = "window-unique"
+    normal = evidence["normal"]
+    require(0 < len(normal) <= 256)
+    def selected_executable(value):
+        return isinstance(value, str) and hub in pathlib.Path(value).parents
+    owned = [w for w in normal if w.get("bundle") == str(hub)
+             or selected_executable(w.get("executable"))]
+    unknown = [w for w in normal if w not in owned]
+    # A CG owner cannot simultaneously claim selected and unrelated identity.
+    require(not ({w.get("pid") for w in owned} & {w.get("pid") for w in unknown}))
+    for row in unknown:
+        pid = row.get("pid")
+        executable = kernel_executable(pid)
+        if "lookup_pid" in row:
+            require(type(row["lookup_pid"]) is int and row["lookup_pid"] in (pid, -1))
+        require(not row.get("executable") or row["executable"] == executable)
+        selected = selected_executable(executable)
+        require(not selected or not row.get("bundle"))
+        if selected:
+            owned.append(row)
+    # Count across the selected bundle, including launcher/companion windows.
+    # Missing AppKit identity is not proof that a lower window is unrelated:
+    # its positive CG PID must resolve outside the selected bundle to exclude it.
+    # The only Hub normal window must also be the top normal window globally.
+    require(len(owned) == 1 and owned[0] == normal[0])
+    window = owned[0]
+    stage = "window-owner-lookup"
+    pid, lookup_pid = window.get("pid"), window.get("lookup_pid")
+    # CG supplies the bound positive PID. -1 is admitted only for this lookup's
+    # verified actual owner; a positive AppKit PID must agree with CG.
+    require(type(pid) is int and 0 < pid <= 2147483647
+            and type(lookup_pid) is int and lookup_pid in (pid, -1))
+    stage = "window-owner-kernel"
+    require(kernel_executable(pid) == window.get("executable")
+            == str(hub / "Contents/MacOS/DeviceHub"))
+    stage = "window-owner-identity"
+    admit_app(window, owner=True)
+    stage = "window-geometry"
+    require(window["id"] > 0 and window["rect"][2] > 100 and window["rect"][3] > 150)
+    return dict(window, screen=evidence["screen"], pointer=evidence["pointer"])
+
+def observe_window(initial):
+    global stage
+    # Only the first pre-input read may wait for open's foreground transition.
+    deadline = time.monotonic() + 5 if initial else 0
+    while True:
+        stage = "lease"
+        check_lease()
+        stage = "window-native"
+        evidence = json.loads(run(str(visual), "window"))
+        try:
+            return admit_window(evidence)
+        except RuntimeError:
+            if not initial or time.monotonic() >= deadline:
+                raise
+        time.sleep(.25)
+'''
 GUEST = r'''
 import base64, hashlib, json, os, pathlib, select, signal, stat, subprocess, sys, tempfile, time
 ''' + POSTURE_STATE + r'''
@@ -118,10 +215,8 @@ try:
             if time.monotonic() >= deadline:
                 raise TimeoutError("pool busy")
             time.sleep(.1)
-''' + "".join("    " + line + "\n" for line in inspection.GUEST_VALIDATE.splitlines()) + r'''
-    # Verify Apple authorship, not just a self-consistent signature.
-    stage = "signature"
-    run("/usr/bin/codesign", "--verify", "--strict", "-R", "anchor apple", str(hub))
+''' + "".join("    " + line + "\n" for line in
+              (inspection.GUEST_VALIDATE + WINDOW_ADMISSION).splitlines()) + r'''
     stage = "binding"
     xinfo = plistlib.loads((developer.parent / "Info.plist").read_bytes())
     version = plistlib.loads((developer.parent / "version.plist").read_bytes())
@@ -142,6 +237,7 @@ try:
         stage = "open"
         run("/usr/bin/open", "-a", str(hub), "--args", "-CurrentDeviceUDID", request["udid"])
         print(json.dumps(dict(ready=True, binding=binding)), flush=True)
+        first_window = True
         while True:
             line = sys.stdin.buffer.readline(41943041)
             if not line:
@@ -165,12 +261,9 @@ try:
             if action not in ("disarm", "finish"):
                 check_lease()
             if action == "window":
-                window = json.loads(run(str(visual), "window"))
-                require(window["bundle"] == str(hub))
-                executable = pathlib.Path(window["executable"])
-                require(hub in executable.parents)
-                run("/usr/bin/codesign", "--verify", "--strict", "-R", "anchor apple", str(executable))
-                result = window
+                initial = first_window and not armed and not pending
+                first_window = False
+                result = observe_window(initial)
             elif action == "text":
                 image = folder / "vnc.png"
                 payload = base64.b64decode(message["png"], validate=True)
@@ -189,6 +282,7 @@ try:
                     result[str(display)] = base64.b64encode(image.read_bytes()).decode()
                     image.unlink()
             elif action == "arm":
+                first_window = False  # Arming permanently ends pre-input settling.
                 require(not armed and not pending)
                 check_lease()
                 expiry = json.loads(lease_witness[2])["expires_epoch"]
@@ -250,7 +344,9 @@ finally:
             if fd is not None:
                 os.close(fd)
 '''
-GUEST_STAGES = set(inspection.GUEST_STAGES) | {"pool", "binding", "compile", "window", "text", "displays", "arm", "publish", "disarm", "finish"}
+GUEST_STAGES = set(inspection.GUEST_STAGES) | {"pool", "binding", "compile", "window", "text", "displays", "arm", "publish", "disarm", "finish",
+    "window-installation", "window-front", "window-unique", "window-owner-lookup",
+    "window-owner-kernel", "window-owner-identity", "window-geometry", "window-native"}
 GUEST = "try:\n" + "".join("    " + line + "\n" for line in GUEST.splitlines()) + \
     'except Exception:\n    import json, sys\n    stage = globals().get("stage", "pool")\n' + \
     '    print(json.dumps({"id": globals().get("request_id", 0), "error": stage if stage in ' + repr(sorted(GUEST_STAGES)) + ' else "pool"}), flush=True)\n' + \
@@ -486,10 +582,13 @@ def read_calibration(path):
 
 
 def validate_calibration(record, binding, geometry):
-    require(set(record) == {"schema", "binding", "geometry", "compact", "controls"}
-            and record["schema"] == 1 and record["compact"] is True
-            and record["binding"] == binding and record["geometry"] == geometry,
-            "calibration does not match selected Xcode, target or compact geometry")
+    legacy = (set(record) == {"schema", "binding", "geometry", "compact", "controls"}
+              and type(record["schema"]) is int and record["schema"] == 1 and record["compact"] is True)
+    current = (set(record) == {"schema", "binding", "geometry", "viewport", "controls"}
+               and type(record["schema"]) is int and record["schema"] == 2
+               and record["viewport"] in ("compact", "expanded"))
+    require((legacy or current) and record["binding"] == binding and record["geometry"] == geometry,
+            "calibration does not match selected Xcode, target or confirmed viewport geometry")
     points = record["controls"]
     require(set(points) == {"closed", "open"})
     width, height = geometry["size"]
@@ -702,8 +801,8 @@ def snapshot_displays(guest, folder):
 
 def stable_window(guest, original, point=None):
     current = guest.call("window")
-    require({k: v for k, v in current.items() if k != "pointer"}
-            == {k: v for k, v in original.items() if k != "pointer"},
+    require({k: v for k, v in current.items() if k not in ("pointer", "lookup_pid")}
+            == {k: v for k, v in original.items() if k not in ("pointer", "lookup_pid")},
             "foreground window changed; no pose input permitted")
     if point is not None:
         require(len(current["pointer"]) == 2
@@ -805,9 +904,14 @@ def operator_controls(path, name, geometry):
             line = os.read(fd, limit).decode()
             require(line.endswith("\n"), "operator calibration input too long")
             return line
-        prompt("Private guest capture: " + str(path) + "\nConfirm exactly this leased simulator in COMPACT view, "
-               "English controls below bezel. Type COMPACT " + name + ":\n")
-        require(answer(256).strip() == "COMPACT " + name, "operator compact confirmation refused")
+        prompt("Private guest capture: " + str(path) + "\nConfirm exactly the leased target " + name
+               + " is visible with its English pose buttons below its bezel, in compact or expanded canvas. "
+               "A sidebar row or generic library is insufficient. Type COMPACT " + name
+               + " or EXPANDED " + name + ":\n")
+        confirmation = answer(256).strip()
+        require(confirmation in ("COMPACT " + name, "EXPANDED " + name),
+                "operator target/viewport confirmation refused")
+        viewport = confirmation.split(" ", 1)[0].lower()
         controls = {}
         for pose in ("closed", "open"):
             prompt(pose + ": enter x y in guest window points, relative to its top-left (PNG pixels / scale "
@@ -815,7 +919,7 @@ def operator_controls(path, name, geometry):
             line = answer(128)
             require(re.fullmatch(r"[0-9]+(?:\.[0-9]+)? [0-9]+(?:\.[0-9]+)?\n", line) is not None)
             controls[pose] = [float(v) for v in line.split()]
-        return controls
+        return viewport, controls
     finally:
         os.close(fd)
 
@@ -853,8 +957,8 @@ def run(state, ssh, vm, checkout, udid, tart, action, lease):
         record_path = calibration_path(vm, udid)
         if action == "calibrate":
             print("sim-posture: guest window rect (points) " + json.dumps(window["rect"]), file=sys.stderr)
-            record = dict(schema=1, binding=binding, geometry=geometry, compact=True,
-                          controls=operator_controls(path, binding["name"], geometry))
+            viewport, controls = operator_controls(path, binding["name"], geometry)
+            record = dict(schema=2, binding=binding, geometry=geometry, viewport=viewport, controls=controls)
         else:
             record = read_calibration(record_path)
         controls = validate_calibration(record, binding, geometry)

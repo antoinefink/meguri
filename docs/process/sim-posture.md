@@ -13,8 +13,20 @@ or `build/vmf2` after verified canonical old-orphan admission. Both use
 `build/vm-fold/venv` and the primary M5 scheduler lease; mutating commands
 recompute routing and revalidate selected VM metadata under that lease.
 
-Native evidence is **pending**: selected Device Hub process identity, Swift
-helper compilation, live full-frame VNC refresh, compact title-bar OCR,
+M3 evidence identifies the selected `DeviceHub.app` as `com.apple.dt.Devices`,
+declaring `DevicesTrampoline`, with the visible window owned by
+`Contents/MacOS/DeviceHub`. Both executable and bundle have the strict Apple
+anchor and exact code identifier. Frontmost can be either that window owner or
+the selected installation's launcher with a different PID. Admission proves
+both identities separately; it never equates those transient PIDs. Only these
+two exact binaries beneath the selected bundle are admitted, with
+`codesign --verify --strict -R '=anchor apple and identifier "com.apple.dt.Devices"'`.
+It counts normal Hub windows across that bundle, requires exactly one and
+requires it to be the top normal window globally. A foreign front app, another
+installation, another binary or an additional normal Hub window refuses input.
+
+Native validation of this revision is **pending**: Swift
+helper compilation, live full-frame VNC refresh, compact/expanded title-bar OCR,
 CG/RFB coordinate scale, exact control labels, tooltip localization/placement
 at 1x/2x, the synchronous holder input path, and both pose transitions need the
 coordinator's M3 lab run. Synthetic tests exercise the production controller
@@ -46,11 +58,11 @@ permission setup or recovery as part of this procedure.
    renew or run another guest job during calibration.
 3. Run `tools/mg sim-posture inspect <leased-udid>`. Privately inspect its saved
    guest PNG. The selected signed Device Hub must show the unique booted
-   leased simulator, awake, in **COMPACT** view, titled exactly
+   leased simulator, awake, in **compact or expanded canvas**, titled exactly
    `Meguri-Pool-foldable-N`. Both external display 1 and internal display 3
    must be readable, with exactly one lit and the other black. Close other
    normal Hub windows in the guest, including its library. If arrangement or
-   selecting compact view needs operator input, use only the already connected
+   selecting the target canvas needs operator input, use only the already connected
    holder's FIFO with fresh private captures. Never guess that a library,
    disconnected device or physical device is the simulator. Agents do not
    perform this manual lab step. Remove the inspection PNG afterwards.
@@ -58,7 +70,9 @@ permission setup or recovery as part of this procedure.
    `tools/mg sim-posture calibrate <leased-udid>`. The CLI launches/selects the
    exact UDID through the selected Hub's `-CurrentDeviceUDID` argument, then
    requires the selected signed frontmost Hub and exactly one unobscured
-   normal window. It saves its own private guest screenshot, reports the
+   normal window across the selected signed bundle. The front app and window
+   owner may have different PIDs, but each must prove the exact selected bundle,
+   identifier and approved signed executable. It saves its own private guest screenshot, reports the
    guest CG window rectangle in points, and displays its capture path directly
    in `/dev/tty`. No input file or executable path can be supplied.
 5. Open that saved image privately and measure the **centers** of Closed and
@@ -67,8 +81,14 @@ permission setup or recovery as part of this procedure.
    guest display dimensions: both axes must equal 1 or 2. Convert each PNG
    center `(px, py)` to window-relative points
    `(px/s - window.x, py/s - window.y)`. Confirm the two controls share a row
-   (within two points) and Closed is left of Open. At the terminal, confirm
-   `COMPACT <exact simulator name>`, then enter the two measured `x y` pairs.
+   (within two points) and Closed is left of Open. At the terminal, explicitly
+   confirm `COMPACT <exact simulator name>` or `EXPANDED <exact simulator name>`,
+   matching the saved canvas. This confirms the **named leased target itself**
+   and its visible pose buttons below its bezel; a selected sidebar row or a
+   generic library is insufficient. Then enter the two measured `x y` pairs.
+   Expanded canvas may keep the same Mac window size across pose changes;
+   measure its actual controls without assuming compact proportions. No layout,
+   target or control location is discovered from a sidebar or window dimensions.
 6. The CLI verifies both candidates **without clicking**: move away inside the
    validated window, capture a baseline, hover the candidate, then require a
    newly visible high-confidence en-US `Closed` or `Open` tooltip near that
@@ -81,15 +101,33 @@ permission setup or recovery as part of this procedure.
    desktop images are removed on joined completion.
 
 The record binds exact selected Xcode path/version/build, signed Hub trampoline
-SHA-256, VM, UDID, device name/runtime, compact window dimensions, single-monitor
+SHA-256, VM, UDID, device name/runtime, confirmed viewport, window dimensions, single-monitor
 geometry and VNC scale. It contains no executable instructions or supplied
 paths. Every pose request repeats tooltip/title verification. Window movement
 works through relative coordinates; resizing, scale changes, another Xcode,
-target, monitor arrangement or view require fresh calibration. Multiple guest
+target, monitor arrangement or layout require fresh calibration. New records
+use schema 2 with an explicit `viewport` of `compact` or `expanded`. Existing
+valid schema-1 records (`compact: true`) retain their compact-only meaning and
+exact binding/geometry checks; they are never migrated into expanded records.
+Unknown schemas, mixed fields or other viewport values refuse. Both layouts
+require the exact leased title as high-confidence OCR in the top 40 points and
+the same fresh exact tooltip, changed-pixel and pointer proofs for each control.
+The actual window owner PID, window ID and geometry stay bound throughout each
+request; a newly admitted launcher PID does not invalidate an unchanged owner.
+Both app identities must be active, nonterminated and finished launching. The
+front entry and the AppKit object looked up by the positive CG owner PID may
+report Apple's documented PID `-1`. A positive lookup PID must equal CG's PID;
+zero, other values and missing lookups refuse. Direct `proc_pidpath` on the CG
+PID must match both AppKit's executable and the exact selected Apple-signed
+`DeviceHub` binary. The positive CG PID stays bound throughout; sentinel-valued
+lookups still count when excluding other Hub windows. Exact selected paths
+and signatures remain required for both. The first pre-input window observation
+alone may poll read-only for five seconds after opening the leased target; an
+unrelated top window is never admitted. Later observations fail immediately on
+mismatch, and no click is retried.
+Multiple guest
 monitors and nonzero display origins are currently unsupported and fail closed.
-If the selected Hub trampoline runs with a different frontmost bundle identity,
-this version refuses it; the coordinator must record native identity evidence
-before any admission change. Do not broaden matching to arbitrary Apple apps.
+Do not broaden matching to arbitrary Apple apps.
 
 ## Per-request proof and failure handling
 

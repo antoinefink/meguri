@@ -42,7 +42,11 @@ info = plistlib.loads((hub / "Contents/Info.plist").read_bytes())
 require(info.get("CFBundleIdentifier") == "com.apple.dt.Devices"
         and info.get("CFBundleExecutable") == "DevicesTrampoline")
 stage = "signature"
-run("/usr/bin/codesign", "--verify", "--strict", str(hub))
+hub_requirement = '=anchor apple and identifier "com.apple.dt.Devices"'
+run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(hub))
+trampoline = hub / "Contents/MacOS/DevicesTrampoline"
+require(trampoline.resolve(strict=True) == trampoline)
+run("/usr/bin/codesign", "--verify", "--strict", "-R", hub_requirement, str(trampoline))
 # Use the selected Xcode's own tools, without an ambient DEVELOPER_DIR override.
 simctl = str(developer / "usr/bin/simctl")
 stage = "simctl-devices"
