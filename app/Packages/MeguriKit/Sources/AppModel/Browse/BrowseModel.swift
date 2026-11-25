@@ -41,7 +41,9 @@ public final class BrowseModel {
     public private(set) var savedReadings: [SavedSearch: FilterQuery] = [:]
     /// Every deck's value as the core makes it (T3), by deck id.
     public private(set) var deckValues: [Int64: FilterValue] = [:]
-    public private(set) var notetypes: [NotetypeName] = []
+    public private(set) var notetypes: [NotetypeName] = [] {
+        didSet { updateShownNotetypes() }
+    }
     /// V2.3's Fields submenu: each note type's field names in field order,
     /// read after the note types (pure reads); read again when note types change.
     public private(set) var notetypeFields: [Int64: [String]] = [:]
@@ -54,7 +56,9 @@ public final class BrowseModel {
     public private(set) var flagNames: [String] = []
     /// Each row's count in the current mode (T12.3 step 4); a row without
     /// one shows none until it is known.
-    public private(set) var counts: [BrowseSidebarTag: UInt64] = [:]
+    public private(set) var counts: [BrowseSidebarTag: UInt64] = [:] {
+        didSet { updateShownNotetypes() }
+    }
     /// The sidebar's filter text (`browser/sidebar` S6).
     public var filter = ""
     /// V6: the folded sections, kept on the device.
@@ -64,6 +68,10 @@ public final class BrowseModel {
     /// V6: the Tags section shows the whole tree (kept on the device).
     public var showsAllTags: Bool {
         didSet { if showsAllTags != oldValue { saveDevice(); updateShownTags() } }
+    }
+    /// V6: the Note Types section shows every note type (kept on the device).
+    public var showsAllNotetypes: Bool {
+        didSet { if showsAllNotetypes != oldValue { saveDevice(); updateShownNotetypes() } }
     }
     /// Raised when a selection the list made is not the query's, so the
     /// list draws the query's selection again.
@@ -143,6 +151,9 @@ public final class BrowseModel {
     /// token: the text an emptying edit replaced in this turn, and whether a
     /// suggestion arrived in it, so the typed text survives either order.
     @ObservationIgnored var clearedThisTurn: String?
+    /// The value list the suggestions were scoped to when the field emptied
+    /// its text this turn: it comes back with the text.
+    @ObservationIgnored var clearedScopeThisTurn: FilterSection?
     @ObservationIgnored var acceptedThisTurn = false
     @ObservationIgnored var savingPresentations: UInt64 = 0
     /// The text a commit left, which D5's incomplete rule no longer holds (T8).
@@ -189,6 +200,7 @@ public final class BrowseModel {
         self.device = device
         folded = device.folded
         showsAllTags = device.showsAllTags
+        showsAllNotetypes = device.showsAllNotetypes ?? false
         results.restoreWidths(device.columnWidths ?? [:])
         results.storeWidths = { [weak self] widths in
             guard let self else { return }
@@ -351,7 +363,7 @@ public final class BrowseModel {
         if next != query { query = next }
         keepRunText()
         showResults()
-        if tokensChanged { refreshTokenOffers() }
+        if tokensChanged { refreshTokenOffers(); updateShownNotetypes() }
         if fieldFocused { refreshSuggestions() }
     }
 
@@ -455,6 +467,8 @@ public final class BrowseModel {
             replace(byReading: saved.text, savedAs: name)
         case .showAllTags:
             showsAllTags = true
+        case .showAllNotetypes:
+            showsAllNotetypes = true
         case .section:
             return
         default:
@@ -478,7 +492,7 @@ public final class BrowseModel {
         case .notetype(let id): notetypes.first { $0.id == id }.map { .notetype(id: $0.id, name: $0.name) }
         case .tag(let name): .tag(name)
         case .builtIn(let search): search.value
-        case .section, .saved, .showAllTags: nil
+        case .section, .saved, .showAllTags, .showAllNotetypes: nil
         }
     }
 
@@ -526,25 +540,21 @@ public final class BrowseModel {
         return true
     }
 
-    /// The list's selection: the Browse row, then the selected filter rows.
-    public var listSelection: Set<BrowseSidebarTag> {
-        selectedRows.union([.section(.browse)])
-    }
+    /// The list's own selection: the Browse row alone (N21.1, 2026-11-24).
+    /// The filter rows the query selects (`selectedRows`) are drawn by the
+    /// rows themselves, so one row only carries the system's selection.
+    public var listSelection: Set<BrowseSidebarTag> { [.section(.browse)] }
 
-    /// The list's selection after a click or a key, read as T9's input:
-    /// a section row navigates (its section is returned); one filter row
-    /// alone is a click (or ⌥-click) on it; with ⌘, each row that came or
-    /// went is a ⌘-click; anything else (a ⇧ range, an empty selection)
-    /// changes nothing. The list then draws the query's selection again.
-    /// `shown` is the rows the list draws: a selected row it does not draw
-    /// (folded, filtered out, under a collapsed parent) is not in `new`, and
-    /// is not taken as unselected. Only a command click on filters needs
-    /// those rows; navigation and single-row clicks do not build them.
-    public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click,
-                                     shown: @autoclosure () -> Set<BrowseSidebarTag>? = nil) -> AppSection? {
+    /// The list's selection after a click, read as T9's input: a section
+    /// row navigates (its section is returned); one filter row alone is a
+    /// click (or ⌥-click) on it; with ⌘, each filter row in it is a ⌘-click;
+    /// anything else (a ⇧ range, an empty selection) changes nothing. The
+    /// list then draws its own selection again. The list's selection holds
+    /// no filter row (N21.1), so no click needs the rows the list draws.
+    public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click) -> AppSection? {
         defer { selectionEcho &+= 1 }
-        // The old selection only holds Browse and filter rows (V6). Any other
-        // section in the new selection navigates, even alongside filter rows.
+        // Any section but Browse in the new selection navigates, even alongside
+        // filter rows.
         if case .section(let section)? = new.first(where: {
             if case .section(let section) = $0 { section != .browse } else { false }
         }) {
@@ -553,10 +563,7 @@ public final class BrowseModel {
         let rows = new.filter { if case .section = $0 { false } else { true } }
         switch click {
         case .command:
-            let old = shown().map { listSelection.intersection($0.union([.section(.browse)])) } ?? listSelection
-            for row in rows.symmetricDifference(old.filter { if case .section = $0 { false } else { true } }) {
-                activate(row, click: .command)
-            }
+            for row in rows { activate(row, click: .command) }
         case .plain, .option:
             if rows.count == 1, let row = rows.first { activate(row, click: click) }
         }
@@ -802,6 +809,32 @@ public final class BrowseModel {
         shownTopLevelTags = (tags.indices.filter(kept.contains).map { tags[$0] }, tags.count)
     }
 
+    /// V6: the note types the Note Types section shows, in name order, and
+    /// the number Show All names (nil when every note type shows): with more
+    /// than 12, the 8 with the most rows in the mode, ties in name order,
+    /// and every note type the query selects; before the counts are known,
+    /// the first 8.
+    public private(set) var shownNotetypes: (rows: [NotetypeName], showAll: Int?) = ([], nil)
+
+    /// Kept up to date when the note types, the counts, the query or Show
+    /// All change, so drawing the sidebar never sorts them again.
+    func updateShownNotetypes() {
+        guard notetypes.count > Self.tagsShownWhole, !showsAllNotetypes else {
+            if shownNotetypes.rows != notetypes || shownNotetypes.showAll != nil { shownNotetypes = (notetypes, nil) }
+            return
+        }
+        let ranked = notetypes.indices.sorted { a, b in
+            let na = counts[.notetype(notetypes[a].id)] ?? 0, nb = counts[.notetype(notetypes[b].id)] ?? 0
+            return na != nb ? na > nb : a < b
+        }
+        var kept = Set(ranked.prefix(Self.tagsShownFew))
+        for index in notetypes.indices where query.selects(.notetype(id: notetypes[index].id, name: notetypes[index].name)) {
+            kept.insert(index)
+        }
+        let rows = notetypes.indices.filter(kept.contains).map { notetypes[$0] }
+        if shownNotetypes.rows != rows || shownNotetypes.showAll != notetypes.count { shownNotetypes = (rows, notetypes.count) }
+    }
+
     /// S6 over the tag tree, once per filter text and tree (the tree can
     /// hold thousands of tags; a sidebar redraw must not walk it again).
     public func filteredTags(_ filter: BrowseSidebarFilter, rootMatched: Bool) -> [BrowseSidebarFilter.Node<TagNode>] {
@@ -861,6 +894,7 @@ public final class BrowseModel {
     func saveDevice() {
         device.folded = folded
         device.showsAllTags = showsAllTags
+        device.showsAllNotetypes = showsAllNotetypes ? true : nil
         store.save(device)
     }
 

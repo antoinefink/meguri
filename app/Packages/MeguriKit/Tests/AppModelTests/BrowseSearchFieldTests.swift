@@ -204,6 +204,40 @@ import Testing
         #expect(core.commits.isEmpty)
     }
 
+    /// N21.2 (2026-11-24): the Mac's field shows no token. A suggestion it
+    /// took is accepted and the query's tokens stay; the bar's Filter menu
+    /// opens a kind's value list in the field.
+    @Test func theFieldWithoutTokensAcceptsASuggestionAndKeepsTheQuerysTokens() async {
+        let (model, core) = await makeModel()
+        model.activate(.state(.new))
+        model.setFieldFocused(true)
+        await until { model.suggestionsCurrent }
+        // The system hands back what it holds: nothing, then the row it took.
+        model.acceptFieldTokens([])
+        #expect(model.query.tokens == [token(.state(.new))])
+        model.acceptFieldTokens([.suggestion(FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil))])
+        #expect(model.query.tokens == [token(.state(.new)), token(Self.spanish)])
+        let focus = model.focusRequests
+        model.startFilter(.tags)
+        #expect(model.suggestionScope == .tags && model.focusRequests == focus &+ 1)
+        await until { core.suggestionCalls.last?.2 == .tags }
+    }
+
+    @Test func aRowOfAKindsValueListIsAcceptedAfterTheFieldEmptiedItsText() async {
+        let (model, core) = await makeModel()
+        let row = FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil)
+        core.suggestionRows[.decks] = [row]
+        model.setFieldFocused(true)
+        // The caret is after White_Space: the value list has no word to drop.
+        type(model, "plimb ")
+        model.startFilter(.decks)
+        await until { model.suggestions == [row] && model.suggestionsCurrent }
+        // The field empties its text, then hands the row over.
+        model.editText("")
+        model.acceptFieldTokens([.suggestion(row)])
+        #expect(model.query == FilterQuery(tokens: [token(Self.spanish)], text: "plimb "))
+    }
+
     @Test func filterByOpensAKindsValueListAndAddsWithoutDroppingText() async {
         let (model, core) = await makeModel()
         // Filter By shows with the caret after White_Space: no word to drop.

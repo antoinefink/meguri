@@ -160,6 +160,8 @@ extension BrowseModel {
             if query.text.isEmpty, let cleared = clearedThisTurn {
                 queryRevision &+= 1
                 query.text = cleared
+                // The row was read in that text's scope (a kind's value list).
+                if suggestionScope == nil { suggestionScope = clearedScopeThisTurn }
             }
             acceptedThisTurn = true
             Task { acceptedThisTurn = false }
@@ -173,6 +175,25 @@ extension BrowseModel {
         }
         accepted.forEach(accept)
         tests.forEach(acceptFieldTest)
+    }
+
+    /// The Mac's field, which holds the text only (N21.2, 2026-11-24: the
+    /// tokens show in the filter bar): the system hands a suggestion it took
+    /// as a token here, and it is accepted (T12). The field's own tokens are
+    /// always none, so nothing here removes one.
+    public func acceptFieldTokens(_ next: [BrowseFieldToken]) {
+        let taken = next.filter { if case .token = $0 { false } else { true } }
+        guard !taken.isEmpty else { return }
+        setFieldTokens(fieldTokens + taken)
+    }
+
+    /// The filter bar's Filter menu (N21.2): the field takes the focus with
+    /// the kind's value list as its suggestions, as Add Another does (T10).
+    public func startFilter(_ section: FilterSection) {
+        suggestedField = nil
+        suggestionScope = section
+        focusField()
+        refreshSuggestions()
     }
 
     /// T8: every edit of the text runs the query at once, unless D5 finds
@@ -191,7 +212,11 @@ extension BrowseModel {
             // The field emptying its text after it took a suggestion: the text stays.
             if acceptedThisTurn { return }
             clearedThisTurn = before
-            Task { clearedThisTurn = nil }
+            clearedScopeThisTurn = suggestionScope
+            Task {
+                clearedThisTurn = nil
+                clearedScopeThisTurn = nil
+            }
         }
         pendingSearch = nil
         queryRevision &+= 1
