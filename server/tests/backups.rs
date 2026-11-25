@@ -70,12 +70,17 @@ fn stamps(h: &Harness,id: &str) -> (i64,i64,i64) {
 }
 async fn history(h: &Harness,cookie: &str) -> Vec<Value> {
     let response=h.get("/api/me/backups",Some(cookie)).await;assert_eq!(response.status(),200);
-    response.json::<Value>().await.unwrap()["data"].as_array().unwrap().clone()
+    let body = response.json::<Value>().await.unwrap();
+    let identity = h.get("/api/me", Some(cookie)).await.json::<Value>().await.unwrap();
+    assert_eq!(body["data"]["account_id"], identity["data"]["id"]);
+    body["data"]["backups"].as_array().unwrap().clone()
 }
 async fn restore(h: &Harness,cookie: &str,id: &str) {
     let response=h.post(&format!("/api/me/backups/{id}/restore"),json!({}),Some(cookie)).await;
     let status=response.status();let body=response.json::<Value>().await.unwrap();
-    assert_eq!(status,200,"restore response: {body}");assert_eq!(body,json!({"data":null}));
+    assert_eq!(status,200,"restore response: {body}");
+    let identity = h.get("/api/me", Some(cookie)).await.json::<Value>().await.unwrap();
+    assert_eq!(body, json!({"data":{"account_id":identity["data"]["id"]}}));
 }
 fn today() -> i64 {time::OffsetDateTime::now_utc().unix_timestamp()}
 fn account_credentials(h: &Harness,id: &str) -> (String,i64,i64) {
@@ -443,14 +448,19 @@ async fn restore_refuses_unstamped_collection_commits_and_exhausted_stamps_and_m
     // Cursor exhaustion is rejected before an intent, safety metadata or pointer.
     upload_media(&h,&key,&[("cursor.bin",Some(b"remove on restore"))]).await;
     let c=rusqlite::Connection::open(h.database()).unwrap();
+    let cursor:i64=c.query_row("SELECT media_usn FROM accounts WHERE id=?1",[id],|r|r.get(0)).unwrap();
     c.execute("UPDATE accounts SET media_usn=2147483647 WHERE id=?1",[id]).unwrap();drop(c);
     let before=std::fs::read(h.path().join("state/accounts").join(id).join("current-collection")).unwrap();
     error(h.post(&format!("/api/me/backups/{backup}/restore"),json!({}),Some(&cookie)).await,503,"storage_unavailable").await;
     assert_eq!(std::fs::read(h.path().join("state/accounts").join(id).join("current-collection")).unwrap(),before);
     assert_eq!(history(&h,&cookie).await,points);
+    // Restore the valid cursor so stamp exhaustion is exercised independently.
+    let c=rusqlite::Connection::open(h.database()).unwrap();
+    c.execute("UPDATE accounts SET media_usn=?2 WHERE id=?1",rusqlite::params![id,cursor]).unwrap();drop(c);
     let c=meguri_sync_server::collection::schema::open(&current(&h,id),true).unwrap();
     c.execute("UPDATE col SET mod=9223372036854775807",[]).unwrap();drop(c);
     error(h.post(&format!("/api/me/backups/{backup}/restore"),json!({}),Some(&cookie)).await,503,"storage_unavailable").await;
+    assert_eq!(std::fs::read(h.path().join("state/accounts").join(id).join("current-collection")).unwrap(),before);
     assert_eq!(history(&h,&cookie).await,points);
     let _=h.stop().await;
 }
@@ -577,4 +587,132 @@ async fn collection_grown_above_default_upload_limit_captures_reopens_and_restor
     let c=meguri_sync_server::collection::schema::open(&current(&h,&id),false).unwrap();
     assert_eq!(c.query_row("SELECT length(bytes) FROM grown_collection",[],|r|r.get::<_,i64>(0)).unwrap(),315_621_376);
     drop(c);let _=h.stop().await;
+}
+
+#[tokio::test]
+async fn expected_account_mismatch_precedes_any_restore_changes_even_with_a_valid_current_account_point() {
+    let h = Harness::new().await;
+    let root = h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "binding.member").await;
+    let cookie = h.login("binding.member", PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let points = history(&h, &cookie).await;
+    let id = member["id"].as_str().unwrap();
+    let account = h.path().join("state/accounts").join(id);
+    let files = store_bytes(&account);
+    let before = stamps(&h, id);
+    let c = rusqlite::Connection::open(h.database()).unwrap();
+    let epoch: i64 = c.query_row("SELECT coalesce((SELECT epoch FROM account_data_epochs WHERE account_id=?1),0)", [id], |r| r.get(0)).unwrap();
+    drop(c);
+    // The cookie is B and the point really belongs to B, but the tab shows A.
+    // Point scoping alone would accept this restore and create a safety point.
+    for route in ["/api/me/backups".to_owned(), format!("/api/me/backups/{}/restore", points[0]["id"].as_str().unwrap())] {
+        let request = if route.ends_with("restore") {
+            h.client.post(format!("{}{route}", h.base)).header("origin", ORIGIN).json(&json!({}))
+        } else {
+            h.client.get(format!("{}{route}", h.base))
+        };
+        error(request.header("cookie", &cookie).header("x-meguri-expected-account", root["id"].as_str().unwrap()).send().await.unwrap(), 409, "stale_authority").await;
+    }
+    assert_eq!(history(&h, &cookie).await, points);
+    assert_eq!(store_bytes(&account), files);
+    assert_eq!(stamps(&h, id), before);
+    let c = rusqlite::Connection::open(h.database()).unwrap();
+    assert_eq!(c.query_row("SELECT coalesce((SELECT epoch FROM account_data_epochs WHERE account_id=?1),0)", [id], |r| r.get::<_, i64>(0)).unwrap(), epoch);
+    assert_eq!(c.query_row("SELECT count(*) FROM backup_restores", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    drop(c);
+    let route = format!("/api/me/backups/{}/restore", points[0]["id"].as_str().unwrap());
+    let response = h.client.post(format!("{}{route}", h.base)).header("origin", ORIGIN).header("cookie", &cookie)
+        .header("x-meguri-expected-account", id).json(&json!({})).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({"data":{"account_id":id}}));
+    let _ = h.stop().await;
+}
+
+#[tokio::test]
+async fn orphan_payloads_are_reclaimed_before_a_failed_fresh_capture_without_pruning_history() {
+    let h = Harness::new().await;
+    let account = h.setup().await;
+    let id = account["id"].as_str().unwrap().to_owned();
+    let cookie = h.login("root.admin", PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let before = history(&h, &cookie).await;
+    let directory = h.path().join("state/accounts").join(&id).join("backups");
+    let orphan = directory.join("ff".repeat(32));
+    std::fs::write(&orphan, b"unpublished payload from an earlier failure").unwrap();
+    // Invalid live collection fails after pre-capture reclamation, so the old
+    // cleanup-after-success ordering would leave this orphan behind forever.
+    let c = meguri_sync_server::collection::schema::open(&current(&h, &id), true).unwrap();
+    c.execute("DELETE FROM col", []).unwrap();
+    drop(c);
+    assert!(h.service.capture_account_backup_at(id, today() + 86400).await.is_err());
+    assert!(!orphan.exists());
+    assert_eq!(history(&h, &cookie).await, before);
+    let _ = h.stop().await;
+}
+
+#[tokio::test]
+async fn history_admission_and_rows_share_one_read_snapshot_during_reset() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "snapshot.member").await;
+    let cookie = h.login("snapshot.member", PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let before = history(&h, &cookie).await;
+    let pause = h.service.hooks.arm("backup_history_admitted");
+    let client = h.client.clone();
+    let url = format!("{}/api/me/backups", h.base);
+    let actor = cookie.clone();
+    let pending = tokio::spawn(async move { client.get(url).header("cookie", actor).send().await.unwrap() });
+    within(pause.arrived()).await;
+    let reset = h.post(&format!("/api/admin/accounts/{}/reset-data", member["id"].as_str().unwrap()), json!({}), Some(&admin)).await;
+    pause.resume();
+    assert_eq!(reset.status(), 200);
+    let response = within(pending).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["data"]["account_id"], member["id"]);
+    assert_eq!(body["data"]["backups"], json!(before));
+    assert!(history(&h, &cookie).await.is_empty());
+    let _ = h.stop().await;
+}
+
+#[tokio::test]
+async fn durable_restore_succeeds_when_generation_and_payload_cleanup_must_be_deferred() {
+    let h = Harness::new().await;
+    let account = h.setup().await;
+    let id = account["id"].as_str().unwrap();
+    let cookie = h.login("root.admin", PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let points = history(&h, &cookie).await;
+    let directory = h.path().join("state/accounts").join(id);
+    let pause = h.service.hooks.arm("backup_restore_before_cleanup");
+    let actor = h.service.browser_authority(secret(&cookie)).await.unwrap();
+    let backup = points[0]["id"].as_str().unwrap().to_owned();
+    let owner = h.service.clone();
+    let pending = tokio::spawn(async move { owner.restore_backup(actor, backup).await });
+    within(pause.arrived()).await;
+    // The pointer and metadata commits have completed. Hide the pointer only
+    // during cleanup to cause a real generation-cleanup I/O failure.
+    let pointer = directory.join("current-collection");
+    let retained = directory.join("fixture-retained-pointer");
+    std::fs::rename(&pointer, &retained).unwrap();
+    // A link with an orphan payload name causes a separate cleanup refusal;
+    // cleanup must preserve it and still report the durable restore as success.
+    let orphan = directory.join("backups").join("ff".repeat(32));
+    std::os::unix::fs::symlink(&retained, &orphan).unwrap();
+    pause.resume();
+    let result = within(pending).await.unwrap();
+    std::fs::rename(&retained, &pointer).unwrap();
+    result.unwrap();
+    assert!(std::fs::symlink_metadata(&orphan).unwrap().file_type().is_symlink());
+    std::fs::remove_file(orphan).unwrap();
+    let c = rusqlite::Connection::open(h.database()).unwrap();
+    assert_eq!(c.query_row("SELECT count(*) FROM backup_restores", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    drop(c);
+    assert!(history(&h, &cookie).await.iter().any(|p| p["kind"] == "before_restore"));
+    assert!(stamps(&h, id).0 > 0);
+    let _ = h.stop().await;
 }

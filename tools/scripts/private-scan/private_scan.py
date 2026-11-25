@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/src/accounts/backups.rs':
+        'd7fccc4c211bf95228b7a63a20c89477922073ffecd000a4ee43809fc43c4001',
     'server/tests/support/mod.rs':
         'fbaccbd87526b237ac1db6d1a2f17ff810838bb15366409b5f0ef254d4cecce8',
     'server/tests/media_recovery.rs':
@@ -842,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     'server/tests/deletion.rs':
         'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
     'server/tests/backups.rs':
-        '32af26a1fa924533b7d6015f21afd7127b3b1a64c1324294ae0542b892887c2d',
+        '99f4f18195e3ce372b5b79857654e78761cddb4d407238878a91835443ef2c25',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -850,16 +852,16 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/collection.rs':
         'e27e2657c752118e14a57eee533d7070b2e40f29348c732b88058382a57c7537',
     'server/src/storage/backups.rs':
-        '474ac2b8eeb940fabc7eb3abc719b5af50ac5bcf62451de6153cce0f0e006537',
+        'baf12de62a3bd512fb3d90ce639fbe94c003d5cc0f547bdb40ccb4cb2d1dd7ab',
     'server/web/tests/api.test.ts':
-        'f686e358e8c4535f8408fcaa131cb53fd3dae474d4c8a7fb86c9e620cadeedf6',
+        '07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be',
     'server/web/tests/browser/mcp.spec.ts':
-        'b4045b73d11cd3fcc38fddc1cfcee477bfca005e24347c1ba098f44ef74ab5af',
+        '261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10',
     'server/web/tests/browser/backups.spec.ts':
-        '8759ae634a5ad4d8f00e922fad011cf69e0e1f610b0253b5ca9e6aea8f9a4b21',
+        'd550ece559a79d0c461b44215eb1d68e1214f19d158249c9fd07b786d82fd6ed',
     # Complete-content public review, collection recovery fixture, 2026-11-25.
     'server/tests/backup_round_trip.rs':
-        '751a5642286c97d761851bc41ed1450afc5cd9c53a3b2ac9593547c05629b3cd',
+        '6549998c8c16276260dc3acd8f05ec395dca05f29c29072a8d25c9cee6a2a1fd',
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
     'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
         '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
@@ -954,7 +956,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '6d106cd95d86ddea212a35fe8224e4f84b7f04b87f8a8a2c4154a5c6f9c148b0',
+        'cda96348d6084e7bccc0af148fd92275b8931145b2ed252e484decf62aafcae5',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1156,11 +1158,11 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        '48df6d6d3025955abbdb188a7ab0a84563111a47331f8255154c29e1906a5c9c',
+        'a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099',
     'server/web/src/style.css':
         '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
     'server/web/src/app.tsx':
-        '5b9247335eb1a8e33001ad9b1ece46483db8cc57382188dcbc02d1dae1530be8',
+        '2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d',
     'server/web/tests/browser/accounts.spec.ts':
         'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
     'server/web/scripts/run.sh':
@@ -1224,7 +1226,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/media/recovery.rs':
         'c5388c9f59ef653beb7d7472f3195dc106bb732ecb797475cfc4671c0735eba5',
     'server/tests/media.rs':
-        'e69e8be1cac53f5d20884055ae4cced7a5ea33d460994961f43427641584a752',
+        '5486def4419d639fb6e21dbfa8b46c4faa1586fc93b4eb552e187cc49fae61ec',
     'server/tests/media_disk_full.rs':
         '98c3a131c1bb05110a2338ae9aee42fd37d8608e8f2ea854475a33ad1518ac57',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
@@ -1247,7 +1249,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '6d34fd1d0afbb489682cef97814924900298b0d203a1549a44471c4a4679186b',
+        '55272c12aad4637f57353ffdac921fd6bda1ae24bd7564d6eb5280df4bfc8c37',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1316,9 +1318,9 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '82fc0b60594f576c41f398dd535fe4e0b9b7c20ee314fd69a7bd568818fb99cb',
+        '5928daeba0ce60e79881ce7043d6202e4a28e70ec8c44324f4540eb1fb08b864',
     'server/src/httpapi/tests.rs':
-        '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
+        'e060bad11937cdd2a4f56a04103c6eecf2d34ac8d34c966d663ddfac01203960',
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':

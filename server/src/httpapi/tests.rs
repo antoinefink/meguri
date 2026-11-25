@@ -350,3 +350,44 @@ async fn completed_body_and_error_keep_admission_until_response_is_dropped() {
         .collect::<Vec<_>>();
     drop(held);
 }
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn backup_scheduler_stops_before_new_work_and_joins_an_active_sweep() {
+    let (temp, service) = fixture(false).await;
+    let token = std::fs::read_to_string(temp.path().join("owner/state/setup-token")).unwrap();
+    service.claim("127.0.0.1".parse().unwrap(), "setup", token.trim().into(), "scheduler.member", "synthetic password 123".into()).await.unwrap();
+    let (stop, stopped) = oneshot::channel();
+    stop.send(()).unwrap();
+    backup_sweeps(service.clone(), stopped).await;
+    let count = service.metadata.run(|c| {
+        Ok(c.query_row("SELECT count(*) FROM backup_points", [], |r| r.get::<_, i64>(0))?)
+    }).await.unwrap();
+    assert_eq!(count, 0, "shutdown already began: no initial capture may start");
+
+    let pause = service.hooks.arm("backup_snapshot_pinned");
+    let (stop, stopped) = oneshot::channel();
+    let running = tokio::spawn(backup_sweeps(service.clone(), stopped));
+    tokio::time::timeout(Duration::from_secs(30), pause.arrived()).await.unwrap();
+    stop.send(()).unwrap();
+    assert!(!running.is_finished(), "shutdown must join the already-running capture");
+    pause.resume();
+    tokio::time::timeout(Duration::from_secs(30), running).await.unwrap().unwrap();
+    let count = service.metadata.run(|c| {
+        Ok(c.query_row("SELECT count(*) FROM backup_points", [], |r| r.get::<_, i64>(0))?)
+    }).await.unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn expected_account_header_is_optional_for_legacy_callers_but_unambiguous() {
+    let mut headers = HeaderMap::new();
+    assert_eq!(expected_account(&headers).unwrap(), None);
+    headers.insert("x-meguri-expected-account", "account-a".parse().unwrap());
+    assert_eq!(expected_account(&headers).unwrap().as_deref(), Some("account-a"));
+    headers.append("x-meguri-expected-account", "account-b".parse().unwrap());
+    assert_eq!(expected_account(&headers).unwrap_err().code, "invalid_request");
+    headers.remove("x-meguri-expected-account");
+    headers.insert("x-meguri-expected-account", "".parse().unwrap());
+    assert_eq!(expected_account(&headers).unwrap_err().code, "invalid_request");
+}

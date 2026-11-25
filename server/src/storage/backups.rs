@@ -71,23 +71,49 @@ pub(crate) fn intents(c: &Connection) -> Result<Vec<Intent>> {
 pub(crate) fn validate(root: &DataRoot,c: &Connection) -> Result<()> {
     if !supported(c)? {return Ok(());}
     intents(c)?;
-    let mut q=c.prepare("SELECT account_id,id,created_at,kind,payload,size,sha256,epoch FROM backup_points")?;
+    root.validate()?;
+    let mut q=c.prepare("SELECT account_id,id,created_at,kind,payload,size,sha256,epoch FROM backup_points ORDER BY account_id,id")?;
     let mut rows=q.query([])?;
+    // Ordered points need only the current account's directory handle.
+    let mut directory:Option<(String,File)>=None;
     while let Some(r)=rows.next()? {
-        let account:String=r.get(0)?;let id:String=r.get(1)?;let at:i64=r.get(2)?;
-        let kind:String=r.get(3)?;let payload:String=r.get(4)?;let bytes:i64=r.get(5)?;
-        let digest:Vec<u8>=r.get(6)?;let epoch:i64=r.get(7)?;
-        if crypto::bearer(&account).is_err() || crypto::bearer(&id).is_err() || at<0
-            || !matches!(kind.as_str(),"daily"|"weekly"|"monthly"|"before_restore")
-            || !payload_name(&payload) || bytes<=0 || digest.len()!=32
-            || payload!=digest.iter().map(|v|format!("{v:02x}")).collect::<String>()
-            || epoch<0 || epoch>super::reset::epoch(c,&account)? {
-            return Err(unavailable());
+        let account=validate_point_metadata(c,r)?;
+        if directory.as_ref().map(|(id,_)|id)!=Some(&account) {
+            let relative=PathBuf::from("state/accounts").join(&account).join("backups");
+            directory=Some((account,root.bound_dir(&relative,false)?));
         }
-        if root.backup_file(&account,&payload)?.metadata()?.len()!=u64::try_from(bytes).map_err(|_|unavailable())? {return Err(unavailable());}
+        let (_,directory)=directory.as_ref().ok_or_else(unavailable)?;
+        validate_point_file(directory,r)?;
     }
     let mut q=c.prepare("SELECT name FROM backup_media")?;
     for name in q.query_map([],|r|r.get::<_,String>(0))? {crate::media::name(&name?).map_err(|_|unavailable())?;}
+    Ok(())
+}
+fn validate_point_metadata(c: &Connection,row: &rusqlite::Row<'_>) -> Result<String> {
+    let account:String=row.get("account_id")?;
+    crypto::bearer(&account).map_err(|_|unavailable())?;
+    let id:String=row.get("id")?;
+    crypto::bearer(&id).map_err(|_|unavailable())?;
+
+    let created_at:i64=row.get("created_at")?;
+    if created_at<0 {return Err(unavailable());}
+    let kind:String=row.get("kind")?;
+    if !matches!(kind.as_str(),"daily"|"weekly"|"monthly"|"before_restore") {return Err(unavailable());}
+
+    let epoch:i64=row.get("epoch")?;
+    if epoch<0 || epoch>super::reset::epoch(c,&account)? {return Err(unavailable());}
+    Ok(account)
+}
+fn validate_point_file(directory: &File,row: &rusqlite::Row<'_>) -> Result<()> {
+    let payload:String=row.get("payload")?;
+    if !payload_name(&payload) {return Err(unavailable());}
+    let digest:Vec<u8>=row.get("sha256")?;
+    if digest.len()!=32 || payload!=digest.iter().map(|v|format!("{v:02x}")).collect::<String>() {return Err(unavailable());}
+
+    let bytes:i64=row.get("size")?;
+    if bytes<=0 {return Err(unavailable());}
+    let bytes=u64::try_from(bytes).map_err(|_|unavailable())?;
+    if at::open(directory,&payload,false,false)?.metadata()?.len()!=bytes {return Err(unavailable());}
     Ok(())
 }
 /// SQLite stores sizes as signed integers; Rust exposes only checked,
@@ -227,22 +253,44 @@ impl Drop for Staged {
 }
 impl Staged {
     pub fn file(&self) -> Result<File> {at::open(&self.directory,&self.name,false,false)}
-    pub fn publish(&self,created_at: i64,kind: &str) -> Result<Point> {
-        let mut file=self.file()?;
-        let (bytes,digest)=digest(&mut file)?;
+    pub fn publish(&self, created_at: i64, kind: &str) -> Result<Point> {
+        let mut file = self.file()?;
+        let (bytes, digest) = digest(&mut file)?;
         sqlite_size(bytes)?;
-        let payload=digest.iter().map(|v|format!("{v:02x}")).collect::<String>();
+        let payload = digest.iter().map(|v| format!("{v:02x}")).collect::<String>();
         if self.path.parent().ok_or_else(unavailable)?.join(&payload).try_exists()? {
             // Compare bytes as well as hashes before reusing a payload.
-            let mut other=at::open(&self.directory,&payload,false,false)?;
-            let mut left=[0;65536];let mut right=[0;65536];
-            loop {let n=file.read(&mut left)?;other.read_exact(&mut right[..n])?;if left[..n]!=right[..n] {return Err(unavailable());}if n==0 {break;}}
-            if other.read(&mut right[..1])?!=0 {return Err(unavailable());}
+            let mut other = at::open(&self.directory, &payload, false, false)?;
+            let mut left = [0; 65536];
+            let mut right = [0; 65536];
+            loop {
+                let n = file.read(&mut left)?;
+                if n == 0 {
+                    break;
+                }
+                other.read_exact(&mut right[..n])?;
+                if left[..n] != right[..n] {
+                    return Err(unavailable());
+                }
+            }
+            if other.read(&mut right[..1])? != 0 {
+                return Err(unavailable());
+            }
         } else {
             file.sync_all()?;
-            at::publish(&self.directory,&self.name,&payload)?;
+            at::publish(&self.directory, &self.name, &payload)?;
         }
-        Ok(Point {summary:Backup {id:crypto::random_token()?,created_at,kind:kind.into(),size_bytes:bytes},payload,bytes,digest})
+        Ok(Point {
+            summary: Backup {
+                id: crypto::random_token()?,
+                created_at,
+                kind: kind.into(),
+                size_bytes: bytes,
+            },
+            payload,
+            bytes,
+            digest,
+        })
     }
 }
 impl DataRoot {

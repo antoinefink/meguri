@@ -3,6 +3,8 @@ export type Identity = { id: string; username: string; role: "admin" | "member" 
 export type Me = Identity & { server_url: string };
 export type AccountStorage = { collection_bytes: number; media_bytes: number; total_bytes: number };
 export type CollectionBackup = { id: string; created_at: number; kind: "daily" | "weekly" | "monthly" | "before_restore"; size_bytes: number };
+export type BackupHistory = { account_id: string; backups: CollectionBackup[] };
+export type BackupRestore = { account_id: string };
 export type Account = Identity & { enabled: boolean; provisioning_state: "provisioning" | "ready"; storage?: AccountStorage | null };
 export type GeneratedLink = { url: string; expires_at: string };
 export type MCPAccess = "read" | "read_write";
@@ -15,7 +17,11 @@ export type ErrorField = "username" | "password" | "token" | "current_password" 
 export class ApiError extends Error {
   constructor(public code: string, public status = 0, public field: ErrorField | undefined = undefined) { super("Account request failed"); }
 }
-export function parseBackupHistory(value: unknown): CollectionBackup[] {
+export function parseBackupHistory(value: unknown, expectedAccount: string): CollectionBackup[] {
+  if (!value || typeof value !== "object" || !("account_id" in value) || typeof value.account_id !== "string"
+    || !value.account_id.length || !("backups" in value)) throw new ApiError("invalid_response");
+  if (value.account_id !== expectedAccount) throw new ApiError("stale_authority");
+  value = value.backups;
   const ids = new Set<string>();
   if (!Array.isArray(value) || !value.every(item => {
     if (!item || typeof item !== "object" || typeof item.id !== "string" || !item.id.length || ids.has(item.id)
@@ -27,11 +33,13 @@ export function parseBackupHistory(value: unknown): CollectionBackup[] {
   return value;
 }
 const fields: readonly string[] = ["username", "password", "token", "current_password", "new_password"];
-export async function api<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
+export async function api<T>(path: string, body?: object, signal?: AbortSignal, expectedAccount?: string): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
-      ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(expectedAccount === undefined ? {} : { "X-Meguri-Expected-Account": expectedAccount }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...(signal ? { signal } : {}) });
   } catch { throw new ApiError("connection_lost"); }
   return responseData<T>(response);

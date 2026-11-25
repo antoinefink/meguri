@@ -88,7 +88,7 @@ async function synthetic(page: Page, origin: string, signedIn = true) {
       return data({ ...state.account, role: "member", server_url: origin });
     }
     if (path === "/api/me/storage") return data({ collection_bytes: 524288, media_bytes: 16384, total_bytes: 540672 });
-    if (path === "/api/me/backups") return data([]);
+    if (path === "/api/me/backups") return data({ account_id: state.account.id, backups: [] });
     if (path === "/api/mcp/authorization/read") {
       state.reads.push(body); expect(body).toEqual({ request }); await state.pauseRead;
       if (state.readError) return error(state.readError);

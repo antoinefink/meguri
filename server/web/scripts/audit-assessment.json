@@ -130,12 +130,12 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 6165,
-        "sha256": "bf8037436b663b26427a8c04dc3d409e3745f6ca3ed2db978aa96feffcb25b11"
+        "bytes": 6806,
+        "sha256": "1cc8591266d6499db67d507154075aae1f4288794bb063f5196763ec968dd239"
       },
       "src/app.tsx": {
-        "bytes": 13803,
-        "sha256": "5b9247335eb1a8e33001ad9b1ece46483db8cc57382188dcbc02d1dae1530be8"
+        "bytes": 13821,
+        "sha256": "2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d"
       },
       "src/apple-touch-icon.png": {
         "bytes": 50588,
@@ -146,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/collection.tsx": {
-        "bytes": 11083,
-        "sha256": "ff83806ba4abaa55baf21ec0980560936843d3a9bd7b657d67ddd1a02883c6b1"
+        "bytes": 11311,
+        "sha256": "6f2783e0b015cd92e63a8b5e30a444aa1d9d54651d54b586179fc5b5314f4dc3"
       },
       "src/connection.tsx": {
         "bytes": 6795,
@@ -190,24 +190,24 @@
         "sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
       },
       "tests/api.test.ts": {
-        "bytes": 5875,
-        "sha256": "f686e358e8c4535f8408fcaa131cb53fd3dae474d4c8a7fb86c9e620cadeedf6"
+        "bytes": 7210,
+        "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
       "tests/browser/account-actions.spec.ts": {
-        "bytes": 8757,
-        "sha256": "290320abe66a2cf75047ab4612e46310c17b16b70cdfeaf7a9ccd609a3f02b00"
+        "bytes": 8792,
+        "sha256": "3845ec64412198ca04dee9cd87e9887a5c0669a294ecb1c76e10974f579f4abd"
       },
       "tests/browser/accounts.spec.ts": {
         "bytes": 48309,
         "sha256": "e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3"
       },
       "tests/browser/backups.spec.ts": {
-        "bytes": 27459,
-        "sha256": "8759ae634a5ad4d8f00e922fad011cf69e0e1f610b0253b5ca9e6aea8f9a4b21"
+        "bytes": 29787,
+        "sha256": "d550ece559a79d0c461b44215eb1d68e1214f19d158249c9fd07b786d82fd6ed"
       },
       "tests/browser/mcp.spec.ts": {
-        "bytes": 37687,
-        "sha256": "b4045b73d11cd3fcc38fddc1cfcee477bfca005e24347c1ba098f44ef74ab5af"
+        "bytes": 37730,
+        "sha256": "261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
@@ -231,7 +231,7 @@
       },
       "upstream-records.json": {
         "bytes": 7364,
-        "sha256": "48df6d6d3025955abbdb188a7ab0a84563111a47331f8255154c29e1906a5c9c"
+        "sha256": "a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099"
       },
       "vite.config.ts": {
         "bytes": 1520,
@@ -281,8 +281,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 26028,
-        "sha256": "82fc0b60594f576c41f398dd535fe4e0b9b7c20ee314fd69a7bd568818fb99cb"
+        "bytes": 26923,
+        "sha256": "5928daeba0ce60e79881ce7043d6202e4a28e70ec8c44324f4540eb1fb08b864"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4512,

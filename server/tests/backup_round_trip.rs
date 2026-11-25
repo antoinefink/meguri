@@ -123,7 +123,7 @@ async fn backups(h: &Harness, cookie: &str) -> Vec<Value> {
     let response = h.get("/api/me/backups", Some(cookie)).await;
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    body["data"].as_array().expect("backup history is an array").clone()
+    body["data"]["backups"].as_array().expect("backup history contains an array").clone()
 }
 
 async fn scheduled_backups(h: &Harness, cookie: &str) -> Vec<Value> {
@@ -227,7 +227,8 @@ async fn startup_scheduler_captures_idle_account_and_cookie_restore_recovers_dow
         assert_eq!(download_rows(&h, &key, "denied").await, changed);
         let response = h.post(&restore, json!({}), Some(&cookie)).await;
         assert_eq!(response.status(), 200);
-        assert_eq!(response.json::<Value>().await.unwrap(), json!({"data":null}));
+        let identity = h.get("/api/me", Some(&cookie)).await.json::<Value>().await.unwrap();
+        assert_eq!(response.json::<Value>().await.unwrap(), json!({"data":{"account_id":identity["data"]["id"]}}));
         assert_eq!(download_rows(&h, &key, "restored").await, expected);
         let expected_media = original_media.iter().map(|(name, bytes)| ((*name).to_owned(), bytes.unwrap().to_vec())).collect::<BTreeMap<_, _>>();
         assert_eq!(download_media(&h, &key, &["changed.bin", "removed.bin"]).await, expected_media);

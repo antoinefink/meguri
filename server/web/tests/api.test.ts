@@ -58,11 +58,17 @@ test("malformed envelopes fail closed without a second fetch", async t => {
 });
 test("backup history validates complete wire rows before rendering", () => {
   const row = { id: "opaque /?% identifier", created_at: 0, kind: "daily", size_bytes: 0 };
-  assert.deepEqual(parseBackupHistory([]), []);
+  const history = (backups: unknown) => ({ account_id: "account-a", backups });
+  assert.deepEqual(parseBackupHistory(history([]), "account-a"), []);
+  assert.throws(() => parseBackupHistory({ account_id: "account-b", backups: [] }, "account-a"),
+    error => error instanceof ApiError && error.code === "stale_authority");
+  for (const value of [[], null, {}, { backups: [] }, { account_id: "", backups: [] }]) {
+    assert.throws(() => parseBackupHistory(value, "account-a"), error => error instanceof ApiError && error.code === "invalid_response");
+  }
   for (const kind of ["daily", "weekly", "monthly", "before_restore"]) {
     for (const created_at of [-8640000000000, 0, 8640000000000]) {
       const value = [{ ...row, kind, created_at, size_bytes: Number.MAX_SAFE_INTEGER }];
-      assert.deepEqual(parseBackupHistory(value), value);
+      assert.deepEqual(parseBackupHistory(history(value), "account-a"), value);
     }
   }
   for (const value of [null, {}, [null], [1], [row, row],
@@ -71,5 +77,18 @@ test("backup history validates complete wire rows before rendering", () => {
     ...[null, "0", 0.5, NaN, Infinity, 8640000000001, -8640000000001].map(created_at => [{ ...row, created_at }]),
     ...[null, "0", -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map(size_bytes => [{ ...row, size_bytes }]),
     [{ id: row.id }],
-  ]) assert.throws(() => parseBackupHistory(value), error => error instanceof ApiError && error.code === "invalid_response");
+  ]) assert.throws(() => parseBackupHistory(history(value), "account-a"), error => error instanceof ApiError && error.code === "invalid_response");
+});
+
+test("backup requests bind the displayed account while restore keeps its empty JSON body", async t => {
+  const calls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(String(input));
+    assert.equal(new Headers(init?.headers).get("x-meguri-expected-account"), "account-a");
+    assert.equal(init?.body, calls.length === 1 ? undefined : "{}");
+    return Response.json({ data: calls.length === 1 ? { account_id: "account-a", backups: [] } : { account_id: "account-a" } });
+  });
+  await api("/api/me/backups", undefined, undefined, "account-a");
+  await api("/api/me/backups/point/restore", {}, undefined, "account-a");
+  assert.deepEqual(calls, ["/api/me/backups", "/api/me/backups/point/restore"]);
 });

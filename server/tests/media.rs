@@ -212,6 +212,8 @@ async fn administrator_deletes_only_the_selected_member_and_its_stores() {
     // The same media name in separate accounts must remain isolated.
     assert_eq!(media(&h, &admin_key, "uploadChanges", &addition("shared.bin", b"admin bytes")).await, json!([1,1]));
     assert_eq!(media(&h, &other_key, "uploadChanges", &addition("shared.bin", b"other bytes")).await, json!([1,1]));
+    // Freeze legitimate scheduled payloads after seeding, before byte baselines.
+    h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
     let preserved = [administrator["id"].as_str().unwrap(), other["id"].as_str().unwrap()]
         .map(|id| (accounts.join(id), store_bytes(&accounts.join(id))));
     assert_eq!(media(&h, &member_key, "uploadChanges", &addition("shared.bin", b"deleted bytes")).await, json!([1,1]));
@@ -227,6 +229,7 @@ async fn administrator_deletes_only_the_selected_member_and_its_stores() {
     let protected = h.member(&admin, "protected.member").await;
     let protected_id = protected["id"].as_str().unwrap();
     let protected_directory = accounts.join(protected_id);
+    h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
     let protected_stores = store_bytes(&protected_directory);
     let protected_delete = format!("/api/admin/accounts/{protected_id}/delete");
     error(h.post(&protected_delete, json!({}), Some(&other_cookie)).await, 403, "permission_denied").await;

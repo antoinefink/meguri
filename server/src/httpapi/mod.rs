@@ -208,22 +208,8 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let owner = service.clone();
     let stopping = service.clone();
-    let (backup_stop, mut backup_stopped) = tokio::sync::oneshot::channel::<()>();
-    let backup_owner = service.clone();
-    let backups = tokio::spawn(async move {
-        #[cfg(feature = "test-hooks")]
-        crate::test_hooks::before_initial_backup_sweep().await.expect("backup startup fixture gate");
-        loop {
-            // A sweep completes before shutdown releases the service owner.
-            let _ = backup_owner.sweep_backups(crate::accounts::now).await;
-            #[cfg(feature = "test-hooks")]
-            backup_owner.hooks.hit("backup_sweep_complete").await;
-            tokio::select! {
-                _ = &mut backup_stopped => break,
-                _ = tokio::time::sleep(Duration::from_secs(300)) => {},
-            }
-        }
-    });
+    let (backup_stop, backup_stopped) = tokio::sync::oneshot::channel::<()>();
+    let backups = tokio::spawn(backup_sweeps(service.clone(), backup_stopped));
     let (router, mcp) = mounted_router(service);
     let stopping_mcp = mcp.clone();
     let result = axum::serve(
@@ -232,12 +218,12 @@ pub async fn serve(
     )
     .with_graceful_shutdown(async move {
         shutdown.await;
+        let _ = backup_stop.send(());
         stopping_mcp.close();
         stopping.browser_ingress.close();
         stopping.native_ingress.close();
     })
     .await;
-    let _ = backup_stop.send(());
     let _ = backups.await;
     mcp.close();
     owner.browser_ingress.close();
@@ -246,6 +232,27 @@ pub async fn serve(
     owner.native_ingress.idle().await;
     mcp.idle().await;
     result
+}
+async fn backup_sweeps(service: Arc<Service>, mut stopped: tokio::sync::oneshot::Receiver<()>) {
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::before_initial_backup_sweep().await.expect("backup startup fixture gate");
+    loop {
+        // Prefer a ready stop over scheduling another sweep. Once started,
+        // join the sweep before releasing the service's root ownership.
+        tokio::select! {
+            biased;
+            _ = &mut stopped => break,
+            _ = std::future::ready(()) => {},
+        }
+        let _ = service.sweep_backups(crate::accounts::now).await;
+        #[cfg(feature = "test-hooks")]
+        service.hooks.hit("backup_sweep_complete").await;
+        tokio::select! {
+            biased;
+            _ = &mut stopped => break,
+            _ = tokio::time::sleep(Duration::from_secs(300)) => {},
+        }
+    }
 }
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
     if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
@@ -419,6 +426,18 @@ async fn media_upload(service: &Service, parts: &axum::http::request::Parts, bod
     service.accept_media_upload(id.to_owned(),bytes,permit).await?;
     Ok(data(serde_json::json!({"uploaded":true}),false))
 }
+fn expected_account(headers: &HeaderMap) -> Result<Option<String>> {
+    let all = headers.get_all("x-meguri-expected-account");
+    let mut values = all.iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    let value = value.to_str().map_err(|_| Error::new("invalid_request"))?;
+    if value.is_empty() || values.next().is_some() {
+        return Err(Error::new("invalid_request"));
+    }
+    Ok(Some(value.to_owned()))
+}
 fn backup_restore_id(path: &str) -> Option<&str> {
     path.strip_prefix("/api/me/backups/").and_then(|s|s.strip_suffix("/restore"))
         .filter(|id| !id.is_empty() && !id.contains('/'))
@@ -491,7 +510,7 @@ async fn dispatch(
             }
             "/api/me/backups" => {
                 let a = authority(service, &parts.headers).await?;
-                Ok(data(service.backups(a).await?, false))
+                Ok(data(service.backups(a, expected_account(&parts.headers)?).await?, false))
             }
             "/api/me/storage" => {
                 let a = authority(service, &parts.headers).await?;
@@ -601,8 +620,10 @@ async fn dispatch(
             if let Some(id) = backup_restore_id(path) {
                 let _: Empty = parse(bytes)?;
                 let a = authority(service, &parts.headers).await?;
-                service.restore_backup(a, id.into()).await?;
-                return Ok(data((), false));
+                let account_id = service.restore_backup_for_account(
+                    a, id.into(), expected_account(&parts.headers)?,
+                ).await?;
+                return Ok(data(serde_json::json!({"account_id": account_id}), false));
             }
             if let Some((id, "revoke")) = path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/')) {
                 if !id.is_empty() {

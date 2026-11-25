@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, ApiError, asError, errorMessage, parseBackupHistory } from "./api";
-import type { AccountStorage, CollectionBackup } from "./api";
+import type { AccountStorage, BackupRestore, CollectionBackup } from "./api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Outcome } from "./ui";
 import type { OutcomeValue } from "./ui";
 import { storageValue } from "./storage";
@@ -14,7 +14,7 @@ function backupDate(backup: CollectionBackup) {
 }
 function backupLabel(backup: CollectionBackup) { const date = backupDate(backup); return `${date.day}, ${date.time}`; }
 
-export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
+export function Collection({ accountId, sessionLoss }: { accountId: string; sessionLoss: () => void }) {
   const [storage, setStorage] = useState<AccountStorage | null>(null), [loading, setLoading] = useState(true);
   const [outcome, setOutcome] = useState<OutcomeValue | null>(null);
   const [backups, setBackups] = useState<CollectionBackup[] | null>(null), [historyLoading, setHistoryLoading] = useState(true);
@@ -58,7 +58,7 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
     readingHistory.current = true; setHistoryLoading(true); setHistoryOutcome(null);
     if (restoreUnknown) void loadStorage();
     try {
-      const value = parseBackupHistory(await api<unknown>("/api/me/backups", undefined, controller.current.signal));
+      const value = parseBackupHistory(await api<unknown>("/api/me/backups", undefined, controller.current.signal, accountId), accountId);
       if (alive.current && !authorityLost.current) { setBackups(value); setRestoreUnknown(false); }
     } catch (caught) { handleError(caught, setHistoryOutcome); }
     finally { readingHistory.current = false; if (alive.current && !authorityLost.current) setHistoryLoading(false); }
@@ -75,8 +75,9 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
     if (!selected || submitting.current || authorityLost.current || readingHistory.current || restoreUnknown) return;
     submitting.current = true; setBusy(true); setRestoreOutcome(null);
     try {
-      const result = await api<unknown>(`/api/me/backups/${encodeURIComponent(selected.id)}/restore`, {}, controller.current.signal);
-      if (result !== null) throw new ApiError("invalid_response");
+      const result = await api<BackupRestore>(`/api/me/backups/${encodeURIComponent(selected.id)}/restore`, {}, controller.current.signal, accountId);
+      if (!result || typeof result.account_id !== "string" || !result.account_id.length) throw new ApiError("invalid_response");
+      if (result.account_id !== accountId) throw new ApiError("stale_authority");
       if (!alive.current || authorityLost.current) return;
       closeConfirmation(true);
       setRestoreOutcome({ text: `Restored the server collection and media from ${backupLabel(selected)}. On each device, download the restored server copy before continuing to study or sync.` });

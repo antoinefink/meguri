@@ -23,7 +23,7 @@ async function fixture(page: Page, origin: string) {
     if (path === "/api/status") return data({ setup_required: false });
     if (path === "/api/me") return data({ ...admin, server_url: origin });
     if (path === "/api/me/storage") return data(admin.storage);
-    if (path === "/api/me/backups") return data([]);
+    if (path === "/api/me/backups") return data({ account_id: admin.id, backups: [] });
     if (path === "/api/admin/accounts") {
       state.lists++; await state.listGate;
       if (state.listError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });

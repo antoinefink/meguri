@@ -160,14 +160,20 @@ Show a grant list only when the response account matches the current screen acco
 The signed-in collection history uses `sync/server-lifecycle#L9`. Both routes
 inherit W1's session authentication, response envelope, no-store/security headers,
 browser admission, query rejection and closing-body handling. The account comes
-only from the captured browser session; no account selector is accepted.
+only from the captured browser session. The web client must send
+`X-Meguri-Expected-Account` with the opaque account ID displayed by the tab on
+both routes. This is an equality precondition, never an account selector: reject
+mismatch as `stale_authority` (409) before staging, safety capture or any mutation.
+Callers without this header retain session-scoped admission; malformed or duplicate
+headers are `invalid_request`. The client validates response `account_id` against
+its displayed identity before rendering history or announcing success.
 
 | Method and route | Input | Success `data` |
 |---|---|---|
-| `GET /api/me/backups` | No query | Array newest first of `{id: string, created_at: number, kind: "daily"\|"weekly"\|"monthly"\|"before_restore", size_bytes: number}` |
-| `POST /api/me/backups/{id}/restore` | Strict JSON `{}` and exact configured Origin | `null` |
+| `GET /api/me/backups` | No query | `{account_id: string, backups: [...]}`, with backups newest first of `{id: string, created_at: number, kind: "daily"\|"weekly"\|"monthly"\|"before_restore", size_bytes: number}` |
+| `POST /api/me/backups/{id}/restore` | Strict JSON `{}` and exact configured Origin | `{account_id: string}` |
 
-Times are Unix seconds and sizes are bytes. Empty history returns `[]`.
+Times are Unix seconds and sizes are bytes. Empty history returns `{account_id, backups: []}`.
 The restore ID is a single opaque path component. Unknown and foreign IDs both
 return `route_not_found` (404) after authentication. Restore accepts the existing
 JSON content type and body bounds and rejects extra fields, malformed bodies,

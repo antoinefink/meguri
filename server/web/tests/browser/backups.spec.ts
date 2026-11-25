@@ -32,9 +32,9 @@ function barrier() {
 }
 async function fixture(page: Page, origin: string, holdIdentity = false, holdStorage = false) {
   const state = {
-    history: [...demo], storage: currentStorage as AccountStorage | null, historyReads: 0, storageReads: 0, restores: [] as string[],
+    accountId: "demo-account", history: [...demo], storage: currentStorage as AccountStorage | null, historyReads: 0, storageReads: 0, restores: [] as string[],
     historyError: null as Failure, storageError: null as Failure, restoreError: null as Failure, loseRestoreResponse: false,
-    restoreResult: null as unknown,
+    restoreResult: { account_id: "demo-account" } as unknown,
     historyGate: null as Promise<void> | null, storageGate: null as Promise<void> | null, restoreGate: null as Promise<void> | null,
   };
   // Observe completion after application promise callbacks, including late
@@ -82,7 +82,7 @@ async function fixture(page: Page, origin: string, holdIdentity = false, holdSto
     const data = (value: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: value }) });
     const fail = (error: NonNullable<Failure>) => route.fulfill({ status: error.status, contentType: "application/json", body: JSON.stringify({ error: { code: error.code } }) });
     if (path === "/api/status") return data({ setup_required: false });
-    if (path === "/api/me") return data({ id: "demo-account", username: "demo.study", role: "member", server_url: origin });
+    if (path === "/api/me") return data({ id: state.accountId, username: "demo.study", role: "member", server_url: origin });
     if (path === "/api/logout") return data(null);
     if (path === "/api/me/mcp-grants") return data({ account_id: "demo-account", grants: [] });
     if (path === "/api/me/storage") {
@@ -92,13 +92,19 @@ async function fixture(page: Page, origin: string, holdIdentity = false, holdSto
     }
     if (path === "/api/me/backups") {
       expect(req.method()).toBe("GET");
-      state.historyReads++; const error = state.historyError, value = [...state.history];
-      await state.historyGate; return error ? fail(error) : data(value);
+      expect(req.headers()["x-meguri-expected-account"]).toBe("demo-account");
+      state.historyReads++; const error = state.historyError, value = { account_id: state.accountId, backups: [...state.history] };
+      await state.historyGate;
+      if (error) return fail(error);
+      if (req.headers()["x-meguri-expected-account"] !== state.accountId) return fail({ status: 409, code: "stale_authority" });
+      return data(value);
     }
     const match = /^\/api\/me\/backups\/([^/]+)\/restore$/.exec(path);
     if (match) {
       expect(req.method()).toBe("POST"); expect(req.postDataJSON()).toEqual({});
       expect(req.headers()["content-type"]).toBe("application/json");
+      expect(req.headers()["x-meguri-expected-account"]).toBe("demo-account");
+      if (req.headers()["x-meguri-expected-account"] !== state.accountId) return fail({ status: 409, code: "stale_authority" });
       state.restores.push(match[1]!); const error = state.restoreError;
       await state.restoreGate;
       if (error) return fail(error);
@@ -413,4 +419,35 @@ test("narrow layouts, large text and keyboard confirmation retain complete conte
     await page.keyboard.press("Escape"); await expect(restoreButton(page)).toBeFocused();
     await page.evaluate(() => { document.documentElement.style.removeProperty("font-size"); });
   }
+});
+
+for (const operation of ["history", "restore"] as const) {
+  test(`cross-tab account switch refuses ${operation} for the account still shown in this tab`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!); await page.goto("/collection"); await ready(page);
+    // Model another tab signing in as B while this page still displays A.
+    // The B history deliberately reuses the selected ID: ID scoping alone
+    // cannot protect a history loaded under the wrong browser cookie.
+    state.accountId = "other-account";
+    const before = [...state.history], storage = state.storage;
+    if (operation === "history") {
+      await history(page).getByRole("button", { name: "Refresh history" }).click();
+    } else {
+      await restoreButton(page).click();
+      await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
+    }
+    await expect(page).toHaveURL(/\/login$/);
+    expect(state.restores).toEqual([]);
+    expect(state.history).toEqual(before); expect(state.storage).toEqual(storage);
+    await expect(page.getByText("Restored the server collection and media", { exact: false })).toHaveCount(0);
+  });
+}
+
+test("a successful response for another account never announces this account restored", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/collection"); await ready(page);
+  state.restoreResult = { account_id: "other-account" };
+  await restoreButton(page).click();
+  await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  expect(state.restores).toEqual(["demo-nov16"]);
+  await expect(page.getByText("Restored the server collection and media", { exact: false })).toHaveCount(0);
 });
