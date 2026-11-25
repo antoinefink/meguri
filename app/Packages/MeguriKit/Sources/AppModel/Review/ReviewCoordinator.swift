@@ -20,6 +20,7 @@ public final class ReviewCoordinator {
         didSet {
             noticeRevision &+= 1
             leechNoticeID = nil; leechNoticeCard = nil
+            leechSubject = nil; leechQuestion?.cancel(); leechQuestion = nil
         }
     }
     // Ordering only: even publishing the same persistent text supersedes an answer's notice.
@@ -35,7 +36,11 @@ public final class ReviewCoordinator {
     public private(set) var leechAnnouncement: ReviewLeechAnnouncement?
     /// N16.11: while the notice is a leech answer's (`review/reviewer-strings#S3`),
     /// the screen shows it as one icon in the top controls, not as a banner.
-    public var leechNotice: ReviewLeechNotice? { leechNoticeID == nil ? nil : ReviewLeechNotice(notice: notice) }
+    public var leechNotice: ReviewLeechNotice? { leechNoticeID == nil ? nil : leechSubject }
+    /// N16.11: the answered card the notice is about, with its lapse count and,
+    /// once read, its question. The card on screen is the one after it.
+    private var leechSubject: ReviewLeechNotice?
+    @ObservationIgnored private var leechQuestion: Task<Void, Never>?
     public private(set) var undoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var redoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var record: ReviewRecord
@@ -421,7 +426,7 @@ public final class ReviewCoordinator {
                     if let pendingAnswer, pendingAnswer.id == answer.id {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
                         self.pendingAnswer = nil
-                        if leech, noticeRevision == answerNoticeRevision { showLeechNotice(suspended: suspended) }
+                        if leech, noticeRevision == answerNoticeRevision { showLeechNotice(suspended: suspended, item: item, rating: rating) }
                     }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence(diagnosticAnswer: true)
@@ -1051,15 +1056,28 @@ public final class ReviewCoordinator {
     /// A notice above the card, for a change the screen reports itself.
     func showNotice(_ text: String) { notice = text }
 
-    private func showLeechNotice(suspended: Bool) {
+    private func showLeechNotice(suspended: Bool, item: ReviewHeadItem, rating: ReviewRating) {
         guard !closingAdmission, phase != .ended else { return }
-        notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech."
+        notice = suspended ? ReviewLeechNotice.suspendedText : ReviewLeechNotice.tagged
         // No expiry (N16.11, replacing #166's 2 s): it lasts for the card that
         // follows, until that card is answered, acted on or undone, another
         // card is presented, or the session ends.
-        leechNoticeID = UUID()
+        let id = UUID()
+        leechNoticeID = id
+        leechSubject = ReviewLeechNotice(suspended: suspended, cardID: item.cardId,
+                                         lapses: ReviewLeechNotice.lapses(after: rating, of: item))
         if let notice { leechAnnouncement = ReviewLeechAnnouncement(text: notice) }
+        // The popover names the card: its question arrives a moment after the icon.
+        leechQuestion = Task { [weak self, client] in
+            guard let text = try? await client.question(cardID: item.cardId),
+                  let self, self.leechNoticeID == id else { return }
+            self.leechSubject?.question = text
+        }
     }
+    /// The leech notice's question read, for tests.
+    func leechQuestionSettled() async { await leechQuestion?.value }
+    /// The read itself, for a test that outlives the notice it was started for.
+    var leechQuestionRead: Task<Void, Never>? { leechQuestion }
     /// N16.11: the first card presented after the leech answer keeps the notice;
     /// any other card presented after it ends it.
     private func presentedForLeechNotice(_ card: Int64) {
@@ -1200,7 +1218,29 @@ public nonisolated struct ReviewLeechNotice: Equatable, Sendable {
     static let tagged = "Card was a leech."
     static let suspendedText = "Card was a leech. It has been suspended."
     public let suspended: Bool
-    public init(suspended: Bool) { self.suspended = suspended }
+    /// The answered card, the leech: Show in Browse opens it.
+    public var cardID: Int64?
+    /// How many times it has been forgotten, this answer included.
+    public var lapses: UInt32?
+    /// Its question as one plain-text line, once read.
+    public var question: String?
+    public init(suspended: Bool, cardID: Int64? = nil, lapses: UInt32? = nil, question: String? = nil) {
+        self.suspended = suspended; self.cardID = cardID; self.lapses = lapses; self.question = question
+    }
+    /// The lapse count the rating gives the card, where its next state has one.
+    static func lapses(after rating: ReviewRating, of item: ReviewHeadItem) -> UInt32? {
+        let next = switch rating {
+        case .again: item.nextStates.again
+        case .hard: item.nextStates.hard
+        case .good: item.nextStates.good
+        case .easy: item.nextStates.easy
+        }
+        return switch next.state {
+        case .review(let state): state.lapses
+        case .relearning(_, let review): review.lapses
+        case .new, .learning: nil
+        }
+    }
     init?(notice: String?) {
         switch notice {
         case Self.tagged: suspended = false

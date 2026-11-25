@@ -19,14 +19,16 @@ public struct ReviewView: View {
     public let close: () -> Void
     public let status: AnyView?
     public let editNote: ReviewEditNote?
+    /// N16.11: opens Browse on a card, where Browse is shown; nil elsewhere.
+    public let showInBrowse: ((Int64) -> Void)?
     public let visibilityChanged: (Bool) -> Void
     /// Today's Study (N24.3): the walk whose open deck `model` is. One review for the
     /// whole walk: its progress, its finished screen, and nothing between its decks.
     public let walk: StudyWalk?
     @Environment(\.colorScheme) private var colorScheme
     public init(model: ReviewCoordinator, walk: StudyWalk? = nil, status: AnyView? = nil, editNote: ReviewEditNote? = nil,
-                visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
-        self.status = status; self.walk = walk; self.editNote = editNote
+                showInBrowse: ((Int64) -> Void)? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
+        self.status = status; self.walk = walk; self.editNote = editNote; self.showInBrowse = showInBrowse
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
     public var body: some View {
@@ -36,7 +38,8 @@ public struct ReviewView: View {
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
             redoDescription: redoDescription, status: status,
-            actions: moreActions, leech: model.leechNotice, editingNote: model.editingNote) {
+            actions: moreActions, leech: model.leechNotice, showInBrowse: showInBrowse,
+            editingNote: model.editingNote) {
             ZStack {
                 if let pair = model.pair {
                     // A walk's next deck brings its own pages: a new host for them, while
@@ -270,6 +273,7 @@ struct ReviewLayout<Card: View>: View {
     var actions = ReviewMoreActions()
     /// N16.11: the leech notice, as one icon first in the top controls.
     var leech: ReviewLeechNotice? = nil
+    var showInBrowse: ((Int64) -> Void)? = nil
     /// N20.8: an open Edit Note holds Back to Decks (the Mac toolbar's).
     var editingNote = false
     @State private var noticeContentHeight: CGFloat?
@@ -306,7 +310,7 @@ struct ReviewLayout<Card: View>: View {
             ToolbarSpacer()
             // N16.11: first among the trailing items, before the sync status.
             if let leech {
-                ToolbarItem(placement: .primaryAction) { ReviewLeechButton(notice: leech) }
+                ToolbarItem(placement: .primaryAction) { ReviewLeechButton(notice: leech, showInBrowse: showInBrowse) }
             }
             ToolbarItem(placement: .primaryAction) { ReviewActionsMenu(actions: actions) }
             if let status {
@@ -356,7 +360,7 @@ struct ReviewLayout<Card: View>: View {
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     // N16.11: the leech icon comes first: [leech][undo][more].
-                    if let leech { ReviewLeechButton(notice: leech) }
+                    if let leech { ReviewLeechButton(notice: leech, showInBrowse: showInBrowse) }
                     Button { if canUndo { undo() } } label: {
                         Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
                     }
@@ -854,51 +858,96 @@ struct ReviewMoreActions {
 
 /// N16.11: the leech notice (`review/reviewer-strings#S3`) as one yellow
 /// warning icon in the top controls, in place of a banner above the card; a
-/// press shows what it means.
+/// press shows which card it was and what the answer did to it.
 struct ReviewLeechButton: View {
     let notice: ReviewLeechNotice
+    var showInBrowse: ((Int64) -> Void)? = nil
     @State private var shown = false
     var body: some View {
         Button { shown = true } label: {
-            Label { Text("review.leech.title", bundle: .module) } icon: {
-                // The system's yellow triangle (Antoine: "we can keep it in
-                // yellow"). The glass toolbar group draws its icons as templates,
-                // so the symbol's multicolour alone came out black or white; the
-                // system yellow as its style and the button's tint keep it yellow,
-                // with Increase Contrast's darker yellow where that is on.
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.multicolor)
-                    .foregroundStyle(.yellow)
-            }
+            Label { Text("review.leech.title", bundle: .module) } icon: { ReviewLeechSymbol() }
         }
         .tint(.yellow)
         .help(Text("review.leech.title", bundle: .module))
         .accessibilityHint(Text("review.leech.hint", bundle: .module))
         .accessibilityIdentifier("review.session.leech")
         .popover(isPresented: $shown) {
-            ReviewLeechDetails(notice: notice)
+            ReviewLeechDetails(notice: notice, showInBrowse: browse)
                 // A popover sized to its text at compact width too (N16.11).
                 .presentationCompactAdaptation(.popover)
         }
     }
+    /// Show in Browse closes the popover, then leaves the review for Browse.
+    private var browse: (() -> Void)? {
+        guard let showInBrowse, let card = notice.cardID else { return nil }
+        return { shown = false; showInBrowse(card) }
+    }
 }
 
-/// What a leech notice means, with what the answer did to the card.
+/// The system's yellow triangle (Antoine: "we can keep it in yellow"). The glass
+/// toolbar group draws its icons as templates, so the symbol's multicolour alone
+/// came out black or white; the system yellow as its style and the button's tint
+/// keep it yellow, with Increase Contrast's darker yellow where that is on.
+private struct ReviewLeechSymbol: View {
+    var body: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .symbolRenderingMode(.multicolor)
+            .foregroundStyle(.yellow)
+    }
+}
+
+/// Which card was the leech and what the answer did to it (N16.11, changed
+/// 2026-11-25): the card's question and lapse count lead, because the card on
+/// screen is the one after it; one quieter line says what happened; Show in
+/// Browse follows where Browse is shown.
 struct ReviewLeechDetails: View {
     let notice: ReviewLeechNotice
+    var showInBrowse: (() -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.small) {
-            Text("review.leech.title", bundle: .module)
+            Label { Text("review.leech.title", bundle: .module) } icon: { ReviewLeechSymbol().accessibilityHidden(true) }
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                if let question = notice.question {
+                    Text(verbatim: question)
+                        .font(.title3)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("review.session.leech.question")
+                }
+                subject
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("review.session.leech.subject")
+            }
+            Divider()
             Text(notice.suspended ? "review.leech.suspended" : "review.leech.tagged", bundle: .module)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("review.session.leech.outcome")
+            if let showInBrowse {
+                Button(action: showInBrowse) { Text("review.leech.showInBrowse", bundle: .module) }
+                    .accessibilityIdentifier("review.session.leech.showInBrowse")
+            }
         }
         .padding()
-        // About a primary action's width in a popover; the text wraps.
-        .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.readable, alignment: .leading)
+        // A primary action's width, stated as the ideal too: a popover takes
+        // its size from the ideal one, and without a width there the lines are
+        // measured unwrapped, so a line that wraps leaves the popover one line
+        // short and its padding clipped.
+        .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.primaryAction, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.leech.details")
+    }
+    /// "Previous card", with how often it has been forgotten when that is known.
+    private var subject: Text {
+        if let lapses = notice.lapses, lapses > 0 {
+            Text("review.leech.previous.lapses \(Int(lapses))", bundle: .module)
+        } else {
+            Text("review.leech.previous", bundle: .module)
+        }
     }
 }
 

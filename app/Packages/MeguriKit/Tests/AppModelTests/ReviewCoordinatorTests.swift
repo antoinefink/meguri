@@ -1707,6 +1707,17 @@ extension ReviewCollectionStartupTests {
             return summary
         }
         func end(sessionID: UInt64) async throws { try await onEnd?(); ends += 1 }
+        var questions: [Int64: String] = [:]
+        var questionReads: [Int64] = []
+        /// Set to hold a question read open until `releaseQuestion()`.
+        var holdsQuestion = false
+        private var heldQuestion: CheckedContinuation<Void, Never>?
+        func question(cardID: Int64) async throws -> String? {
+            questionReads.append(cardID)
+            if holdsQuestion { await withCheckedContinuation { heldQuestion = $0 } }
+            return questions[cardID]
+        }
+        func releaseQuestion() { heldQuestion?.resume(); heldQuestion = nil }
     }
     static func emptyHead(_ terminal: ReviewTerminalState) -> ReviewHead {
         ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)

@@ -337,7 +337,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Shows what this means."
+            "value": "Shows which card it was."
           }
         }
       }
@@ -347,7 +347,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A card you answered in this session has been forgotten many times: it reached its deck’s leech threshold. Its note is now tagged “leech”, so you can find it in Browse and rework it."
+            "value": "Tagged “leech” so you can rework it later."
           }
         }
       }
@@ -357,7 +357,49 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A card you answered in this session has been forgotten many times: it reached its deck’s leech threshold. Its note is now tagged “leech”, and the card is suspended: it will not come up again until you unsuspend it."
+            "value": "Tagged “leech” and suspended until you unsuspend it."
+          }
+        }
+      }
+    },
+    "review.leech.previous": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous card"
+          }
+        }
+      }
+    },
+    "review.leech.previous.lapses %lld": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Previous card · forgotten %lld time"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Previous card · forgotten %lld times"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "review.leech.showInBrowse": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Browse"
           }
         }
       }
