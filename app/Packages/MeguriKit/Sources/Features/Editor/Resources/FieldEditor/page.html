@@ -25,7 +25,7 @@ textarea { display: block; box-sizing: border-box; width: 100%; min-height: 6em;
    140 pt column (EditNoteView's facts use the same column); its box beside it
    is a bezelled text field with the system focus ring. */
 html.mac, html.mac body { background: transparent; }
-html.mac body { padding: 0 16px 8px; font: 13px -apple-system; }
+html.mac body { padding: 4px 16px 8px; font: 13px -apple-system; } /* 4 pt above: room for the first field's focus ring */
 html.mac main { display: grid; grid-template-columns: 140px minmax(0, 1fr); column-gap: 8px; row-gap: 8px; align-items: start; }
 html.mac section { display: contents; }
 html.mac header { grid-column: 1; display: flex; justify-content: flex-end; }
