@@ -214,6 +214,94 @@ import Testing
         #expect(model.query == FilterQuery() && model.selectedRows.isEmpty)
     }
 
+    // MARK: T9 after the arrow keys
+
+    /// The arrow keys move through the filter rows without changing the
+    /// query; the row they stand on is the list's whole selection.
+    private func arrow(_ model: BrowseModel, to row: BrowseSidebarTag) {
+        let query = model.query
+        #expect(model.sidebarSelectionChanged(to: [row], byKey: true, click: .plain) == .keep)
+        #expect(model.keyRow == row && model.query == query)
+    }
+
+    /// A plain or ⌥-click on the row the keys stand on leaves the list's
+    /// selection as it is: the list reports nothing and the row's own click
+    /// is read. A ⌘-click on it empties the list's selection.
+    @Test(arguments: [BrowseModel.Click.plain, .command, .option])
+    func aClickOnTheRowTheArrowKeysStandOnFiltersByIt(_ click: BrowseModel.Click) async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        arrow(model, to: .builtIn(.dueToday))
+        arrow(model, to: .state(.new))
+        if click == .command {
+            #expect(model.sidebarSelectionChanged(to: [], byKey: false, click: click) == .restore)
+        } else {
+            #expect(model.sidebarRowClicked(.state(.new), click: click))
+        }
+        #expect(model.query.tokens == [token(Self.spanish), token(.state(.new), negated: click == .option)])
+        #expect(model.keyRow == nil && model.clickedRow == .state(.new))
+        // The click is read once: the row's own click after the list's report does nothing.
+        let query = model.query
+        #expect(!model.sidebarRowClicked(.state(.new), click: click))
+        #expect(model.query == query)
+        // Return is then a second click on that row (T9), where that removes its filter.
+        #expect(model.activateSidebarRowByKey() == (click != .option))
+        #expect(model.query.tokens == (click == .option ? query.tokens : [token(Self.spanish)]))
+    }
+
+    /// CodeRabbit on PR #211: the keys stand on New and a ⌘-click lands on
+    /// Suspended. The list's selection then holds both rows; New was not clicked.
+    @Test func aCommandClickAfterTheArrowKeysTogglesOnlyTheClickedRow() async {
+        let (model, _) = await makeModel()
+        arrow(model, to: .state(.new))
+        let both: Set<BrowseSidebarTag> = [.state(.new), .state(.suspended)]
+        #expect(model.sidebarSelectionChanged(to: both, byKey: false, click: .command) == .restoreAfterEvent)
+        #expect(model.query.tokens == [token(.state(.suspended))])
+        #expect(model.selectedRows == [.state(.suspended)])
+        #expect(model.keyRow == nil && model.clickedRow == .state(.suspended))
+        // The clicked row's own click is not read a second time.
+        #expect(!model.sidebarRowClicked(.state(.suspended), click: .command))
+        #expect(model.query.tokens == [token(.state(.suspended))])
+        // The keys stand on a row that is a filter already: it stays one.
+        arrow(model, to: .state(.suspended))
+        let pair: Set<BrowseSidebarTag> = [.state(.suspended), .state(.review)]
+        #expect(model.sidebarSelectionChanged(to: pair, byKey: false, click: .command) == .restoreAfterEvent)
+        #expect(model.query.tokens == [token(.state(.suspended), .state(.review))])
+        // A ⌘-click that removes: the clicked row goes, the row under the keys is not added.
+        arrow(model, to: .deck(10))
+        #expect(model.sidebarSelectionChanged(to: [.deck(10), .state(.review)], byKey: false, click: .command)
+            == .restoreAfterEvent)
+        #expect(model.query.tokens == [token(.state(.suspended))])
+        // A ⌘-click on a section row navigates and changes no filter.
+        arrow(model, to: .state(.new))
+        #expect(model.sidebarSelectionChanged(to: [.state(.new), .section(.home)], byKey: false, click: .command)
+            == .navigate(.home))
+        #expect(model.query.tokens == [token(.state(.suspended))])
+    }
+
+    /// Return and Space on the row the keys stand on are a click on it; the
+    /// keys back on the Browse row, or rows that changed, leave nothing to act on.
+    @Test func returnActsOnTheRowTheArrowKeysStandOn() async {
+        let (model, _) = await makeModel()
+        #expect(!model.activateSidebarRowByKey())
+        arrow(model, to: .state(.new))
+        #expect(model.activateSidebarRowByKey() && model.query.tokens == [token(.state(.new))])
+        #expect(model.activateSidebarRowByKey() && model.query.tokens.isEmpty)
+        #expect(model.sidebarSelectionChanged(to: model.listSelection, byKey: true, click: .plain) == .keep)
+        #expect(model.keyRow == nil && !model.activateSidebarRowByKey())
+        arrow(model, to: .state(.new))
+        model.forgetSidebarKeyRow()
+        #expect(!model.activateSidebarRowByKey() && model.query.tokens.isEmpty)
+        // Without the keys on a row, a click is the list's selection, as before.
+        #expect(model.sidebarSelectionChanged(to: [.state(.review)], byKey: false, click: .plain) == .restoreAfterEvent)
+        #expect(model.query.tokens == [token(.state(.review))] && model.clickedRow == .state(.review))
+        // CodeRabbit on PR #220: a sidebar built again forgets the click too, so
+        // Return there is no second click that would remove the filter.
+        model.forgetSidebarKeyRow()
+        #expect(model.clickedRow == nil && !model.activateSidebarRowByKey())
+        #expect(model.query.tokens == [token(.state(.review))])
+    }
+
     /// The rows follow the field both ways: a token edited or removed in
     /// the field deselects at once; a saved search shows selected only while
     /// the query equals it.
