@@ -21,8 +21,8 @@ final class MacBrowseInspectorTests: XCTestCase {
     func testTagsAutocompleteLight() throws { try tagsAutocomplete(appearance: "light") }
     func testTagsAutocompleteDark() throws { try tagsAutocomplete(appearance: "dark") }
 
-    /// Production inspector + real core over typical-1. Seed only synthetic
-    /// tags through native paste into the editor; no completion-demo route.
+    /// Production inspector + real core, with system suggestions in the VM.
+    /// Paste seeds committed tags; unfinished queries always use real typing.
     private func tagsAutocomplete(appearance: String) throws {
         guard CardSwapTimingGate.hypervisorPresent() == true else {
             throw XCTSkip("Browse tag completion runs only in the Mac test VM")
@@ -38,16 +38,8 @@ final class MacBrowseInspectorTests: XCTestCase {
         let firstFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
         let paths = ["Adjectives", "Adverbs", "Articles", "Conditionals", "Nouns", "Prepositions", "Pronouns", "Tenses", "Verbs"]
             .map { "Spanish::Grammar::" + $0 }
-        let query = "spanish::grammar::"
         let tags = element(app, "browse.inspector.tags")
-        let list = element(app, "browse.inspector.tagSuggestions")
-        let viewport = app.scrollViews.matching(identifier: "browse.inspector.tagSuggestions.viewport").firstMatch
-        func suggestion(_ index: Int) -> XCUIElement {
-            element(app, "browse.inspector.tagSuggestion.\(index)")
-        }
         func tagText() -> String {
-            // Preserve the native field's AX representation: OS versions can
-            // expose its names as the value, token children, or both.
             ([String(describing: tags.value ?? "")] + tags.descendants(matching: .any).allElementsBoundByIndex.map {
                 $0.label + " " + String(describing: $0.value ?? "")
             }).joined(separator: " ")
@@ -55,110 +47,85 @@ final class MacBrowseInspectorTests: XCTestCase {
         // This test is VM-only. Never read or retain the workstation clipboard.
         let pasteboard = NSPasteboard.general
         defer { pasteboard.clearContents() }
-        func paste(_ text: String) {
+        func seed(_ names: [String]) {
+            tags.click()
+            app.typeKey("a", modifierFlags: [.command])
             pasteboard.clearContents()
-            XCTAssertTrue(pasteboard.setString(text, forType: .string))
+            XCTAssertTrue(pasteboard.setString(names.joined(separator: " ") + " ", forType: .string))
             app.typeKey("v", modifierFlags: [.command])
         }
-        tags.click()
-        app.typeKey("a", modifierFlags: [.command])
-        paste(paths.joined(separator: " ") + " ")
+        func typeQuery(_ query: String, capture name: String) {
+            app.typeText(query)
+            // Wait on the parent field, not an assumed remote menu hierarchy.
+            let typed = waitUntil { (tags.value as? String ?? "").contains(query) }
+            screen(app, "browse-tags-\(name)-\(appearance)-synthetic")
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "browse-tags-\(name)-hierarchy-\(appearance)"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            XCTAssertTrue(typed, "the unfinished query is editable text, not a pasted token")
+        }
+        func afterAcceptance(_ name: String, capture label: String) {
+            let accepted = waitUntil { tagText().contains(name) }
+            screen(app, "browse-tags-\(label)-\(appearance)-synthetic")
+            XCTAssertTrue(accepted, "accepted tag: \(name)")
+            XCTAssertTrue(tagText().contains(paths[0]) && tagText().contains("Kept::Token"), "adjacent tokens survive")
+        }
+
+        seed(paths)
         app.typeKey(.tab, modifierFlags: [])
-        XCTAssertTrue(waitUntil { tagText().contains(paths[8]) })
         press(table.outlineRows.element(boundBy: 1))
         XCTAssertTrue(waitUntil {
             guard fields.count > 0, let front = fields.element(boundBy: 0).value as? String else { return false }
             return front.contains("palabra") && front != firstFront
         })
         let secondFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
-        tags.click()
-        app.typeKey("a", modifierFlags: [.command])
-        paste(paths[0] + " Kept::Token " + query)
-        XCTAssertTrue(list.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitUntil { suggestion(0).label == paths[1] }, "full prefix, case insensitive; held tag excluded")
-        XCTAssertGreaterThan(list.tableRows.count, 6, "more results than the bounded viewport")
-        XCTAssertEqual(list.tableRows.matching(NSPredicate(format: "selected == true")).count, 0,
-                       "typing starts without a highlighted suggestion")
-        XCTAssertTrue(viewport.exists, "measure the scroll viewport, not the table document")
-        XCTAssertGreaterThanOrEqual(viewport.frame.width, tags.frame.width - 2)
-        XCTAssertLessThanOrEqual(viewport.frame.width, 460, "hierarchies get useful width without a screen-wide panel")
-        XCTAssertLessThanOrEqual(viewport.frame.height, 240, "the suggestion list scrolls instead of growing tall")
-        XCTAssertGreaterThan(list.frame.height, viewport.frame.height, "the document exceeds its bounded scroll viewport")
-        XCTAssertFalse(viewport.frame.intersects(tags.frame), "held tokens and editable text remain uncovered")
-        XCTAssertTrue(tags.isHittable)
-        // A popover is a separate native window. Retain the VM screen so its
-        // actual material, field anchor and surrounding inspector are visible.
-        screen(app, "browse-tags-expanded-\(appearance)-synthetic")
-
-        for _ in 0..<8 { app.typeKey(.downArrow, modifierFlags: []) }
-        XCTAssertTrue(waitUntil { list.tableRows.element(boundBy: 7).isSelected })
-        XCTAssertTrue(suggestion(7).isHittable, "keyboard selection scrolls into view")
-        XCTAssertTrue(viewport.frame.intersects(suggestion(7).frame), "the selected row is visible inside the viewport")
-        screen(app, "browse-tags-keyboard-selection-\(appearance)-synthetic")
-
-        // Blank header area above the token field is in the same parent
-        // window and cannot take focus: semitransient alone misses this click.
-        let whitespace = tags.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0))
-            .withOffset(CGVector(dx: 0, dy: -8))
-        whitespace.click()
-        XCTAssertTrue(waitUntil { !list.exists }, "nonfocusable inspector whitespace dismisses completion")
-        XCTAssertFalse(tagText().contains(paths[8]), "outside dismissal never accepts the selected row")
-        app.typeText("x")
-        XCTAssertFalse(list.exists, "whitespace leaves ordinary typing in the field")
-        app.typeKey(.delete, modifierFlags: [])
-        XCTAssertTrue(list.waitForExistence(timeout: 10))
-        tags.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).click()
-        app.typeKey(.downArrow, modifierFlags: [.command])
-        XCTAssertTrue(waitUntil { list.exists }, "clicking inside the field keeps completion usable")
-        for _ in 0..<8 { app.typeKey(.downArrow, modifierFlags: []) }
+        seed([paths[0], "Kept::Token"])
+        let prefix = "spanish::grammar::"
+        typeQuery(prefix, capture: "expanded")
+        // Exercise native highlight and Esc with keys before querying any
+        // suggestion elements: the window can be AX-remote on current macOS.
+        app.typeKey(.downArrow, modifierFlags: [])
         app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(waitUntil { !list.exists })
-        XCTAssertFalse(tagText().contains(paths[8]), "Escape never accepts the highlighted tag")
-        app.typeText("x")
-        XCTAssertFalse(list.exists, "ordinary typing continues in the token editor")
-        app.typeKey(.delete, modifierFlags: [])
-        XCTAssertTrue(list.waitForExistence(timeout: 10), "editing after dismissal reopens matching suggestions")
-        for _ in 0..<8 { app.typeKey(.downArrow, modifierFlags: []) }
+        XCTAssertFalse(tagText().contains(paths[7]), "Escape accepts nothing")
+        XCTAssertFalse(tagText().contains(paths[8]), "highlighting preserves the editor")
+        for _ in prefix { app.typeKey(.delete, modifierFlags: []) }
+        typeQuery("SPANISH::GRAMMAR::TEN", capture: "keyboard-expanded")
+        app.typeKey(.downArrow, modifierFlags: [])
         app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(waitUntil { !list.exists && tagText().contains(paths[8]) })
-        app.typeText("AfterKeyboard ")
-        XCTAssertTrue(waitUntil { tagText().contains("AfterKeyboard") }, "acceptance keeps the editor ready for typing")
-        capture(app, "browse-tags-after-keyboard-accept-\(appearance)-synthetic")
+        afterAcceptance(paths[7], capture: "after-keyboard-accept")
 
-        app.typeText(query)
-        XCTAssertTrue(list.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitUntil { suggestion(0).label == paths[1] })
-        XCTAssertEqual(list.tableRows.count, 7, "held and newly accepted tags are both excluded")
-        suggestion(0).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .click(forDuration: 0.2, thenDragTo: whitespace)
-        XCTAssertFalse(tagText().contains(paths[1]), "dragging out cancels pointer acceptance")
-        XCTAssertTrue(list.exists)
-        suggestion(0).click()
-        XCTAssertTrue(waitUntil { !list.exists && tagText().contains(paths[1]) })
-        app.typeText("Fresh::Created ")
+        tags.click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        app.typeText(" ")
+        typeQuery("ver", capture: "pointer-expanded")
+        // Match the suggestion's public text across all element types, including
+        // remote children. No table, row, menu shape or system dimensions assumed.
+        let choice = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@ OR value == %@", paths[8], paths[8])).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10), "native suggestion: \(paths[8])")
+        choice.click()
+        afterAcceptance(paths[8], capture: "after-pointer-accept")
+        tags.click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        app.typeText(" Fresh::Created ")
         app.typeKey(.tab, modifierFlags: [])
-        XCTAssertTrue(waitUntil { tagText().contains("Fresh::Created") })
-        capture(app, "browse-tags-after-pointer-accept-\(appearance)-synthetic")
 
-        // Editing-end save, then reload from the real collection. No highlighted
-        // candidate or another note's tags may leak into the saved list.
+        // Browse's real editing-end save, then a reload of each note.
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, firstFront))
         XCTAssertFalse(tagText().contains("Fresh::Created"))
         press(table.outlineRows.element(boundBy: 1))
         XCTAssertTrue(shows(fields, secondFront))
-        for name in [paths[0], paths[1], paths[8], "Kept::Token", "AfterKeyboard", "Fresh::Created"] {
+        for name in [paths[0], paths[7], paths[8], "Kept::Token", "Fresh::Created"] {
             XCTAssertTrue(waitUntil { tagText().contains(name) }, "persisted tag: \(name)")
         }
-        XCTAssertFalse(tagText().contains(paths[2]), "an unaccepted suggestion is never saved")
-        tags.click()
-        app.typeKey(.downArrow, modifierFlags: [.command])
-        app.typeText(" " + query)
-        XCTAssertTrue(list.waitForExistence(timeout: 10))
-        press(table.outlineRows.element(boundBy: 0))
-        XCTAssertTrue(shows(fields, firstFront))
-        XCTAssertTrue(waitUntil { !list.exists }, "changing notes dismisses the old completion session")
-        XCTAssertFalse(tagText().contains("AfterKeyboard"), "pending updates never overwrite the next note")
+        for name in paths[1..<7] {
+            XCTAssertFalse(tagText().contains(name), "dismissed suggestion is never saved: \(name)")
+        }
+        for query in [prefix, "SPANISH::GRAMMAR::TEN", "ver"] {
+            XCTAssertFalse(tagText().contains(query), "unfinished query is not saved as another token: \(query)")
+        }
     }
 
     /// H4 and Browse M4: bare Return belongs to the field, including consecutive

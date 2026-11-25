@@ -2,8 +2,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// V12's system token editor. Only its completion presentation is replaced:
-/// a field-anchored native popover leaves the tokens and insertion point visible.
+/// V12's native token editor and macOS suggestions presentation.
 struct BrowseTagField: NSViewRepresentable {
     let tags: [String]
     let names: [String]
@@ -14,9 +13,9 @@ struct BrowseTagField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTokenField {
         let field = NSTokenField()
         field.delegate = context.coordinator
+        field.suggestionsDelegate = context.coordinator
         field.tokenStyle = .rounded
         field.tokenizingCharacterSet = CharacterSet.whitespacesAndNewlines
-        field.completionDelay = 0
         field.isBordered = true
         field.isBezeled = true
         field.bezelStyle = .squareBezel
@@ -26,23 +25,20 @@ struct BrowseTagField: NSViewRepresentable {
         field.objectValue = tags
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        context.coordinator.field = field
         return field
     }
 
     func updateNSView(_ field: NSTokenField, context: Context) {
         let coordinator = context.coordinator
-        let namesChanged = coordinator.parent.names != names
         coordinator.parent = self
         // SwiftUI can refresh while the field editor owns uncommitted text.
         if field.currentEditor() == nil, (field.objectValue as? [String]) != tags { field.objectValue = tags }
-        if namesChanged { coordinator.scheduleRefresh() }
     }
 
     static func dismantleNSView(_ field: NSTokenField, coordinator: Coordinator) {
         // Finish native editing while its original note's commit is still bound.
         if field.currentEditor() != nil { field.window?.endEditing(for: field) }
-        coordinator.stopEditing()
+        field.suggestionsDelegate = nil
         field.delegate = nil
     }
 
@@ -52,183 +48,42 @@ struct BrowseTagField: NSViewRepresentable {
         return CGSize(width: width, height: max(height ?? 0, field.intrinsicContentSize.height))
     }
 
-    final class Coordinator: NSObject, NSTokenFieldDelegate, NSPopoverDelegate {
-        var parent: BrowseTagField
-        weak var field: NSTokenField?
-        private weak var editor: NSTextView?
-        private var selectionObserver: NSObjectProtocol?
-        private var mouseMonitor: Any?
-        private var generation = 0
-        private var editingCommit: (([String]) -> Void)?
-        private var accepting = false
-        private var dismissed: Query?
-        private var offered: Query?
-        private let suggestions = BrowseTagSuggestions()
-        let popover = NSPopover()
+    final class Coordinator: NSObject, NSTokenFieldDelegate, NSTextSuggestionsDelegate {
+        typealias SuggestionItemType = String
 
-        init(_ parent: BrowseTagField) {
-            self.parent = parent
-            super.init()
-            popover.behavior = .semitransient
-            popover.animates = false
-            popover.delegate = self
-            popover.contentViewController = suggestions
-            suggestions.accept = { [weak self] row in self?.accept(row) }
+        var parent: BrowseTagField
+        private var editingCommit: (([String]) -> Void)?
+
+        init(_ parent: BrowseTagField) { self.parent = parent }
+
+        func textField(_ textField: NSTextField, provideUpdatedSuggestions responseHandler: @escaping (ItemResponse) -> Void) {
+            guard let editor = textField.currentEditor() as? NSTextView,
+                  !editor.hasMarkedText(), let query = Query(text: editor.string, selection: editor.selectedRange()) else {
+                responseHandler(NSSuggestionItemResponse(items: []))
+                return
+            }
+            let held = textField.objectValue as? [String] ?? []
+            let items = query.suggestions(in: parent.names, excluding: held).map {
+                NSSuggestionItem(representedValue: $0, title: $0)
+            }
+            responseHandler(NSSuggestionItemResponse(items: items))
         }
 
-        // Never let NSTokenField create the insertion-point completion window.
-        func tokenField(_ tokenField: NSTokenField, completionsForSubstring substring: String, indexOfToken tokenIndex: Int,
-                        indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?) -> [Any]? {
-            selectedIndex?.pointee = -1
-            return []
+        func textField(_ textField: NSTextField, textCompletionFor item: Item) -> String? {
+            // Highlighting must not replace the field's other token attachments.
+            // Only didSelect inserts text, using the active token's UTF-16 range.
+            nil
+        }
+
+        func textField(_ textField: NSTextField, didSelect item: Item) {
+            guard let editor = textField.currentEditor() as? NSTextView,
+                  !editor.hasMarkedText(), let query = Query(text: editor.string, selection: editor.selectedRange()) else { return }
+            editor.insertText(item.representedValue, replacementRange: query.range)
+            editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
-            stopEditing()
-            guard let field, let editor = field.currentEditor() as? NSTextView else { return }
-            self.editor = editor
             editingCommit = parent.commit
-            selectionObserver = NotificationCenter.default.addObserver(
-                forName: NSTextView.didChangeSelectionNotification, object: editor, queue: .main
-            ) { [weak self] _ in
-                // AppKit posts selection changes during its text edits too.
-                // Re-read only after it has completed the current operation.
-                MainActor.assumeIsolated { self?.scheduleRefresh() }
-            }
-            scheduleRefresh()
-        }
-
-        func controlTextDidChange(_ notification: Notification) {
-            dismissed = nil
-            scheduleRefresh()
-        }
-
-        func scheduleRefresh() {
-            generation += 1
-            let ticket = generation
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.generation == ticket else { return }
-                self.refresh()
-            }
-        }
-
-        private func refresh() {
-            guard !accepting, let field, let editor, field.currentEditor() === editor,
-                  field.window?.firstResponder === editor, let query = Query(editor), query != dismissed else {
-                closeSuggestions()
-                return
-            }
-            let held = Set((field.objectValue as? [String] ?? []).map { $0.lowercased() })
-            let typed = query.text.lowercased()
-            let matches = Array(parent.names.filter { name in
-                let lower = name.lowercased()
-                return !held.contains(lower) && (lower.hasPrefix(typed)
-                    || lower.components(separatedBy: "::").contains { $0.hasPrefix(typed) })
-            }.prefix(50))
-            guard !matches.isEmpty else { closeSuggestions(); return }
-            let changed = offered != query || suggestions.names != matches
-            offered = query
-            if changed { suggestions.show(matches, fieldWidth: field.bounds.width) }
-            popover.contentSize = suggestions.preferredContentSize
-            if !popover.isShown {
-                // The anchor is the whole field, never the current glyph. AppKit
-                // chooses the available edge and keeps the popover on screen.
-                popover.show(relativeTo: field.bounds, of: field, preferredEdge: .minY)
-                field.window?.makeFirstResponder(editor)
-                mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-                    MainActor.assumeIsolated { self?.dismissIfOutside(event) }
-                    return event
-                }
-            }
-        }
-
-        func dismissIfOutside(_ event: NSEvent) {
-            guard popover.isShown, let field else { return }
-            // Semitransient popovers permit editing in their parent window,
-            // but AppKit can leave them open over nonfocusable whitespace.
-            // Pass every event on: the field and the clicked control still own it.
-            if event.window === popover.contentViewController?.view.window { return }
-            if event.window === field.window,
-               field.bounds.contains(field.convert(event.locationInWindow, from: nil)) { return }
-            generation += 1
-            if let editor { dismissed = Query(editor) }
-            closeSuggestions()
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            // Composition owns all its keys, including arrows, Return and Escape.
-            guard !accepting, !textView.hasMarkedText() else { return false }
-            if selector == #selector(NSTextView.complete(_:)) {
-                dismissed = nil
-                refresh()
-                return true
-            }
-            guard popover.isShown else { return false }
-            switch selector {
-            case #selector(NSResponder.moveDown(_:)):
-                suggestions.move(1)
-            case #selector(NSResponder.moveUp(_:)):
-                suggestions.move(-1)
-            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)):
-                guard suggestions.table.selectedRow >= 0 else { closeSuggestions(); return false }
-                accept(suggestions.table.selectedRow)
-            case #selector(NSResponder.cancelOperation(_:)):
-                dismissed = Query(textView)
-                closeSuggestions()
-            default: return false
-            }
-            return true
-        }
-
-        private func accept(_ row: Int) {
-            guard let field, let editor, field.currentEditor() === editor, !editor.hasMarkedText(),
-                  let offered, Query(editor) == offered, suggestions.names.indices.contains(row) else { return }
-            let name = suggestions.names[row]
-            accepting = true
-            closeSuggestions()
-            // Use the native field editor's text-input path, then its ordinary
-            // Return command to tokenize. Never construct token attachments or
-            // replace objectValue while editing: other tokens and undo survive.
-            editor.insertText(name, replacementRange: offered.range)
-            editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
-            // Return can end NSTokenField editing. Resume this field rather
-            // than letting acceptance move typing to the next key view.
-            if field.currentEditor() == nil {
-                field.window?.makeFirstResponder(field)
-                if let editor = field.currentEditor() as? NSTextView {
-                    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
-                }
-            }
-            accepting = false
-            scheduleRefresh()
-        }
-
-        private func closeSuggestions() {
-            offered = nil
-            removeMouseMonitor()
-            popover.close()
-        }
-
-        private func removeMouseMonitor() {
-            if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
-            mouseMonitor = nil
-        }
-
-        func popoverWillClose(_ notification: Notification) {
-            // Outside dismissal must survive queued SwiftUI/name refreshes.
-            if let editor { dismissed = Query(editor) }
-            offered = nil
-            removeMouseMonitor()
-        }
-
-        func stopEditing() {
-            generation += 1
-            if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
-            selectionObserver = nil
-            editor = nil
-            editingCommit = nil
-            dismissed = nil
-            closeSuggestions()
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
@@ -237,149 +92,42 @@ struct BrowseTagField: NSViewRepresentable {
             let tags = (field.objectValue as? [String] ?? []).flatMap { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
             var seen = Set<String>(), unique: [String] = []
             for tag in tags where seen.insert(tag.lowercased()).inserted { unique.append(tag) }
-            stopEditing()
+            editingCommit = nil
             commit(unique)
         }
+    }
 
-        /// Native token attachments delimit editable tag text. UTF-16 ranges
-        /// are required by NSTextInputClient, including for non-ASCII tags.
-        private struct Query: Equatable {
-            let range: NSRange
-            let text: String
-            let selection: NSRange
+    /// Native token attachments delimit editable tag text. NSTextInputClient
+    /// uses UTF-16 ranges, including for non-ASCII tags.
+    struct Query {
+        let range: NSRange
+        let text: String
 
-            init?(_ editor: NSTextView) {
-                guard !editor.hasMarkedText() else { return nil }
-                let string = editor.string as NSString
-                let selection = editor.selectedRange()
-                guard selection.length == 0, selection.location != NSNotFound, selection.location <= string.length else { return nil }
-                let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FFFC}"))
-                let before = string.rangeOfCharacter(from: separators, options: .backwards,
-                                                   range: NSRange(location: 0, length: selection.location))
-                let start = before.location == NSNotFound ? 0 : NSMaxRange(before)
-                let after = string.rangeOfCharacter(from: separators, options: [],
-                                                  range: NSRange(location: selection.location, length: string.length - selection.location))
-                let end = after.location == NSNotFound ? string.length : after.location
-                guard end > start else { return nil }
-                range = NSRange(location: start, length: end - start)
-                text = string.substring(with: range)
-                self.selection = selection
+        init?(text: String, selection: NSRange) {
+            let string = text as NSString
+            guard selection.length == 0, selection.location != NSNotFound, selection.location <= string.length else { return nil }
+            let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FFFC}"))
+            let before = string.rangeOfCharacter(from: separators, options: .backwards,
+                                               range: NSRange(location: 0, length: selection.location))
+            let start = before.location == NSNotFound ? 0 : NSMaxRange(before)
+            let after = string.rangeOfCharacter(from: separators, options: [],
+                                              range: NSRange(location: selection.location, length: string.length - selection.location))
+            let end = after.location == NSNotFound ? string.length : after.location
+            guard end > start else { return nil }
+            range = NSRange(location: start, length: end - start)
+            self.text = string.substring(with: range)
+        }
+
+        func suggestions(in names: [String], excluding held: [String]) -> [String] {
+            let held = Set(held.map { $0.lowercased() })
+            let typed = text.lowercased()
+            return names.filter { name in
+                let lower = name.lowercased()
+                guard !held.contains(lower) else { return false }
+                let components = lower.components(separatedBy: "::")
+                return components.indices.contains { components[$0...].joined(separator: "::").hasPrefix(typed) }
             }
         }
-    }
-}
-
-/// A native popover, scroll view and table supply material, selection, scrollers
-/// and accessible rows. It has no key view: typing stays with the token editor.
-private final class BrowseTagSuggestions: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    let table = BrowseTagSuggestionTable()
-    var names: [String] = []
-    var accept: ((Int) -> Void)?
-
-    override func loadView() {
-        let scroll = BrowseTagSuggestionScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.setAccessibilityIdentifier("browse.inspector.tagSuggestions.viewport")
-        table.headerView = nil
-        table.backgroundColor = .clear
-        table.rowSizeStyle = .medium
-        // A useful pointer/AX target, with at most six visible choices.
-        table.rowHeight = max(28, table.rowHeight)
-        table.allowsEmptySelection = true
-        table.allowsMultipleSelection = false
-        table.setAccessibilityIdentifier("browse.inspector.tagSuggestions")
-        table.setAccessibilityLabel(BrowseStrings.text("browse.inspector.tags"))
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tag"))
-        table.addTableColumn(column)
-        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        table.autoresizingMask = [.width]
-        table.dataSource = self
-        table.delegate = self
-        table.target = self
-        table.action = #selector(chooseSuggestion(_:))
-        scroll.documentView = table
-        view = scroll
-    }
-
-    func show(_ names: [String], fieldWidth: CGFloat) {
-        _ = view // Load the native scroll view before configuring its table.
-        self.names = names
-        let font = NSFont.preferredFont(forTextStyle: .body)
-        let longest = names.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        // Width grows for paths, but cannot turn into a screen-wide completion
-        // panel. Unusually long paths retain their full AX label and tooltip.
-        let width = max(fieldWidth, min(420, longest + 32))
-        let height = CGFloat(min(names.count, 6)) * (table.rowHeight + table.intercellSpacing.height)
-        preferredContentSize = NSSize(width: width, height: height)
-        view.frame.size = preferredContentSize
-        let contentWidth = (view as? NSScrollView)?.contentSize.width ?? width
-        table.frame = NSRect(x: 0, y: 0, width: contentWidth,
-                             height: CGFloat(names.count) * (table.rowHeight + table.intercellSpacing.height))
-        table.sizeLastColumnToFit()
-        table.reloadData()
-        table.deselectAll(nil)
-        table.scrollRowToVisible(0)
-    }
-
-    func move(_ step: Int) {
-        let current = table.selectedRow
-        let next = current < 0 ? (step > 0 ? 0 : names.count - 1) : current + step
-        if names.indices.contains(next) {
-            table.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
-            table.scrollRowToVisible(next)
-        } else { table.deselectAll(nil) }
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { names.count }
-
-    @objc private func chooseSuggestion(_ sender: NSTableView) {
-        // NSTableView tracks selection through mouse-up. Releasing outside
-        // the clicked row cancels acceptance while retaining native tracking.
-        guard let event = NSApp.currentEvent, event.type == .leftMouseUp,
-              sender.clickedRow >= 0,
-              sender.row(at: sender.convert(event.locationInWindow, from: nil)) == sender.clickedRow else { return }
-        accept?(sender.clickedRow)
-    }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = BrowseTagSuggestionCell()
-        let label = NSTextField(labelWithString: names[row])
-        label.font = .preferredFont(forTextStyle: .body)
-        label.lineBreakMode = .byTruncatingMiddle
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setAccessibilityElement(false)
-        cell.addSubview(label)
-        cell.textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: tableView.intercellSpacing.width),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -tableView.intercellSpacing.width),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        cell.toolTip = names[row]
-        cell.setAccessibilityElement(true)
-        cell.setAccessibilityRole(.button)
-        cell.setAccessibilityLabel(names[row])
-        cell.setAccessibilityIdentifier("browse.inspector.tagSuggestion.\(row)")
-        cell.press = { [weak self] in self?.accept?(row) }
-        return cell
-    }
-}
-
-private final class BrowseTagSuggestionScrollView: NSScrollView {
-    override var acceptsFirstResponder: Bool { false }
-}
-
-private final class BrowseTagSuggestionTable: NSTableView {
-    override var acceptsFirstResponder: Bool { false }
-}
-
-private final class BrowseTagSuggestionCell: NSTableCellView {
-    var press: (() -> Void)?
-    override func accessibilityPerformPress() -> Bool {
-        press?()
-        return true
     }
 }
 #endif

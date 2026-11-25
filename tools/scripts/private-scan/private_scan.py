@@ -843,11 +843,11 @@ PUBLIC_ARTIFACTS = {
         '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
         '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
-    # Complete-file review in cleanroom 20261125T150152Z-48643.
-    'app/MeguriSnapshotTests/BrowseTagPopoverTests.swift':
-        '7a1df541d53630d8a4a6ca56f961eba9a5def3c691f7fe4ef4309cb6a540d278',
+    # Whole-file review in cleanroom 20261125T154052Z-94614.
+    'app/Packages/MeguriKit/Tests/BrowseTests/BrowseTagFieldTests.swift':
+        '9d4f83ae0ffe4c49beb2efc35fc1474a9928786b94f2b49a4401bd7b9e621b44',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '357676d0db43c569b640efa01a895493e0fcb9ed648930b59a2c89228d97af60',
+        '417bd403de6a33face77a64add0e883e2099d73a96ffc8da20b7d1891648d84d',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
@@ -920,7 +920,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '180f6c908bda7347dfa6fc925cfbb802d3fcccf391231a2e2366b3c3b7e74321',
+        '9076083d5f53bde5110cb8e256ba61d81e7ab516071b28e6cef8a9daa58a9e21',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
