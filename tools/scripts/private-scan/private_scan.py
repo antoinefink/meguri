@@ -835,9 +835,27 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
+    'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
+        '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
+    # Complete-content PUBLIC review: Mac heatmap history, 2026-11-24.
+    'app/Packages/MeguriKit/Sources/HeatmapKit/ActivityGrid.swift':
+        '06bdb1cf1bb568541feedda2187a1a67d37bfe33353c25b1672419edf06da417',
+    'core/crates/meguri-engine/tests/activity.rs':
+        '37ad2a34372338cdac430f3b1d45299d433256d46cbbbc95032915ecb1fe3948',
+    'core/crates/meguri-ffi/src/activity.rs':
+        '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
+    'core/crates/meguri-storage/tests/activity.rs':
+        'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
+    # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
+    'docs/design/native-interface-contract.md':
+        'ae75b265d0f65aba457ec52d2d585140c001f2e1a7c0e07b040d6ea90136ad7d',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
+    # Whole-file PUBLIC review in cleanroom 20261124T154119Z-15087.
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseCardPreviewTests.swift':
+        'f5b4994c338dd6d93d99cadbf15c90761a44269fe7d6dc7f0fe1030d6ee11c95',
     'docs/process/review-log/mcp-note-attachments-20261122.md':
         '9ab4f1074eba351094ed1660f1a69fea51d46097a917c040eac6e1fbd7bf4ea8',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
@@ -1337,7 +1355,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'cf1988b435f58576bedcb431520f9d98a1161aa2c075a1c8d6b59ffebb207429',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '125a87c0294d5e6535bcc729ed24d21034d4a58615f60747d4765b21ac3c8578',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

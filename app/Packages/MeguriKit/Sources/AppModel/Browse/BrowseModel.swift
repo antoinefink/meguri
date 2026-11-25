@@ -549,20 +549,21 @@ public final class BrowseModel {
     /// row navigates (its section is returned); one filter row alone is a
     /// click (or ⌥-click) on it; with ⌘, each filter row in it is a ⌘-click;
     /// anything else (a ⇧ range, an empty selection) changes nothing. The
-    /// list then draws its own selection again.
+    /// list then draws its own selection again. The list's selection holds
+    /// no filter row (N21.1), so no click needs the rows the list draws.
     public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click) -> AppSection? {
-        let old = listSelection
         defer { selectionEcho &+= 1 }
-        if case .section(let section)? = new.subtracting(old).first(where: { if case .section = $0 { true } else { false } }),
-           section != .browse {
+        // Any section but Browse in the new selection navigates, even alongside
+        // filter rows.
+        if case .section(let section)? = new.first(where: {
+            if case .section(let section) = $0 { section != .browse } else { false }
+        }) {
             return section
         }
         let rows = new.filter { if case .section = $0 { false } else { true } }
         switch click {
         case .command:
-            for row in rows.symmetricDifference(old.filter { if case .section = $0 { false } else { true } }) {
-                activate(row, click: .command)
-            }
+            for row in rows { activate(row, click: .command) }
         case .plain, .option:
             if rows.count == 1, let row = rows.first { activate(row, click: click) }
         }

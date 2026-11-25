@@ -87,7 +87,7 @@ let package = Package(
         .testTarget(name: "CardInfoTests", dependencies: ["CardInfo", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "NoteTypesTests", dependencies: ["NoteTypes", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "HeatmapKitTests", dependencies: ["HeatmapKit"], swiftSettings: settings),
-        .testTarget(name: "StatsTests", dependencies: ["Stats", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
+        .testTarget(name: "StatsTests", dependencies: ["Stats", "AppModel", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "ReviewTests", dependencies: ["Review", "AppModel", "DesignSystem", "Settings"], swiftSettings: settings),
         .testTarget(
             name: "CardRenderingTests",

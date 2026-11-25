@@ -240,6 +240,15 @@ pub trait ReadRows: sealed::Connected {
     ) -> Result<Vec<u32>, StorageError> {
         crate::queries::activity::day_counts(self.connection(), scope, next_day_at)
     }
+    /// All rated history, with AH3 day bounds and AH4 home-deck scope.
+    /// Only studied days are returned; absent days are implicitly zero.
+    fn activity_history_counts(
+        &self,
+        scope: crate::queries::activity::ActivityScope<'_>,
+        next_day_at: i64,
+    ) -> Result<Vec<(i64, u32)>, StorageError> {
+        crate::queries::activity::history_counts(self.connection(), scope, next_day_at)
+    }
     /// `stats/studied-today` T12.1: the number of N6's rows after review-log
     /// id `after` (`stats/day-buckets` B2) and the sum of their `time`.
     fn studied_since(&self, after: i64) -> Result<crate::queries::studied::Studied, StorageError> {

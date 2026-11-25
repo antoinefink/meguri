@@ -25,7 +25,9 @@ pub enum ActivityScope<'a> {
 
 /// Collection scope. `?1` is `N` (epoch seconds), `?2` the window's first id.
 /// The `id` range is a rowid range: the statement never reads rows before it.
-pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - id / 1000) / 86400), count(*) FROM revlog \
+/// Negative milliseconds need floor seconds. Adding 1 before dividing is safe
+/// even for i64::MIN; nonnegative ids keep their plain integer division.
+pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - CASE WHEN id >= 0 THEN id / 1000 ELSE (id + 1) / 1000 - 1 END) / 86400), count(*) FROM revlog \
      WHERE id >= ?2 AND ease > 0 GROUP BY 1";
 
 /// Deck scope for `decks` deck ids, bound as `?3` onwards. Each half of
@@ -37,7 +39,7 @@ pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - id / 1000) / 86400), count
 pub fn deck_sql(decks: usize) -> String {
     let list = (0..decks.max(1)).map(|i| format!("?{}", i + 3)).collect::<Vec<_>>().join(", ");
     format!(
-        "SELECT max(0, (?1 - r.id / 1000) / 86400), count(*) FROM revlog r \
+        "SELECT max(0, (?1 - CASE WHEN r.id >= 0 THEN r.id / 1000 ELSE (r.id + 1) / 1000 - 1 END) / 86400), count(*) FROM revlog r \
          WHERE r.id >= ?2 AND r.ease > 0 AND r.cid IN (\
            SELECT c.id FROM cards c WHERE c.odid = 0 AND c.did IN ({list}) \
            UNION ALL \
@@ -62,14 +64,34 @@ pub(crate) fn day_counts(
     scope: ActivityScope<'_>,
     next_day_at: i64,
 ) -> Result<Vec<u32>, StorageError> {
-    let start = window_start(next_day_at);
     let mut counts = vec![0u32; ACTIVITY_DAYS as usize];
-    let mut add = |k: i64, n: i64| {
-        // The bound keeps k at or under 370; a row stamped in the far future
-        // has k 0 (max), so nothing falls outside the vector.
+    for (k, n) in sparse_day_counts(conn, scope, next_day_at, window_start(next_day_at))? {
         if let Some(slot) = usize::try_from(k).ok().and_then(|k| counts.get_mut(k)) {
-            *slot = slot.saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
+            *slot = n;
         }
+    }
+    Ok(counts)
+}
+
+/// Mac Home's all-history read. Missing days are zero; space is proportional
+/// to studied days, never to the age of the oldest review timestamp.
+pub(crate) fn history_counts(
+    conn: &Connection,
+    scope: ActivityScope<'_>,
+    next_day_at: i64,
+) -> Result<Vec<(i64, u32)>, StorageError> {
+    sparse_day_counts(conn, scope, next_day_at, i64::MIN)
+}
+
+fn sparse_day_counts(
+    conn: &Connection,
+    scope: ActivityScope<'_>,
+    next_day_at: i64,
+    start: i64,
+) -> Result<Vec<(i64, u32)>, StorageError> {
+    let mut counts = Vec::new();
+    let mut add = |k: i64, n: i64| {
+        counts.push((k, u32::try_from(n).unwrap_or(u32::MAX)));
     };
     match scope {
         ActivityScope::Collection => {

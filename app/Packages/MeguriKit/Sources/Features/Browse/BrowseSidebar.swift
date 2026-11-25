@@ -18,13 +18,14 @@ import AppKit
 public struct BrowseSidebar<Header: View>: View {
     @Bindable private var model: BrowseModel
     private let decks: [CountedDeckNode]
-    private let deckExpanded: (Int64) -> Binding<Bool>
+    private let deckExpanded: (CountedDeckNode) -> Binding<Bool>
     private let navigate: (AppSection) -> Void
     private let header: Header
 
     /// `decks` is the deck tree in Today's order and `deckExpanded` its
-    /// expansion, the same as Today's (V6); `navigate` selects a section row.
-    public init(model: BrowseModel, decks: [CountedDeckNode], deckExpanded: @escaping (Int64) -> Binding<Bool>,
+    /// expansion, the same as Today's (V6). Pass the displayed node to avoid
+    /// resolving its ID in the tree again; `navigate` selects a section row.
+    public init(model: BrowseModel, decks: [CountedDeckNode], deckExpanded: @escaping (CountedDeckNode) -> Binding<Bool>,
                 navigate: @escaping (AppSection) -> Void, @ViewBuilder header: () -> Header) {
         self.model = model
         self.decks = decks
@@ -461,7 +462,7 @@ public struct BrowseSidebar<Header: View>: View {
         String(name.unicodeScalars.map { $0.properties.isAlphabetic || ("0"..."9").contains($0) || $0 == "-" ? Character($0) : "_" })
     }
 
-    fileprivate var deckExpansion: (Int64) -> Binding<Bool> { deckExpanded }
+    fileprivate var deckExpansion: (CountedDeckNode) -> Binding<Bool> { deckExpanded }
     fileprivate var browse: BrowseModel { model }
 }
 
@@ -477,7 +478,7 @@ private struct DeckBranch<Header: View>: View {
         if node.children.isEmpty {
             sidebar.deckRow(node, ancestors: ancestors)
         } else {
-            DisclosureGroup(isExpanded: sidebar.deckExpansion(node.id)) {
+            DisclosureGroup(isExpanded: sidebar.deckExpansion(node)) {
                 ForEach(node.children, id: \.id) { child in
                     // AnyView hides the row's own tag, so the group's would reach it and select it too.
                     AnyView(DeckBranch(sidebar: sidebar, node: child,

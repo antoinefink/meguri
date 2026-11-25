@@ -130,6 +130,43 @@ import Testing
         #expect(model.query == after)
     }
 
+    @Test(arguments: [BrowseModel.Click.plain, .command, .option], [false, true])
+    func sectionNavigationDoesNotChangeFilters(_ click: BrowseModel.Click, mixed: Bool) async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        model.activate(.tag("brask::oddly"))
+        let query = model.query, selection = model.listSelection, echo = model.selectionEcho
+        let rows: Set<BrowseSidebarTag> = mixed
+            ? [.section(.home), .section(.browse), .deck(20), .tag("brask"), .showAllTags]
+            : [.section(.home)]
+        #expect(model.listSelectionChanged(to: rows, click: click) == .home)
+        #expect(model.query == query && model.listSelection == selection)
+        #expect(!model.showsAllTags && model.selectionEcho == echo &+ 1)
+    }
+
+    @Test(arguments: [BrowseModel.Click.plain, .option])
+    func aSingleFilterClickBesideTheBrowseRowIsAClickOnIt(_ click: BrowseModel.Click) async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: click) == nil)
+        #expect(model.query.tokens == [token(Self.spanish), token(.tag("brask"), negated: click == .option)])
+    }
+
+    /// N21.1 (2026-11-24): the list's selection is the Browse row alone, so a
+    /// ⌘-click reports the clicked row only, and a selected row the list
+    /// does not draw (filtered out, under a collapsed parent) stays selected.
+    @Test func aCommandClickKeepsHiddenDeckAndTagSelections() async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        model.activate(.tag("brask"))
+        model.activate(.tag("brask::oddly"), click: .command)
+        model.activate(.state(.new))
+        // ⌘-clicks on deck 20 (not selected) and on the parent tag (selected).
+        #expect(model.listSelectionChanged(to: [.section(.browse), .deck(20)], click: .command) == nil)
+        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: .command) == nil)
+        #expect(model.selectedRows == [.deck(10), .deck(20), .tag("brask::oddly"), .state(.new)])
+    }
+
     /// Decided 2026-11-23 (T9): a click on the row that is its kind's whole
     /// token removes it; on a saved search the query holds, it clears it.
     @Test func aSecondClickOnASelectedRowRemovesItsFilter() async {
@@ -324,7 +361,7 @@ import Testing
         await until { model.shownTopLevelTags.tags.map(\.fullName) != Array(names.prefix(8)) }
         #expect(model.shownTopLevelTags.tags.map(\.fullName) == ["t01", "t02", "t05", "t07", "t09", "t11", "t13", "t14"])
         #expect(model.shownTopLevelTags.showAll == 14)
-        model.activate(.showAllTags)
+        #expect(model.listSelectionChanged(to: [.showAllTags], click: .plain) == nil)
         #expect(model.shownTopLevelTags.tags.count == 14 && model.shownTopLevelTags.showAll == nil)
     }
 

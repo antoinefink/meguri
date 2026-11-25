@@ -151,7 +151,7 @@ private struct TodayPreviewHost: View {
 
     var body: some View {
         let now = clock.now()
-        let totals = TodayDecks(nodes: HomeTodayPreview.nodes(state)).totals
+        let totals = TodayDecks.totals(nodes: HomeTodayPreview.nodes(state))
         PreviewActivityHost { activity, navigation in
             TodaySummaryContent(summary: HomeTodayPreview.summary(state, now: now),
                 nextLearningReadyAt: state == .nothingWaiting ? now.addingTimeInterval(2 * 3_600) : nil,
@@ -198,6 +198,15 @@ struct PreviewActivityHost<Content: View>: View {
 /// A year of ordinary days, some empty, and one catch-up day of 1,400 reviews (AH7's case).
 private struct PreviewActivity: ActivityService {
     let today: ActivityDays.Day
+    func heatmapHistory(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
+        let bounded = try await heatmap(deckID: deckID)
+        var history = Dictionary(uniqueKeysWithValues: bounded.counts.enumerated().filter { $0.element > 0 }
+            .map { ($0.offset, $0.element) })
+        // Sample older reviews exercise the production sparse path on wide Mac rows.
+        for day in stride(from: 371, through: 1_100, by: 5) { history[day] = UInt32(40 + (day * 37) % 140) }
+        return ActivityDays(generation: bounded.generation, schedulerDay: bounded.schedulerDay,
+                            nextDayAt: bounded.nextDayAt, today: today, counts: bounded.counts, history: history)
+    }
     func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
         var counts = [UInt32](repeating: 0, count: 371)
         for day in counts.indices where day % 9 != 4 {

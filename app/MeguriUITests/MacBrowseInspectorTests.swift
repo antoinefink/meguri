@@ -15,6 +15,165 @@ final class MacBrowseInspectorTests: XCTestCase {
     func testInspectorLight() throws { try inspector(appearance: "light") }
     func testInspectorDark() throws { try inspector(appearance: "dark") }
 
+    /// Synthetic typical-1 collection only; run in the Mac test VM.
+    func testPinnedPreviewInteractions() throws {
+        let (app, bundle) = try launch(appearance: "light")
+        try openBrowse(app, bundle)
+        try showDeck(app, bundle, containing: "Español")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 1 })
+        press(table.outlineRows.element(boundBy: 0))
+        let page = element(app, "editor.fields"), fields = page.textViews
+        XCTAssertTrue(shows(fields, "palabra"))
+        let preview = element(app, "browse.inspector.preview")
+        let picker = element(app, "browse.inspector.preview.side")
+        XCTAssertTrue(preview.waitForExistence(timeout: 20) && picker.exists)
+        let front = picker.radioButtons["Front"], back = picker.radioButtons["Back"]
+        XCTAssertTrue(waitUntil { front.isEnabled && back.isEnabled }, "native accessible segments are ready")
+        // typical.yaml uses "word {n}"; recipe_note appends image and sound
+        // references to that field. Only its human-readable token is card text.
+        let questionField = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
+        let questionRange = try XCTUnwrap(questionField.range(of: #"^palabra [0-9]+\b"#, options: .regularExpression))
+        let question = String(questionField[questionRange])
+        let answerField = try XCTUnwrap(fields.element(boundBy: 1).value as? String)
+        let answerRange = try XCTUnwrap(answerField.range(of: #"^word [0-9]+\b"#, options: .regularExpression))
+        let answer = String(answerField[answerRange])
+        func cardText(_ text: String) -> XCUIElement {
+            // CardPagePair exposes only the current webview in this AX subtree.
+            // MATCHES consumes the whole string: e.g. (?s).*\bword 1\b.*
+            // accepts WebKit's trailing space. Rendered text may be below the viewport.
+            let pattern = #"(?s).*\b"# + NSRegularExpression.escapedPattern(for: text) + #"\b.*"#
+            return preview.staticTexts.matching(NSPredicate(
+                format: "label MATCHES %@ OR value MATCHES %@", pattern, pattern)).firstMatch
+        }
+        func answerRendered() -> Bool {
+            cardText(answer).exists
+        }
+        func backRendered() -> Bool {
+            back.value as? Int == 1 && answerRendered()
+        }
+        func frontRendered() -> Bool {
+            front.value as? Int == 1 && cardText(question).exists && !answerRendered()
+        }
+        XCTAssertTrue(waitUntil { frontRendered() }, "Front's field content is rendered in the current card")
+        capture(app, "browse-note-pinned-preview-initial-front-synthetic")
+        back.click()
+        let renderedBack = waitUntil { backRendered() }
+        // Retain the natural selected note even when the rendered-side check fails.
+        capture(app, "browse-note-pinned-preview-before-resize-synthetic")
+        XCTAssertTrue(renderedBack, "Back's field content is rendered in the card")
+
+        let count = fields.count
+        let bar = element(app, "browse.inspector.formatting")
+        let initialHeight = preview.frame.height, barBottom = bar.frame.maxY
+        func dividerStart() -> XCUICoordinate {
+            // Native VM evidence places the separator immediately below the preview.
+            // Resolve a physical point afresh: a preview-relative saved coordinate
+            // would move when a previous drag changes the preview's height.
+            let window = app.windows.containing(.outline, identifier: "browse.results.table").firstMatch
+            let frame = preview.frame, origin = window.frame.origin
+            return window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: frame.midX - origin.x, dy: frame.maxY + 0.5 - origin.y))
+        }
+        try app.bringToFront(bundleIdentifier: bundle)
+        let enlargeStart = dividerStart()
+        enlargeStart.click(forDuration: 0.1, thenDragTo: enlargeStart.withOffset(CGVector(dx: 0, dy: 160)))
+        XCTAssertTrue(waitUntil { preview.frame.height > initialHeight + 130 }, "dragging resizes the preview")
+        XCTAssertGreaterThanOrEqual(bar.frame.maxY - preview.frame.maxY, 179, "the editor remains useful")
+        XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+        // Capture a normal selected note before editing or folding anything.
+        XCTAssertTrue(waitUntil { backRendered() })
+        capture(app, "browse-note-pinned-preview-synthetic")
+
+        // Click-to-flip updates the same segmented picker.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)).click()
+        XCTAssertTrue(waitUntil { frontRendered() }, "Front is rendered before selecting Back again")
+        back.click()
+        XCTAssertTrue(waitUntil { backRendered() })
+
+        fields.element(boundBy: 0).click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        app.typeText(" inspectionmarker")
+        app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
+
+        let editingHeight = preview.frame.height
+        try app.bringToFront(bundleIdentifier: bundle)
+        let editingStart = dividerStart()
+        editingStart.click(forDuration: 0.1, thenDragTo: editingStart.withOffset(CGVector(dx: 0, dy: -30)))
+        XCTAssertTrue(waitUntil { preview.frame.height < editingHeight - 15 })
+        XCTAssertEqual(fields.count, count)
+        XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+        let bold = element(app, "browse.inspector.format.bold")
+        XCTAssertTrue(bold.isEnabled, "dragging retains the editing selection")
+        bold.click()
+        // Browse uses the host's focused-field identifier; formatting emits <b>.
+        let html = bar.descendants(matching: .any).matching(identifier: "editor.field.0.htmlToggle").firstMatch
+        XCTAssertTrue(html.isEnabled)
+        html.click()
+        XCTAssertTrue(waitUntil { (fields.element(boundBy: 0).value as? String ?? "").contains("<b>inspectionmarker</b>") },
+                      "formatting still acts on the selected text after the divider drag")
+        html.click()
+
+        let header = element(app, "browse.inspector.preview.header")
+        header.click()
+        XCTAssertTrue(waitUntil { !preview.exists })
+        XCTAssertEqual(fields.count, count, "folding keeps the editor")
+        header.click()
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntil { backRendered() && cardText("inspectionmarker").exists },
+                      "folding and a blur-save preserve rendered Back with the edited FrontSide")
+        // Drag to both bounds: both regions remain useful.
+        for shrink in [true, false] {
+            try app.bringToFront(bundleIdentifier: bundle)
+            let height = preview.frame.height
+            let target = shrink ? header.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)) :
+                bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            let edge = dividerStart()
+            edge.click(forDuration: 0.1, thenDragTo: target)
+            XCTAssertTrue(waitUntil {
+                shrink ? preview.frame.height < height - 15 : preview.frame.height > height + 30
+            }, "each bounds drag changes the actual preview height")
+            XCTAssertGreaterThanOrEqual(preview.frame.height, 95)
+            XCTAssertGreaterThanOrEqual(bar.frame.maxY - preview.frame.maxY, 179)
+            XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+        }
+        try app.bringToFront(bundleIdentifier: bundle)
+        let edge = dividerStart()
+        edge.click(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(dx: 0, dy: initialHeight - preview.frame.height)))
+        XCTAssertTrue(waitUntil { abs(preview.frame.height - initialHeight) <= 2 }, "the preview returns to its initial height")
+        XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+
+        // Empty Fields is still the separate disclosure; an opened empty field stays open on clicks.
+        fields.element(boundBy: 1).click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeKey(.delete, modifierFlags: [])
+        press(table.outlineRows.element(boundBy: 1))
+        XCTAssertTrue(waitUntil { fields.count > 1 && !(fields.element(boundBy: 1).value as? String ?? "").isEmpty })
+        press(table.outlineRows.element(boundBy: 0))
+        let empty = element(app, "browse.inspector.emptyFields")
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        empty.click()
+        XCTAssertTrue(waitUntil { fields.count == count })
+        fields.element(boundBy: 1).click()
+        XCTAssertEqual(fields.count, count)
+        // Narrow overlay: the picker and card navigation must remain separate and reachable.
+        // Español uses Basic; the Japanese reversed note actually has card navigation.
+        try showDeck(app, bundle, containing: "語彙")
+        press(table.outlineRows.element(boundBy: 0))
+        XCTAssertTrue(shows(fields, "単語"))
+        let nextCard = element(app, "browse.inspector.preview.nextCard")
+        XCTAssertTrue(nextCard.waitForExistence(timeout: 10))
+        try resize(app, bundle: bundle, to: "820x700")
+        XCTAssertTrue(waitUntil { !preview.exists }, "the narrow inspector hides before reopening")
+        try app.bringToFront(bundleIdentifier: bundle)
+        table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).doubleClick()
+        XCTAssertTrue(picker.waitForExistence(timeout: 10) && front.isHittable && back.isHittable)
+        XCTAssertTrue(nextCard.isHittable, "card navigation remains reachable")
+        XCTAssertFalse(picker.frame.intersects(header.frame), "Preview and side selection never overlap")
+        XCTAssertFalse(picker.frame.intersects(nextCard.frame), "side selection and card navigation never overlap")
+        capture(app, "browse-note-pinned-preview-narrow-synthetic")
+    }
+
     private func inspector(appearance: String) throws {
         let (app, bundle) = try launch(appearance: appearance)
         try openBrowse(app, bundle)
@@ -215,7 +374,9 @@ final class MacBrowseInspectorTests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        let window = app.windows.containing(.outline, identifier: "browse.results.table").firstMatch
+        XCTAssertTrue(window.exists, "capture the Browse window")
+        let attachment = XCTAttachment(screenshot: window.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
