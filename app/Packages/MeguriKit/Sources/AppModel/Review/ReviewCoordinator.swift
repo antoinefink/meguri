@@ -1172,6 +1172,7 @@ public final class ReviewCoordinator {
         presentationRevision &+= 1
         preload?.cancel()
         surface.invalidatePresentationAudio()
+        presentedKey = nil
         notice = String(describing: error); phase = .error
         // A start that failed before its session opened never shows (N16.8).
         if sessionID != nil { firstPresentation() }

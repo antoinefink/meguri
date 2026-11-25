@@ -416,6 +416,36 @@ extension ReviewCollectionStartupTests {
         #expect(await fixture.model.end())
     }
 
+    @Test(arguments: [false, true])
+    func automaticRefreshAfterReadFailurePresentsSameCardAgain(answerSide: Bool) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        if answerSide { fixture.model.reveal(); await fixture.model.settled() }
+        try #require(fixture.surface.presented == [1])
+        fixture.client.onHeadResult = { throw BridgeError.internal("synthetic transient read failure") }
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.model.phase == .error)
+        #expect(!fixture.model.canReveal && !fixture.model.canRate)
+        #expect(fixture.surface.audioInvalidations == 1)
+
+        fixture.client.onHeadResult = nil
+        // A reveal must use a fresh presentation after the old page was invalidated.
+        fixture.surface.onReveal = { [surface = fixture.surface] in
+            guard surface.presented == [1, 1] else { throw CardPage.Failure.notPrepared }
+        }
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        #expect(fixture.client.headReads == 2)
+        #expect(fixture.surface.presented == [1, 1])
+        #expect(fixture.model.phase == (answerSide ? .answer : .question))
+        #expect(fixture.model.canReveal == !answerSide)
+        #expect(fixture.model.canRate == answerSide)
+        if !answerSide { fixture.model.reveal(); await fixture.model.settled() }
+        #expect(fixture.model.phase == .answer && fixture.model.canRate)
+        #expect(fixture.surface.reveals == (answerSide ? 2 : 1))
+        fixture.surface.onReveal = nil
+        #expect(await fixture.model.end())
+    }
+
     @Test func presentationFailureInvalidatesAudioAndRetryPresentsAgain() async throws {
         let fixture = Fixture()
         await fixture.model.start()
