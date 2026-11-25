@@ -37,15 +37,20 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
     private var closing = false
 
     static func show(_ form: some View, collection: ReviewCollection, over parent: NSWindow?) {
+        // Add can itself be main. Only the visible workspace can own it;
+        // reentry from a native editor must retain the previous workspace.
+        let workspace = parent.flatMap {
+            $0.isVisible && $0.identifier?.rawValue == "main" ? $0 : nil
+        }
         if let current, current.collection === collection {
             // The workspace may have closed and reopened while Add stayed open.
-            if let parent, parent.isVisible { current.parent = parent }
+            if let workspace, workspace !== current.window { current.parent = workspace }
             current.window.makeKeyAndOrderFront(nil)
             return
         }
         // A collection transition drains its editor before replacing its owner.
         guard current == nil else { return }
-        current = AddNoteWindow(form: form, collection: collection, over: parent)
+        current = AddNoteWindow(form: form, collection: collection, over: workspace)
     }
     private init(form: some View, collection: ReviewCollection, over parent: NSWindow?) {
         self.collection = collection; self.parent = parent
@@ -91,9 +96,6 @@ final class AddNoteWindow: NSObject, NSWindowDelegate {
 }
 
 private final class AddNoteKeyWindow: NSWindow {
-    // Add takes the keyboard; the workspace remains the main document window.
-    override var canBecomeMain: Bool { false }
-
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "w" {
