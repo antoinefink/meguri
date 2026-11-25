@@ -97,7 +97,9 @@ final class DeckOptionsUITests: XCTestCase {
     }
 
     func testExpandedDisplayOrderAndNewPresetThroughNativeDeckMenu() throws {
-        let (app, bundle) = try launch()
+        // Use the guest's available screen so the native panel's row labels
+        // and all five pickers fit together in the evidence attachment.
+        let (app, bundle) = try launch(extra: ["-MeguriWindowSize", "large"])
         defer { app.terminate() }
         try app.bringToFront(bundleIdentifier: bundle)
         let deckMenu = app.menuBars.menuBarItems["Deck"]
@@ -110,35 +112,58 @@ final class DeckOptionsUITests: XCTestCase {
         let gather = app.popUpButtons["deckOptions.options.order.newGatherPriority"]
         XCTAssertFalse(gather.exists, "Advanced is collapsed whenever the page opens")
         try app.bringToFront(bundleIdentifier: bundle)
-        let advanced = app.disclosureTriangles["Advanced"].firstMatch
+        let advanced = app.buttons["deckOptions.options.advanced"]
         XCTAssertTrue(advanced.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForValue(advanced, "Collapsed"))
         XCTAssertTrue(advanced.isHittable)
-        // The VM reports a 94 × 16 combined chevron/label AX frame. Its
-        // midpoint hits the label; click the native chevron's leading square.
-        let triangleSide = advanced.frame.height
-        advanced.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: triangleSide / 2, dy: triangleSide / 2)).click()
+        advanced.click()
+        XCTAssertTrue(waitForValue(advanced, "Expanded"))
         XCTAssertTrue(gather.waitForExistence(timeout: 10))
-        for row in ["newSortOrder", "newMix", "interdayLearningMix", "reviewOrder"] {
-            XCTAssertTrue(app.popUpButtons["deckOptions.options.order." + row].exists,
+        let orderRows = ["newGatherPriority", "newSortOrder", "newMix", "interdayLearningMix", "reviewOrder"]
+        let review = app.popUpButtons["deckOptions.options.order.reviewOrder"]
+        let scroll = app.scrollViews.containing(.popUpButton, identifier: "deckOptions.options.order.reviewOrder").firstMatch
+        XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
+        for row in orderRows {
+            let picker = app.popUpButtons["deckOptions.options.order." + row]
+            XCTAssertTrue(picker.waitForExistence(timeout: 10),
                           "Advanced exposes the actual native picker for \(row)")
         }
+        capture(app, "deck-options-five-native-pickers")
+        for row in orderRows {
+            let picker = app.popUpButtons["deckOptions.options.order." + row]
+            XCTAssertTrue(picker.isHittable && app.windows.firstMatch.frame.contains(picker.frame),
+                          "The native panel screenshot shows the picker for \(row)")
+        }
+        for label in ["New card gather order", "New card sort order", "New/review order",
+                      "Interday learning/review order", "Review sort order"] {
+            let text = app.staticTexts[label].firstMatch
+            XCTAssertTrue(text.exists && app.windows.firstMatch.frame.contains(text.frame),
+                          "The native panel screenshot shows the row label \(label)")
+        }
         XCTAssertFalse(save.isEnabled, "Expanding the disclosure never changes the draft")
+        XCTAssertTrue(bringIntoView(advanced, in: scroll, app: app))
+        advanced.click()
+        XCTAssertTrue(waitForValue(advanced, "Collapsed"))
+        for row in orderRows {
+            XCTAssertFalse(app.popUpButtons["deckOptions.options.order." + row].exists)
+        }
+        XCTAssertFalse(save.isEnabled, "Collapsing the disclosure never changes the draft")
+        advanced.click()
+        XCTAssertTrue(gather.waitForExistence(timeout: 10))
+        XCTAssertTrue(bringIntoView(gather, in: scroll, app: app))
         // This is the native menu's spec order, including the nonsequential value 5.
         gather.clickOrTap()
         let gatherLabels = ["Deck", "Deck, then random notes", "Ascending position", "Descending position", "Random notes", "Random cards"]
         let menu = app.menus.firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        let titles = menu.menuItems.allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty }
+        let titles = menuTitles(menu)
         XCTAssertEqual(titles, gatherLabels)
         menuItem(menu, titled: "Deck, then random notes").click()
         XCTAssertTrue(waitForEnabled(save))
-        let review = app.popUpButtons["deckOptions.options.order.reviewOrder"]
-        let scroll = app.scrollViews.containing(.popUpButton, identifier: "deckOptions.options.order.reviewOrder").firstMatch
         XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
         review.click()
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        XCTAssertEqual(menu.menuItems.allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty },
+        XCTAssertEqual(menuTitles(menu),
                        ["Due date, then random", "Due date, then deck", "Deck, then due date", "Ascending intervals",
                         "Descending intervals", "Easy cards first", "Difficult cards first", "Ascending retrievability",
                         "Descending retrievability", "Relative overdueness", "Random", "Order added", "Latest added first"])
@@ -311,10 +336,16 @@ final class DeckOptionsUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
     private func menuItem(_ menu: XCUIElement, titled title: String) -> XCUIElement {
-        // Native Mac menu items may have a title and an empty AX label.
-        menu.menuItems.matching(NSPredicate(format: "title == %@", title)).firstMatch
+        // Native Mac menus can expose their captions as either title or label.
+        menu.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@", title, title)).firstMatch
+    }
+    private func menuTitles(_ menu: XCUIElement) -> [String] {
+        menu.menuItems.allElementsBoundByIndex.map { $0.title.isEmpty ? $0.label : $0.title }.filter { !$0.isEmpty }
     }
     private func bringIntoView(_ control: XCUIElement, in scroll: XCUIElement, app: XCUIApplication) -> Bool {
+        // A visible native control needs no scroll-area or scrollbar AX node.
+        if control.exists, !control.frame.isEmpty,
+           app.windows.firstMatch.frame.contains(control.frame), control.isHittable { return true }
         guard scroll.exists else { return false }
         for _ in 0..<8 {
             let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)

@@ -172,7 +172,7 @@ public final class DeckOptionsPageModel {
     public private(set) var addingPreset = false
     public private(set) var selectingPreset = false
     public private(set) var presetCreationFailed = false
-    /// Add succeeded; Save can safely retry the core's validation before writing.
+    /// A mutation succeeded; Save can safely retry the core's validation before writing.
     public private(set) var presetValidationFailed = false
     /// The text of each row's field; committed by `commit(_:)` (O15.3).
     public var fieldText: [DeckOptionsPageRow: String] = [:]
@@ -469,17 +469,25 @@ public final class DeckOptionsPageModel {
             // validation read fails, and never offer to retry this Add.
             presets = updated.presets; selectedPreset = updated.openingPreset
             for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
-            do {
-                let checked = try await session.issues()
-                guard current == revision else { return }
-                issues = checked; presetValidationFailed = false
-            } catch {
-                guard current == revision else { return }
-                presetValidationFailed = true
-                handlePresetFailure(error)
-            }
+            await refreshValidation(session, revision: current)
             guard current == revision else { return }
             addingPreset = false; finishNamingPreset()
+        }
+    }
+
+    private func refreshValidation(_ session: any DeckOptionsPageSession, revision current: UInt64) async {
+        guard current == revision else { return }
+        guard owner?.generation == generation else { end(.ended); return }
+        do {
+            let checked = try await session.issues()
+            guard current == revision else { return }
+            guard owner?.generation == generation else { end(.ended); return }
+            issues = checked; presetValidationFailed = false
+        } catch {
+            guard current == revision else { return }
+            guard owner?.generation == generation else { end(.ended); return }
+            presetValidationFailed = true
+            handlePresetFailure(error)
         }
     }
 
@@ -556,12 +564,12 @@ public final class DeckOptionsPageModel {
             guard current == revision else { return }
             do {
                 try await edit(session)
-                let issues = try await session.issues()
-                if current == revision { self.issues = issues; presetValidationFailed = false }
             } catch {
                 // The core draft no longer matches this page; read it again.
                 if current == revision { changedElsewhere = true }
+                return
             }
+            await refreshValidation(session, revision: current)
         }
     }
 

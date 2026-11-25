@@ -536,7 +536,8 @@ import Testing
         #expect(core.session?.calls.filter { $0.hasPrefix("add ") }.count == (retry ? 2 : 1))
     }
 
-    @Test func addedPresetSurvivesValidationReadFailureAndSaveRetriesWithoutDuplicate() async throws {
+    @Test(arguments: [false, true])
+    func addedPresetSurvivesValidationReadFailureAndSaveRetriesWithoutDuplicate(numeric: Bool) async throws {
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions
         model.open(deckID: 1); await model.waitForCompletion()
@@ -555,6 +556,14 @@ import Testing
         #expect(model.canSave && !model.canSwitchPreset && model.selectedUseCount == 0)
         model.createPreset(); model.beginNewPreset(); model.selectPreset(1)
         #expect(model.selectedPreset == -1 && !model.namingPreset)
+        core.issuesFailure = .cancelled
+        if numeric { model.setValue(.newPerDay, 42) }
+        else { model.setDisplayOrder(.reviewOrder, 6) }
+        await model.waitForCompletion()
+        #expect(model.presetValidationFailed && !model.changedElsewhere && model.canSave && !model.canSwitchPreset)
+        let staged = try #require(model.selected)
+        #expect(staged.id == -1 && staged.name == "Default1894701600")
+        #expect(staged.newPerDay == (numeric ? 42 : 20) && staged.displayOrder[.reviewOrder] == (numeric ? 0 : 6))
         core.saveResult = .failure(.sessionActive)
         model.save(); await model.waitForCompletion()
         #expect(model.phase == .editing && model.saveFailure == .busy && model.canSave)
@@ -563,9 +572,11 @@ import Testing
         model.save(); await model.waitForCompletion()
         let saved = try #require(core.session?.savedPresets)
         #expect(saved.filter { $0.id < 0 }.count == 1 && core.session?.savedSelection == -1)
+        #expect(saved.first { $0.id == -1 } == staged)
         #expect(saved.first { $0.id == 1 }?.newPerDay == 31)
         #expect(saved.first { $0.id == 1 }?.displayOrder[.reviewOrder] == 12)
-        #expect(core.session?.calls == ["set newPerDay 1 31.0", "order reviewOrder 1 12", "add Default", "save", "save"])
+        #expect(core.session?.calls == ["set newPerDay 1 31.0", "order reviewOrder 1 12", "add Default",
+            numeric ? "set newPerDay -1 42.0" : "order reviewOrder -1 6", "save", "save"])
         #expect(core.opens == 1 && model.outcome == .saved)
     }
 

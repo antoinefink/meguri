@@ -130,24 +130,34 @@ public struct DeckOptionsPage: View {
                     .accessibilityIdentifier("deckOptions.options.memoryFooter")
             }
             Section {
-                DisclosureGroup(isExpanded: $model.advancedExpanded) {
-                    VStack(alignment: .leading) {
-                        Text("deckOptions.section.displayOrder", bundle: .module)
-                            .font(.headline)
-                            .accessibilityAddTraits(.isHeader)
-                        ForEach(DeckOptionsDisplayOrder.allCases, id: \.self) { row in
-                            displayOrderPicker(row)
-                        }
-                        Text("deckOptions.displayOrder.footer", bundle: .module)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("deckOptions.options.displayOrderFooter")
+                // Two native Mac UI runs found DisclosureGroup inert in this grouped
+                // Form, at both its center and chevron. A native Button gives the
+                // whole row one action, with its identifier confined to that leaf.
+                Button { model.advancedExpanded.toggle() } label: {
+                    HStack {
+                        Image(systemName: model.advancedExpanded ? "chevron.down" : "chevron.right")
+                            .accessibilityHidden(true)
+                        Text("deckOptions.disclosure.advanced", bundle: .module)
                     }
-                } label: {
-                    Text("deckOptions.disclosure.advanced", bundle: .module)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                // Scope identifiers to leaf controls: Mac disclosure IDs propagate to children.
+                .buttonStyle(.plain)
+                .accessibilityValue(Text(model.advancedExpanded
+                    ? "deckOptions.disclosure.expanded" : "deckOptions.disclosure.collapsed", bundle: .module))
+                .accessibilityIdentifier("deckOptions.options.advanced")
+            }
+            if model.advancedExpanded {
+                Section {
+                    ForEach(DeckOptionsDisplayOrder.allCases, id: \.self) { row in
+                        displayOrderPicker(row)
+                    }
+                } header: {
+                    Text("deckOptions.section.displayOrder", bundle: .module)
+                } footer: {
+                    Text("deckOptions.displayOrder.footer", bundle: .module)
+                        .accessibilityIdentifier("deckOptions.options.displayOrderFooter")
+                }
             }
         }
         .formStyle(.grouped)

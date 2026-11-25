@@ -51,6 +51,26 @@
         }
       }
     },
+    "deckOptions.disclosure.collapsed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed"
+          }
+        }
+      }
+    },
+    "deckOptions.disclosure.expanded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expanded"
+          }
+        }
+      }
+    },
     "deckOptions.displayOrder.footer": {
       "localizations": {
         "en": {
