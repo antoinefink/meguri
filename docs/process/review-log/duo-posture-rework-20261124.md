@@ -74,3 +74,23 @@ Independent reviewer `s-20261124T123814Z-b6a481ac` reviewed the complete files b
 | `tools/vm/tests/test_hosted_posture.py` | `cdc01982383ced2c80e55e3b9f87ba016b74139e51504b1c65ffa59459f08cf4` | `20261125T093459Z-11667` |
 | `tools/vm/vnc-hosted.py` | `c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba` | `20261125T091929Z-75549` |
 | `tools/vm/vnc-session.py` | `0361433453b25f9714db86a4f2d91f51d773b60d2ac32922c50b5ec6f04fe218` | `20261125T093459Z-11667` |
+
+## Sharing the VM with M3 jobs
+
+Folding runs on M5 and waits on the guest claim also used by M3 jobs. M3 hosts the persistent VNC connection. The production holder stayed connected across an M5 control disconnect. The first live inspection passed. Calibration stopped before input when Vision’s Accurate recognition failed on the guest.
+
+Independent reviewer `s-20261124T123814Z-b6a481ac` classified the following complete files as public project source, documentation or synthetic fixtures.
+
+| File | Complete-file SHA-256 | Independent cleanroom |
+| --- | --- | --- |
+| `docker/image-tools.Dockerfile` | `1ceac11b23309739cf879770dc5595833c4b618b2a773995262b1bda74e39bb6` | `20261125T105315Z-1142` |
+| `docs/process/mac-ui-vm.md` | `4a7c28d74dc7d316d47b529a9a190bb4b6ecbd043ae356a53fa7d94660c90b4d` | `20261125T105315Z-1142` |
+| `docs/process/new-machine.md` | `31cefac51a58392687e0aba28fd3d36039c14c6ff8a15d86c4d4031fc829c62a` | `20261125T105315Z-1142` |
+| `docs/process/sim-posture.md` | `c61c8e4bef254147685efb4a93b32e8e2453a8953f566fd2f875c5604db7e7b7` | `20261125T105315Z-1142` |
+| `tools/scripts/vm-claim.py` | `f71d76cc817da0a7e83b3232c710f58da883b8e10c96eeca484abb459d3034c8` | `20261125T105315Z-1142` |
+| `tools/tests/vnc_session_test.py` | `81bebf58239c7fa8f681d4550b2e2a61a55a2933ea3e6897c64c77da69887493` | `20261125T105543Z-3873` |
+| `tools/vm/AGENTS.md` | `db075d154131e99869875b404de7c6cf28eabf4eb0d432f10f82ac2242ddd71d` | `20261125T105315Z-1142` |
+| `tools/vm/duo-fold.sh` | `71070ef4ff2be7b34d1543370170d52424efc3c56b49456f0f5efc16a4bc7b22` | `20261125T105543Z-3873` |
+| `tools/vm/fold-claim.py` | `e959bbed9139177db65f04e922c8e0baefa59fbfa3601a9446a07e8272cd5626` | `20261125T105543Z-3873` |
+| `tools/vm/tests/test_fold_claim.py` | `f2b158f4dbe641f1c67909f95313bf6cb79b055194cac3a1d65882ba60b7caa6` | `20261125T105315Z-1142` |
+| `tools/vm/tests/test_hosted_posture.py` | `381a35e844fb73d642f5f72684e7b3a21ef89c8c7771dd1a751e6d71caf455ff` | `20261125T105315Z-1142` |

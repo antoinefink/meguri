@@ -6,7 +6,12 @@ extension SettingsPage {
     /// it launch with `-ShowAnkiServerInterface YES`.
     public static var showsAnkiServer: Bool { UserDefaults.standard.bool(forKey: "ShowAnkiServerInterface") }
     public static var visible: [SettingsPage] {
-        showsAnkiServer ? allCases : allCases.filter { $0 != .ankiServer }
+        let pages = showsAnkiServer ? allCases : allCases.filter { $0 != .ankiServer }
+        #if os(macOS)
+        return pages
+        #else
+        return pages.filter { $0 != .integrations }
+        #endif
     }
 }
 

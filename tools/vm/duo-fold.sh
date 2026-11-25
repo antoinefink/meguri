@@ -31,6 +31,12 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 # shellcheck source=/dev/null
 . "$ROOT/tools/scripts/mac-vm-lib.sh"
 . "$ROOT/tools/scripts/host-lease-mutex.sh"
+# Use master's claim admission/keeper, with only its reporting hooks adapted.
+MG_TOOLS="$ROOT/tools"
+. "$MG_TOOLS/mg.d/mac-vm.sh"
+mg__mac_vm_detail() { :; }
+mg__mac_vm_fail() { log "$2"; }
+mg__mac_vm_unreachable() { log "$1; no guest work admitted"; }
 
 MAIN="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")"
 CANONICAL="$MAIN/build/vm-fold"
@@ -43,7 +49,8 @@ usage() { sed -n '6,13p' "$0" | sed 's/^# *//' >&2; exit 2; }
 
 SESSION="$ROOT/tools/vm/vnc-session.py"
 HOSTED="$ROOT/tools/vm/vnc-hosted.py"
-RECOVER="" LEASE="" LEASE_WRITING=""
+BOUNDARY="$ROOT/tools/vm/fold-claim.py"
+RECOVER="" LEASE="" LEASE_WRITING="" PRIVATE_RUN_DIR="" DRAIN_BEFORE=""
 
 mvl_read_config || { log "$MVL_REASON"; exit 1; }
 PRIMARY="$(jq -r '.[0].name' <<<"$MVL_ALL")"
@@ -61,6 +68,17 @@ case "$COMMAND" in start|prepare|stop|inspect|open|closed|calibrate|deploy|prefl
   [ "$VM" = "$PRIMARY" ] || { log "VNC lifecycle supports only configured primary VM $PRIMARY"; exit 1; }
 esac
 
+# The deployed native kit is a resident, not another folding scheduler. A
+# standalone development Tart/config without that kit remains supported.
+case "$COMMAND" in status|receipt|preflight) ;;
+  *)
+    if [ ! -e "$(dirname "$TART")/remote.json" ] &&
+       [ -e "$(dirname "$TART")/../vnc-owner-v1" ]; then
+      log "fold requests run on M5 through its remote wrappers; this M3 kit already owns the persistent VNC client. M3 may schedule ordinary MG jobs"
+      exit 1
+    fi ;;
+esac
+
 select_state() {
   STATE="$(python3 "$SESSION" route "$CANONICAL" "$VM" "$TART")" || exit 1
   python3 "$SESSION" primary "$STATE" "$VM" || exit 1
@@ -74,13 +92,98 @@ recheck_state() {
   python3 "$SESSION" primary "$STATE" "$VM" || return 1
 }
 
+drain_markers() {
+  python3 - "$STATE" <<'PY'
+import os, sys
+records = []
+for name in ("drain-precommit", "shutdown-pending"):
+    try:
+        info = os.lstat(os.path.join(sys.argv[1], name))
+    except FileNotFoundError:
+        continue
+    records.append((name, info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns))
+print(records)
+PY
+}
+
 release() {
   if [ -n "$LEASE" ] && host_lease_lock "$LEASE"; then
     if [ "$LEASE_WRITING" = 1 ] || [ "$(jq -r .pid "$LEASE/holder.json" 2>/dev/null)" = "$$" ]; then
+      # Cover an unjoined drain before Python arms its stop fence, but never
+      # promote unchanged evidence that this invocation only queried/refused.
+      if [ -n "$DRAIN_BEFORE" ] && [ "$(drain_markers)" != "$DRAIN_BEFORE" ] &&
+         { [ -e "$STATE/drain-precommit" ] || [ -e "$STATE/shutdown-pending" ]; }; then
+        if mkdir "$LEASE/vm-shutdown-pending" 2>/dev/null; then
+          jq -nc --arg state "$STATE" '{state: $state, reason: "unconfirmed fold drain/stop"}' \
+            >"$LEASE/vm-shutdown-pending/intent.json"
+        fi
+      fi
       host_lease_drop "$LEASE"
     fi
     host_lease_unlock
   fi
+  [ -z "$LEASE" ] || mg__mac_vm_claim_nudge "$LEASE.claim"
+}
+
+claim_check() { python3 "$BOUNDARY" check "$LEASE" "$SSH"; }
+
+claim_take() {
+  # Never honor the general opt-out for folding: every guest access needs the
+  # same guest-wide claim, even for a connected resident's cleanup/inspection.
+  MG_LEASE_DIR="$LEASE" MG_MAC_VM="$SELECTED" MG_ROOT="$ROOT"
+  if [ -z "${MG_RUN_DIR:-}" ]; then
+    PRIVATE_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/meguri-fold.XXXXXX")" || return 1
+    MG_RUN_DIR="$PRIVATE_RUN_DIR"
+  fi
+  MG_RUN_ID="${MG_RUN_ID:-fold.$$}" MG_JOB="${MG_JOB:-$COMMAND}"
+  MEGURI_MAC_VM_SHARED_CLAIM=1
+  mkdir -p "$MG_RUN_DIR" || return 1
+  mg__mac_vm_claim || return $?
+  claim_check
+}
+
+fold_python() {
+  local interpreter=python3 rc
+  if [ "$1" = "$VENV/bin/python" ]; then interpreter="$1"; shift; fi
+  "$interpreter" -I "$BOUNDARY" run "$LEASE" "$SSH" "$@" &
+  ACTIVE_CHILD=$!
+  wait "$ACTIVE_CHILD"; rc=$?
+  ACTIVE_CHILD=""
+  return "$rc"
+}
+
+fold_start() {
+  local rc
+  # Starts run while the owned, drained guest is positively stopped. There is
+  # no live guest keeper to prove authority then. Track the controller so Bash
+  # can forward cancellation while waiting, including before publication.
+  # Keep recovery disarmed through cancellation or an unprovable start. Only
+  # an ordinary local result followed by fresh admission may rearm it.
+  RECOVER=""
+  python3 -I "$BOUNDARY" start "$LEASE" "$SSH" "$@" &
+  ACTIVE_CHILD=$!
+  wait "$ACTIVE_CHILD"; rc=$?
+  ACTIVE_CHILD=""
+  return "$rc"
+}
+
+fold_ssh() { claim_check && "$SSH" "$@"; }
+
+cancel() {
+  trap '' HUP INT TERM
+  RECOVER=""
+  if [ -n "${ACTIVE_CHILD:-}" ]; then
+    kill -TERM "$ACTIVE_CHILD" 2>/dev/null || :
+    wait "$ACTIVE_CHILD" || :
+    ACTIVE_CHILD=""
+  fi
+  exit "$1"
+}
+
+postboot_claim() {
+  # The restart kills the claim. Keep the original keeper/lease; it asks again
+  # after SSH returns. No readiness read or drain cleanup precedes admission.
+  claim_take
 }
 
 headless() {
@@ -90,14 +193,19 @@ headless() {
   }
   python3 "$SESSION" owned "$STATE" || return 1
   case "$(mvl_state "$TART" "$VM")" in
-    stopped) ;;
+    stopped)
+      # Before VNC publication our completed drain authorizes restoration.
+      # An existing VNC owner must not bypass lost admission just because
+      # the guest subsequently stopped.
+      [ ! -e "$STATE/owner" ] || claim_check || return 1 ;;
     running) shutdown_guest || return 1 ;;
     *) log "VM shutdown status uncertain; evidence retained"; return 1 ;;
   esac
   python3 "$SESSION" stop "$STATE" || return 1
   mvl_start "$TART" "$VM" "$STATE/headless.log" || return 1
-  mvl_wait_ready "$SSH" "$TART" "$VM" true "$STATE/headless.log" "$STATE/headless.ssh" >"$STATE/readiness.log" 2>&1 || return 1
-  python3 "$SESSION" clean-drain "$STATE" "$SSH" || return 1
+  postboot_claim || return 1
+  mvl_wait_ready fold_ssh "$TART" "$VM" true "$STATE/headless.log" "$STATE/headless.ssh" >"$STATE/readiness.log" 2>&1 || return 1
+  fold_python "$SESSION" clean-drain "$STATE" "$SSH" || return 1
   rm -f "$STATE/recovery-pending"
 }
 
@@ -112,6 +220,7 @@ finish() {
     fi
   fi
   release
+  [ -z "$PRIVATE_RUN_DIR" ] || rm -rf "$PRIVATE_RUN_DIR"
   exit "$rc"
 }
 
@@ -121,9 +230,9 @@ lease() {
   mkdir -p "$(dirname "$dir")" || exit 1
   start="$(mvl_epoch)"
   trap finish EXIT
-  trap 'exit 129' HUP
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
+  trap 'cancel 129' HUP
+  trap 'cancel 130' INT
+  trap 'cancel 143' TERM
   while :; do
     host_lease_lock "$dir" || exit 1
     if mkdir "$dir" 2>/dev/null; then
@@ -138,6 +247,8 @@ lease() {
       fi
       LEASE_WRITING=""
       host_lease_unlock
+      export MEGURI_FOLD_SCHEDULER_PID="$$"
+      claim_take || exit 1
       return 0
     fi
     host_lease_unlock
@@ -151,15 +262,19 @@ lease() {
 # Scheduler excludes acquisitions/jobs; the guest pool mutex also excludes
 # legacy renewals from final inventory through shutdown initiation.
 shutdown_guest() {
+  claim_check || return 1
   recheck_state || return 1
-  mvl_tests_idle "$SSH" || { log "guest tests running or unknown; wait for jobs to finish"; return 1; }
-  python3 "$SESSION" shutdown "$STATE" "$SSH" "$TART" "$VM" "$LEASE" || return 1
+  mvl_tests_idle fold_ssh || { log "guest tests running or unknown; wait for jobs to finish"; return 1; }
+  DRAIN_BEFORE="$(drain_markers)" || return 1
+  fold_python "$SESSION" shutdown "$STATE" "$SSH" "$TART" "$VM" "$LEASE" || return 1
   [ "$(mvl_state "$TART" "$VM")" = stopped ] || {
     log "shutdown command completed but stopped state unconfirmed; evidence retained"; return 1;
   }
 }
 
 send() {
+  lease vm-fold-screen
+  claim_check || exit 1
   [ "$(session_status | jq -r .connected)" = true ] ||
     { log "existing holder unavailable"; exit 1; }
   printf '%s\n' "$1" >"$FIFO"
@@ -177,11 +292,12 @@ pending_cleanup() {
 
 poststart_cleanup() {
   recheck_state || return 1
-  python3 "$SESSION" poststart-cleanup "$STATE" "$SSH" "$VM" "$LEASE" "$$" "$1"
+  fold_python "$SESSION" poststart-cleanup "$STATE" "$SSH" "$VM" "$LEASE" "$$" "$1"
 }
 
+
 start() {
-  local host current
+  local host current rc
   [ $# -eq 0 ] || usage
   lease vm-fold-prepare
   recheck_state || exit 1
@@ -196,7 +312,8 @@ start() {
       poststart_cleanup check || exit 1
       # This is an owned, already booted session. Never arm rollback, reconnect
       # VNC or issue another stop/start when its cleanup SSH is unavailable.
-      mvl_wait_ready "$SSH" "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
+      claim_check || exit 1
+      mvl_wait_ready fold_ssh "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
         log "post-start cleanup cannot reach the logged-in guest; keep VNC connected and retry prepare when SSH is available; private evidence retained"; exit 1;
       }
       poststart_cleanup finish || exit 1
@@ -222,8 +339,15 @@ start() {
   RECOVER=1
   shutdown_guest || exit 1
   recheck_state || exit 1
-  python3 "$SESSION" start "$STATE" "$TART" "$VM" "$VENV/bin/python" || exit 1
-  mvl_wait_ready "$SSH" "$TART" "$VM" true "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
+  fold_start "$SESSION" start "$STATE" "$TART" "$VM" "$VENV/bin/python"; rc=$?
+  case "$rc" in 0|1) ;; *) exit 1 ;; esac
+  # Even a normal VNC failure may have booted the guest. Recover only after
+  # bounded admission by the original keeper; lost/unprovable claims retain
+  # the transaction. headless still requires owned state and a guarded stop.
+  postboot_claim || exit 1
+  RECOVER=1
+  [ "$rc" = 0 ] || exit 1
+  mvl_wait_ready fold_ssh "$TART" "$VM" true "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
     log "VNC guest did not become accessible; inspect private $STATE logs"; exit 1;
   }
   # GUI login after our successful start confirms a working post-start session.
@@ -252,7 +376,7 @@ hosted_start() {
   python3 "$HOSTED" bind "$STATE" "$TART" "$VM" || return 1
   current="$(session_status)" || return 1
   if [ "$(jq -r .connected <<<"$current")" = true ]; then
-    python3 "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
+    fold_python "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
     log "connected to $VM (reused; resident holder)"; return 0
   fi
   if pending_cleanup; then
@@ -269,11 +393,12 @@ hosted_start() {
     # No automatic headless rollback: exactly one authorized stop.
     shutdown_guest || return 1
   fi
-  python3 "$HOSTED" prepare "$STATE" "$TART" "$VM" "$CANONICAL" start || return 1
-  mvl_wait_ready "$SSH" "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
+  fold_start "$HOSTED" prepare "$STATE" "$TART" "$VM" "$CANONICAL" start || return 1
+  postboot_claim || return 1
+  mvl_wait_ready fold_ssh "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
     log "resident started; guest readiness unconfirmed; retain evidence and query status"; return 1;
   }
-  python3 "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
+  fold_python "$HOSTED" cleanup "$STATE" "$TART" "$VM" "$SSH" "$LEASE" || return 1
   log "connected to $VM (resident holder)"
 }
 
@@ -298,7 +423,9 @@ screen() {
 
 shot() {
   [ $# -eq 3 ] || usage
-  "$SSH" "xcrun simctl io $(mvl_q "$1") screenshot --display=$(mvl_q "$2") /tmp/duo-fold.png >/dev/null 2>&1 && cat /tmp/duo-fold.png" </dev/null >"$3"
+  lease vm-fold-shot
+  claim_check || exit 1
+  fold_ssh "xcrun simctl io $(mvl_q "$1") screenshot --display=$(mvl_q "$2") /tmp/duo-fold.png >/dev/null 2>&1 && cat /tmp/duo-fold.png" </dev/null >"$3"
 }
 
 # Read-only inspection. Never calls start, headless, boot, reset or a controller.
@@ -307,7 +434,7 @@ inspect() {
   [ $# -eq 1 ] || usage
   lease vm-fold-inspect
   recheck_state || exit 1
-  python3 "$ROOT/tools/vm/sim-posture-inspect.py" "$STATE" "$SSH" "$VM" "$ROOT" "$1" "$TART"
+  fold_python "$ROOT/tools/vm/sim-posture-inspect.py" "$STATE" "$SSH" "$VM" "$ROOT" "$1" "$TART"
 }
 
 posture() {
@@ -321,7 +448,7 @@ posture() {
   "$VENV/bin/python" -I -c 'from PIL import Image, ImageChops' >/dev/null 2>&1 || {
     log "restore Pillow in the existing operator venv before posture"; return 1;
   }
-  "$VENV/bin/python" -I "$ROOT/tools/vm/sim-posture.py" \
+  fold_python "$VENV/bin/python" "$ROOT/tools/vm/sim-posture.py" \
     "$STATE" "$SSH" "$VM" "$ROOT" "$2" "$TART" "$1" "$LEASE"
 }
 

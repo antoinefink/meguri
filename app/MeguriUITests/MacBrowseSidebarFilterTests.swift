@@ -5,8 +5,11 @@ import XCTest
 /// T9, decided 2026-11-23; `browser/workspace` V6, V1), over the generated
 /// typical recipe on the real core: a second click on a selected row removes
 /// its filter, Return does the same, a saved search shows selected while the
-/// query is its own, emptying the field deselects at once, and the table's
+/// query is its own, the filter bar's Clear deselects at once, and the table's
 /// first row starts below its column header, also when Browse is shown again.
+/// N21.1, N21.2 (2026-11-24): a selected filter row is selected to
+/// accessibility while the list's own selection stays on the Browse row, and
+/// the query's tokens show in the filter bar over the table.
 @MainActor
 final class MacBrowseSidebarFilterTests: XCTestCase {
     #if os(macOS)
@@ -21,11 +24,21 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         new.click()
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
         XCTAssertTrue(waitUntil { self.selected(app, "browse.sidebar.state.new") }, "New shows selected")
+        XCTAssertTrue(listSelected(app, "shell.root.sidebar.browse"), "the list's own selection stays on Browse")
+        XCTAssertFalse(listSelected(app, "browse.sidebar.state.new"), "a filter row draws its own selected state")
+        // The token shows in the filter bar, with Filter, Save Search… and Clear.
+        let token = element(app, "browse.search.token.0")
+        XCTAssertTrue(token.waitForExistence(timeout: 10), "the Card State token in the filter bar")
+        XCTAssertTrue(element(app, "browse.filterBar.add").exists && element(app, "browse.filterBar.save").exists
+            && element(app, "browse.filterBar.clear").exists, "Filter, Save Search… and Clear")
+        let table = app.outlines.matching(identifier: "browse.results.table").firstMatch
+        XCTAssertLessThanOrEqual(token.frame.maxY, table.frame.minY + 1, "the bar is over the table: \(token.frame) \(table.frame)")
         capture(app, "sidebar-new-selected")
         // The same row again: the filter goes, and so does the highlight.
         new.click()
         XCTAssertTrue(waitUntil { self.statusText(app) == whole }, statusText(app))
         XCTAssertFalse(selected(app, "browse.sidebar.state.new"))
+        XCTAssertTrue(waitUntil { !token.exists }, "no token, no filter bar")
         capture(app, "sidebar-new-removed")
 
         // A saved search whose token no section lists shows selected itself.
@@ -33,14 +46,11 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
         XCTAssertTrue(waitUntil { self.selected(app, "browse.sidebar.saved.dueToday") }, "Due Today shows selected")
         capture(app, "sidebar-due-today-selected")
-        // Emptying the field (⌘A, ⌫): the row is deselected at once.
-        let field = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
-        field.click()
-        app.typeKey("a", modifierFlags: .command)
-        app.typeKey(.delete, modifierFlags: [])
+        // The filter bar's Clear: the row is deselected at once.
+        element(app, "browse.filterBar.clear").click()
         XCTAssertTrue(waitUntil { self.statusText(app) == whole }, statusText(app))
-        XCTAssertFalse(selected(app, "browse.sidebar.saved.dueToday"), "the field emptied deselects Due Today")
-        capture(app, "sidebar-field-emptied")
+        XCTAssertFalse(selected(app, "browse.sidebar.saved.dueToday"), "Clear deselects Due Today")
+        capture(app, "sidebar-cleared")
     }
 
     /// T9: Return and Space on the one selected filter row are a second click,
@@ -124,8 +134,14 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         XCTAssertTrue(waitUntil { !self.statusText(app).isEmpty })
     }
 
-    /// The sidebar row holding `id` is selected in the list.
+    /// The filter row `id` reads as selected: the query holds its value (T9).
     private func selected(_ app: XCUIApplication, _ id: String) -> Bool {
+        let row = element(app, id)
+        return row.exists && row.isSelected
+    }
+
+    /// The sidebar row holding `id` carries the list's own selection.
+    private func listSelected(_ app: XCUIApplication, _ id: String) -> Bool {
         let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
         let row = list.outlineRows.containing(.any, identifier: id).firstMatch
         return row.exists && row.isSelected

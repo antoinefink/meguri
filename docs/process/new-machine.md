@@ -7,9 +7,13 @@ It is not a backup: back it up separately before deleting or replacing it.
 
 ## Current coordinator and remote test VM
 
-M5 is the sole MG scheduler and Apple build coordinator. The headless
-`meguri-mac` guest stays on T9 attached to M3 Max. M3 Max hosts Tart; it does
-not run a second MG scheduler. Keep leases and jobs on M5, across its worktrees.
+M5 is the Apple build coordinator and schedules folding over SSH. Both Macs
+can schedule other VM jobs; MG's guest-wide claim serializes guest access
+(`tools/vm/AGENTS.md`). The headless `meguri-mac` guest stays on T9 attached to
+M3 Max, which hosts Tart and the resident VNC connection that folding reuses.
+M3 Max's per-user `mac-vm.json` names the kit's `bin/tart` and `bin/vm-ssh`
+directly. Each Mac keeps its leases across its own worktrees.
+
 The coordinator uses the existing SSD-local `bin/tart` and `bin/vm-ssh`
 wrappers over SSH. Those select `TART_HOME` and the guest's identity; do not
 copy their key or duplicate that logic on M5.

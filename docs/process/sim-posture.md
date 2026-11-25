@@ -10,8 +10,11 @@ fallback. The former unleased `hub`, fixed-coordinate `fold` and generic
 
 New configured-remote sessions use coordinator state `build/vmh3` and a
 resident M3 owner. Local and already connected legacy sessions retain
-`build/vm-fold` or `build/vmf2`. M5 remains the only scheduler, with the same
-primary lease, guest acquisition/window/OCR guards and display readback.
+`build/vm-fold` or `build/vmf2`. M5 alone schedules folding; both Macs can
+schedule other VM jobs. Folding waits on MG's guest-wide claim before guest
+access, including when reusing the resident VNC connection. After a guest
+reboot, it waits for the claim to be reacquired before readiness checks or
+drain cleanup (`tools/vm/AGENTS.md`).
 M5 posture analysis still uses `build/vm-fold/venv`. Mutations recheck routing
 and VM metadata under the scheduler lease.
 
@@ -78,9 +81,9 @@ M3 must independently report no resident reservation. The canonical directory
 and `vmf2` evidence are preserved. No old PID is signalled and no old holder is
 reconnected. Admission also works for a genuinely empty legacy route.
 
-After the ordinary M5 lease, idle-test check and committed guest drain, M3
-reserves one token-bound detached stop peer. Its single terminal receipt
-requires the actual stop command to join **and** M3 to confirm Tart stopped.
+After the ordinary M5 lease, guest-wide claim, idle-test check and committed
+guest drain, M3 reserves one token-bound detached stop peer. Its single terminal
+receipt requires the actual stop command to join **and** M3 to confirm Tart stopped.
 Only that receipt admits one detached resident start with the actual local
 Tart binary. Stop/start reservations, logs and receipts stay in the private
 kit. Controller loss cannot kill these peers. Lost replies use fresh receipt
@@ -108,7 +111,8 @@ Holder's FIFO/log/complete-PNG barrier. Only bounded PNG bytes cross SSH into
 exclusive owner-only files in unique private coordinator directories. The
 service accepts typed coordinates, never supplied paths or executable commands.
 
-For a click, M5 still holds its scheduler and exact guest lease/window guard.
+For a click, M5 still holds its scheduler, guest-wide claim and exact guest
+lease/window guard.
 M3 first reserves a unique request bound to that resident session and guest
 guard, sampling a five-second deadline on **M3's clock before publication**.
 Before sending input, M5 requires headroom for a full five-second resident
@@ -125,9 +129,9 @@ outstanding scheduler intent and refreshes that receipt; it emits bounded
 joined/executed/error data and never clears fences or emits input. A null
 receipt remains unknown. Receipt recovery alone is not a pose/display proof.
 
-Native acceptance remains with the integrator: first verify the ready M3 kit,
-then use the single authorized drained migration. Interrupt the M5 client/SSH
-between joined read-only operations, verify the same resident session/children
+Native acceptance remains with the integrator: verify the ready M3 kit and
+connected reuse. Interrupt the M5 client/SSH between joined read-only operations,
+verify the same resident session/children
 and one connection with fresh private captures, then acquire a Duo and run the
 calibration below. Verify real full-frame refresh, signed Hub/window identity,
 scale, tooltips and open → closed → open display pairs through production MG.

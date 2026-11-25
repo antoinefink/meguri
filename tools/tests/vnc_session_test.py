@@ -1,5 +1,7 @@
 """Synthetic VNC transport and operator lifecycle; never contacts a VM or SSH host."""
 import importlib.util
+import contextlib
+import fcntl
 import io
 import json
 import os
@@ -140,10 +142,13 @@ class SessionTests(unittest.TestCase):
                         MEGURI_MAC_VM_CONFIG=str(self.root / "config.json"),
                         MEGURI_HOST_LEASE_DIR=str(self.lease.parent / "host.lock"),
                         MEGURI_SIM_POOL_DIR=str(self.root / "pool"),
-                        MEGURI_MAC_VM_LEASE_WAIT_SECONDS="0", MEGURI_MAC_VM_BOOT_SECONDS="0",
+                        MEGURI_MAC_VM_LEASE_WAIT_SECONDS="2", MEGURI_MAC_VM_BOOT_SECONDS="0",
+                        MEGURI_MAC_VM_CLAIM_PATH=str(self.root / "guest-claim.lock"),
+                        MEGURI_MAC_VM_CLAIM_BEAT_SECONDS="0.1", MEGURI_MAC_VM_CLAIM_POLL_SECONDS="0.1",
                         PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
         for name in ("tools/vm/duo-fold.sh", "tools/vm/vnc-session.py",
-                     "tools/scripts/mac-vm-lib.sh", "tools/scripts/host-lease-mutex.sh"):
+                     "tools/vm/fold-claim.py", "tools/mg.d/mac-vm.sh",
+                     "tools/scripts/vm-claim.py", "tools/scripts/mac-vm-lib.sh", "tools/scripts/host-lease-mutex.sh"):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / name, dest)
@@ -216,6 +221,8 @@ elif sys.argv[1] == 'run':
 root = pathlib.Path(os.environ['FAKE_ROOT'])
 assert (root / 'scheduler/mac-vm.guest.lock/holder.json').exists()
 cmd = sys.argv[1]
+if 'use Fcntl' not in cmd:
+    with (root / 'guest-ops').open('a') as out: out.write('guest-operation\\n')
 if 'pgrep' in cmd:
     if not (root / 'busy-tests').exists(): print('idle')
 elif 'stat -f' in cmd:
@@ -240,7 +247,9 @@ else:
         words[index] = ('import sys; sys.path.insert(0, ' + repr(str(root / 'bin')) + '); '
                         "from fixture_control import serve; serve('guest')\\n" + words[index])
         cmd = shlex.join(words)
-    code = subprocess.call(['/bin/sh', '-c', 'exec ' + cmd])
+    # vm-ssh receives a shell command; the caller owns its exec semantics.
+    # Claim and ownership probes already exec Perl to preserve its lifetime.
+    code = subprocess.call(['/bin/sh', '-c', cmd])
     if 'remove_drain(sys.argv[1])' in cmd and (root / 'lose-cleanup-response').exists():
         (root / 'lose-cleanup-response').unlink()
         sys.exit(255)
@@ -374,6 +383,171 @@ while True:
 
     def trace(self):
         return (self.root / "trace").read_text() if (self.root / "trace").exists() else ""
+
+    @contextlib.contextmanager
+    def foreign_claim(self):
+        # A foreign Mac's real guest flock, with a synthetic holder only.
+        with open(self.env["MEGURI_MAC_VM_CLAIM_PATH"], "a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            lock.seek(0)
+            lock.truncate()
+            lock.write('{"machine":"foreign-m3","job":"mac-ui","worktree":"/synthetic"}\n')
+            lock.flush()
+            yield
+
+    def wait_claim(self, path):
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            if path.exists() and b"VM claim: waiting" in path.read_bytes():
+                return
+            time.sleep(.02)
+        self.fail("fold did not report waiting for the foreign claim")
+
+    def test_foreign_claim_refuses_all_guest_work_without_force_or_job_retry(self):
+        self.env.update(MEGURI_MAC_VM_LEASE_WAIT_SECONDS="0", DUO_FOLD_FORCE="1",
+                        MEGURI_MAC_VM_SHARED_CLAIM="0")
+        with self.foreign_claim():
+            for command, args in (("prepare", ()), ("inspect", ("leased-udid",)),
+                                  ("open", ("leased-udid",)), ("closed", ("leased-udid",)),
+                                  ("stop", ()), ("shot", ("leased-udid", "1", str(self.root / "unused.png")))):
+                self.call(command, 1, *args)
+                self.assertFalse((self.root / "guest-ops").exists())
+                self.assertEqual(self.trace(), "")
+                self.assertFalse(self.lease.exists())
+
+    def test_foreign_claim_wait_then_handoff_and_connected_reuse(self):
+        self.env["MEGURI_MAC_VM_LEASE_WAIT_SECONDS"] = "10"
+        for reused in (False, True):
+            before = self.trace()
+            guest_ops = self.root / "guest-ops"
+            guest_ops.unlink(missing_ok=True)
+            error = self.root / "waiting.err"
+            error.unlink(missing_ok=True)
+            # Let a departing keeper observe local release before the foreign
+            # scheduler takes the lock (a real cross-Mac handoff).
+            with self.foreign_claim(), error.open("wb") as err:
+                child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+                                         env=self.env, stdout=subprocess.PIPE, stderr=err)
+                try:
+                    self.wait_claim(error)
+                    self.assertIsNone(child.poll())
+                    self.assertEqual(self.trace(), before)
+                    self.assertFalse(guest_ops.exists())
+                except BaseException:
+                    child.terminate()
+                    child.wait(timeout=10)
+                    raise
+            output, _ = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, error.read_text())
+            self.assertEqual(output, b"")
+            if reused:
+                self.assertIn("(reused)", error.read_text())
+                self.assertEqual(self.trace(), before)
+            else:
+                self.assertIn("stop guest", self.trace())
+
+    def test_claim_logs_honor_mg_run_and_clean_only_private_scratch(self):
+        run = self.root / "mg-run"
+        scratch = self.root / "scratch"
+        run.mkdir()
+        scratch.mkdir()
+        (run / "retained.log").write_text("keep")
+        self.env.update(MG_RUN_DIR=str(run), TMPDIR=str(scratch),
+                        MEGURI_MAC_VM_LEASE_WAIT_SECONDS="0")
+        marker = self.state / "drain-precommit"
+        marker.write_text("a" * 64)
+        with self.foreign_claim():
+            self.call("prepare", 1)
+            self.assertTrue((run / "mac-vm-claim.log").is_file())
+            self.env.pop("MG_RUN_DIR")
+            self.call("prepare", 1)
+        self.assertEqual((run / "retained.log").read_text(), "keep")
+        self.assertEqual(list(scratch.iterdir()), [])
+        self.assertFalse((self.state / "mac-vm-claim.log").exists())
+        self.assertEqual(marker.read_text(), "a" * 64)
+        self.assertFalse(self.lease.exists())
+        self.assertEqual(self.trace(), "")
+
+    def test_cancellation_while_waiting_releases_without_guest_access(self):
+        self.env["MEGURI_MAC_VM_LEASE_WAIT_SECONDS"] = "20"
+        error = self.root / "cancel.err"
+        with self.foreign_claim(), error.open("wb") as err:
+            child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+                                     env=self.env, stdout=subprocess.PIPE, stderr=err)
+            try:
+                self.wait_claim(error)
+                child.terminate()
+                child.communicate(timeout=10)
+                self.assertEqual(child.returncode, 143)
+                self.assertFalse(self.lease.exists())
+                self.assertFalse((self.root / "guest-ops").exists())
+                self.assertEqual(self.trace(), "")
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+                    child.wait(timeout=10)
+
+    def cancel_at_start(self, script, anchor, *, published):
+        """Pause the actual controller at a publication boundary, then cancel Bash."""
+        source = script.read_text()
+        self.assertEqual(source.count(anchor), 1)
+        indent = anchor[:len(anchor) - len(anchor.lstrip())]
+        pause = (indent + "pause = Path(os.environ['FAKE_ROOT']) / 'start-paused'\n"
+                 + indent + "pause.write_text(str(os.getpid()))\n"
+                 + indent + "while pause.exists(): time.sleep(.01)\n")
+        script.write_text(source.replace(anchor, pause + anchor))
+        child = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+                                 env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            pause_file = self.root / "start-paused"
+            m.wait_until(pause_file.exists, 10, "start controller never paused")
+            self.assertIsNone(child.poll())
+            self.assertEqual(self.trace().count("stop guest"), 1)
+            self.assertEqual(self.trace().count("--vnc-experimental"), int(published))
+            # Leave the controller paused. Only cancellation forwarded by the
+            # tracked Bash wait can stop it before that pause is released.
+            child.terminate()
+            output, error = child.communicate(timeout=8)
+            self.assertEqual(child.returncode, 143, error.decode())
+            self.assertEqual(output, b"")
+            self.assertTrue(pause_file.exists())
+            self.assertEqual(self.trace().count("stop guest"), 1)
+            self.assertEqual(self.trace().count("--vnc-experimental"), int(published))
+            self.assertNotIn("run --no-graphics guest", self.trace())
+            state = self.root / "build/vmh3" if (self.root / "build/vmh3").exists() else self.state
+            self.assertTrue((state / "recovery-pending").exists())
+            self.assertTrue((state / "drain-token").exists())
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=10)
+            script.write_text(source)
+
+    def test_cancel_before_local_start_publication_cannot_start_after_pause(self):
+        self.cancel_at_start(self.root / "tools/vm/vnc-session.py",
+                             '        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),\n',
+                             published=False)
+        self.assertEqual((self.root / "vm-state").read_text(), "stopped")
+
+    def test_cancel_after_local_start_preserves_one_connected_transaction(self):
+        self.cancel_at_start(self.root / "tools/vm/vnc-session.py",
+                             '    request(state, "ready", timeout=120)\n', published=True)
+        m.wait_until(lambda: m.status(self.state, "guest")["connected"], 5, "owner did not connect")
+        before = self.trace()
+        self.call("prepare")
+        self.assertEqual(self.trace().count("stop guest"), 1)
+        self.assertEqual(self.trace().count("--vnc-experimental"), 1)
+        self.assertNotIn("run --no-graphics guest", self.trace()[len(before):])
+
+    def test_native_resident_refuses_but_standalone_development_remains_supported(self):
+        (self.bin / "remote.json").unlink()
+        (self.root / "vnc-owner-v1").mkdir()
+        result = self.call("prepare", 1)
+        self.assertIn(b"fold requests run on M5", result.stderr)
+        self.assertFalse(self.lease.exists())
+        self.assertEqual(self.trace(), "")
+        (self.root / "vnc-owner-v1").rmdir()
+        self.call("prepare")
 
     def test_disconnected_route_reuses_canonical_venv_across_commands_and_worktrees(self):
         canonical = self.state
@@ -587,6 +761,31 @@ mg_mac_ui_take
         self.mac_ui_scheduler_client(blocked=True)
         self.mac_ui_scheduler_client(blocked=False, secondary=True)
         self.assertEqual((self.lease / "holder.json").read_bytes(), holder)
+
+    def test_release_fences_new_unjoined_drain_but_not_refused_old_drain(self):
+        self.call("prepare")
+        # shutdown itself can refuse inherited evidence before starting a drain.
+        (self.state / "drain-precommit").write_text("a" * 64)
+        (self.state / "drain-token").write_text("b" * 64)
+        result = self.call("stop", 1)
+        self.assertIn(b"guest drain admission ownership changed", result.stderr)
+        self.assertFalse(self.lease.exists())
+        self.assertEqual((self.state / "drain-precommit").read_text(), "a" * 64)
+        self.assertEqual((self.state / "drain-token").read_text(), "b" * 64)
+        # Model an interruption after a new drain is published, before Python
+        # arms ShutdownFence. Rewrite the same inode to cover token replacement.
+        helper = self.root / "tools/vm/vnc-session.py"
+        helper.write_text(helper.read_text().replace(
+            "def shutdown(state, ssh, tart, vm, lease):\n",
+            "def shutdown(state, ssh, tart, vm, lease):\n"
+            "    (state / 'drain-precommit').write_text('c' * 64)\n"
+            "    (state / 'drain-token').write_text('c' * 64)\n"
+            "    raise RuntimeError('synthetic unjoined drain')\n", 1))
+        result = self.call("stop", 1)
+        self.assertIn(b"synthetic unjoined drain", result.stderr)
+        self.assertTrue((self.lease / "vm-shutdown-pending/intent.json").is_file())
+        self.assertEqual((self.state / "drain-precommit").read_text(), "c" * 64)
+        self.assertEqual((self.state / "drain-token").read_text(), "c" * 64)
 
     def test_proven_no_stop_launch_and_missing_ssh_allow_second_scheduler_client(self):
         for missing in ("tart", "vm-ssh"):
@@ -957,11 +1156,14 @@ os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
     def test_inspect_holds_scheduler_releases_on_success_and_failure_without_lifecycle(self):
         helper = self.root / "tools/vm/sim-posture-inspect.py"
         helper.write_text('''import json, os, pathlib, sys
-root = pathlib.Path(os.environ['FAKE_ROOT'])
-assert (root / 'scheduler/mac-vm.guest.lock/holder.json').exists()
-assert sys.argv[1:] == [str(root / 'build/vm-fold'), str(root / 'bin/vm-ssh'), 'guest', str(root), 'leased-udid', str(root / 'bin/tart')]
-if (root / 'inspect-fail').exists(): sys.exit(1)
-print(json.dumps({'ready': True}))
+def capture(*args): pass
+def main():
+    root = pathlib.Path(os.environ['FAKE_ROOT'])
+    assert (root / 'scheduler/mac-vm.guest.lock/holder.json').exists()
+    assert sys.argv[1:] == [str(root / 'build/vm-fold'), str(root / 'bin/vm-ssh'), 'guest', str(root), 'leased-udid', str(root / 'bin/tart')]
+    if (root / 'inspect-fail').exists(): return 1
+    print(json.dumps({'ready': True}))
+    return 0
 ''')
         for expected in (0, 1):
             if expected:
@@ -980,13 +1182,17 @@ print(json.dumps({'ready': True}))
             for name in ('tart', 'holder', 'tunnel'):
                 (self.state / (name + '.pid')).write_text(str(child.pid))
             (self.state / 'holder.log').write_text('connected\n')
-            before = {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}
+            # Claim diagnostics are new scheduling evidence, independent of
+            # the existing session records that must stay untouched.
+            before = {p.name: p.read_bytes() for p in self.state.iterdir()
+                      if p.is_file() and p.name != "mac-vm-claim.log"}
             self.assertFalse(m.status(self.state, 'guest')['connected'])
             self.call('prepare', 1)
             self.call('stop', 1)
             self.assertIsNone(child.poll())
             self.assertEqual(self.trace(), '')
-            self.assertEqual(before, {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()})
+            self.assertEqual(before, {p.name: p.read_bytes() for p in self.state.iterdir()
+                                     if p.is_file() and p.name != "mac-vm-claim.log"})
         finally:
             child.terminate()
             child.wait()

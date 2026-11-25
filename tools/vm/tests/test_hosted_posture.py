@@ -477,6 +477,24 @@ class HostedAdmissionTests(unittest.TestCase):
         hosted.write_text(content.replace('def deployed(tart, vm, install=False):', wire + 'def deployed(tart, vm, install=False):'))
         return fixture
 
+    def test_cancel_before_hosted_start_publication_cannot_publish_after_pause(self):
+        fixture = self.routing_fixture()
+        fixture.cancel_at_start(fixture.root / "tools/vm/vnc-hosted.py",
+                                "        require((root/'one-stop').read_text() == message['drain'])\n",
+                                published=False)
+        self.assertFalse((fixture.root / "resident-online").exists())
+        self.assertEqual((fixture.root / "vm-state").read_text(), "stopped")
+
+    def test_cancel_after_hosted_start_reconciles_without_second_start_or_stop(self):
+        fixture = self.routing_fixture()
+        fixture.cancel_at_start(fixture.root / "tools/vm/vnc-hosted.py",
+                                '        return dict(connected=True)\n', published=True)
+        self.assertTrue((fixture.root / "resident-online").exists())
+        fixture.call("prepare")
+        self.assertEqual(fixture.trace().count("stop guest"), 1)
+        self.assertEqual(fixture.trace().count("--vnc-experimental"), 1)
+        self.assertFalse((fixture.root / "build/vmh3/recovery-pending").exists())
+
     def test_hosted_route_recovers_legacy_after_transient_prepare_failure_without_restart(self):
         fixture = self.routing_fixture(legacy=True)
         trace = fixture.trace()

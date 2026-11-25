@@ -63,6 +63,34 @@ extension WebKitSuites {
             #expect(pair.current.update != prepared && pair.current.payload?.question == "<p>Early</p>")
         }
 
+        /// A pause empties the idle page under a preloaded card. The next
+        /// present prepares that card again and never fails with `notPrepared`.
+        @Test func aPreloadLostToAPauseIsPreparedAgain() async throws {
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair)
+            let window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            try await pages.load()
+            let items = [Self.item(1), Self.item(2)]
+            pages.renderHead = { _, keys, _ in
+                keys.map { key in
+                    let id: Int64 = key == items[0].renderKey ? 1 : 2
+                    return CardPayload(cardID: id, question: "<p>Card \(id)</p>", answer: "Answer")
+                }
+            }
+            try await pages.render(sessionID: 5, items: items)
+            try await pages.present(item: items[0], inputTime: 0)
+            try await pages.preload(item: items[1])
+            let preloaded = try #require(pair.idle.update)
+            await pages.suspend()
+            await pages.resume()
+            #expect(pair.idle.update == nil)
+            try await pages.present(item: items[1], inputTime: 0)
+            #expect(pair.current.update != preloaded && pair.current.update?.card == 2)
+            #expect(pair.current.payload?.question == "<p>Card 2</p>" && pair.current.settled)
+        }
+
         private static func item(_ id: Int64, token: UInt8? = nil) -> ReviewHeadItem {
             let state = ReviewSchedulingState.new(position: 1)
             let answer = ReviewAnswerState(state: state, delay: .days(amount: 1), left: 0, factor: 0,

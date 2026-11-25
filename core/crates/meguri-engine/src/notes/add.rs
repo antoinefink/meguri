@@ -62,40 +62,48 @@ pub fn add_for_screen(collection: &Collection, input: AddScreenNote) -> Result<O
     }
     collection.run(super::op_spec(ADD_NOTE, OpSource::UserUndoable, 1), move |context| {
         let (scope, random) = context.scope_and_random();
-        // These are the first reads in the real writer transaction, before
-        // normalization, tag registration, row generation or defaults writes.
-        let nt = scope.notetype(input.notetype_id)?.ok_or_else(|| EngineError::NotFound {
+        add_screen_in(scope, random, input, true)
+    })
+}
+
+/// Shared live destination/layout checks for native and local API adds.
+pub(super) fn add_screen_in(
+    scope: &mut WriteScope<'_>, random: &dyn RandomSource,
+    input: AddScreenNote, update_add_defaults: bool,
+) -> Result<Added, EngineError> {
+    // These are the first reads in the real writer transaction, before
+    // normalization, tag registration, row generation or defaults writes.
+    let nt = scope.notetype(input.notetype_id)?.ok_or_else(|| EngineError::NotFound {
+        table: meguri_storage::Table::Notetypes,
+        key: input.notetype_id.0.to_string(),
+    })?;
+    let layout: Vec<_> = nt.fields.iter().map(|field| AddFieldIdentity {
+        ord: field.ord,
+        id: field.config.id,
+        name: field.name.clone(),
+    }).collect();
+    if nt.config.kind != input.kind || layout != input.field_layout
+        || crate::notetypes::AggregateDigest::of(&nt) != input.notetype_base
+    {
+        return Err(EngineError::Stale {
             table: meguri_storage::Table::Notetypes,
             key: input.notetype_id.0.to_string(),
-        })?;
-        let layout: Vec<_> = nt.fields.iter().map(|field| AddFieldIdentity {
-            ord: field.ord,
-            id: field.config.id,
-            name: field.name.clone(),
-        }).collect();
-        if nt.config.kind != input.kind || layout != input.field_layout
-            || crate::notetypes::AggregateDigest::of(&nt) != input.notetype_base
-        {
-            return Err(EngineError::Stale {
-                table: meguri_storage::Table::Notetypes,
-                key: input.notetype_id.0.to_string(),
-            });
-        }
-        let deck = scope.deck(input.deck_id)?.ok_or_else(|| EngineError::NotFound {
-            table: meguri_storage::Table::Decks,
-            key: input.deck_id.0.to_string(),
-        })?;
-        if !matches!(deck.kind.kind, meguri_model::proto::deck::DeckKind::Normal(_)) {
-            return Err(EngineError::DeckRefused(crate::decks::Refusal::FilteredDeck));
-        }
-        add_in(scope, random, &AddNote {
-            notetype_id: input.notetype_id,
-            fields: input.fields,
-            tags: input.tags,
-            deck_id: input.deck_id,
-            guid: None,
-            update_add_defaults: true,
-        })
+        });
+    }
+    let deck = scope.deck(input.deck_id)?.ok_or_else(|| EngineError::NotFound {
+        table: meguri_storage::Table::Decks,
+        key: input.deck_id.0.to_string(),
+    })?;
+    if !matches!(deck.kind.kind, meguri_model::proto::deck::DeckKind::Normal(_)) {
+        return Err(EngineError::DeckRefused(crate::decks::Refusal::FilteredDeck));
+    }
+    add_in(scope, random, &AddNote {
+        notetype_id: input.notetype_id,
+        fields: input.fields,
+        tags: input.tags,
+        deck_id: input.deck_id,
+        guid: None,
+        update_add_defaults,
     })
 }
 

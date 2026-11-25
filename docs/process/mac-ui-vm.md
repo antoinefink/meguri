@@ -1,11 +1,15 @@
 # Mac UI tests and simulators in a VM
 
-Current topology (2026-11-24): M5 is the sole MG scheduler and build
-coordinator. The dedicated headless `meguri-mac` VM lives on T9 attached to
-M3 Max. The private coordinator wrappers use the kit at `/Volumes/T9/Meguri VM`
-on the M3 Max. See
+Current topology (2026-11-25): M5 is the build coordinator and schedules
+folding over SSH. Both Macs can schedule other VM jobs under MG's guest-wide
+claim (`tools/vm/AGENTS.md`). The dedicated headless `meguri-mac` VM lives on
+T9 attached to M3 Max, which hosts the resident VNC connection that folding
+reuses. The private coordinator wrappers use the kit at
+`/Volumes/T9/Meguri VM` on M3 Max. See
 [`new-machine.md`](new-machine.md#current-coordinator-and-remote-test-vm) for
-atomic installation, removal of old activation overrides and verification.
+configuration, atomic installation, removal of old activation overrides and
+verification.
+
 The provisioning and dated results below describe the original installation.
 
 Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records provisioning and subsequent verification. The 2026-10-19 supplement below moves the remaining Mac app-hosted checks into the VM.

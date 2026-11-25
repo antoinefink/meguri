@@ -33,7 +33,7 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 This Mac is also Antoine's workstation. Anything that would disturb it runs in the macOS test VM (`docs/process/mac-ui-vm.md`), with the Mac locked or not.
 
-- M5 is the sole scheduler; the headless guest lives on T9 attached to M3 Max. Use the default per-user remote-wrapper config across worktrees (`docs/process/new-machine.md`); clear old activated overrides and keep host fallbacks disabled.
+- M5 schedules VM jobs over SSH and M3 Max, which hosts the headless guest on T9, may run its own; the VM's claim lets one Mac in at a time (`tools/vm/AGENTS.md`). Use the default per-user remote-wrapper config across worktrees (`docs/process/new-machine.md`); clear old activated overrides and keep host fallbacks disabled.
 
 - Simulators live in the VM's pool: `tools/mg sim acquire <kind>`, release when done. Reach them only through `tools/mg` jobs. Never use `xcrun simctl` on this Mac, never create, erase, delete, shut down or reboot a simulator, and never open Simulator.app. iOS simulators may run on this Mac through MG when the VM slows work.
 - The VM is small: run one simulator or UI job in it at a time.

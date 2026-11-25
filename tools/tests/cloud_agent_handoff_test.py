@@ -1010,7 +1010,9 @@ exit "$rc"
 '''
             (directory / "selection").write_text(json.dumps({"name": "generated", "tart": "/generated/tart",
                 "ssh": str(directory / "ssh"), "state": "running"}))
+            # The generated guest runs no command: the VM's claim is tested in mac_vm.bats.
             env = dict(os.environ, GENERATED_CASE=str(directory), GENERATED_MODE=mode, TMPDIR=str(directory),
+                       MEGURI_MAC_VM_SHARED_CLAIM="0",
                        PATH=str(directory / "bin") + os.pathsep + os.environ["PATH"])
             result = REAL_RUN(["/bin/bash", "-c", shell, "generated-lifecycle", str(Path(__file__).resolve().parents[2])],
                               env=env, capture_output=True, timeout=30)
