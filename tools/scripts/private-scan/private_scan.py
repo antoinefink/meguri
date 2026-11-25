@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'specs/render/audio-playback.md':
+        '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
     'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':
         '3a36cc9a416d05baeca475a15c39b7c8a68a452a1967e31de47235eed1be50e7',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
