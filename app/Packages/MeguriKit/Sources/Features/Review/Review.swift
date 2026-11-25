@@ -43,13 +43,15 @@ public struct ReviewView: View {
                     // the review around it stays (N24.3).
                     #if os(macOS)
                     ReviewCardUnderAnswers { covered in
-                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions, obscuredBottom: covered)
+                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions,
+                                       obscuredBottom: covered.bottom, obscuredTop: covered.top)
                     }
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                         .id(ObjectIdentifier(model))
                     #else
                     ReviewCardUnderAnswers { covered in
-                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions, obscuredBottom: covered)
+                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions,
+                                       obscuredBottom: covered.bottom, obscuredTop: covered.top)
                     }
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
@@ -193,19 +195,49 @@ public struct ReviewView: View {
     private func appearance() async { try? await model.pair?.setAppearance(colorScheme == .dark ? .dark : .light) }
 }
 
+/// How much of the card's page the bars cover at each end.
+struct ReviewCardCover: Equatable {
+    var top: CGFloat = 0
+    var bottom: CGFloat = 0
+}
+
 /// The card's page runs on under the answer area, to the window's bottom
 /// edge, and keeps clear the part the answers cover, so its last line can
-/// always scroll above them (N16.9).
+/// always scroll above them (N16.9). On touch it also runs on under the top
+/// bars, to the screen's top edge: it rests below them, and a long card
+/// scrolls on under them (N16.12).
 struct ReviewCardUnderAnswers<Content: View>: View {
     @Environment(\.reviewAnswerAreaTop) private var answerAreaTop
     @State private var bottom: CGFloat?
-    @ViewBuilder let content: (CGFloat) -> Content
+    #if !os(macOS)
+    /// Where the page starts once it ignores the top inset, and where the
+    /// area clear of the top bars starts, in global coordinates.
+    @State private var pageTop: CGFloat?
+    @State private var clearTop: CGFloat?
+    #endif
+    @ViewBuilder let content: (ReviewCardCover) -> Content
     var body: some View {
-        content(covered)
+        content(ReviewCardCover(top: coveredTop, bottom: coveredBottom))
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom = $0 }
+            #if os(macOS)
             .ignoresSafeArea(.container, edges: .bottom)
+            #else
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { pageTop = $0 }
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
+            // Outside the modifier the frame is still the safe one. Under a
+            // notice both start at the same place: nothing is covered.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { clearTop = $0 }
+            #endif
     }
-    private var covered: CGFloat {
+    private var coveredTop: CGFloat {
+        #if os(macOS)
+        0
+        #else
+        guard let pageTop, let clearTop else { return 0 }
+        return max(0, clearTop - pageTop)
+        #endif
+    }
+    private var coveredBottom: CGFloat {
         guard let answerAreaTop, let bottom else { return 0 }
         return max(0, bottom - answerAreaTop)
     }
@@ -333,6 +365,8 @@ struct ReviewLayout<Card: View>: View {
             .safeAreaBar(edge: .bottom, spacing: 0) { answerArea }
             // Soft only: no line where the card passes under the answers (N16.9).
             .scrollEdgeEffectStyle(.soft, for: .bottom)
+            // No blur or fade where it passes under the top bars (N16.12).
+            .scrollEdgeEffectHidden(true, for: .top)
             .background(.token(.cardPage))
             // On the screen's very bottom edge, under the home indicator, in
             // every fold position; not a control, so it may cross a fold (N16.1).

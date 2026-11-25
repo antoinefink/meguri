@@ -60,7 +60,7 @@ Supporting requirements: R15, R30, R31, R35, R40–R42. Show existing features w
 - Do not infer remote freshness from a prior transfer, saved credentials or the absence of errors.
 - Keep Show Answer and the four rating actions at the bottom of the review area.
 - Reserve the action region on both sides so reveal does not move or resize card content.
-- Long card content scrolls between the corner controls and the answer region, and on under the answer region (N16.9).
+- Long card content scrolls between the corner controls and the answer region, and on under the answer region (N16.9). On touch it also scrolls on under the top bars, to the screen's top edge (N16.12).
 - Reveal preserves the reader's scroll position. Never recreate the card pair just to change the surrounding layout.
 - Preserve the real rating labels and intervals from `ReviewCoordinator.item.nextStates`.
 - Keep waiting, finished, paused/error and transition states usable.
@@ -670,6 +670,17 @@ Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Car
 - **Not built: Edit Note and Suspend Card in the popover.** The leech card is the one just answered. The review's existing commands act on the card on screen, the next one, so they would edit or suspend the wrong card. Acting on the answered card would be new behaviour; this decision asked for none. Open for Antoine.
 - **Accessibility:** label "Leech", hint "Shows what this means." The notice's VoiceOver announcement is S2's and is not changed here. The toolbar gives the button its system target on touch and keyboard focus on the Mac.
 - **Other notices** (a refused or failed answer, media, a changed card, the session record) keep their banner row unchanged.
+
+### N16.12 The card scrolls on under the top bars (touch, 2026-11-25)
+
+Asked by Antoine on 2026-11-25, from his capture of a long card whose first line was cut at a band under the screen's top edge: he agreed the card should not start flush with the top of the screen, and wanted a long one to "go up to the edge the screen" once he scrolls (`decisions.md`).
+
+- On iPhone, iPad and a foldable, in every position, the card's page reaches the screen's top edge, under the status area and the review's top controls, as it reaches the bottom edge under the answers (N16.9).
+- At rest the card starts where it did: below the top bars, so its first line is clear of them. The page is told how much of its top they cover (`WKWebView.obscuredContentInsets`, and the scroll view's top content inset). Scrolling moves the card on under them to the edge; no band clips it. WebKit keeps a card's fixed and sticky elements clear of that part.
+- The scroll view draws no edge effect at the top: no blur, no fade, no line. The card stays sharp up to the screen's edge, behind the status area and the controls (Antoine, 2026-11-25, of the soft effect first built there: "can you remove that?"). The bottom keeps N16.9's soft effect.
+- A notice's banner row (N16.6) stays above the card; the card then starts under that row and has no covered part at its top.
+- The Mac is unchanged: the card sits under the window's toolbar.
+- Replaces, on touch: "scrolls between the corner controls and the answer region" in N3's review rules, at the top end.
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 

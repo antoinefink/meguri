@@ -55,6 +55,14 @@ public final class CardPagePair {
             for page in pages { page.webView.obscuredBottom = value }
         }
     }
+    /// How much of the pages' top the bars cover: a card rests below them
+    /// and scrolls on under them (N16.12).
+    public var obscuredTop: CGFloat = 0 {
+        didSet {
+            let value = max(0, obscuredTop.isFinite ? obscuredTop : 0)
+            for page in pages { page.webView.obscuredTop = value }
+        }
+    }
     public var inspectorPolicy = WebInspectorPolicy() {
         didSet { for page in pages { page.webView.isInspectable = inspectorPolicy.isInspectable } }
     }

@@ -83,7 +83,7 @@ import Testing
                 ReviewCardUnderAnswers { value in
                     Color.clear
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height.value = $0 }
-                        .onChange(of: value, initial: true) { _, new in covered.value = new }
+                        .onChange(of: value, initial: true) { _, new in covered.value = new.bottom }
                 }
             }, size: CGSize(width: 900, height: 700))
             defer { window.close() }
