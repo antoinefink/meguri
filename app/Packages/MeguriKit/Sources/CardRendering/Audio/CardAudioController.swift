@@ -450,8 +450,8 @@ public final class CardAudioController {
         guard paused, current != nil else { return }
         paused = false
         continuityAllowed = true
-        maintainContinuity()
         if let clip {
+            maintainContinuity()
             armCompletion(clip, serial: generation)
             transport.resume()
             drain()

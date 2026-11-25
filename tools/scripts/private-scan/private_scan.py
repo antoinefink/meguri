@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
-        'ea9259e62ec24989694b965c9a276822dfa60f02eadbffbb2964aee084152013',
+        '6020dbe8a0c07e90a84a61b13ff0783228f361201f143e5fae0c73fc23266927',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
         '77211fbbfba063609f1e3663147da28342174e137fa131378fb9516434375bed',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':

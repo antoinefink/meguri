@@ -279,12 +279,12 @@ private actor SilentOutput {
             }
             self.engine = engine; self.player = player
             engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
+            try engine.connectNode(player, to: engine.mainMixerNode, format: format)
             player.scheduleBuffer(buffer, at: nil, options: .loops)
             try Task.checkCancellation()
             try engine.start()
             try Task.checkCancellation()
-            player.play()
+            try player.playAudio()
             #endif
         } catch { stop(); throw error }
     }
