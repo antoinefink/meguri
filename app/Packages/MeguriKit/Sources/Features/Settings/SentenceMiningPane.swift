@@ -42,7 +42,6 @@ public struct SentenceMiningPane: View {
                         .accessibilityIdentifier("settings.integrations.error")
                 }
             } header: { Text("Destination") }
-            footer: { Text("Front receives the sentence and Back receives the translation. Audio and images use matching fields, or are appended to the sentence when a matching field is absent. Embedded media only; remote media URLs return an error.") }
             if !model.fieldMapping.isEmpty {
                 Section {
                     DisclosureGroup("Field mapping") {
