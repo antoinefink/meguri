@@ -150,8 +150,8 @@ import AppKit
 
     @Test(arguments: ["field", "note", "held", "source", "setField"])
     func delayedPicturePasteCannotChangeAnotherTarget(_ change: String) async throws {
-        var current = true
-        let host = try Self.host("abcd", current: { current })
+        let owner = CurrentOwner()
+        let host = try Self.host("abcd", current: { owner.isCurrent })
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let media = PictureTestMedia(root: root)
         let hold = FieldEditorTests.HeldResult()
@@ -167,7 +167,7 @@ import AppKit
         try await hold.wait()
         let completion = try #require(host.picturePasteCompletion)
         if change == "field" { try await host.setFocus(1) }
-        else if change == "note" { current = false; host.shutDown() }
+        else if change == "note" { owner.isCurrent = false; host.shutDown() }
         else if change == "held" { try await host.flush(hold: true) }
         else if change == "source" { try await host.setMode(.html, ord: 0) }
         else { try await host.reload(fields: [0]) }
@@ -179,6 +179,10 @@ import AppKit
             #expect(host.draft.values[0].contains("<img") == (change == "field"))
         } else { #expect(host.draft.values == ["abcd", "other field"]) }
         #expect(!hold.expired && media.added.count == 1)
+    }
+
+    @MainActor private final class CurrentOwner {
+        var isCurrent = true
     }
 
     @Test func unsupportedPasteRepresentationsFailClosedAndBitmapsRespectEncoding() throws {
