@@ -56,8 +56,11 @@ import Network
         row.clickOrTap()
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
         let owner = try XCTUnwrap(running.count == 1 ? running.first : nil)
-        let migaku = settings.checkBoxes["settings.integrations.migaku.enabled"]
-        let ankiConnect = settings.checkBoxes["settings.integrations.ankiConnect.enabled"]
+        func receiverRow(_ name: String) -> XCUIElement {
+            settings.descendants(matching: .any).matching(identifier: "settings.integrations.\(name).row").firstMatch
+        }
+        let migaku = receiverRow("migaku").checkBoxes["settings.integrations.migaku.enabled"]
+        let ankiConnect = receiverRow("ankiConnect").checkBoxes["settings.integrations.ankiConnect.enabled"]
         XCTAssertTrue(migaku.waitForExistence(timeout: 5) && ankiConnect.exists)
         XCTAssertTrue(migaku.label.contains("44432") && ankiConnect.label.contains("8765"))
         let configuration = URLSessionConfiguration.ephemeral
@@ -67,7 +70,7 @@ import Network
         let session = URLSession(configuration: configuration, delegate: MiningNoRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         func displayedStatus(_ name: String) -> String? {
-            let status = settings.descendants(matching: .any).matching(identifier: "settings.integrations.\(name).status").firstMatch
+            let status = receiverRow(name).descendants(matching: .any).matching(identifier: "settings.integrations.\(name).status").firstMatch
             guard status.exists else { return nil }
             // Native text can sit inside a disabled AX wrapper with stale text.
             // Read the enabled leaf within this endpoint's freshly queried status.
@@ -80,13 +83,12 @@ import Network
                 return leaf.label
             }
             guard leaves.isEmpty, status.children(matching: .any).count == 0 else { return nil }
-            return status.value as? String
+            if let value = status.value as? String, !value.isEmpty { return value }
+            return status.label
         }
-        func statusMatches(_ name: String, _ port: UInt16, _ enabled: Bool) -> Bool {
+        func statusMatches(_ name: String, _ enabled: Bool) -> Bool {
             guard let observed = displayedStatus(name) else { return false }
-            let expected = enabled ? "Listening on 127.0.0.1:\(port)" : "Off · Port \(port)"
-            let allowed = enabled ? [expected, expected + " · Collection unavailable"] : [expected]
-            return allowed.contains(observed)
+            return observed == (enabled ? "Listening" : "Off")
         }
         func checked(_ checkbox: XCUIElement, _ enabled: Bool) -> Bool {
             let value = checkbox.value
@@ -97,16 +99,19 @@ import Network
             let endpoints = [
                 (migaku, "migaku", UInt16(44432), migakuOn), (ankiConnect, "ankiConnect", UInt16(8765), ankiConnectOn)
             ]
-            for (checkbox, name, port, enabled) in endpoints {
+            for (checkbox, name, _, enabled) in endpoints {
                 // Bind each request to one native control and its model's exact
-                // status, rather than accepting another endpoint's status prefix.
-                _ = try XCTUnwrap(settings.checkBoxes.matching(identifier: "settings.integrations.\(name).enabled").count == 1
+                // short status in the same identified row. AX containment is
+                // the witness; native wrapper frames need not match text frames.
+                _ = try XCTUnwrap(settings.descendants(matching: .any).matching(identifier: "settings.integrations.\(name).row").count == 1
+                    && receiverRow(name).checkBoxes.matching(identifier: "settings.integrations.\(name).enabled").count == 1
+                    && settings.checkBoxes.matching(identifier: "settings.integrations.\(name).enabled").count == 1
                     && checkbox.identifier == "settings.integrations.\(name).enabled"
                     && checkbox.label == (name == "migaku" ? "Migaku (44432)" : "AnkiConnect (8765)") ? true : nil)
                 let deadline = ContinuousClock.now + .seconds(5)
-                while !checked(checkbox, enabled) || !statusMatches(name, port, enabled) {
+                while !checked(checkbox, enabled) || !statusMatches(name, enabled) {
                     _ = try XCTUnwrap(ContinuousClock.now < deadline ? true : nil,
-                                      "\(name) must report checked=\(enabled) and its exact port status; observed status: \(displayedStatus(name) ?? "<missing or ambiguous>")")
+                                      "\(name) must report checked=\(enabled) and its exact short receiver state; observed status: \(displayedStatus(name) ?? "<missing or ambiguous>")")
                     try await Task.sleep(for: .milliseconds(20))
                 }
             }
@@ -124,7 +129,7 @@ import Network
                 _ = try XCTUnwrap(!owner.isTerminated && current.count == 1
                     && current.first?.processIdentifier == owner.processIdentifier
                     && owner.bundleURL?.resolvingSymlinksInPath() == build.appBundle.resolvingSymlinksInPath()
-                    && checked(checkbox, true) && statusMatches(name, port, true) ? true : nil,
+                    && checked(checkbox, true) && statusMatches(name, true) ? true : nil,
                     "The tested Dev app must own this control and listening status; \(name) observed status: \(displayedStatus(name) ?? "<missing or ambiguous>")")
                 // Listening is published only after the production exclusive
                 // bind succeeds. Never send an RPC after Off or Port in use.

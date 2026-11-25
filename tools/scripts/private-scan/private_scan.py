@@ -838,7 +838,7 @@ PUBLIC_ARTIFACTS = {
     'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':
         '3a36cc9a416d05baeca475a15c39b7c8a68a452a1967e31de47235eed1be50e7',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
-        '2bc3bbd00214138cf7527948d56498abb57407e002a60b705579296f6d0f2739',
+        '62037f92f41a3f706093d5c233055a9e26afa54151fb441388fb844cca074067',
     # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
         '18e72c0d652f3b438b3c5811cbfe83fbbfb7aff0c9ef5db68c880a534b1d8317',
@@ -849,7 +849,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
         '207a37c06ba700b606294f567677085ff72f583b713a5caf1e9ae3461b819687',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
-        'ccef122d825d7b361cce8c2dcb64145772298f9671b3167cf7917ddb5ac20983',
+        '7a31f9686977ee8a856e1691f8bc78fced6f815a461005358bfd9d3ad716d521',
     'core/crates/meguri-ffi/src/notes.rs':
         'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
@@ -865,7 +865,7 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     'docs/design/native-interface-contract.md':
-        '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
+        '34c8b24b9c8f57a6ba35cc6dd69e7bbf8674c6c30de17bd8d208a9441d99933f',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

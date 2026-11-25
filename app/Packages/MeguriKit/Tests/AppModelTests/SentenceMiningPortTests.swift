@@ -80,6 +80,7 @@ import Synchronization
             model.setEnabled(true, for: .migaku)
             await model.settle()
             try await waitForStatus(model.migaku) { $0.hasPrefix("Listening") }
+            #expect(model.migaku.statusState == .listening && model.ankiConnect.statusState == .off)
             #expect(!model.ankiConnect.enabled)
             try await socket.start()
             try await socket.upgrade(port: first.port)
@@ -94,6 +95,7 @@ import Synchronization
             model.setEnabled(true, for: .ankiConnect)
             await model.settle()
             try await waitForStatus(model.ankiConnect) { $0.contains("is in use") }
+            #expect(model.ankiConnect.statusState == .portInUse && model.migaku.statusState == .listening)
             #expect(model.enabled && model.migaku.status == initialStatus)
             try await socket.frame(9, payload: ping)
             try await socket.expectFrame(10, payload: ping)
@@ -101,6 +103,7 @@ import Synchronization
             // Automatic retry is per endpoint and cannot replace its sibling.
             occupied.close()
             try await waitForStatus(model.ankiConnect, timeout: .seconds(15)) { $0.hasPrefix("Listening") }
+            #expect(model.ankiConnect.statusState == .listening)
             #expect(model.migaku.port == first.port && model.ankiConnect.port == occupied.port)
             for port in [first.port, occupied.port] {
                 let hello = try await exchange(session, port: port, path: "/anki-hello")

@@ -8,22 +8,8 @@ public struct SentenceMiningPane: View {
     public var body: some View {
         Form {
             Section {
-                Toggle("Migaku (44432)", isOn: Binding(get: { model.migaku.enabled },
-                    set: { model.setEnabled($0, for: .migaku) }))
-                    .toggleStyle(.checkbox)
-                    .accessibilityIdentifier("settings.integrations.migaku.enabled")
-                LabeledContent("Migaku status") {
-                    Text(verbatim: model.migaku.status).textSelection(.enabled)
-                        .accessibilityIdentifier("settings.integrations.migaku.status")
-                }
-                Toggle("AnkiConnect (8765)", isOn: Binding(get: { model.ankiConnect.enabled },
-                    set: { model.setEnabled($0, for: .ankiConnect) }))
-                    .toggleStyle(.checkbox)
-                    .accessibilityIdentifier("settings.integrations.ankiConnect.enabled")
-                LabeledContent("AnkiConnect status") {
-                    Text(verbatim: model.ankiConnect.status).textSelection(.enabled)
-                        .accessibilityIdentifier("settings.integrations.ankiConnect.status")
-                }
+                receiverRow(.migaku, name: "Migaku", label: "Migaku (44432)", key: "migaku")
+                receiverRow(.ankiConnect, name: "AnkiConnect", label: "AnkiConnect (8765)", key: "ankiConnect")
             } header: { Text("Sentence Mining") }
             footer: { Text("Choose Anki in Migaku. Keep Meguri running to save sentences.") }
             Section {
@@ -54,6 +40,42 @@ public struct SentenceMiningPane: View {
         .formStyle(.grouped)
         .navigationTitle("Integrations")
         .accessibilityIdentifier("settings.integrations.content")
+    }
+
+    private func receiverRow(_ id: SentenceMining.EndpointID, name: String, label: String, key: String) -> some View {
+        let endpoint = model.endpoint(id)
+        let status = receiverStatus(endpoint.statusState)
+        return HStack {
+            Toggle(label, isOn: Binding(get: { endpoint.enabled }, set: { model.setEnabled($0, for: id) }))
+                .toggleStyle(.checkbox)
+                .accessibilityIdentifier("settings.integrations.\(key).enabled")
+            Spacer()
+            HStack {
+                Image(systemName: "circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(status.color)
+                    .accessibilityHidden(true)
+                Text(verbatim: status.text)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(endpoint.status)
+                    .accessibilityHint(Text(verbatim: endpoint.status))
+                    .accessibilityIdentifier("settings.integrations.\(key).status")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: name))
+        .accessibilityIdentifier("settings.integrations.\(key).row")
+    }
+
+    private func receiverStatus(_ state: SentenceMining.Endpoint.StatusState) -> (text: String, color: Color) {
+        switch state {
+        case .off: ("Off", .secondary)
+        case .waiting: ("Waiting", .secondary)
+        case .starting: ("Starting…", .secondary)
+        case .listening: ("Listening", .green)
+        case .portInUse: ("Port in use", .orange)
+        }
     }
 }
 #endif

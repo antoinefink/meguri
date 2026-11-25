@@ -230,8 +230,10 @@ import Testing
     @Test func preferencesStartOffAndWaitForLaunchCompletion() {
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic")
         #expect(!model.enabled && model.migaku.status == "Off · Port 44432")
+        #expect(model.migaku.statusState == .off && model.ankiConnect.statusState == .off)
         model.setEnabled(true, for: .migaku)
         #expect(model.enabled && model.migaku.status == "Waiting for collection · Port 44432") // No bind before entry completes.
+        #expect(model.migaku.statusState == .waiting && model.ankiConnect.statusState == .off)
     }
     static func type(_ fields: [String]) -> NotetypeRecord {
         .init(id: 1, name: "Imported", kind: 0, sortField: 0, css: "", base: Array(repeating: 1, count: 32),

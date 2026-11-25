@@ -9,8 +9,12 @@ import Observation
     public enum EndpointID: CaseIterable { case migaku, ankiConnect }
 
     @Observable public final class Endpoint {
+        /// Receiver lifecycle only; enabling a preference or connecting a client
+        /// does not establish that the listening socket has bound.
+        public enum StatusState: Equatable { case off, waiting, starting, listening, portInUse }
         public fileprivate(set) var enabled: Bool
         public fileprivate(set) var status = ""
+        public fileprivate(set) var statusState = StatusState.off
         public fileprivate(set) var port: UInt16
         fileprivate let configuredPort: UInt16
         @ObservationIgnored fileprivate let admission = MiningAdmission()
@@ -277,14 +281,23 @@ import Observation
             let endpoint = self.endpoint(id)
             let port = endpoint.port
             guard endpoint.enabled, !suspended else {
+                endpoint.statusState = .off
                 endpoint.status = "Off · Port \(port)"
                 continue
             }
             switch endpoint.state {
-            case .off: endpoint.status = began ? "Starting on 127.0.0.1:\(port)…" : "Waiting for collection · Port \(port)"
-            case .starting: endpoint.status = "Starting on 127.0.0.1:\(port)…"
-            case .listening: endpoint.status = "Listening on 127.0.0.1:\(port)" + (available ? "" : " · Collection unavailable")
-            case .portInUse: endpoint.status = "Port \(port) is in use. Quit the app using it. Meguri retries automatically."
+            case .off:
+                endpoint.statusState = began ? .starting : .waiting
+                endpoint.status = began ? "Starting on 127.0.0.1:\(port)…" : "Waiting for collection · Port \(port)"
+            case .starting:
+                endpoint.statusState = .starting
+                endpoint.status = "Starting on 127.0.0.1:\(port)…"
+            case .listening:
+                endpoint.statusState = .listening
+                endpoint.status = "Listening on 127.0.0.1:\(port)" + (available ? "" : " · Collection unavailable")
+            case .portInUse:
+                endpoint.statusState = .portInUse
+                endpoint.status = "Port \(port) is in use. Quit the app using it. Meguri retries automatically."
             }
         }
     }
