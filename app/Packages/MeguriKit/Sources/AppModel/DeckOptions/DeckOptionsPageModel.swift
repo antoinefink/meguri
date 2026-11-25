@@ -325,13 +325,14 @@ public final class DeckOptionsPageModel {
         Set(DeckOptionsPageRow.allCases.filter { row in fieldText[row].map { $0 != formatted(row) } ?? false })
     }
 
-    /// An error blocks Save unless its row's field holds a correction that
-    /// Save commits and validates first (the save rechecks after validation).
+    /// An error blocks Save unless its row holds a correction or validation
+    /// was inconclusive; the transactional save validates the current draft.
     public var canSave: Bool {
         let pending = pendingRows
         let blocking = issues.contains { $0.severity == .error
             && !(pending.contains($0.row) && ($0.preset == nil || $0.preset == selectedPreset)) }
-        guard phase == .editing, !addingPreset, !selectingPreset, !namingPreset, hasChanges, !blocking, let owner,
+        guard phase == .editing, !addingPreset, !selectingPreset, !namingPreset, hasChanges,
+              !blocking || presetValidationFailed, let owner,
               owner.generation == generation else { return false }
         return owner.deckOptionsAllowed
     }
@@ -596,7 +597,8 @@ public final class DeckOptionsPageModel {
             let refuse = { [self] in phase = .editing; if leftWhileSaving { end(.left) } }
             // Moving to the background before the save started: it never starts.
             if saveCancelled { saveCancelled = false; refuse(); return }
-            if hasErrors { refuse(); return }
+            // A failed issue read leaves cached errors; save validates afresh.
+            if hasErrors && !presetValidationFailed { refuse(); return }
             if changedElsewhere {
                 // N20.9 has no reload row: the save is refused, the page says
                 // nothing was changed, and the options are read again.

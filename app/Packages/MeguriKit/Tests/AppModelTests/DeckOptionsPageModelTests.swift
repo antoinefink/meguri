@@ -611,6 +611,54 @@ import Testing
     }
 
     @Test(arguments: [false, true])
+    func cachedErrorsAfterNumericValidationFailureLetSaveValidateTheStagedPreset(corrected: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Staged"; model.createPreset()
+        await model.waitForCompletion()
+        let staged = try #require(model.selected)
+        #expect(staged.id == -1 && staged.name == "Staged")
+        model.fieldText[.newPerDay] = "10000"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(!model.canSave && !model.presetValidationFailed)
+        let cached = model.issues
+        core.issuesFailure = .cancelled
+        model.fieldText[.newPerDay] = corrected ? "21" : "10001"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.value(.newPerDay) == (corrected ? 21 : 10001))
+        #expect(model.issues == cached && model.presetValidationFailed && model.canSave)
+        #expect(!model.canSwitchPreset && !model.changedElsewhere)
+        if !corrected {
+            core.saveResult = .failure(.deckOptionsInvalid([
+                .init(field: .newPerDay, preset: staged.id, code: .outOfRange, severity: .error, params: [:]),
+            ]))
+        }
+        model.save(); await model.waitForCompletion()
+        if !corrected {
+            #expect(model.phase == .editing && model.outcome == nil && model.saveFailure == nil)
+            #expect(model.hasErrors && !model.presetValidationFailed && !model.canSave)
+            #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+            #expect(core.session?.savedPresets == nil && model.selectedPreset == staged.id && model.presets.count == 3)
+            model.save(); await model.waitForCompletion()
+            #expect(core.session?.calls.filter { $0 == "save" }.count == 1)
+            model.fieldText[.newPerDay] = "21"; model.commit(.newPerDay)
+            await model.waitForCompletion()
+            #expect(!model.hasErrors && model.canSave)
+            core.saveResult = .success(11)
+            model.save(); await model.waitForCompletion()
+        }
+        let saved = try #require(core.session?.savedPresets)
+        var expected = staged; expected.newPerDay = 21
+        #expect(saved.first { $0.id == staged.id } == expected)
+        #expect(saved.count == 3 && saved.filter { $0.id < 0 }.count == 1 && core.session?.savedSelection == staged.id)
+        #expect(core.session?.calls.filter { $0 == "add Staged" }.count == 1)
+        #expect(core.session?.calls.filter { $0 == "save" }.count == (corrected ? 1 : 2))
+        #expect(core.opens == 1 && model.phase == .closed && model.outcome == .saved)
+    }
+
+    @Test(arguments: [false, true])
     func presetFailuresKeepStaleDraftProtection(afterAdd: Bool) async throws {
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions
