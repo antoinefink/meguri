@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CoreML
 import Foundation
 import Vision
 import XCTest
@@ -295,11 +296,17 @@ final class BackupRestoreWindowUITests: XCTestCase {
             return try XCTUnwrap(nil as CGRect?, "The bound window date column must be available")
         }
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
+        request.recognitionLevel = .fast
         request.recognitionLanguages = ["en-US"]
         request.usesLanguageCorrection = false
         request.minimumTextHeight = 0.01
         do {
+            let devices = try request.supportedComputeStageDevices
+            let cpu = try XCTUnwrap(devices[.main]?.first { device in
+                if case .cpu = device { return true }
+                return false
+            }, "Native window OCR requires a supported CPU device for the main compute stage")
+            request.setComputeDevice(cpu, for: .main)
             try VNImageRequestHandler(cgImage: cropped, options: [:]).perform([request])
         } catch {
             diagnostics += "Recognition failed: \(error)\n"

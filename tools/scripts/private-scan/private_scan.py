@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
         "ad79311280c0e3216296e574b0aab632e8529c7c725afda3dd9720ed379ba5ff",
     # Complete public-file review: U163a checks reviewer, 2026-11-26.
     "app/MeguriUITests/BackupRestoreWindowUITests.swift":
-        "9b9bc2a9a782514f3fec38a650c18792da4945b3a8609f38ca4615b3fb1047af",
+        "db612f779e0f9ff95d15e17fe64ecd417cb43f407094eff797d8fb8bf73ea94a",
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
         "b18449ab368a57caf36977ae617dd8bde3069fa0b0d625beef41f3f4bad737f0",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
