@@ -614,6 +614,8 @@ fn preflight_and_write_keep_original_membership_and_payloads_with_or_without_med
         let plan = preflight_deck_export_from_live(&reader, &path, &context, 100, options).unwrap();
         assert_eq!(plan.note_count(), 2);
         assert_eq!(plan.card_count(), 3);
+        assert!(!path.exists(), "preparation keeps the built database private");
+        assert!(reader.begin_snapshot().is_ok(), "preparation releases the collection transaction");
         let moved_out = f.cards[1];
         let moved_in = f.cards[2];
         f.clock.step_ms(1000);
@@ -647,10 +649,276 @@ fn preflight_and_write_keep_original_membership_and_payloads_with_or_without_med
         assert!(rows.card(moved_in).unwrap().is_none());
         assert_eq!(output.written.snapshot_modified, rows.col().unwrap().modified);
         opened.close().unwrap();
-        // The consumed plan released its transaction; a new view sees the move.
+        // A new view sees the move; the package retains the earlier built rows.
         let fresh = reader.begin_snapshot().unwrap();
         assert_eq!(fresh.card(moved_out).unwrap().unwrap().deck_id, DeckId(300));
         assert_ne!(output.written.snapshot_modified, fresh.col().unwrap().modified);
+    }
+}
+
+// A separate live storage owner lets these tests inspect checkpoint outcomes
+// and author malformed cells without reaching through the engine's writer.
+fn independent_source(f: &Fixture) -> (tempfile::TempDir, meguri_storage::OpenedCollection) {
+    let package = write(
+        f,
+        DeckExportOptions {
+            include_scheduling: true,
+            include_presets: false,
+            include_media: false,
+        },
+        "source-copy.apkg",
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let path = decoded(&package, directory.path());
+    let source =
+        meguri_storage::deck_package::open_deck_candidate(&path, f.clock.as_ref(), f.random.as_ref()).unwrap();
+    (directory, source)
+}
+
+fn closed_export_stage(directory: &Path) -> Option<PathBuf> {
+    fs::read_dir(directory)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|stage| {
+            stage.file_name().unwrap().to_string_lossy().starts_with(".meguri-stage-")
+                && stage.join("snapshot.anki2").is_file()
+                && ["-wal", "-shm", "-journal"]
+                    .iter()
+                    .all(|suffix| !stage.join(format!("snapshot.anki2{suffix}")).exists())
+        })
+}
+
+#[test]
+fn malformed_selected_dependency_fields_are_typed_before_staging() {
+    use meguri_storage::{StorageError, deck_export::DeckExportReadError, raw::SqlValue};
+    for field in ["did", "odid", "mid"] {
+        for value in [
+            SqlValue::Text("unreadable".into()),
+            SqlValue::Blob(vec![1]),
+            SqlValue::Real(1.5),
+            SqlValue::Real(1e30),
+        ] {
+            let f = seeded();
+            let (directory, source) = independent_source(&f);
+            let reader = source.open_reader(ReaderRole::Maintenance).unwrap();
+            let (table, id) = if field == "mid" {
+                ("notes", reader.card(f.cards[0]).unwrap().unwrap().note_id.0)
+            } else {
+                // This card is selected through its sibling in Root, so an
+                // unreadable did cannot silently remove it from the selection.
+                ("cards", NOW + 500)
+            };
+            source
+                .writer()
+                .execute_raw(
+                    &format!("UPDATE {table} SET {field}=?1 WHERE id=?2"),
+                    &[value, SqlValue::Integer(id)],
+                )
+                .unwrap();
+            let mut before: Vec<_> =
+                fs::read_dir(directory.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+            before.sort();
+            let snapshot = reader.begin_snapshot().unwrap();
+            let error = snapshot
+                .select_deck_export(100, true, false, NOW, &|| false)
+                .err()
+                .unwrap();
+            let DeckExportReadError::Storage(StorageError::Row(row)) = error else {
+                panic!("expected a typed unreadable selected row: {error:?}")
+            };
+            assert_eq!(row.table, table);
+            assert_eq!(row.key, id.to_string());
+            assert_eq!(row.column, field);
+            drop(snapshot);
+            let path = directory.path().join("malformed.apkg");
+            let context = CollectionPackageWriteContext {
+                collection_directory: directory.path(),
+                purpose: Purpose::Export,
+                finalisation: Finalisation::ExclusiveCreate,
+                clock: f.clock.as_ref(),
+                random: f.random.as_ref(),
+                space: &StatvfsSpace,
+                is_cancelled: &|| false,
+            };
+            assert!(matches!(
+                preflight_deck_export_from_live(
+                    &reader,
+                    &path,
+                    &context,
+                    100,
+                    DeckExportOptions {
+                        include_scheduling: true,
+                        include_presets: false,
+                        include_media: true,
+                    },
+                ),
+                Err(Error::ExportNeedsCheckDatabase)
+            ));
+            let mut after: Vec<_> =
+                fs::read_dir(directory.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+            after.sort();
+            assert_eq!(before, after, "A8 refuses before staging or publication");
+            drop(reader);
+            source.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn media_inventory_and_revalidation_release_the_pin_while_writes_commit() {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    let f = seeded();
+    let (directory, source) = independent_source(&f);
+    let media = directory.path().join("collection.media");
+    fs::create_dir(&media).unwrap();
+    fs::write(media.join("referenced.png"), b"referenced").unwrap();
+    let reader = source.open_reader(ReaderRole::Maintenance).unwrap();
+    let original = reader
+        .note(reader.card(f.cards[1]).unwrap().unwrap().note_id)
+        .unwrap()
+        .unwrap();
+    let moved_out = f.cards[1];
+    let path = directory.path().join("released.apkg");
+    let phase = AtomicUsize::new(0);
+    let (paused_tx, paused_rx) = mpsc::channel();
+    let (resume_tx, resume_rx) = mpsc::channel();
+    let resume_rx = Mutex::new(resume_rx);
+    let check = || {
+        let current = phase.load(Ordering::SeqCst);
+        // Build's cancellation points run with the builder's WAL still open.
+        // The first point after its closed DB exists is media inventory entry.
+        let built = current == 0 && closed_export_stage(directory.path()).is_some();
+        if built || current == 2 {
+            phase.store(current + 1, Ordering::SeqCst);
+            paused_tx.send(current).unwrap();
+            resume_rx.lock().unwrap().recv_timeout(Duration::from_secs(30)).unwrap();
+        }
+        false
+    };
+    let output = std::thread::scope(|scope| {
+        let path = &path;
+        let directory = directory.path();
+        let phase = &phase;
+        let check = &check;
+        let clock = f.clock.as_ref();
+        let random = f.random.as_ref();
+        let task = scope.spawn(move || {
+            let context = CollectionPackageWriteContext {
+                collection_directory: directory,
+                purpose: Purpose::Export,
+                finalisation: Finalisation::ExclusiveCreate,
+                clock,
+                random,
+                space: &StatvfsSpace,
+                is_cancelled: check,
+            };
+            let mut plan = preflight_deck_export_from_live(
+                &reader,
+                path,
+                &context,
+                100,
+                DeckExportOptions {
+                    include_scheduling: true,
+                    include_presets: false,
+                    include_media: true,
+                },
+            )
+            .unwrap();
+            assert!(reader.begin_snapshot().is_ok());
+            phase.store(2, Ordering::SeqCst);
+            plan.protect_retained_outputs(&[], check).unwrap();
+            write_deck_export_from_live(&reader, path, &context, plan).unwrap()
+        });
+        for expected in [0, 2] {
+            assert_eq!(paused_rx.recv_timeout(Duration::from_secs(30)).unwrap(), expected);
+            assert!(!path.exists());
+            let mut scope = source
+                .writer()
+                .begin_write(meguri_storage::StampMode::Raw, f.clock.as_ref(), None)
+                .unwrap();
+            let mut card = scope.card(moved_out).unwrap().unwrap();
+            card.deck_id = DeckId(200);
+            scope.put(&card).unwrap();
+            let mut note = scope.note(original.id).unwrap().unwrap();
+            note.fields = format!("committed during media phase {expected}\u{1f}later back");
+            scope.put(&note).unwrap();
+            scope.commit().unwrap();
+            let checkpoint = source.writer().checkpoint_with_timeout(Duration::ZERO).unwrap();
+            // Resume even on a regression, so a failed assertion cannot strand
+            // the scoped worker. The checkpoint itself must succeed once.
+            resume_tx.send(()).unwrap();
+            assert!(
+                checkpoint.succeeded(),
+                "media work retained the collection pin: {checkpoint:?}"
+            );
+        }
+        task.join().unwrap()
+    });
+    assert_eq!(phase.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        output.deck_counts,
+        Some(meguri_package::DeckExportCounts { notes: 2, cards: 3, media: 1 })
+    );
+    output.source_validation.validate(&|| false).unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let db = decoded(&path, scratch.path());
+    let opened =
+        meguri_storage::deck_package::open_deck_candidate(&db, f.clock.as_ref(), f.random.as_ref()).unwrap();
+    assert_eq!(opened.writer().note(original.id).unwrap().unwrap().fields, original.fields);
+    assert_eq!(opened.writer().card(moved_out).unwrap().unwrap().deck_id, DeckId(101));
+    opened.close().unwrap();
+    source.close().unwrap();
+}
+
+#[test]
+fn prepared_database_is_private_and_cleans_up_on_drop_or_inventory_cancellation() {
+    use std::os::unix::fs::PermissionsExt;
+    for cancel_inventory in [false, true] {
+        let f = seeded();
+        let directory = f.collection.path().parent().unwrap();
+        let path = f.dir.path().join("private.apkg");
+        let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+        let check = || cancel_inventory && closed_export_stage(directory).is_some();
+        let context = CollectionPackageWriteContext {
+            collection_directory: directory,
+            purpose: Purpose::Export,
+            finalisation: Finalisation::ExclusiveCreate,
+            clock: f.clock.as_ref(),
+            random: f.random.as_ref(),
+            space: &StatvfsSpace,
+            is_cancelled: &check,
+        };
+        let result = preflight_deck_export_from_live(
+            &reader,
+            &path,
+            &context,
+            100,
+            DeckExportOptions {
+                include_scheduling: true,
+                include_presets: false,
+                include_media: true,
+            },
+        );
+        if cancel_inventory {
+            assert!(matches!(result, Err(Error::Cancelled)));
+        } else {
+            let plan = result.unwrap();
+            let stage = closed_export_stage(directory).unwrap();
+            assert_eq!(fs::metadata(&stage).unwrap().permissions().mode() & 0o777, 0o700);
+            assert!(stage.join("snapshot.anki2").is_file());
+            assert!(!path.exists());
+            drop(plan);
+        }
+        assert!(!path.exists());
+        assert!(!fs::read_dir(directory).unwrap().any(|e| {
+            e.unwrap().file_name().to_string_lossy().starts_with(".meguri-stage-")
+        }));
+        assert!(reader.begin_snapshot().is_ok());
     }
 }
 

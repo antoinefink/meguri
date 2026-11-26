@@ -135,50 +135,46 @@ impl CoreHost {
             }
         }
         // The actual DB+WAL P10 budget precedes every output mutation, including recovery.
-        enum Plan<'r> {
+        enum Plan {
             Collection(meguri_package::MediaCollectionExportPlan),
-            Deck(meguri_package::DeckExportPlan<'r>),
+            Deck(meguri_package::DeckExportPlan),
         }
-        // End the plan's drop scope before releasing the reader it may borrow.
-        let (completed, mut unfinished) = {
-            let mut plan = match deck {
-                Some((id, options)) => Plan::Deck(meguri_package::preflight_deck_export_from_live(&reader, &path, &context, id, options).map_err(package_error)?),
-                None => Plan::Collection(meguri_package::preflight_media_collection_export_from_live(&reader, &path, &context).map_err(package_error)?),
-            };
-            if let Ok((retained, _, filename)) = ownership(&directory) {
-                let paths = [
-                    directory.join(MARKER),
-                    directory.join(&retained).join(filename),
-                ];
-                match &mut plan {
-                    Plan::Collection(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
-                    Plan::Deck(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
-                }.map_err(package_error)?;
-            }
-            cancel.check()?;
-            if directory.symlink_metadata().is_ok() {
-                // Only a durable never-handed-off/completed marker permits recovery.
-                // Unknown/old/provider-owned slots remain fenced, with a truthful refusal.
-                if ownership(&directory).is_ok_and(|(_, state, _)| state == "safe") {
-                    remove_collection_export(&directory, &protected)?;
-                } else {
-                    return Err(EngineError::Busy { running_op: "a retained Files export; finish its provider operation before retrying (ownership cannot be proven after restart)".into() });
-                }
-            }
-            fs::create_dir_all(&root).map_err(io)?;
-            fs::create_dir(&directory).map_err(io)?;
-            let unfinished = Unfinished(&directory, &protected, false);
-            write_ownership(&directory, operation.file_name().unwrap().to_str().unwrap(), "safe", &suggested_name)?;
-            fs::create_dir(&operation).map_err(io)?;
-            meguri_storage::atomic_file::sync_directory(&directory)?;
-            meguri_storage::atomic_file::sync_directory(&root)?;
-            meguri_storage::atomic_file::sync_directory(parent)?;
-            let completed = match plan {
-                Plan::Collection(plan) => meguri_package::write_media_collection_export_from_live(&reader, &path, &context, plan),
-                Plan::Deck(plan) => meguri_package::write_deck_export_from_live(&reader, &path, &context, plan),
-            }.map_err(package_error)?;
-            (completed, unfinished)
+        let mut plan = match deck {
+            Some((id, options)) => Plan::Deck(meguri_package::preflight_deck_export_from_live(&reader, &path, &context, id, options).map_err(package_error)?),
+            None => Plan::Collection(meguri_package::preflight_media_collection_export_from_live(&reader, &path, &context).map_err(package_error)?),
         };
+        if let Ok((retained, _, filename)) = ownership(&directory) {
+            let paths = [
+                directory.join(MARKER),
+                directory.join(&retained).join(filename),
+            ];
+            match &mut plan {
+                Plan::Collection(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
+                Plan::Deck(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
+            }.map_err(package_error)?;
+        }
+        cancel.check()?;
+        if directory.symlink_metadata().is_ok() {
+            // Only a durable never-handed-off/completed marker permits recovery.
+            // Unknown/old/provider-owned slots remain fenced, with a truthful refusal.
+            if ownership(&directory).is_ok_and(|(_, state, _)| state == "safe") {
+                remove_collection_export(&directory, &protected)?;
+            } else {
+                return Err(EngineError::Busy { running_op: "a retained Files export; finish its provider operation before retrying (ownership cannot be proven after restart)".into() });
+            }
+        }
+        fs::create_dir_all(&root).map_err(io)?;
+        fs::create_dir(&directory).map_err(io)?;
+        let mut unfinished = Unfinished(&directory, &protected, false);
+        write_ownership(&directory, operation.file_name().unwrap().to_str().unwrap(), "safe", &suggested_name)?;
+        fs::create_dir(&operation).map_err(io)?;
+        meguri_storage::atomic_file::sync_directory(&directory)?;
+        meguri_storage::atomic_file::sync_directory(&root)?;
+        meguri_storage::atomic_file::sync_directory(parent)?;
+        let completed = match plan {
+            Plan::Collection(plan) => meguri_package::write_media_collection_export_from_live(&reader, &path, &context, plan),
+            Plan::Deck(plan) => meguri_package::write_deck_export_from_live(&reader, &path, &context, plan),
+        }.map_err(package_error)?;
         drop(reader);
         cancel.check()?;
         if !collection.is_current() {
@@ -483,9 +479,11 @@ mod export_refusal_tests {
     #[test]
     fn deck_names_and_owned_markers_remain_narrow_and_collection_compatible() {
         let suggested = meguri_package::DeckExportPlan::suggested_name_for_deck;
-        assert_eq!(suggested("Alpha\u{1f}Beta/?"), "AlphaBeta.apkg");
+        assert_eq!(suggested("Alpha::Beta"), "Alpha__Beta.apkg");
+        assert_eq!(suggested("Alpha\u{1f}Beta/?"), "Alpha__Beta__.apkg");
         assert_eq!(suggested("Alpha\0\r\n\tBeta"), "AlphaBeta.apkg");
-        assert_eq!(suggested(" . /\\:?<>*|\"^\n . "), "Meguri-Deck.apkg");
+        assert_eq!(suggested(" . /\\:?<>*|\"^\n . "), "__________.apkg");
+        assert_eq!(suggested(" . \0\r\n\t . "), "Meguri-Deck.apkg");
         assert_eq!(suggested(&"a".repeat(300)), format!("{}.apkg", "a".repeat(250)));
         assert_eq!(
             suggested(&format!("{}é", "a".repeat(249))),

@@ -249,6 +249,7 @@ pub struct Reader {
     _recovery_copy: Option<tempfile::TempDir>,
     role: ReaderRole,
     native_identity: (u64, u64),
+    connection_identity: std::sync::Arc<()>,
     /// The epoch of the derived store attached as `derived`
     /// (`storage/derived-store` D9).
     pub(crate) derived: Option<u64>,
@@ -331,6 +332,7 @@ impl Reader {
             _recovery_copy: None,
             role,
             native_identity,
+            connection_identity: std::sync::Arc::new(()),
             derived: None,
         })
     }
@@ -339,6 +341,13 @@ impl Reader {
     /// closed here while the writer holds POSIX locks on this file.
     pub fn native_identity(&self) -> (u64, u64) {
         self.native_identity
+    }
+
+    /// An opaque identity for this connection, without retaining the reader or
+    /// a transaction. Compare with `Arc::ptr_eq`; it survives reader moves and
+    /// cannot be reused by a later connection while a plan retains it.
+    pub fn connection_identity(&self) -> std::sync::Arc<()> {
+        self.connection_identity.clone()
     }
 
     pub fn role(&self) -> ReaderRole {

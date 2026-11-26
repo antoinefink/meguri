@@ -12,7 +12,7 @@ use meguri_model::{
 };
 use rusqlite::OptionalExtension;
 
-use crate::{ReadRows, ReadSnapshot, StorageError};
+use crate::{ReadRows, ReadSnapshot, RowError, StorageError, Table};
 
 #[derive(Debug)]
 pub enum DeckExportReadError {
@@ -56,6 +56,27 @@ fn check(cancel: &(dyn Fn() -> bool + Sync)) -> Result<(), DeckExportReadError> 
 }
 fn missing(table: &'static str, id: i64) -> DeckExportReadError {
     DeckExportReadError::MissingReference { table, id }
+}
+
+fn selected_field_error(
+    table: Table,
+    id: i64,
+    columns: &[&'static str],
+    error: rusqlite::Error,
+) -> DeckExportReadError {
+    let index = match &error {
+        rusqlite::Error::InvalidColumnType(index, ..)
+        | rusqlite::Error::FromSqlConversionFailure(index, ..)
+        | rusqlite::Error::IntegralValueOutOfRange(index, ..) => *index,
+        _ => return error.into(),
+    };
+    StorageError::Row(RowError {
+        table: table.name(),
+        column: columns[index],
+        key: id.to_string(),
+        reason: error.to_string(),
+    })
+    .into()
 }
 
 impl ReadSnapshot<'_> {
@@ -118,7 +139,9 @@ impl ReadSnapshot<'_> {
         let mut card_decks = self.conn().prepare("SELECT did,odid FROM cards WHERE id=?1")?;
         for id in &cards {
             check(cancel)?;
-            let (did, odid): (i64, i64) = card_decks.query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            let (did, odid): (i64, i64) = card_decks
+                .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(|error| selected_field_error(Table::Cards, *id, &["did", "odid"], error))?;
             deck_ids.insert(did);
             current_decks.insert(did);
             if odid == 0 {
@@ -174,7 +197,11 @@ impl ReadSnapshot<'_> {
         let mut note_types = self.conn().prepare("SELECT mid FROM notes WHERE id=?1")?;
         for id in &notes {
             check(cancel)?;
-            mids.insert(note_types.query_row([id], |r| r.get::<_, i64>(0))?);
+            mids.insert(
+                note_types
+                    .query_row([id], |r| r.get::<_, i64>(0))
+                    .map_err(|error| selected_field_error(Table::Notes, *id, &["mid"], error))?,
+            );
         }
         let mut notetypes = BTreeMap::new();
         for id in mids {

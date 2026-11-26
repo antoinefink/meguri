@@ -1,6 +1,6 @@
 //! Production latest-format deck export (package/apkg-export A1–A12).
-//! The short-lived preflight plan pins the selection until its fresh database
-//! is built. The read transaction ends before media capture and publication.
+//! Preparation builds the fresh database from one pinned selection, then ends
+//! the read transaction before media inventory, capture and publication.
 use crate::{
     CollectionPackageWriteContext, Error, LiveCollectionPackageWritten, MediaCollectionExportWritten, Result,
     cancelled,
@@ -42,20 +42,22 @@ pub struct DeckExportOptions {
     pub include_presets: bool,
     pub include_media: bool,
 }
-pub struct DeckExportPlan<'r> {
-    snapshot: ReadSnapshot<'r>,
-    selection: DeckExportSelection,
+pub struct DeckExportPlan {
+    staging: tempfile::TempDir,
+    database: PathBuf,
+    snapshot_modified: EpochMillis,
+    name: String,
+    notes: u64,
+    cards: u64,
+    reader_identity: std::sync::Arc<()>,
     source: PathBuf,
     source_identity: (u64, u64),
-    source_size: u64,
     directory: PathBuf,
     directory_identity: (u64, u64),
     destination: PathBuf,
-    options: DeckExportOptions,
-    instant: i64,
     validation: ExportSourceValidation,
 }
-impl DeckExportPlan<'_> {
+impl DeckExportPlan {
     pub fn protect_retained_outputs(&mut self, paths: &[PathBuf], check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
         for retained in paths {
             cancelled(check)?;
@@ -78,16 +80,16 @@ impl DeckExportPlan<'_> {
         self.validation.protect(paths, check)
     }
     pub fn note_count(&self) -> u64 {
-        self.selection.notes.len() as u64
+        self.notes
     }
     pub fn card_count(&self) -> u64 {
-        self.selection.cards.len() as u64
+        self.cards
     }
     pub fn media_count(&self) -> u64 {
         self.validation.files.len() as u64
     }
     pub fn suggested_name(&self) -> String {
-        Self::suggested_name_for_deck(&self.selection.name)
+        Self::suggested_name_for_deck(&self.name)
     }
     /// A single filesystem component that also fits the line-based ownership
     /// marker. Reserve the suffix before truncating at a UTF-8 boundary.
@@ -95,10 +97,8 @@ impl DeckExportPlan<'_> {
         const SUFFIX: &str = ".apkg";
         let human_name = meguri_model::deck::human_name(native_name);
         let mut stem = String::new();
-        for c in human_name
-            .chars()
-            .filter(|c| !c.is_control() && !"\\/?<>:*|\"^".contains(*c))
-        {
+        for c in human_name.chars().filter(|c| !c.is_control()) {
+            let c = if "\\/?<>:*|\"^".contains(c) { '_' } else { c };
             if stem.len() + c.len_utf8() > 255 - SUFFIX.len() {
                 break;
             }
@@ -135,30 +135,6 @@ fn select(
         )
         .map_err(read_error)
 }
-fn references(
-    snapshot: &ReadSnapshot<'_>,
-    selection: &DeckExportSelection,
-    enabled: bool,
-    check: &(dyn Fn() -> bool + Sync),
-) -> Result<BTreeSet<String>> {
-    let mut names = BTreeSet::new();
-    if enabled {
-        for nt in selection.notetypes.values() {
-            cancelled(check)?;
-            crate::deck_export_media::notetype(&mut names, nt);
-        }
-        for id in &selection.notes {
-            cancelled(check)?;
-            let note = snapshot.note(NoteId(*id))?.expect("validated snapshot note");
-            let nt = &selection.notetypes[&note.notetype_id.0];
-            for field in note.field_values() {
-                cancelled(check)?;
-                crate::deck_export_media::fields(&mut names, field, nt.config.latex_svg);
-            }
-        }
-    }
-    Ok(names)
-}
 fn preflight_build(size: u64, context: &CollectionPackageWriteContext<'_>) -> Result<()> {
     let needed = size.checked_add(4 * 1024 * 1024).ok_or(Error::ExportFormatLimit)?;
     let available = context.space.available_bytes(context.collection_directory)?;
@@ -167,13 +143,13 @@ fn preflight_build(size: u64, context: &CollectionPackageWriteContext<'_>) -> Re
     }
     Ok(())
 }
-pub fn preflight_deck_export_from_live<'r>(
-    reader: &'r Reader,
+pub fn preflight_deck_export_from_live(
+    reader: &Reader,
     destination: &Path,
     context: &CollectionPackageWriteContext<'_>,
     deck_id: i64,
     options: DeckExportOptions,
-) -> Result<DeckExportPlan<'r>> {
+) -> Result<DeckExportPlan> {
     use std::os::unix::fs::MetadataExt;
     cancelled(context.is_cancelled)?;
     let (source, size) = reader.live_snapshot_source()?;
@@ -239,8 +215,12 @@ pub fn preflight_deck_export_from_live<'r>(
     let instant = context.clock.now_ms();
     let snapshot = reader.begin_snapshot()?;
     let selection = select(&snapshot, deck_id, options, instant, context.is_cancelled)?;
-    let references = references(&snapshot, &selection, options.include_media, context.is_cancelled)?;
     preflight_build(size, context)?;
+    cancelled(context.is_cancelled)?;
+    let staging = staging_directory(context.collection_directory)?;
+    let database = staging.path().join("snapshot.anki2");
+    let (snapshot_modified, references) = build(&snapshot, &selection, &database, options, instant, context)?;
+    drop(snapshot);
     let validation = ExportSourceValidation::referenced(
         context.collection_directory,
         protected,
@@ -248,16 +228,18 @@ pub fn preflight_deck_export_from_live<'r>(
         context.is_cancelled,
     )?;
     Ok(DeckExportPlan {
-        snapshot,
-        selection,
+        staging,
+        database,
+        snapshot_modified,
+        name: selection.name,
+        notes: selection.notes.len() as u64,
+        cards: selection.cards.len() as u64,
+        reader_identity: reader.connection_identity(),
         source,
         source_identity: reader.native_identity(),
-        source_size: size,
         directory: context.collection_directory.to_owned(),
         directory_identity: (directory.dev(), directory.ino()),
         destination: destination.to_owned(),
-        options,
-        instant,
         validation,
     })
 }
@@ -274,7 +256,8 @@ fn build(
     options: DeckExportOptions,
     instant: i64,
     context: &CollectionPackageWriteContext<'_>,
-) -> Result<EpochMillis> {
+) -> Result<(EpochMillis, BTreeSet<String>)> {
+    let mut references = BTreeSet::new();
     let frozen = FixedClock::new(instant, context.clock.utc_offset_at(instant));
     let col = Col {
         version: Col::SCHEMA_VERSION,
@@ -347,11 +330,21 @@ fn build(
     }
     for nt in selected.notetypes.values() {
         cancelled(context.is_cancelled)?;
+        if options.include_media {
+            crate::deck_export_media::notetype(&mut references, nt);
+        }
         scope.put_notetype(nt)?;
     }
     for id in &selected.notes {
         cancelled(context.is_cancelled)?;
         let mut note = snapshot.note(NoteId(*id))?.expect("validated snapshot note");
+        if options.include_media {
+            let nt = &selected.notetypes[&note.notetype_id.0];
+            for field in note.field_values() {
+                cancelled(context.is_cancelled)?;
+                crate::deck_export_media::fields(&mut references, field, nt.config.latex_svg);
+            }
+        }
         let tags: Vec<_> = meguri_engine::tags::canonical::split_text(&note.tags)
             .filter(|t| {
                 options.include_scheduling || !(t.eq_ignore_ascii_case("marked") || t.eq_ignore_ascii_case("leech"))
@@ -387,22 +380,20 @@ fn build(
     scope.commit()?;
     builder.finish()?;
     meguri_storage::collection_package::finalise_export_snapshot(path)?;
-    Ok(modified)
+    Ok((modified, references))
 }
 
 pub fn write_deck_export_from_live(
     reader: &Reader,
     destination: &Path,
     context: &CollectionPackageWriteContext<'_>,
-    mut plan: DeckExportPlan<'_>,
+    mut plan: DeckExportPlan,
 ) -> Result<MediaCollectionExportWritten> {
     use std::os::unix::fs::MetadataExt;
     cancelled(context.is_cancelled)?;
-    // live_snapshot_source requires autocommit: the plan already owns this
-    // reader's transaction. Check its binding without opening another view.
     let source = std::fs::metadata(&plan.source)?;
     let directory = std::fs::metadata(context.collection_directory)?;
-    if !std::ptr::eq(reader, plan.snapshot.reader())
+    if !std::sync::Arc::ptr_eq(&reader.connection_identity(), &plan.reader_identity)
         || reader.native_identity() != plan.source_identity
         || (source.dev(), source.ino()) != plan.source_identity
         || context.collection_directory != plan.directory.as_path()
@@ -413,25 +404,28 @@ pub fn write_deck_export_from_live(
     }
     plan.validation.validate(context.is_cancelled)?;
     writer::check_exclusive_destination(destination, context.finalisation)?;
-    preflight_build(plan.source_size, context)?;
     cancelled(context.is_cancelled)?;
-    let staging = staging_directory(context.collection_directory)?;
-    let path = staging.path().join("snapshot.anki2");
-    let snapshot_modified = build(&plan.snapshot, &plan.selection, &path, plan.options, plan.instant, context)?;
-    drop(plan.snapshot);
     export_capture::preflight_deck(
-        std::fs::metadata(&path)?.len(),
+        std::fs::metadata(&plan.database)?.len(),
         &plan.validation.files,
         destination,
         context,
     )?;
-    plan.validation.capture(staging.path(), context.is_cancelled)?;
-    writer::publish_snapshot_with_media(&path, staging.path(), destination, context, Some(&plan.validation))?;
+    plan.validation.capture(plan.staging.path(), context.is_cancelled)?;
+    writer::publish_snapshot_with_media(
+        &plan.database,
+        plan.staging.path(),
+        destination,
+        context,
+        Some(&plan.validation),
+    )?;
     Ok(MediaCollectionExportWritten {
-        written: LiveCollectionPackageWritten { snapshot_modified },
+        written: LiveCollectionPackageWritten {
+            snapshot_modified: plan.snapshot_modified,
+        },
         deck_counts: Some(DeckExportCounts {
-            notes: plan.selection.notes.len() as u64,
-            cards: plan.selection.cards.len() as u64,
+            notes: plan.notes,
+            cards: plan.cards,
             media: plan.validation.files.len() as u64,
         }),
         source_validation: plan.validation,
