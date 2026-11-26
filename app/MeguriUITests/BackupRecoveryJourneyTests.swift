@@ -244,9 +244,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     private func enter(_ content: String, field name: String, editor: XCUIElement,
                        app: XCUIApplication, replacing: Bool = true) throws {
         var input: XCUIElement { field(name, editor: editor) }
-        var expectedValue: String?
         try act(input, app)
         #if os(macOS)
+        let expectedValue: String? = nil
         if replacing {
             try app.bringToFront(bundleIdentifier: bundle)
             app.typeKey("a", modifierFlags: .command)
@@ -262,6 +262,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertTrue(wait { nextMode.exists && (name == "Front" ? nextMode.isEnabled : !nextMode.isEnabled) },
             "The editor must process the native blur before reading the committed value")
         #else
+        var expectedValue: String?
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         if isPad {
             let mode = element(app, name == "Front" ? "editor.field.0.htmlToggle" : "editor.field.1.htmlToggle")
