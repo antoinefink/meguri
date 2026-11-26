@@ -1,11 +1,11 @@
 //! `sync/meguri-provider#MP7` and `notetypes/draft-save#D6`, `#D7`, `#D10`:
 //! the structure save job against a scripted Meguri server.
 #[allow(dead_code)]
-#[path = "support/meguri_bootstrap_script.rs"] mod bootstrap;
+#[path = "support/meguri_bootstrap_script.rs"] pub(super) mod bootstrap;
 #[allow(dead_code)]
-#[path = "support/meguri_round_script.rs"] mod round;
+#[path = "support/meguri_round_script.rs"] pub(super) mod round;
 #[allow(dead_code)]
-#[path = "support/meguri_structure.rs"] mod structure;
+#[path = "support/meguri_structure.rs"] pub(super) mod structure;
 use bootstrap as b;
 use round as r;
 use structure as s;
@@ -18,8 +18,6 @@ use meguri_storage::{ReadRows, ReaderRole};
 use meguri_sync::{Method, policy::Acceptance, provider::{MeguriReadiness, MeguriRoundRefusal, Selection}};
 use serde_json::json;
 use std::sync::Arc;
-
-#[path = "provider_notetype_removal.rs"] mod note_type_removal;
 
 fn ready(host: &CoreHost) -> bool { matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Ready) }
 fn record(host: &CoreHost) -> bool { host.provider_authority().snapshot().unwrap().meguri_structure.is_some() }

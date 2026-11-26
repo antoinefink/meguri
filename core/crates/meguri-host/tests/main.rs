@@ -50,6 +50,13 @@ pub mod provider_import;
 #[cfg(feature = "test-hooks")]
 #[path = "provider_normal.rs"]
 pub mod provider_normal;
+// Keep the removal suite's `super::{b, r, s}` on the structure fixtures,
+// including their shared serialization lane.
+#[cfg(feature = "test-hooks")]
+use provider_structure::{bootstrap as b, round as r, structure as s};
+#[cfg(feature = "test-hooks")]
+#[path = "provider_notetype_removal.rs"]
+pub mod provider_notetype_removal;
 #[cfg(feature = "test-hooks")]
 #[path = "provider_setup.rs"]
 pub mod provider_setup;
