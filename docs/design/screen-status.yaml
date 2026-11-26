@@ -919,8 +919,190 @@ screens:
     status: sketch
     fix_rounds: 0
   settings.backups:
-    status: sketch
+    status: built
     fix_rounds: 0
+    platforms:
+    - iphone
+    - ipad
+    - mac
+    evidence:
+      lint:
+        run: 20261126T171743Z-12514
+        status: pass
+      iphone:
+        snapshots:
+          run: 20261126T171741Z-12094
+          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
+          status: fail
+          digest: 31ae5740a671b4da52c5be7c6447912d214c065f0b644a4369235c1c5201ebdd
+          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
+        critic:
+          run: 20261126T172905Z-72014
+          session: s-20261126T172908Z-ced2d889
+          commit: 1f5b571c53c605981ee13e8217348654f593ab78
+          status: pass
+          high: 0
+          medium: 2
+          low: 1
+          dropped: 0
+          date: '2026-11-26T17:31:04Z'
+      ipad:
+        snapshots:
+          run: 20261126T171741Z-12094
+          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
+          status: fail
+          digest: 5c7bf7cf38dd7c65bc4f343912fbea8afee5506f0f990028f1b1184d7ac71c17
+          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
+        critic:
+          run: 20261126T172905Z-72014
+          session: s-20261126T172908Z-ced2d889
+          commit: 1f5b571c53c605981ee13e8217348654f593ab78
+          status: fail
+          high: 1
+          medium: 0
+          low: 0
+          dropped: 0
+          date: '2026-11-26T17:31:04Z'
+      mac:
+        snapshots:
+          run: 20261126T171741Z-12094
+          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
+          status: fail
+          digest: 5622eeedad9558cd7e3c83f0625b12faa0171188290b6db820d37ad96505f780
+          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
+        critic:
+          run: 20261126T172905Z-72014
+          session: s-20261126T172908Z-ced2d889
+          commit: 1f5b571c53c605981ee13e8217348654f593ab78
+          status: pass
+          high: 0
+          medium: 2
+          low: 0
+          dropped: 0
+          date: '2026-11-26T17:31:04Z'
+    issues:
+    - platform: ipad
+      state: overflow
+      variant: dark-standard-ipadRegular+hc+rm
+      rule: platform-native-defaults
+      severity: high
+      region:
+        x: 484
+        y: 1240
+        width: 1091
+        height: 298
+      summary: In dark mode with Increase Contrast, the selected backup row (Nov 24) looks the same as
+        the other rows, so the person cannot see which backup Restore… will use.
+      image: screens/settings.backups/overflow/dark-standard-ipadRegular+hc+rm.png
+      run: 20261126T172905Z-72014
+    - platform: iphone
+      state: loading
+      variant: dark-standard-iphoneLarge+rm+tmax
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 80
+        y: 460
+        width: 320
+        height: 110
+      summary: The progress spinner is centred above the 'Creating Backup…' label, but the label starts
+        at the row's leading edge, so the two don't line up.
+      image: screens/settings.backups/loading/dark-standard-iphoneLarge+rm+tmax.png
+      run: 20261126T172905Z-72014
+    - platform: iphone
+      state: loading
+      variant: dark-ax5-iphoneSmall
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 72
+        y: 555
+        width: 420
+        height: 410
+      summary: At AX5 the progress spinner floats in the middle of the row above a two-line label that
+        starts at the leading edge.
+      image: screens/settings.backups/loading/dark-ax5-iphoneSmall.png
+      run: 20261126T172905Z-72014
+    - platform: mac
+      state: loading
+      variant: light-standard-macLarge
+      rule: layout-alignment
+      severity: medium
+      region:
+        x: 911
+        y: 145
+        width: 238
+        height: 119
+      summary: On the Mac the spinner is stacked and centred above a leading 'Creating Backup…' label
+        instead of sitting on one line with it.
+      image: screens/settings.backups/loading/light-standard-macLarge.png
+      run: 20261126T172905Z-72014
+    - platform: mac
+      state: loading
+      variant: light-standard-macLarge
+      rule: layout-native-spacing
+      severity: medium
+      region:
+        x: 895
+        y: 425
+        width: 1404
+        height: 45
+      summary: While a backup is running, the gap between the Back Up Now group and the Restore group
+        shrinks to a thin strip, so the two groups almost touch.
+      image: screens/settings.backups/loading/light-standard-macLarge.png
+      run: 20261126T172905Z-72014
+    - platform: iphone
+      state: error
+      variant: dark-standard-iphoneLarge+rm+tmax
+      rule: copy-plain
+      severity: low
+      region:
+        x: 70
+        y: 490
+        width: 740
+        height: 140
+      summary: Use the shorter Mac recovery instruction on iPhone.
+      image: screens/settings.backups/error/dark-standard-iphoneLarge+rm+tmax.png
+      run: 20261126T172905Z-72014
+    tasks:
+    - rule: layout-alignment
+      state: loading
+      variant: dark-standard-iphoneLarge+rm+tmax
+      summary: The progress spinner is centred above the 'Creating Backup…' label, but the label starts
+        at the row's leading edge, so the two don't line up.
+      from: 20261126T172905Z-72014
+      open: true
+      since: 20261126T172905Z-72014
+    - rule: layout-alignment
+      state: loading
+      variant: dark-ax5-iphoneSmall
+      summary: At AX5 the progress spinner floats in the middle of the row above a two-line label that
+        starts at the leading edge.
+      from: 20261126T172905Z-72014
+      open: true
+      since: 20261126T172905Z-72014
+    - rule: layout-alignment
+      state: loading
+      variant: light-standard-macLarge
+      summary: On the Mac the spinner is stacked and centred above a leading 'Creating Backup…' label
+        instead of sitting on one line with it.
+      from: 20261126T172905Z-72014
+      open: true
+      since: 20261126T172905Z-72014
+    - rule: layout-native-spacing
+      state: loading
+      variant: light-standard-macLarge
+      summary: While a backup is running, the gap between the Back Up Now group and the Restore group
+        shrinks to a thin strip, so the two groups almost touch.
+      from: 20261126T172905Z-72014
+      open: true
+      since: 20261126T172905Z-72014
+    history:
+    - date: '2026-11-26T17:31:04Z'
+      from: sketch
+      to: built
+      by: tools/mg critic
+      reason: critic run 20261126T172905Z-72014 graded its snapshots
   settings.maintenance:
     status: sketch
     fix_rounds: 0
