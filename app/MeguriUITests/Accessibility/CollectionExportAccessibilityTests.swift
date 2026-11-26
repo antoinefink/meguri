@@ -46,4 +46,33 @@ import UIKit
         add(AccessibilityAudit.screenReport("settings.importExport", states: states))
         for state in states { AccessibilityAudit.assertClean(state.findings); TouchTargets.assertMet(state.touchTargets) }
     }
+    func testDeckOptionsUseNamedNativeControlsAtEveryTextSizeAndAppearance() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("Requires public view fixtures") }
+        #if os(macOS)
+        guard try build.bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("VM development build required") }
+        #endif
+        let suppressions = try AuditSuppressions.bundled()
+        let states = try ["options", "options-changed"].map { state in
+            try AccessibilityAudit.runAllVariants(state: state,
+                launch: MeguriLaunch(locale: "en_US", animations: false, route: "collection/deck-export/\(state)"),
+                waitFor: "home.deckExport.content", suppressions: suppressions,
+                supplemental: { app, _ in
+                    let labels = ["scheduling": "Include scheduling information",
+                                  "presets": "Include deck presets", "media": "Include media"]
+                    for (option, label) in labels {
+                        let control = app.descendants(matching: .any)["home.deckExport.\(option)"].firstMatch
+                        XCTAssertTrue(control.exists && control.isEnabled)
+                        XCTAssertEqual(control.label, label)
+                    }
+                    XCTAssertTrue(app.buttons["home.deckExport.export"].firstMatch.isEnabled)
+                    XCTAssertTrue(app.buttons["home.deckExport.close"].firstMatch.isEnabled)
+                    return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: try TouchTargets.violations(in: app))
+                })
+        }
+        add(AccessibilityAudit.screenReport("settings.importExport", states: states))
+        for state in states { AccessibilityAudit.assertClean(state.findings); TouchTargets.assertMet(state.touchTargets) }
+    }
+
 }

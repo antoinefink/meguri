@@ -37,6 +37,12 @@ impl Drop for Flow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckExportCounts {
+    pub notes: u64,
+    pub cards: u64,
+    pub media: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CollectionExportMetadata {
     pub operation_id: u64,
     pub source_generation: u64,
@@ -45,6 +51,7 @@ pub struct CollectionExportMetadata {
     pub byte_length: u64,
     pub suggested_name: String,
     pub sha256: Vec<u8>,
+    pub deck_counts: Option<DeckExportCounts>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CollectionExportFailure {
@@ -311,9 +318,46 @@ pub struct CollectionExportJob {
 #[uniffi::export]
 pub fn start_collection_export() -> Result<CollectionExportJob, CoreError> {
     callback::enter("start_collection_export");
+    start_package_export(None, None)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckExportOptions {
+    pub include_scheduling: bool,
+    pub include_presets: bool,
+    pub include_media: bool,
+}
+impl From<DeckExportOptions> for meguri_package::DeckExportOptions {
+    fn from(value: DeckExportOptions) -> Self {
+        Self { include_scheduling: value.include_scheduling, include_presets: value.include_presets, include_media: value.include_media }
+    }
+}
+#[uniffi::export]
+pub fn start_deck_export(
+    deck_id: i64,
+    options: DeckExportOptions,
+    expected_generation: u64,
+) -> Result<CollectionExportJob, CoreError> {
+    callback::enter("start_deck_export");
+    start_package_export(Some((deck_id, options.into())), Some(expected_generation))
+}
+fn start_package_export(
+    deck: Option<(i64, meguri_package::DeckExportOptions)>,
+    expected_generation: Option<u64>,
+) -> Result<CollectionExportJob, CoreError> {
     let host = runtime::host()?;
     let collection = host.collection()?; // Ready independently of FSRS study eligibility.
     let generation = collection.generation().0;
+    // Check the exact Collection moved into the worker, before reserving a
+    // flow or starting any job. Never re-fetch the runtime collection here.
+    if let Some(planned) = expected_generation
+        && planned != generation
+    {
+        return Err(CoreError::StaleGeneration {
+            planned,
+            current: generation,
+        });
+    }
     let admission_seq = collection.last_seq().0;
     let source = collection.path().to_owned();
     let flow = Flow::reserve()?;
@@ -335,6 +379,7 @@ pub fn start_collection_export() -> Result<CollectionExportJob, CoreError> {
             job.id.0,
             &job.cancel,
             &job.progress,
+            deck,
         );
         let status = outcome.as_ref().map(|_| ()).map_err(Clone::clone);
         completion.finish(outcome.map_err(Into::into));
@@ -358,9 +403,13 @@ fn prepare_export(
     operation_id: u64,
     cancel: &CancelToken,
     progress: &meguri_engine::ProgressSink,
+    deck: Option<(i64, meguri_package::DeckExportOptions)>,
 ) -> Result<Arc<CollectionExportArtifact>, EngineError> {
     progress.set_phase(ProgressPhase::Named("Flushing saved reviews"));
-    let output = host.write_collection_export(&collection, cancel, progress)?;
+    let output = match deck {
+        Some((id, options)) => host.write_deck_export(&collection, cancel, progress, id, options)?,
+        None => host.write_collection_export(&collection, cancel, progress)?,
+    };
     // Writer's Maintenance lease is gone before hashing and Ready.
     progress.set_phase(ProgressPhase::Named("Verifying completed export"));
     let digest = digest(&output.path, cancel).and_then(|identity| {
@@ -392,8 +441,11 @@ fn prepare_export(
                 admission_seq,
                 snapshot_modified_ms: output.written.snapshot_modified.0,
                 byte_length,
-                suggested_name: "Meguri-Collection.colpkg".into(),
+                suggested_name: output.suggested_name,
                 sha256: sha256.to_vec(),
+                deck_counts: output.deck_counts.map(|counts| DeckExportCounts {
+                    notes: counts.notes, cards: counts.cards, media: counts.media,
+                }),
             },
             removal: Mutex::new(meguri_host::CollectionExportRemoval::default()),
             state: Mutex::new(ArtifactState {
@@ -662,6 +714,7 @@ pub fn save_file_for_memory_regression(
             byte_length,
             suggested_name: "Meguri-Collection.colpkg".into(),
             sha256: hash.to_vec(),
+            deck_counts: None,
         },
         state: Mutex::new(ArtifactState {
             discarded: false,
@@ -732,6 +785,7 @@ mod tests {
             41,
             &CancelToken::new(),
             &ProgressSink::new(),
+            None,
         );
         meguri_model::faultpoint::disarm(point);
         assert!(result.is_err());
@@ -769,6 +823,7 @@ mod tests {
             42,
             &CancelToken::new(),
             &ProgressSink::new(),
+            None,
         );
         assert!(matches!(result, Err(EngineError::ExportSourceInvalid)));
         assert!(!root.path().join("CollectionExports").exists());
@@ -810,6 +865,7 @@ mod tests {
             41,
             &CancelToken::new(),
             &ProgressSink::new(),
+            None,
         )
         .unwrap()
     }
@@ -892,6 +948,55 @@ mod tests {
                 OpSource::UserUndoable,
             )
             .unwrap();
+        }
+    }
+    #[test]
+    fn selected_deck_reuses_owned_save_alias_and_native_lease_protection() {
+        let _serial = SERIAL.lock().unwrap();
+        for include_media in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (host, _) = host(root.path());
+            add_cards(&host);
+            let c = host.collection().unwrap();
+            let generation = c.generation().0;
+            let seq = c.last_seq().0;
+            let source = c.path().to_owned();
+            let artifact = prepare_export(
+                &host, c, host.engine().clone(), source.clone(), generation, seq,
+                Flow::reserve().unwrap(), 42, &CancelToken::new(), &ProgressSink::new(),
+                Some((1, meguri_package::DeckExportOptions {
+                    include_scheduling: false, include_presets: false, include_media,
+                })),
+            ).unwrap();
+            let metadata = artifact.metadata().unwrap();
+            assert_eq!(metadata.suggested_name, "Default.apkg");
+            assert_eq!(artifact.owner.path.file_name().unwrap(), "Default.apkg");
+            assert_eq!(metadata.source_generation, generation);
+            assert_eq!(metadata.admission_seq, seq);
+            assert!(metadata.byte_length > 0);
+            let lease = acquire_native(&artifact);
+            assert!(matches!(host.close(), Err(EngineError::Busy { .. })));
+            assert!(save(&artifact.owner, &source, &CancelToken::new()).is_err());
+            let destination = root.path().join("saved.apkg");
+            save(&artifact.owner, &destination, &CancelToken::new()).unwrap();
+            assert_eq!(digest(&destination, &CancelToken::new()).unwrap(),
+                       digest(&artifact.owner.path, &CancelToken::new()).unwrap());
+            // Dismiss/discard cannot delete bytes while Files still owns them.
+            assert!(artifact.discard().unwrap().is_none());
+            assert!(artifact.owner.path.is_file());
+            finish_native(lease.clone());
+            let events = host.engine().stream().subscribe();
+            drop(lease);
+            while artifact.owner.state.lock().unwrap().flow.is_some() {
+                events.recv_timeout(Duration::from_secs(20)).unwrap();
+            }
+            assert!(!artifact.owner.directory.exists());
+            assert!(destination.is_file());
+            // Collection export still uses its original format and recovers the slot.
+            let collection = prepare(&host);
+            assert_eq!(collection.metadata().unwrap().suggested_name, "Meguri-Collection.colpkg");
+            drain_cleanup(&collection);
+            host.close().unwrap();
         }
     }
     #[test]
@@ -1169,6 +1274,8 @@ mod tests {
             match &error {
                 EngineError::ExportSourceChanged => "ExportSourceChanged",
                 EngineError::ExportSourceInvalid => "ExportSourceInvalid",
+                EngineError::ExportInvalidIds => "ExportInvalidIds",
+                EngineError::ExportNeedsCheckDatabase => "ExportNeedsCheckDatabase",
                 EngineError::ExportFormatLimit => "ExportFormatLimit",
                 EngineError::SyncNote(_) => "SyncNote",
                 EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",
@@ -1709,6 +1816,8 @@ mod source_refusal_projection_tests {
             (EngineError::ExportSourceChanged, CoreError::ExportSourceChanged),
             (EngineError::ExportSourceInvalid, CoreError::ExportSourceInvalid),
             (EngineError::ExportFormatLimit, CoreError::ExportFormatLimit),
+            (EngineError::ExportInvalidIds, CoreError::ExportInvalidIds),
+            (EngineError::ExportNeedsCheckDatabase, CoreError::ExportNeedsCheckDatabase),
             (EngineError::Cancelled, CoreError::Cancelled),
             (
                 EngineError::Storage(StorageError::InsufficientSpace {

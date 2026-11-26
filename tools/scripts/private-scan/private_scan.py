@@ -845,6 +845,10 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
     "app/MeguriUITests/IOAddEditUITests.swift": "c46e6dca3af898ba074b68ad0fa8026d93c3a6c03f0ee1599a3317083ecea338",
+    "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
+    "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
+    "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
+    "core/crates/meguri-host/src/collection_export.rs": "88c340e10981b59a4e4ea5f64766c547c5fa9182c70e4a36ca47b5b04f05e867",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
@@ -1131,8 +1135,9 @@ PUBLIC_ARTIFACTS = {
         '5c252409842d08d9d53f0b196ca737e8ec2051fa28aa38ed6fecd219e70a9126',
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
+    # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     'server/README.md':
-        '4d6f4a0475d17afad978fd1ef20efc727372c7e0c5b0b8a7150ff7834fedaa72',
+        '39ee9aa5a30633b4e6fe148a8044450c34896b19a95e66dd72295f887d627d40',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
@@ -1157,9 +1162,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/native-owned-provider-ui-20261118.md":
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
-    # Complete public-file review: owned_diagnostic_review, 2026-11-19.
+    # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     "docs/process/verification-status.md":
-        "8ec51195b37d6f85427ee90efd068937676be625afa88f4980506c305519cf56",
+        "f6d11e917a2d9e74eba72039aa36e53c6b0e656901fc83425b33b7cbf587c21f",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",

@@ -345,3 +345,76 @@ fn media_format_limit_reaches_the_host_as_a_distinct_refusal() {
     assert!(!root.path().join("CollectionExports").exists());
     host.close().unwrap();
 }
+
+#[test]
+fn interrupted_atomic_export_is_recovered_for_both_export_kinds_after_restart() {
+    use meguri_storage::atomic_file::{AtomicFile, Purpose};
+    let _serial = SERIAL.lock().unwrap();
+    for deck in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+        let host = CoreHost::open(config.clone()).unwrap();
+        let previous = export(&host).unwrap();
+        fs::remove_file(&previous.path).unwrap();
+        let mut atomic = AtomicFile::new(&previous.path, Purpose::Export).unwrap();
+        std::io::Write::write_all(atomic.file_mut(), b"interrupted compression").unwrap();
+        let temporary = atomic.path().to_owned();
+        // Retain just the bytes that survive a killed worker, without leaking its descriptor.
+        let bytes = fs::read(&temporary).unwrap();
+        drop(atomic);
+        fs::write(&temporary, bytes).unwrap();
+        host.close().unwrap();
+        let host = CoreHost::open(config).unwrap();
+        let output = if deck {
+            host.write_deck_export(&host.collection().unwrap(), &CancelToken::new(), &ProgressSink::new(), 1,
+                meguri_package::DeckExportOptions { include_scheduling: false, include_presets: false, include_media: false })
+        } else { export(&host) }.unwrap();
+        assert!(!temporary.exists());
+        assert!(output.path.is_file());
+        remove_collection_export(&output.directory, &output.protected_directories).unwrap();
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn operation_recovery_refuses_foreign_names_symlinks_directories_and_provider_temps() {
+    let _serial = SERIAL.lock().unwrap();
+    for foreign in ["foreign", ".meguri-tmp-export-abcde", ".meguri-tmp-export-abcdefg", ".meguri-tmp-export-abcde_", ".meguri-tmp-backup-abcdef", "symlink", "directory", "provider"] {
+        let root = tempfile::tempdir().unwrap();
+        let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+        let host = CoreHost::open(config).unwrap();
+        let output = export(&host).unwrap();
+        let operation = output.path.parent().unwrap();
+        let reserved = operation.join(".meguri-tmp-export-aB012z");
+        fs::write(&reserved, b"partial").unwrap();
+        let path = operation.join(match foreign { "symlink" | "directory" => ".meguri-tmp-export-zY123a", _ => foreign });
+        match foreign {
+            "symlink" => std::os::unix::fs::symlink(&output.path, &path).unwrap(),
+            "directory" => fs::create_dir(&path).unwrap(),
+            "provider" => meguri_host::collection_export_provider_state(&output.directory, true).unwrap(),
+            _ => fs::write(&path, b"keep").unwrap(),
+        }
+        assert!(remove_collection_export(&output.directory, &output.protected_directories).is_err());
+        assert!(output.path.is_file() && reserved.is_file());
+        if foreign != "provider" { assert!(path.symlink_metadata().is_ok()); }
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn selected_name_lookup_ignores_unrelated_malformed_deck_blobs() {
+    let _serial = SERIAL.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
+    let host = CoreHost::open(config.clone()).unwrap();
+    host.close().unwrap();
+    let db = meguri_storage::raw::PlainDatabase::open(&config.collection_directory.join("collection.anki2")).unwrap();
+    db.execute_batch("INSERT INTO decks (id,name,mtime_secs,usn,common,kind) VALUES (200,'Unrelated',0,0,x'ff',x'ff')").unwrap();
+    db.close().unwrap();
+    let host = CoreHost::open(config).unwrap();
+    let output = host.write_deck_export(&host.collection().unwrap(), &CancelToken::new(), &ProgressSink::new(), 1,
+        meguri_package::DeckExportOptions { include_scheduling: false, include_presets: false, include_media: false }).unwrap();
+    assert_eq!(output.deck_counts, Some(meguri_package::DeckExportCounts { notes: 0, cards: 0, media: 0 }));
+    remove_collection_export(&output.directory, &output.protected_directories).unwrap();
+    host.close().unwrap();
+}
