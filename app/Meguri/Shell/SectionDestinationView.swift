@@ -307,7 +307,7 @@ private struct BrowseSidebarHost: View {
         BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { node in
             Binding(get: { collection.studyExpanded(node) },
                     set: { collection.setStudyExpanded(deckID: node.id, expanded: $0, includingDescendants: false) })
-        }, navigate: { navigation.select(.section($0)) }) {
+        }, navigate: { navigation.selectFromSidebar(.section($0)) }, navigation: navigation) {
             header
         }
         // Rows and counts are read once the collection can answer (a launch, a replacement).

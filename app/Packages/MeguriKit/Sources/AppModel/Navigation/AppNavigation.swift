@@ -42,6 +42,9 @@ public final class AppNavigation {
     public var sheet: SheetRoute? {
         get { presentedSheet }
         set {
+            #if os(macOS)
+            if newValue != presentedSheet { cancelMacSidebarSelection() }
+            #endif
             if presentedSheet.isAddNote || newValue.isAddNote, let addSheetRequest {
                 addSheetRequest(newValue)
             } else {
@@ -111,7 +114,76 @@ public final class AppNavigation {
     /// study continue to use the committed selection, never this pending intent.
     public private(set) var pendingDeckPage: DeckID?
     @ObservationIgnored private(set) var intentRevision: UInt64 = 0 {
-        didSet { pendingDeckPage = nil }
+        didSet {
+            pendingDeckPage = nil
+            #if os(macOS)
+            macSidebarSelection = nil
+            macSidebarCompletion = nil
+            #endif
+        }
+    }
+
+    #if os(macOS)
+    /// Native row feedback only. The detail, stacks and restoration still read
+    /// the committed route until the sidebar's window has displayed this row.
+    public private(set) var macSidebarSelection: SidebarItem?
+    @ObservationIgnored private var macSidebarCompletion: (() -> Void)?
+    public var macSidebarSelectionID: UInt64? { macSidebarSelection == nil ? nil : intentRevision }
+
+    public func commitMacSidebarSelection(_ intent: UInt64) {
+        guard macSidebarSelectionID == intent, let item = macSidebarSelection else { return }
+        let completion = macSidebarCompletion
+        macSidebarSelection = nil
+        macSidebarCompletion = nil
+        select(item)
+        completion?()
+    }
+
+    /// A deck row's double-click starts Study after its own selection has
+    /// opened the page. A newer selection cancels both parts together.
+    public func afterMacSidebarSelection(_ action: @escaping () -> Void) {
+        if macSidebarSelection != nil { macSidebarCompletion = action }
+        else { action() }
+    }
+
+    public func cancelMacSidebarSelection() {
+        guard macSidebarSelection != nil else { return }
+        intentRevision &+= 1
+    }
+    #endif
+
+    /// User selection from the main sidebar. Programmatic routes use `select`.
+    public func selectFromSidebar(_ item: SidebarItem) {
+        #if os(macOS)
+        guard macSidebarSelection != item else { return }
+        let displayedDeck = pendingDeckPage
+        intentRevision &+= 1
+        // Keep even pending detail mounted during the visual handoff, while
+        // invalidating its former save's authority to navigate.
+        pendingDeckPage = displayedDeck
+        macSidebarSelection = item
+        #else
+        select(item)
+        #endif
+    }
+
+    public var displayedSidebarSelection: SidebarItem {
+        #if os(macOS)
+        if let macSidebarSelection { return macSidebarSelection }
+        #endif
+        return sidebarSelection
+    }
+
+    public var sidebarInteractionPending: Bool {
+        #if os(macOS)
+        return macSidebarSelection != nil
+        #else
+        return false
+        #endif
+    }
+
+    public var destinationActionsAvailable: Bool {
+        pendingDeckPage == nil && !sidebarInteractionPending
     }
 
     func beginDeckSelection(deck: DeckID? = nil) -> UInt64 {
@@ -427,6 +499,9 @@ public final class AppNavigation {
     }
 
     public func startReview(_ presentation: ReviewPresentation) {
+        #if os(macOS)
+        cancelMacSidebarSelection()
+        #endif
         if review == nil {
             columnVisibilityBeforeReview = columnVisibility
         }

@@ -78,7 +78,7 @@ extension TestHooks {
                     return Binding(get: { !expansion.collapsed.contains(id) }, set: { expanded in
                         if expanded { expansion.collapsed.remove(id) } else { expansion.collapsed.insert(id) }
                     })
-                }, navigate: { navigation.select(.section($0)) }) { header })
+                }, navigate: { navigation.selectFromSidebar(.section($0)) }, navigation: navigation) { header })
             }
             let query: FilterQuery = switch state {
             case .typical, .filtered, .today:

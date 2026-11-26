@@ -123,7 +123,10 @@ extension View {
     /// The row's deck menu: a long press on touch, a right-click on the Mac.
     @ViewBuilder func deckMenu(collection: ReviewCollection?, deck: CountedDeckNode, place: String = "list") -> some View {
         if let collection {
-            contextMenu { DeckMenu(collection: collection, deck: deck, deletionAnchor: .row(place: place)) }
+            contextMenu {
+                DeckMenu(collection: collection, deck: deck, deletionAnchor: .row(place: place))
+                    .disabled(collection.navigation.sidebarInteractionPending)
+            }
                 .deckDeletionQuestion(collection: collection, deckID: deck.id, place: place)
         } else {
             self

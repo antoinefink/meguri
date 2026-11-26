@@ -51,6 +51,8 @@ struct SidebarRootView: View {
                         navigation.detailPath = path
                     })) {
                         SectionDestinationView(screen: root, navigation: navigation, features: features)
+                            .disabled(navigation.sidebarInteractionPending)
+                            .allowsHitTesting(!navigation.sidebarInteractionPending)
                             #if !os(macOS)
                             // iPadOS draws only a column's own toolbar items: one on the
                             // split view itself never appears (N11.8's status button).
@@ -64,6 +66,8 @@ struct SidebarRootView: View {
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    .disabled(navigation.sidebarInteractionPending)
+                                    .allowsHitTesting(!navigation.sidebarInteractionPending)
                                     // A pushed page (a note type's on iPad) does not get the value set on
                                     // the stack below: it gets it here.
                                     .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
@@ -133,6 +137,8 @@ struct PendingDeckDetail: View {
         NavigationStack {
             if let deck = navigation.pendingDeckPage {
                 SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
+                    .disabled(navigation.sidebarInteractionPending)
+                    .allowsHitTesting(!navigation.sidebarInteractionPending)
                     .toolbar {
                         #if os(macOS)
                         ToolbarItem(placement: .navigation) { back(displayed) }

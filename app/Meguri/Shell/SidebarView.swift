@@ -14,6 +14,9 @@ struct SidebarView: View {
 
     var body: some View {
         content
+            #if os(macOS)
+            .background(MacSidebarSelectionHandoff(navigation: navigation))
+            #endif
             .sidebarColumnChrome()
             .navigationTitle(Text(verbatim: "Meguri"))
             #if !os(macOS)
@@ -38,7 +41,7 @@ struct SidebarView: View {
     private func sectionRows<Tag: Hashable>(tag: @escaping (AppSection) -> Tag) -> some View {
         ForEach(features.availableSections.filter(features.sectionShown), id: \.self) { section in
             Button {
-                navigation.select(.section(section))
+                navigation.selectFromSidebar(.section(section))
             } label: {
                 Label {
                     // Rows grow with the text size rather than cut it.
@@ -54,14 +57,14 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
-            .accessibilityAddTraits(navigation.sidebarSelection == .section(section) ? .isSelected : [])
+            .accessibilityAddTraits(navigation.displayedSidebarSelection == .section(section) ? .isSelected : [])
             .tag(tag(section))
         }
     }
 
     private var list: some View {
-        List(selection: Binding<SidebarItem?>(get: { navigation.sidebarSelection }, set: { item in
-            if let item { navigation.select(item) }
+        List(selection: Binding<SidebarItem?>(get: { navigation.displayedSidebarSelection }, set: { item in
+            if let item { navigation.selectFromSidebar(item) }
         })) {
             Section {
                 sectionRows { SidebarItem.section($0) }
@@ -95,7 +98,7 @@ struct SidebarView: View {
         // the Mac sidebar: the list's type-select keeps the letters (H12).
         .background(ReturnKeyStudyMonitor(
             allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
-            act: { features.sidebarStudy(navigation.sidebarSelection) }))
+            act: { !navigation.sidebarInteractionPending && features.sidebarStudy(navigation.sidebarSelection) }))
         #else
         // H12: with the list focused (a hardware keyboard), Return or S starts the selected
         // deck's review, or Today's Study on the Today row; once per press, never on a key's

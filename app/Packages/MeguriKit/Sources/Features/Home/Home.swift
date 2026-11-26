@@ -1122,7 +1122,7 @@ private struct HomeSidebarBranch: View {
     private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
         !countsHeld && DeckWaiting(counts: node.counts, filtered: node.filtered)
-            .quietInSidebar(selected: (collection?.navigation.sidebarSelection ?? previewSelection) == .deck(DeckID(node.id)))
+            .quietInSidebar(selected: (collection?.navigation.displayedSidebarSelection ?? previewSelection) == .deck(DeckID(node.id)))
     }
     private var expanded: Binding<Bool> {
         Binding(get: { collection?.studyExpanded(node) ?? !node.studyCollapsed }, set: {
@@ -1156,7 +1156,7 @@ private struct HomeSidebarBranch: View {
     private var row: some View {
         Group {
             #if os(macOS)
-            Button { collection?.openDeckPage(deckID: node.id) } label: {
+            Button { collection?.navigation.selectFromSidebar(.deck(DeckID(node.id))) } label: {
                 Text(verbatim: name)
                     // N14.6: nothing waiting reads quieter, except on the selection highlight.
                     .foregroundStyle(quiet ? .secondary : .primary)
@@ -1167,13 +1167,17 @@ private struct HomeSidebarBranch: View {
             .buttonStyle(.plain)
             // H12: the first click opens the page, as a click does; the second starts the review.
             .simultaneousGesture(TapGesture(count: 2).onEnded {
-                if let collection { DeckListStudy.start(deckID: node.id, collection: collection) }
+                if let collection {
+                    collection.navigation.afterMacSidebarSelection {
+                        DeckListStudy.start(deckID: node.id, collection: collection)
+                    }
+                }
             })
             .help(helpTag)
             .accessibilityLabel(Text(verbatim: path))
             .accessibilityValue(countsValue)
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
-            .accessibilityAddTraits(collection?.navigation.sidebarSelection == .deck(DeckID(node.id)) ? .isSelected : [])
+            .accessibilityAddTraits(collection?.navigation.displayedSidebarSelection == .deck(DeckID(node.id)) ? .isSelected : [])
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
             HStack {

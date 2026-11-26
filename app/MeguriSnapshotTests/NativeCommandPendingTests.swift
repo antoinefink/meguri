@@ -6,6 +6,37 @@ import Testing
 
 /// Model-only command admission regressions: no window, app activation or Core calls.
 @MainActor @Suite struct NativeCommandPendingTests {
+    #if os(macOS)
+    @Test func sidebarFrameHandoffBlocksFormerDestinationCommandsButAllowsNewNavigation() throws {
+        var configuration = LaunchConfiguration()
+        configuration.deviceDefaults = nil
+        let navigation = AppNavigation()
+        let collection = ReviewCollection(configuration: configuration, navigation: navigation)
+        navigation.openDeckPage(DeckID(1))
+        navigation.selectFromSidebar(.section(.browse))
+        let intent = try #require(navigation.macSidebarSelectionID)
+        let context = NativeCommandContext(collection: collection, host: .main)
+        #expect(navigation.homeDeckPage == DeckID(1))
+        #expect(context.shownDeck == nil)
+        #expect(!context.fileActionsAvailable && !context.canNewNote && !context.canNewDeck)
+        #expect(!context.canStudyShownDeck && !context.canExportShownDeck && !context.canDeleteShownDeck)
+        #expect(!context.canRenameShownDeck && !context.canOpenDeckOptions && !context.canCreateFiltered)
+        #expect(!context.undoRoute(redo: false).enabled)
+        #expect(context.browseCommands == nil && !context.canSaveNoteType)
+        // A direct/deep-link route supersedes the click without staging itself.
+        navigation.select(.section(.noteTypes))
+        navigation.commitMacSidebarSelection(intent)
+        #expect(navigation.section == .noteTypes)
+        #expect(!navigation.sidebarInteractionPending)
+        navigation.selectFromSidebar(.section(.home))
+        #expect(!context.noteTypeSaveShown)
+        navigation.show(.browse)
+        navigation.selectFromSidebar(.section(.noteTypes))
+        #expect(context.browseCommands == nil && context.browseInspector == nil)
+        #expect(!context.canToggleBrowseMode && !context.canEditBrowseNote && !context.canDeleteNotes)
+    }
+    #endif
+
     @Test func pendingDeckDoesNotExposeCommittedDeckOrBrowseCommands() async {
         var configuration = LaunchConfiguration()
         configuration.deviceDefaults = nil
