@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift": "cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6",
-    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "a6b059634e32f22104b24e5b119c71094121fa5f40bed9c05451a0d1e977a6a7",
+    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "38632ad733fcbc9ce782b76974d4796c02ad55ddb8a6f657a2e44b590428071b",
     "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
     "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "45a381178815c391e3c2de3c62086fc3fdb1504d7d2f398216671137cb27cd45",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "c4b6ee938977f446a3de0d4c3ab1dbe070364d8b9ffa0d3a5542abeec659d4b9",
@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "c94356e618294a9266b4a71d4522ca8fe1228b065567d0f568c31c1901a122cc",
-    "app/MeguriUITests/IOAddEditUITests.swift": "14e66ae8fed3dbad944f129994ba14cc04cf7dfeb19bb183596782ca9879a2a0",
+    "app/MeguriUITests/IOAddEditUITests.swift": "69127fd8bdf09a512b015da47994b79e32f22cc40bf2aa19bb94a54f3c63ca42",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
@@ -941,7 +941,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '779ed4470a5cee15e0032580b31b6053ec425ea9c33865c87c6909936b0fca4f',
+        '222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.

@@ -50,6 +50,20 @@ import UIKit
         #expect(OcclusionFieldRoles(notetype: Self.type(stock: 1)) == nil)
     }
 
+    @Test func windowTitleUsesHeaderOnlyWhenTheFirstFieldIsHostOwned() throws {
+        func title(_ tags: [UInt32?], _ values: [String], stock: Int32 = 6) throws -> String? {
+            try NoteEditorDraft(generation: 1, notetype: Self.type(tags: tags, stock: stock),
+                deck: Self.deck, values: values).windowTitleHTML
+        }
+        #expect(try title([0, 1, 2, 3], [Self.first, "image", "<b>Diagram</b>", "extra"]) == "<b>Diagram</b>")
+        // Blank Header must reach Edit Note's fallback, never masks or Back Extra.
+        #expect(try title([0, 1, 2, 3], [Self.first, "image", "", "extra"]) == "")
+        #expect(try title([1, 3, 0, 2], ["image", "extra", Self.first, "Renamed header"]) == "Renamed header")
+        #expect(try title([4, 0, 1, 2, 3], ["Custom first", Self.first, "image", "header", "extra"]) == "Custom first")
+        #expect(try title([nil, nil], ["Ordinary", "back"], stock: 1) == "Ordinary")
+        #expect(try title([0, 1, 2], [Self.first, "image", "header"]) == nil)
+    }
+
     @Test func malformedIOTypeDoesNotHideOnDemandChoiceAndValidIOTypeDoes() async throws {
         let malformed = Self.type(tags: [0, 1, 2])
         let names = [NotetypeName(id: malformed.id, name: "Image Occlusion")]

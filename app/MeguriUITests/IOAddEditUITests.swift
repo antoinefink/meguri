@@ -62,6 +62,9 @@ import XCTest
         XCTAssertTrue(pasteboard.setData(png, forType: .png))
         try click(paste)
         let addCanvas = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "add")
+        let initialAdd = try settledPresentation(in: addWindow, imageSize: imageSize)
+        XCTAssertEqual(initialAdd.zoom, 100,
+                       "Add loads its image after enlarge: the first usable layout must open at 100%")
 
         // O4.2 opens Rectangle. These are real mouse drags over the two
         // diagram labels, expressed as fractions of the fitted source image.
@@ -104,7 +107,7 @@ import XCTest
 
         try click(page.buttons["home.deck.study"])
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
-        let editWindow = try openEditCurrent(app, bundle: bundle)
+        let editWindow = try openEditCurrent(app, bundle: bundle, imageSize: imageSize)
         let editCanvas = try readableCanvas(in: editWindow, imageSize: imageSize, stage: "edit")
         assertNativeImage(editCanvas, in: editWindow, stage: "edit")
         assertBounds(try maskBounds(in: editWindow, canvas: editCanvas), equalTo: original)
@@ -117,11 +120,11 @@ import XCTest
             CGVector(dx: editCanvas.frame.width * 0.04, dy: editCanvas.frame.height * 0.14)))
         capture(editWindow, named: "image-occlusion-edit-moved-mask-immediately-after-input-synthetic")
         try deselect(in: editCanvas, app: app)
-        capture(editWindow, named: "image-occlusion-edit-note-moved-mask-synthetic")
         XCTAssertTrue(wait {
             let frame = first.frame, image = editCanvas.frame
             return image.height > 0 && (frame.minY - image.minY) / image.height > original[0].minY + 0.10
         }, "the mouse drag must move the actual mask before capture")
+        capture(editWindow, named: "image-occlusion-edit-note-moved-mask-synthetic")
         let edited = try maskBounds(in: editWindow, canvas: editCanvas)
         XCTAssertEqual(edited[0].minX, original[0].minX + 0.04, accuracy: 0.015)
         XCTAssertEqual(edited[0].minY, original[0].minY + 0.14, accuracy: 0.015)
@@ -131,7 +134,7 @@ import XCTest
 
         // Reload the stored note through the same normal entry, with no fixture
         // reinstallation or draft reuse. Both coordinates and sizes must persist.
-        let reopened = try openEditCurrent(app, bundle: bundle)
+        let reopened = try openEditCurrent(app, bundle: bundle, imageSize: imageSize)
         let reloadedCanvas = try readableCanvas(in: reopened, imageSize: imageSize, stage: "reopened")
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
         assertNativeImage(reloadedCanvas, in: reopened, stage: "reopened")
@@ -140,7 +143,7 @@ import XCTest
         XCTAssertTrue(reopened.waitForNonExistence(timeout: 15))
     }
 
-    private func openEditCurrent(_ app: XCUIApplication, bundle: String) throws -> XCUIElement {
+    private func openEditCurrent(_ app: XCUIApplication, bundle: String, imageSize: CGSize) throws -> XCUIElement {
         try app.bringToFront(bundleIdentifier: bundle)
         let command = app.menuBars.menuBarItems["Note"].menuItems.matching(
             NSPredicate(format: "title == %@", "Edit Note")).firstMatch
@@ -149,8 +152,60 @@ import XCTest
         app.typeKey("e", modifierFlags: .command)
         let window = app.windows["review.editCurrent.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
+        // Edit loads media before our manual resize. Sample the live native
+        // layout, not a logged early proposal that may already have disappeared.
+        // The reference size stays fixed (M1); M6.1 refits by changing zoom.
+        let before = try settledPresentation(in: window, imageSize: imageSize)
         try enlarge(window, in: app)
+        let after = try settledPresentation(in: window, imageSize: imageSize)
+        let ratio = after.image.width / before.image.width
+        let fitRatio = min(after.viewport.width / imageSize.width, after.viewport.height / imageSize.height)
+            / min(before.viewport.width / imageSize.width, before.viewport.height / imageSize.height)
+        XCTAssertEqual(ratio, fitRatio, accuracy: 0.01, "native image follows the real viewport resize")
+        // Each displayed percentage is rounded to an integer. Propagate both
+        // half-point rounding bounds through the measured scale change. A
+        // restored window already at the target size can keep its initial 100%.
+        XCTAssertEqual(after.zoom, before.zoom * Double(ratio), accuracy: 0.5 * Double(ratio) + 0.5 + 0.01,
+                       "resize fits the locked reference size rather than resetting zoom to 100%")
         return window
+    }
+
+    private struct Presentation: Equatable {
+        let image: CGRect
+        let viewport: CGRect
+        let window: CGRect
+        let zoom: Double
+    }
+
+    private func settledPresentation(in window: XCUIElement, imageSize: CGSize) throws -> Presentation {
+        let surface = DrawingSurface(viewport: element(window, "io.canvas"),
+            nativeImage: element(window, "io.editor.canvas"), imageSize: imageSize)
+        let zoom = element(window, "io.zoom")
+        var previous: Presentation?
+        var stableSamples = 0
+        // Wait only for current production AX measurements. Never require an
+        // early tiny presentation or a diagnostic/synthetic data record.
+        let settled = wait {
+            guard surface.viewport.exists, surface.nativeImage.exists, zoom.exists,
+                  let value = zoom.value as? String,
+                  let percent = Double(value.replacingOccurrences(of: "%", with: "")), percent > 0 else {
+                previous = nil; stableSamples = 0; return false
+            }
+            let sample = Presentation(image: surface.nativeImage.frame, viewport: surface.viewport.frame,
+                                      window: window.frame, zoom: percent)
+            let fitted = surface.fittedFrame
+            guard sample.viewport.width >= 44, sample.viewport.height >= 44,
+                  sample.window.contains(sample.viewport),
+                  abs(sample.image.minX - fitted.minX) <= 1, abs(sample.image.minY - fitted.minY) <= 1,
+                  abs(sample.image.width - fitted.width) <= 1, abs(sample.image.height - fitted.height) <= 1 else {
+                previous = nil; stableSamples = 0; return false
+            }
+            stableSamples = previous == sample ? stableSamples + 1 : 0
+            previous = sample
+            return stableSamples >= 3
+        }
+        XCTAssertTrue(settled, "the live native image, viewport and zoom must settle before measurement")
+        return try XCTUnwrap(previous)
     }
 
     /// Native title-bar and resize-border drags keep screenshots readable. Only
@@ -213,7 +268,6 @@ import XCTest
         let zoom = element(window, "io.zoom")
         if !zoom.exists { captureToolbar(window, stage: "\(stage)-zoom-absent") }
         XCTAssertTrue(zoom.exists)
-        XCTAssertEqual(zoom.value as? String, "100%", "the first usable image layout opens at 100% within pixel rounding")
         return result
     }
 

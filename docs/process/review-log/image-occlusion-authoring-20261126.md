@@ -70,3 +70,15 @@ The independent privacy reviewer read and admitted all 21,339 bytes of `app/Megu
 The independent privacy reviewer read and admitted all 21,341 bytes of `app/MeguriUITests/IOAddEditUITests.swift` as public. SHA-256 `14e66ae8fed3dbad944f129994ba14cc04cf7dfeb19bb183596782ca9879a2a0`.
 
 The independent privacy reviewer read and admitted all 36,005 bytes of `app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift` as public. SHA-256 `a6b059634e32f22104b24e5b119c71094121fa5f40bed9c05451a0d1e977a6a7`.
+
+The independent privacy reviewer read and admitted all 24,725 bytes of `app/MeguriUITests/IOAddEditUITests.swift` as public. SHA-256 `69127fd8bdf09a512b015da47994b79e32f22cc40bf2aa19bb94a54f3c63ca42`.
+
+The independent privacy reviewer read and admitted all 37,029 bytes of `app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift` as public. SHA-256 `38632ad733fcbc9ce782b76974d4796c02ad55ddb8a6f657a2e44b590428071b`.
+
+Source review covered F13, O4.1, and M5.
+
+The focused Rust media suite passed all 13 tests in `core-test/20261126T101106Z-82994`. Nine Swift bridge tests passed in `swift-test/20261126T100308Z-54840`. The iOS Simulator Dev build passed in `build-app/20261126T100307Z-54389`. The native Add screenshot in `ui-test/20261126T095815Z-32198` exposed the initial zoom and macOS accessibility frame issues corrected in the follow-up.
+
+Verification receipts: `core-test/20261126T104859Z-81496` (15 passed) and `ui-test/20261126T104509Z-64172` (Add, two cards, Edit Note).
+
+The independent privacy reviewer reviewed all 291,418 bytes of the native interface contract and admitted the public document at SHA-256 `222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285`.

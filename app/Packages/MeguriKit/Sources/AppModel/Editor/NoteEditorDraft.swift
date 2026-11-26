@@ -106,6 +106,13 @@ public final class NoteEditorDraft {
     public var hostFields: Set<Int> {
         occlusionRoles?.hidden ?? (notetype.originalStockKind == 6 ? [0] : [])
     }
+    /// N20.8's note title excludes host-owned IO serialization. A custom
+    /// layout with an editable first field still names the note by that field.
+    /// Empty content goes through the window's localized Edit Note fallback.
+    public var windowTitleHTML: String? {
+        let index = hostFields.contains(0) ? occlusionRoles?.header : 0
+        return index.flatMap { fields.indices.contains($0) ? fields[$0].target : nil }
+    }
     /// Native state survives switching between fields and masks and layout changes.
     public var showsMaskEditor = true
     public var hostFieldsHeld = false
