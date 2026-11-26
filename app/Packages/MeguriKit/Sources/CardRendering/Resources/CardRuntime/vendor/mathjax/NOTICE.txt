@@ -1,0 +1,21 @@
+MathJax 4.1.3
+Copyright The MathJax Consortium. Distributed under the Apache License,
+Version 2.0 (LICENSE). The mhchem parser is copyright 2015–2023 Martin
+Hensel and is distributed under the same license.
+
+The MathJax New Computer Modern and mhchem glyph outlines are copyright
+2024 MathJax, Inc. and derive from New Computer Modern, copyright
+2019–2021 Antonis Tsolomitis. The GUST Font License applies to the
+outlines. See GUST-FONT-LICENSE.txt and LPPL-1.3c.txt.
+
+The bbm glyphs are copyright 1993 Gilles F. Robert, with conversion
+copyright 2024 Davide Cervone. The bboldx glyphs are copyright 2007 TeX
+Users Group and 2021 Michael Sharpe. Both fonts permit free use,
+modification and distribution. The dsfont glyphs derive from Olaf Kummer's
+Doublestroke 1.111. It may be freely distributed. Modified versions may
+not use the filenames of Knuth's Computer Modern fonts.
+
+Upstream font notices:
+https://mirrors.ctan.org/fonts/cm/bbm/README
+https://mirrors.ctan.org/fonts/bboldx/README
+https://mirrors.ctan.org/fonts/doublestroke/README
