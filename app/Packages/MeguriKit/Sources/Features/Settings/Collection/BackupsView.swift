@@ -59,6 +59,7 @@ struct BackupsContent: View {
                 if let instant = presentation.lastBackupMilliseconds {
                     LabeledContent {
                         Text(Date(timeIntervalSince1970: Double(instant) / 1_000), format: .dateTime)
+                            .backupTouchSecondaryStyle()
                     } label: { Text("Last backup", bundle: .module) }
                 } else if presentation.lastBackupUnavailable {
                     Text("Last backup unavailable. Try refreshing Backups.", bundle: .module)
@@ -157,6 +158,15 @@ struct BackupsContent: View {
 }
 
 private extension View {
+    // Native touch backup captions/status text measured below 4.5:1.
+    @ViewBuilder func backupTouchSecondaryStyle() -> some View {
+        #if os(iOS)
+        self.foregroundStyle(ColorToken.textSecondary.color, ColorToken.textSecondary.color)
+        #else
+        self
+        #endif
+    }
+
     // Native light iPhone action tint measured below 4.5:1.
     @ViewBuilder func backupFormActionTint() -> some View {
         #if os(iOS)
@@ -367,13 +377,23 @@ struct BackupRestoreContent: View {
                 ToolbarItem(placement: .confirmationAction) { restoreButton }
             }
             #endif
+            #if os(macOS)
             .confirmationDialog(confirmationTitle, isPresented: $confirmation, titleVisibility: .visible) {
-                Button(role: .destructive) {
-                    if let entry = confirmedEntry { restore(entry.name) }
-                } label: { Text("Restore", bundle: .module) }
-                Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
-            } message: { Text(confirmationMessage, bundle: .module) }
+                confirmationActions
+            } message: { confirmationText }
+            #else
+            .alert(confirmationTitle, isPresented: $confirmation) {
+                confirmationActions
+            } message: { confirmationText }
+            #endif
     }
+    @ViewBuilder private var confirmationActions: some View {
+        Button(role: .destructive) {
+            if let entry = confirmedEntry { restore(entry.name) }
+        } label: { Text("Restore", bundle: .module) }
+        Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
+    }
+    private var confirmationText: Text { Text(confirmationMessage, bundle: .module) }
     @ViewBuilder private var restoreLayout: some View {
         #if os(macOS)
         // Allocate the footer outside the history. Native Table drawing must
@@ -397,7 +417,10 @@ struct BackupRestoreContent: View {
                     BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: cancel)
                         .padding()
                 } else if presentation.loading {
-                    ProgressView { Text("Loading Backups…", bundle: .module) }
+                    ProgressView {
+                        Text("Loading Backups…", bundle: .module)
+                            .backupTouchSecondaryStyle()
+                    }
                         .accessibilityLabel(Text("Loading Backups…", bundle: .module))
                         .accessibilityValue(Text("In progress", bundle: .module))
                         .accessibilityIdentifier("settings.backups.loading")
@@ -411,6 +434,7 @@ struct BackupRestoreContent: View {
                                 .accessibilityIdentifier("settings.backups.listFailure")
                         } actions: {
                             Button(action: refresh) { Text("Try Again", bundle: .module) }
+                                .backupFormActionTint()
                                 .accessibilityIdentifier("settings.backups.retry")
                         }
                         restoreNotices
@@ -418,8 +442,12 @@ struct BackupRestoreContent: View {
                 } else if presentation.entries.isEmpty {
                     ContentUnavailableView {
                         Label { Text("No Backups Yet", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
-                    } description: { Text("Create a backup on this device, or check the configured backup folder.", bundle: .module) }
+                    } description: {
+                        Text("Create a backup on this device, or check the configured backup folder.", bundle: .module)
+                            .backupTouchSecondaryStyle()
+                    }
                     actions: { Button(action: refresh) { Text("Try Again", bundle: .module) }
+                        .backupFormActionTint()
                         .accessibilityIdentifier("settings.backups.retry") }
                 } else {
                     history
@@ -485,7 +513,8 @@ struct BackupRestoreContent: View {
                     if textSize.isAccessibilitySize {
                         VStack(alignment: .leading) {
                             entryLabel(entry)
-                            Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                            Text(verbatim: BackupPresentation.size(entry.sizeBytes))
+                                .foregroundStyle(unavailable(entry) ? .secondary : .primary)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -493,7 +522,8 @@ struct BackupRestoreContent: View {
                         HStack(alignment: .firstTextBaseline) {
                             entryLabel(entry)
                             Spacer()
-                            Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                            Text(verbatim: BackupPresentation.size(entry.sizeBytes))
+                                .foregroundStyle(unavailable(entry) ? .secondary : .primary)
                         }
                     }
                 }
@@ -601,12 +631,14 @@ private struct BackupProgress: View {
     var body: some View {
         ProgressView {
             Text(work == .restore ? "Restoring Backup…" : "Creating Backup…", bundle: .module)
+                .backupTouchSecondaryStyle()
         }
         .accessibilityLabel(Text(work == .restore ? "Restoring Backup…" : "Creating Backup…", bundle: .module))
         .accessibilityValue(Text("In progress", bundle: .module))
         .accessibilityIdentifier("settings.backups.progress")
         if canCancel {
             Button(action: cancel) { Text("Cancel", bundle: .module) }
+                .backupFormActionTint()
                 .accessibilityIdentifier("settings.backups.cancelOperation")
         }
     }
@@ -651,7 +683,11 @@ private struct BackupFailureText: View {
                     : "The backup was not restored. Try another backup or resolve the problem and try again.", bundle: .module)
             }
         }
+        #if os(iOS)
+        .backupTouchSecondaryStyle()
+        #else
         .foregroundStyle(.secondary)
+        #endif
     }
     private var cause: LocalizedStringKey {
         switch error {

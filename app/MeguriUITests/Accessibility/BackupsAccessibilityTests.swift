@@ -128,47 +128,82 @@ final class BackupsAccessibilityTests: XCTestCase {
                                              "server-copy-2026-11-23-09.10.00.unverified.anki2", "backup-2026-11-22-08.00.00.colpkg"]
                                 for (index, name) in names.enumerated() {
                                     let row = app.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
-                                    if try self.reach(row, in: app) { try audit("entry.\(index)") }
-                                    XCTAssertTrue(row.label.contains(name), "The exact filename is read with the row")
+                                    #if os(iOS)
+                                    let scrolled = try self.reachHistoryEntry(index, names: names, in: app)
+                                    #else
+                                    let scrolled = try self.reach(row, in: app)
+                                    #endif
+                                    guard row.exists else {
+                                        XCTFail("Reached backup entry disappeared before its semantics were read: \(name)\n\(app.debugDescription)")
+                                        return .init(state: "\(surface).\(state)", findings: findings, touchTargets: targets)
+                                    }
+                                    let label = row.label, value = row.value as? String
+                                    XCTAssertTrue(label.contains(name), "The exact filename is read with the row")
                                     let sizes: [Int64] = [28_400_000, 27_900_000, 27_800_000, 27_600_000]
                                     let size = sizes[index].formatted(.byteCount(style: .file).locale(Locale(identifier: "en_US")))
-                                    XCTAssertTrue(row.label.contains(size))
+                                    XCTAssertTrue(label.contains(size))
                                     // Native List may put isSelected on an ancestor. Check
                                     // the exact entry's AX value for both selection outcomes.
-                                    XCTAssertEqual(row.value as? String, index == (state == "overflow" ? 1 : 0) ? "Selected" : "Not selected")
-                                    if index == 1 { XCTAssertTrue(row.label.contains("Server copy")) }
+                                    XCTAssertEqual(value, index == (state == "overflow" ? 1 : 0) ? "Selected" : "Not selected")
+                                    if index == 1 { XCTAssertTrue(label.contains("Server copy")) }
                                     if index == 2 || (index == 3 && state == "overflow") {
-                                        XCTAssertTrue(row.label.contains("Can’t be restored"))
+                                        XCTAssertTrue(label.contains("Can’t be restored"))
                                     }
+                                    if scrolled { try audit("entry.\(index)") }
                                 }
                                 // The real native confirmation discloses the selected older copy's
                                 // date and the provider's publication/media decision. No restore runs.
                                 try app.bringToFront(bundleIdentifier: self.bundle)
                                 apply.clickOrTap()
-                                let date = state == "overflow" ? "Nov 24, 2026" : "Nov 25, 2026"
+                                var calendar = Calendar(identifier: .gregorian)
+                                calendar.timeZone = .gmt
+                                let selectedDate = try XCTUnwrap(calendar.date(from: DateComponents(
+                                    year: 2026, month: 11, day: state == "overflow" ? 24 : 25,
+                                    hour: state == "overflow" ? 9 : 17, minute: state == "overflow" ? 10 : 25, second: 0)))
+                                let formatter = DateFormatter()
+                                formatter.locale = Locale(identifier: "en_US")
+                                formatter.calendar = calendar; formatter.timeZone = .gmt
+                                formatter.setLocalizedDateFormatFromTemplate("yMMMdjmmss")
+                                let date = formatter.string(from: selectedDate)
+                                let title = "Replace the current collection with the backup from \(date)?"
                                 let message = state == "overflow"
-                                    ? "Restoring does not upload this collection to Meguri Sync."
-                                    : "Media files are kept."
+                                    ? "Meguri backs up the current collection first. Media files are kept. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing."
+                                    : "Meguri backs up the current collection first. Media files are kept."
                                 // Bind the action and text to the smallest native prompt.
-                                // iOS 27 can expose a Menu with MenuItem actions.
+                                #if os(macOS)
                                 let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
                                     XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.menu.rawValue,
                                     XCUIElement.ElementType.sheet.rawValue, XCUIElement.ElementType.alert.rawValue,
                                     XCUIElement.ElementType.dialog.rawValue,
                                 ]))
+                                #else
+                                let contexts = app.alerts
+                                #endif
                                 var found: XCUIElement?
                                 XCTAssertTrue(self.wait {
                                     found = contexts.allElementsBoundByIndex.filter {
                                         self.confirmationRestore(in: $0).exists
-                                            && self.containsText(date, in: $0) && self.containsText(message, in: $0)
+                                            && self.containsText(title, in: $0) && self.containsText(message, in: $0)
                                             && !$0.descendants(matching: .any).matching(identifier: anchor).firstMatch.exists
                                     }.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
                                     return found != nil
                                 }, "Expected native Restore confirmation for \(date)")
                                 let confirmation = try XCTUnwrap(found,
                                     "Expected native Restore confirmation: \(restoreScope.debugDescription)")
-                                XCTAssertTrue(self.confirmationRestore(in: confirmation).isEnabled)
-                                XCTAssertTrue(self.containsText(date, in: confirmation))
+                                let restore = self.confirmationRestore(in: confirmation)
+                                let cancel = self.confirmationAction("Cancel", excluding: anchor, in: confirmation)
+                                for action in [cancel, restore] {
+                                    XCTAssertTrue(action.exists && action.isEnabled && action.isHittable,
+                                        "The same native prompt must offer visible, enabled Cancel and Restore")
+                                    #if os(iOS)
+                                    XCTAssertFalse(action.frame.isEmpty)
+                                    XCTAssertTrue(confirmation.frame.contains(action.frame))
+                                    #endif
+                                }
+                                #if os(iOS)
+                                XCTAssertEqual(confirmation.elementType, .alert)
+                                #endif
+                                XCTAssertTrue(self.containsText(title, in: confirmation))
                                 XCTAssertTrue(self.containsText(message, in: confirmation))
                                 try audit("restore confirmation")
                             }
@@ -205,15 +240,19 @@ final class BackupsAccessibilityTests: XCTestCase {
     }
 
     private func confirmationRestore(in context: XCUIElement) -> XCUIElement {
+        confirmationAction("Restore", excluding: "settings.backups.apply", in: context)
+    }
+
+    private func confirmationAction(_ title: String, excluding identifier: String, in context: XCUIElement) -> XCUIElement {
         #if os(macOS)
         let caption = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@",
-            "Restore", "Restore", "settings.backups.apply")
-        #else
-        let caption = NSPredicate(format: "label == %@ AND identifier != %@", "Restore", "settings.backups.apply")
-        #endif
+            title, title, identifier)
         return context.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
             XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue,
         ])).matching(caption).firstMatch
+        #else
+        return context.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", title, identifier)).firstMatch
+        #endif
     }
 
     private func containsText(_ expected: String, in context: XCUIElement) -> Bool {
@@ -246,6 +285,48 @@ final class BackupsAccessibilityTests: XCTestCase {
                       "Expected static text containing \(expected.debugDescription); label=\(label.debugDescription), value=\(String(describing: value))\n\(element.debugDescription)",
                       file: file, line: line)
     }
+
+    #if os(iOS)
+    private func reachHistoryEntry(_ index: Int, names: [String], in app: XCUIApplication) throws -> Bool {
+        let history = app.collectionViews.matching(identifier: "settings.backups.restoreContent").firstMatch
+        guard history.waitForExistence(timeout: 5) else {
+            XCTFail("Expected the native backup history collection view")
+            return false
+        }
+        let window = app.windows.containing(.collectionView, identifier: "settings.backups.restoreContent").firstMatch
+        let rows = names.map { name in
+            history.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
+        }
+        let target = rows[index]
+        var scrolled = false
+        for _ in 0..<24 {
+            let historyFrame = history.frame
+            let viewport = historyFrame.intersection(window.frame)
+            let frame = target.exists ? target.frame : .null
+            if !frame.isEmpty && viewport.contains(frame) && target.isHittable { return scrolled }
+            // An audit can leave even the next row above the viewport. Missing
+            // lazy cells have no AX frame: use only existing known neighbours.
+            let earlierVisible = rows.prefix(index).contains { row in
+                guard row.exists else { return false }
+                let frame = row.frame
+                return !frame.isEmpty && viewport.intersects(frame)
+            }
+            let step = viewport.height * (earlierVisible ? 1.0 / 3.0 : 0.75)
+            let move = frame.isEmpty
+                ? (earlierVisible ? -step : step)
+                : max(-step, min(step, viewport.midY - frame.midY))
+            // Centre the bounded drag in the actual history viewport so both
+            // endpoints stay inside it, including the larger move toward the top.
+            let start = history.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: viewport.midX - historyFrame.minX, dy: viewport.midY - historyFrame.minY - move / 2))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
+                        withVelocity: .slow, thenHoldForDuration: 0.2)
+            scrolled = true
+        }
+        XCTFail("Unreachable backup history entry: \(names[index])\n\(app.debugDescription)")
+        return scrolled
+    }
+    #endif
 
     /// Lazy native Forms and Lists must bring every tested row into the viewport,
     /// including at AX5. A missing or unreachable row fails, never skips its audit.

@@ -137,10 +137,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         #if os(iOS)
         try assertShortHistoryGeometry(app, names: beforeCancel)
         #endif
-        let outside = try confirmationDismissalPoint(historyWindow)
         let confirmation = try advanceToConfirmation(app, filename: older)
         capture(historyWindow, state: "confirmation-restore-older-backup")
-        try cancelConfirmation(confirmation, app, outside: outside)
+        try cancelConfirmation(confirmation, app)
         try waitForHistory(app)
         XCTAssertFalse(element(app, "settings.backups.progress").exists, "Cancellation must not start restore work")
         XCTAssertTrue(wait { self.selectionMatches(older, app) },
@@ -526,13 +525,17 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertTrue(selectionMatches(filename, app))
         let title = "Replace the current collection with the backup from \(timestamp)?"
         try act(element(app, "settings.backups.apply"), app)
-        // System confirmations lose app action IDs. iOS 27 may expose a menu
-        // rather than a popover; native menu actions may be menu items.
+        // System confirmations lose app action IDs. Keep Mac native prompt
+        // forms; touch must use an alert with both actions inside it.
+        #if os(macOS)
         let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
             XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.menu.rawValue,
             XCUIElement.ElementType.sheet.rawValue, XCUIElement.ElementType.alert.rawValue,
             XCUIElement.ElementType.dialog.rawValue,
         ]))
+        #else
+        let contexts = app.alerts
+        #endif
         var found: XCUIElement?
         XCTAssertTrue(wait {
             // Bind the exact title and action to the same native prompt. The
@@ -545,7 +548,19 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         },
             "Confirmation must name the date and time of the exact selected archive: \(filename)")
         let confirmation = try XCTUnwrap(found, "A native confirmation must own the destructive Restore action")
-        XCTAssertTrue(destructiveRestore(confirmation).isEnabled)
+        let cancel = confirmationAction("Cancel", excluding: historyAnchor, in: confirmation)
+        for action in [cancel, destructiveRestore(confirmation)] {
+            XCTAssertTrue(action.exists && action.isEnabled && action.isHittable,
+                "The same native prompt must offer visible, enabled Cancel and Restore")
+            #if os(iOS)
+            XCTAssertFalse(action.frame.isEmpty)
+            XCTAssertTrue(confirmation.frame.contains(action.frame))
+            #endif
+        }
+        #if os(iOS)
+        XCTAssertEqual(confirmation.elementType, .alert)
+        #endif
+        XCTAssertTrue(containsText(title, in: confirmation))
         XCTAssertTrue(containsText("Meguri backs up the current collection first. Media files are kept.",
             in: confirmation))
         return confirmation
@@ -559,45 +574,21 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     private func confirmationAction(_ title: String, excluding identifier: String, in context: XCUIElement) -> XCUIElement {
         #if os(macOS)
         let caption = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@", title, title, identifier)
-        #else
-        let caption = NSPredicate(format: "label == %@ AND identifier != %@", title, identifier)
-        #endif
         return context.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
             XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue,
         ])).matching(caption).firstMatch
+        #else
+        return context.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", title, identifier)).firstMatch
+        #endif
     }
 
     private func destructiveRestore(_ confirmation: XCUIElement) -> XCUIElement {
         confirmationAction("Restore", excluding: "settings.backups.apply", in: confirmation)
     }
 
-    private func confirmationDismissalPoint(_ window: XCUIElement) throws -> XCUICoordinate? {
-        #if os(iOS)
-        // Capture geometry before the modal tree hides the presenting controls.
-        let bar = window.navigationBars.containing(.button, identifier: historyAnchor).firstMatch
-        XCTAssertTrue(bar.exists)
-        return window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: bar.frame.midX - window.frame.minX, dy: bar.frame.midY - window.frame.minY))
-        #else
-        return nil
-        #endif
-    }
-
-    private func cancelConfirmation(_ confirmation: XCUIElement, _ app: XCUIApplication, outside: XCUICoordinate?) throws {
+    private func cancelConfirmation(_ confirmation: XCUIElement, _ app: XCUIApplication) throws {
         let cancel = confirmationAction("Cancel", excluding: historyAnchor, in: confirmation)
-        if cancel.exists && cancel.isHittable {
-            try act(cancel, app)
-        } else {
-            #if os(macOS)
-            XCTFail("The native Mac confirmation must offer Cancel")
-            #else
-            // iOS 27 can hide cancel-role buttons in a popover. A tap in
-            // the presenting sheet's empty navigation-bar middle dismisses it.
-            let point = try XCTUnwrap(outside)
-            XCTAssertFalse(confirmation.frame.contains(point.screenPoint), "Dismiss outside the native confirmation")
-            point.tap()
-            #endif
-        }
+        try act(cancel, app)
         XCTAssertTrue(destructiveRestore(confirmation).waitForNonExistence(timeout: 10))
     }
 
