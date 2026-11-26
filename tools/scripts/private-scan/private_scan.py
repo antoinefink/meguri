@@ -839,6 +839,8 @@ PUBLIC_ARTIFACTS = {
         "dde4dd4b82894df3eb270cded5a9abdac5ada95a203dea7c30e7a9e3bbb10859",
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":
         "ad79311280c0e3216296e574b0aab632e8529c7c725afda3dd9720ed379ba5ff",
+    "app/MeguriUITests/BackupSettingsTouchUITests.swift":
+        "e9cdf4f8e05028491ea8011dc5a3ea7b4d1fcadf833696f21952970ca28b7383",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
