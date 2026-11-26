@@ -30,5 +30,12 @@ The initial review also classified both session records as PUBLIC.
 | `server/src/mcp_transport/descriptors.rs` | `c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8` | `20261123T153159Z-59915` |
 | `server/tests/mcp_oauth.rs` | `088eb8ae77b445f5c3d2566678cc9d9b594f7982f466b6d40dfac878a10fbf3a` | `20261123T154520Z-20079` |
 
-The hosted attachment attempt predates this change. Hosted readback and
-native app playback remain pending deployment.
+On 2026-11-26, the hosted Meguri Testing connector advertised the retired
+sign-in flow for `prepare_media_upload`. A direct upload of a generated PNG
+returned `attachment_unavailable`. The server recorded `attachment_url`,
+which identifies URL validation. The specific rejected URL property is unknown.
+
+The staged POST succeeded with the same PNG. Exact lookup of the created note
+returned an image reference whose filename contained the SHA-256 of the local
+PNG. Checking discovery in a new conversation after refreshing the custom
+connection and checking native playback remain open.
