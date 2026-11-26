@@ -126,12 +126,12 @@ import XCTest
     }
 
     private func key(_ app: XCUIApplication, _ key: XCUIKeyboardKey, _ bundle: String,
-                     modifiers: XCUIKeyModifierFlags = []) throws {
+                     modifiers: XCUIElement.KeyModifierFlags = []) throws {
         try self.key(app, key.rawValue, bundle, modifiers: modifiers)
     }
 
     private func key(_ app: XCUIApplication, _ key: String, _ bundle: String,
-                     modifiers: XCUIKeyModifierFlags = []) throws {
+                     modifiers: XCUIElement.KeyModifierFlags = []) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(key, modifierFlags: modifiers)
     }
