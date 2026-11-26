@@ -403,10 +403,21 @@ struct BackupRestoreContent: View {
         #else
         List(selection: selection) {
             ForEach(presentation.entries, id: \.name) { entry in
-                HStack(alignment: .firstTextBaseline) {
-                    entryLabel(entry)
-                    Spacer()
-                    Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                Group {
+                    if textSize.isAccessibilitySize {
+                        VStack(alignment: .leading) {
+                            entryLabel(entry)
+                            Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        HStack(alignment: .firstTextBaseline) {
+                            entryLabel(entry)
+                            Spacer()
+                            Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                     // Observe the intrinsic row content, never the parent sheet.
