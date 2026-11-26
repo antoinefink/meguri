@@ -15,7 +15,7 @@ fn request(notetype: NotetypeId) -> RemoveNotetype {
 }
 fn remove_local(host: &CoreHost, notetype: NotetypeId) -> Result<meguri_engine::OpResult<remove::Removed>, EngineError> {
     host.remove_notetype_locally_for_generation(host.collection().unwrap().generation(), request(notetype),
-        Arc::new(CancelToken::new()), ProgressSink::new())
+        CancelToken::new(), ProgressSink::new())
 }
 fn unbound_after_transfer(root: &Path) -> (CoreHost, HostConfig, MeguriConnection, Operation, NotetypeId) {
     let (host, config) = b::seeded(&root.join("local"));
@@ -51,6 +51,9 @@ struct Facts {
 }
 fn facts(host: &CoreHost, config: &HostConfig) -> Facts {
     assert!(host.derived().wait_idle(Duration::from_secs(5)));
+    snapshot_facts(host, config)
+}
+fn snapshot_facts(host: &CoreHost, config: &HostConfig) -> Facts {
     let collection = host.collection().unwrap();
     let reader = collection.reader(ReaderRole::Query).unwrap();
     let tables = reader.execute_raw("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", &[]).unwrap();
@@ -79,14 +82,14 @@ fn binding_installed_after_unbound_read_refuses_local_removal_in_the_same_genera
     let collection = host.collection().unwrap();
     let stored = collection.reader(ReaderRole::Query).unwrap().notetype(notetype).unwrap().unwrap();
     let mut draft = notetypes::Draft::of(stored);
-    draft.css.push_str("\n/* Removal sentinel */");
+    draft.config.css.push_str("\n/* Removal sentinel */");
     notetypes::save(&collection, draft, Default::default()).unwrap();
     s::add_note(&host, notetype, "Redo sentinel", "Answer");
     collection.undo(UndoScope::Global).unwrap();
     let before = facts(&host, &config);
     assert!(matches!(before.undo, UndoStatus::Available(_)) && matches!(before.redo, UndoStatus::Available(_)));
     assert!(matches!(host.remove_notetype_locally_for_generation(generation, request(notetype),
-        Arc::new(CancelToken::new()), ProgressSink::new()), Err(EngineError::Busy { .. })));
+        CancelToken::new(), ProgressSink::new()), Err(EngineError::Busy { .. })));
     assert_eq!(facts(&host, &config), before);
     host.close().unwrap();
 }
@@ -117,15 +120,16 @@ fn local_removal_holds_binding_installation_until_its_real_commit() {
     progress.set_listener(Arc::new(HoldPlanning(Mutex::new(Some((entered, held))))));
     let original = host.clone();
     let worker = std::thread::spawn(move || original.remove_notetype_locally_for_generation(generation,
-        request(notetype), Arc::new(CancelToken::new()), progress));
-    let reached = wait.recv_timeout(Duration::from_secs(10));
+        request(notetype), CancelToken::new(), progress));
+    wait.recv_timeout(Duration::from_secs(10)).expect("removal reached planning");
     // The removal has real native admission and is paused in the engine's
     // plan, before backup/commit; no fabricated flags or fake binding setter.
     let binding = host.complete_meguri_bootstrap_for_generation(generation, &connection, b::USER, &op.id);
-    let during = facts(&host, &config);
+    // Planning holds Maintenance; a derived refresh can need that same
+    // reader. The pre-worker snapshot already waited for derived idle.
+    let during = snapshot_facts(&host, &config);
     drop(release);
     let removed = worker.join().unwrap().unwrap();
-    assert!(reached.is_ok());
     assert!(matches!(binding, Err(MeguriBootstrapError::Busy)));
     assert_eq!(during, before);
     assert!(removed.value.removed && removed.value.notes_removed == 1 && removed.value.cards_removed == 1);
