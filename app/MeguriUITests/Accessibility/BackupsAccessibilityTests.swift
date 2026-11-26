@@ -97,7 +97,8 @@ final class BackupsAccessibilityTests: XCTestCase {
                                     if try self.reach(row, in: app) { try audit("entry.\(index)") }
                                     XCTAssertTrue(row.label.contains(name), "The exact filename is read with the row")
                                     let sizes: [Int64] = [28_400_000, 27_900_000, 27_800_000, 27_600_000]
-                                    XCTAssertTrue(row.label.contains(ByteCountFormatter.string(fromByteCount: sizes[index], countStyle: .file)))
+                                    let size = sizes[index].formatted(.byteCount(style: .file).locale(Locale(identifier: "en_US")))
+                                    XCTAssertTrue(row.label.contains(size))
                                     XCTAssertEqual(row.isSelected, index == (state == "overflow" ? 1 : 0))
                                     if index == 1 { XCTAssertTrue(row.label.contains("Server copy")) }
                                     if index == 2 || (index == 3 && state == "overflow") {

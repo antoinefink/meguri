@@ -10,6 +10,7 @@ actor BackupServiceProbe: MaintenanceService {
     var restoredNames: [String] = []
     var triggers: [MaintenanceTrigger] = []
     var dueOperation: MaintenanceOperation?
+    var restoreOperation: MaintenanceOperation?
     var refusal: MaintenanceFailure?
     var deadline: Int64?
     var held = false
@@ -40,6 +41,7 @@ actor BackupServiceProbe: MaintenanceService {
     }
     func restoreBackup(name: String, operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> RestoredBackup {
         restoredNames.append(name)
+        restoreOperation = operation
         await reachGate()
         await beforeRestore?()
         if let refusal { throw refusal }

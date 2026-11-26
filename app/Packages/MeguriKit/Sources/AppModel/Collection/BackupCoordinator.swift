@@ -130,6 +130,7 @@ public final class BackupCoordinator {
             defer { end() }
             var admitted = false
             do {
+                try Task.checkCancellation()
                 try await host.beginBackupRestore(); admitted = true
                 try Task.checkCancellation()
                 let restored = try await service.restoreBackup(name: name, operation: operation, progress: progressHandler(expected, operation: operation))
@@ -166,13 +167,16 @@ public final class BackupCoordinator {
         guard canCancel, let operation else { return }
         cancellationRequested = true
         if work == .restore { host?.cancelBackupRestoreAdmission() }
+        task?.cancel()
         Task { await operation.cancel() }
     }
     func cancelAndDrain() async {
+        let original = task
+        cancellationRequested = true
         if work == .restore { host?.cancelBackupRestoreAdmission() }
+        original?.cancel()
         if let operation { await operation.cancel() }
-        task?.cancel()
-        await task?.value
+        await original?.value
     }
 
     func collectionChanged() {

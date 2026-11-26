@@ -1291,6 +1291,14 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     }
     func cancelBackupRestoreAdmission() { _ = backupEditorDecision?.cancel() }
     func finishBackupRestore(candidateActive reportedActive: Bool?, generation expected: UInt64?) async -> BackupRestoreCompletion {
+        // Cancellation still owns admission and the active restore job. Its
+        // terminal facts and provider reattachment must finish on an independent
+        // task, including rollback from a cancelled admission after sync drained.
+        await Task {
+            await reconcileBackupRestore(candidateActive: reportedActive, generation: expected)
+        }.value
+    }
+    private func reconcileBackupRestore(candidateActive reportedActive: Bool?, generation expected: UInt64?) async -> BackupRestoreCompletion {
         let previous = backupRestoreState
         defer {
             if let reservation = backupEditorReservation { finishEditorReplacement(reservation) }
