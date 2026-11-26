@@ -10,8 +10,7 @@ public struct FilteredStudyForm: View {
         StudyFormFrame(title: model.editingDeck == nil ? "Create Filtered Deck" : "Edit Filtered Deck",
                        model: model, id: "home.filteredStudy") {
             Section {
-                TextField(text: $model.definition.name) { Text("Name", bundle: .module) }
-                    .accessibilityIdentifier("home.filteredStudy.name")
+                StudyTextField("Name", text: $model.definition.name, id: "home.filteredStudy.name")
             }
             if !model.definition.terms.isEmpty {
                 Section {
@@ -27,12 +26,9 @@ public struct FilteredStudyForm: View {
                 Toggle(isOn: $model.definition.reschedule) { Text("Reschedule cards", bundle: .module) }
                     .accessibilityIdentifier("home.filteredStudy.reschedule")
                 if !model.definition.reschedule {
-                    TextField(text: $model.againText) { Text("Again (seconds)", bundle: .module) }
-                        .accessibilityIdentifier("home.filteredStudy.again")
-                    TextField(text: $model.hardText) { Text("Hard (seconds)", bundle: .module) }
-                        .accessibilityIdentifier("home.filteredStudy.hard")
-                    TextField(text: $model.goodText) { Text("Good (seconds)", bundle: .module) }
-                        .accessibilityIdentifier("home.filteredStudy.good")
+                    StudyTextField("Again (seconds)", text: $model.againText, id: "home.filteredStudy.again")
+                    StudyTextField("Hard (seconds)", text: $model.hardText, id: "home.filteredStudy.hard")
+                    StudyTextField("Good (seconds)", text: $model.goodText, id: "home.filteredStudy.good")
                 }
             } footer: {
                 if !model.definition.reschedule {
@@ -53,10 +49,8 @@ private struct FilteredTermFields: View {
         "Highest retrievability first", "Relative overdueness"
     ]
     var body: some View {
-        TextField(text: $term.search, axis: .vertical) { Text("Search", bundle: .module) }
-            .accessibilityIdentifier("home.filteredStudy.\(id).search")
-        TextField(text: $limit) { Text("Card limit", bundle: .module) }
-            .accessibilityIdentifier("home.filteredStudy.\(id).limit")
+        StudyTextField("Search", text: $term.search, multiline: true, id: "home.filteredStudy.\(id).search")
+        StudyTextField("Card limit", text: $limit, id: "home.filteredStudy.\(id).limit")
         Picker(selection: $term.order) {
             ForEach(orders.indices, id: \.self) { index in Text(orders[index], bundle: .module).tag(UInt32(index)) }
             if term.order > 10 { Text("Unknown order", bundle: .module).tag(term.order) }
@@ -87,10 +81,8 @@ public struct CustomStudyForm: View {
                     } label: { Text("Available cards before daily limits", bundle: .module) }
                     .accessibilityIdentifier("home.customStudy.available")
                 }
-                TextField(text: $model.amountText) {
-                    Text(model.modeIndex < 2 ? "Change in today’s limit" : model.modeIndex == 5 ? "Card limit" : "Days", bundle: .module)
-                }
-                .accessibilityIdentifier("home.customStudy.amount")
+                StudyTextField(model.modeIndex < 2 ? "Change in today’s limit" : model.modeIndex == 5 ? "Card limit" : "Days",
+                               text: $model.amountText, id: "home.customStudy.amount")
                 if model.modeIndex == 2 { Text("Choose 1–30 days.", bundle: .module) }
             } footer: {
                 if model.modeIndex < 2 { Text("Positive changes allow more cards today. Negative changes reduce today’s allowance.", bundle: .module) }
@@ -104,14 +96,54 @@ public struct CustomStudyForm: View {
                         ForEach(states.indices, id: \.self) { index in Text(states[index], bundle: .module).tag(index) }
                     } label: { Text("Card state", bundle: .module) }
                     .accessibilityIdentifier("home.customStudy.state")
-                    TextField(text: $model.includeTags, axis: .vertical) { Text("Include tags", bundle: .module) }
-                        .accessibilityIdentifier("home.customStudy.includeTags")
-                    TextField(text: $model.excludeTags, axis: .vertical) { Text("Exclude tags", bundle: .module) }
-                        .accessibilityIdentifier("home.customStudy.excludeTags")
+                    StudyTextField("Include tags", text: $model.includeTags, multiline: true, id: "home.customStudy.includeTags")
+                    StudyTextField("Exclude tags", text: $model.excludeTags, multiline: true, id: "home.customStudy.excludeTags")
                 } footer: {
                     Text("Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags.", bundle: .module)
                 }
             }
+        }
+    }
+}
+
+/// Touch fields keep their purpose visible after entry; long input gets the full row width.
+private struct StudyTextField: View {
+    let title: LocalizedStringKey
+    @Binding var text: String
+    let multiline: Bool
+    let id: String
+
+    init(_ title: LocalizedStringKey, text: Binding<String>, multiline: Bool = false, id: String) {
+        self.title = title
+        self._text = text
+        self.multiline = multiline
+        self.id = id
+    }
+
+    var body: some View {
+        #if os(macOS)
+        field
+        #else
+        if multiline {
+            VStack(alignment: .leading) {
+                Text(title, bundle: .module).accessibilityHidden(true)
+                field.accessibilityLabel(Text(title, bundle: .module))
+            }
+        } else {
+            LabeledContent {
+                field.accessibilityLabel(Text(title, bundle: .module))
+            } label: { Text(title, bundle: .module) }
+        }
+        #endif
+    }
+
+    @ViewBuilder private var field: some View {
+        if multiline {
+            TextField(text: $text, axis: .vertical) { Text(title, bundle: .module) }
+                .accessibilityIdentifier(id)
+        } else {
+            TextField(text: $text) { Text(title, bundle: .module) }
+                .accessibilityIdentifier(id)
         }
     }
 }

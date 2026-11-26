@@ -67,3 +67,5 @@ Planinterop re-reviewed the complete 23,768-byte touch test after it adopted the
 Planinterop reviewed the full 22,564-byte touch test after it began editing visible fields with the keyboard open. The code and inputs are public and synthetic. Its verified SHA-256 is `20a75301658060e8904c4f43a2b685f748e1d2cf44ce6ba69e7cb929e91a88b5`.
 
 Planinterop reviewed the full 22,619-byte touch journey after native Select All replaced cursor-relative deletion in its text helper. Its public synthetic content has verified SHA-256 `c26eb356b8475eb65c523bce25dd5f24869e38eda160c97f12442361d1b57701`.
+
+Plancheck reviewed the complete 14,332-byte form with persistent touch labels. It contains public native controls, localization keys, bindings and accessibility identifiers. Its verified SHA-256 is `bcc838fe6ba4a79d42d24870ed7a35aa3f6d03132dc129b86ab5024047e9152d`.
