@@ -42,6 +42,14 @@ html.mac #hint { margin: 8px 0 0 148px; }
    runtime owns all rich/source text and the enclosing native view scrolls. */
 html.occlusionForm, html.occlusionForm body { overflow: hidden; height: auto; }
 html.occlusionForm .nativeRow { grid-column: 1 / -1; min-width: 0; }
+/* The retained Mac editor loads and focuses before it has a native frame.
+   Keep its contents out of the document's scroll area only at zero viewport.
+   Root clipping alone becomes overflow:hidden on the viewport, which still
+   permits selection scrolling; the fixed, clipped body supplies no overflow. */
+@media (width: 0px), (height: 0px) {
+    html.mac:not(.inspector) { overflow: clip; }
+    html.mac:not(.inspector) body { position: fixed; inset: 0; overflow: clip; }
+}
 /* Browse's inspector (Option A): a plain list. Each field's name on its own
    line in the small secondary style, its text at the system body size under
    it, no box until it is edited, a hairline between fields. The page never

@@ -10,7 +10,7 @@ public enum DeckImportSheetPreview: PreviewStates {
 
     /// Every named fixture the capture routes draw.
     public static let fixtures = [
-        "options-small", "options-large", "options-changed", "importing", "confirm-losses", "confirm-sync",
+        "options-small", "options-large", "options-changed", "importing", "importing-finishing", "confirm-losses", "confirm-sync",
         "confirm-sync-losses", "confirm-unreachable", "result", "result-log", "result-undone", "refused-too-new",
         "refused-space", "refused-kind-conflict", "refused-rows", "refused-sync", "imported-without-result",
     ]
@@ -62,6 +62,12 @@ public enum DeckImportSheetPreview: PreviewStates {
         case "importing":
             value.step = .importing; value.progressVisible = true
             value.progressStage = .media; value.progressCompleted = 40; value.progressTotal = 100
+        case "importing-finishing":
+            // The commit: no total, and Cancel can no longer stop it.
+            value.fileName = "Zorvel Quandle Brimwort Fenstaly Grumbaxe Collection.apkg"
+            value.facts = DeckImportFacts(notes: 1_200, cards: 3_400, decks: ["Zorvel Quandle"], notetypes: ["Basic"])
+            value.step = .importing; value.progressVisible = true
+            value.progressStage = .committing; value.cancellable = false
         case "confirm-losses":
             value.step = .confirming; value.confirmation = losses
         case "confirm-sync":

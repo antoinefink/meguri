@@ -2,6 +2,9 @@ import CoreBridge
 import Foundation
 import Testing
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 @testable import AppModel
 @testable import Editor
 
@@ -17,6 +20,65 @@ extension FieldEditorTests {
         return .init(id: id, name: "Form \(id)", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [], originalStockKind: 0)
     }
     private static let deck = DeckNameEntry(id: 9, fullName: "Languages::Daily", filtered: false)
+
+    #if os(macOS)
+    @Test(arguments: [false, true])
+    func manyFieldMacFormOpensAtTheSizedViewport(_ editing: Bool) async throws {
+        let type = Self.form((0..<24).map { "Field \($0)" })
+        let values = (0..<24).map { "Synthetic \($0)" }
+        let draft = try editing
+            ? NoteEditorDraft(editing: .init(id: 5, notetypeId: type.id, fields: values, tags: [], guid: "g"),
+                              notetype: type, deck: Self.deck, generation: 1)
+            : NoteEditorDraft(generation: 1, notetype: type, deck: Self.deck, values: values)
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        defer { host.shutDown() }
+        BrowseFieldEditingTests.installProbe(host)
+        // Production focuses before SwiftUI mounts the retained, zero-sized view.
+        try #require(host.webView.frame == .zero)
+        try await host.start()
+        try #require(try await host.webView.callAsyncJavaScript("return innerWidth === 0 && innerHeight === 0;",
+            contentWorld: .page) as? Bool == true)
+
+        func settleLayout() async throws {
+            _ = try await host.webView.callAsyncJavaScript("""
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Layout did not settle')), 2000);
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        clearTimeout(timeout); resolve();
+                    }));
+                });
+                """, contentWorld: .page)
+        }
+        let window = EditorFormTestWindow(contentRect: CGRect(x: -30_000, y: -30_000, width: 1, height: 1),
+                                          styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host.webView
+        window.makeFirstResponder(host.webView)
+        defer { window.contentView = nil; window.close() }
+        // The first nonzero layout need not be the final usable viewport.
+        host.webView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        try await settleLayout()
+        window.setContentSize(NSSize(width: 500, height: 240))
+        host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 240)
+        try await settleLayout()
+
+        let checks = try #require(try await host.webView.callAsyncJavaScript("""
+            const root = testFieldRoots.find(root => root.host.isConnected);
+            const box = document.querySelector('.fieldBoundary');
+            const style = getComputedStyle(box);
+            return {
+                scrollable: innerHeight === 240 && document.scrollingElement.scrollHeight > innerHeight,
+                focused: root.activeElement === root.querySelector('meguri-field-content'),
+                topVisible: parseFloat(style.outlineWidth) > 0 &&
+                    box.getBoundingClientRect().top - parseFloat(style.outlineWidth) >= 0
+            };
+            """, contentWorld: BrowseFieldEditingTests.world) as? [String: Bool])
+        // No test-driven focus or scrolling may repair the clipped opening box.
+        #expect(checks["scrollable"] == true)
+        #expect(checks["focused"] == true)
+        #expect(checks["topVisible"] == true, "The first field and its focus ring must start within the viewport")
+    }
+    #endif
 
     @Test func addWaitsForContentInTheFirstField() throws {
         let blank = try NoteEditorDraft(generation: 1, notetype: Self.form(["Front", "Back"]), deck: Self.deck)
@@ -137,3 +199,10 @@ extension FieldEditorTests {
         page.shutDown()
     }
 }
+
+#if os(macOS)
+@MainActor private final class EditorFormTestWindow: NSWindow {
+    override var isVisible: Bool { true }
+    override var occlusionState: NSWindow.OcclusionState { .visible }
+}
+#endif
