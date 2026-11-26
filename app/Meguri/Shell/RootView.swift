@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var launchAlert: Bool
     @State private var linkRefusal: DeepLinkRefusal?
     @State private var deckNameBesideList = false
+    @State private var collectionSceneID = UUID()
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.layoutFollowsForcedSizeClass) private var layoutFollowsForcedSizeClass
@@ -175,16 +176,13 @@ struct RootView: View {
             // After this update: a selection changed during it can be lost.
             if !shown { Task { @MainActor in if !features.sectionShown(navigation.section) { navigation.select(.section(.home)) } } }
         }
-        .onChange(of: scenePhase) { _, phase in
-            collection?.setSceneActive(phase == .active)
-            if phase == .active { collection?.setForeground(true) }
-            else if phase == .background {
-                #if os(iOS)
-                ReviewBackgroundLease.begin(collection)
-                #else
-                collection?.setForeground(false)
-                #endif
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            if collection?.updateSceneActivity(collectionSceneID, active: phase == .active, background: phase == .background) == true {
+                backgroundCollection()
             }
+        }
+        .onDisappear {
+            if collection?.removeSceneActivity(collectionSceneID) == true { backgroundCollection() }
         }
         .onChange(of: navigation.sheet) { _, sheet in
             updateReviewObscuration()
@@ -214,6 +212,14 @@ struct RootView: View {
         .modifier(StudyRefusalFeedback(collection: collection))
         .modifier(DeckDeletionFeedback(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
+    }
+
+    private func backgroundCollection() {
+        #if os(iOS)
+        ReviewBackgroundLease.begin(collection)
+        #else
+        collection?.setForeground(false)
+        #endif
     }
 
     private var hasModalSheet: Bool {

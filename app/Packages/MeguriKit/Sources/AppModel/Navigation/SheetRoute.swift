@@ -9,6 +9,7 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     /// The deck package import sheet (U162, `package/transfer-sheets` X2).
     case deckImport
     case collectionExport
+    case backupRestore
     case deckName(DeckActionsModel.Action)
     /// Names a preset in the collection-owned Deck Options draft (N20.9).
     case newDeckOptionsPreset

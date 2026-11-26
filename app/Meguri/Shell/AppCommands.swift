@@ -19,7 +19,7 @@ struct NativeCommandContext {
     var statsPage: StatsPage?
 
     var fileActionsAvailable: Bool {
-        collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
+        !collection.backups.busy && collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
             && !collection.entry.pickerPresented && !collection.intake.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
@@ -36,6 +36,10 @@ struct NativeCommandContext {
         case .collectionExport:
             guard fileActionsAvailable, collection.collectionExport.canPresent else { return }
             collection.collectionExport.start()
+        case .backupRestore:
+            guard fileActionsAvailable else { return }
+            collection.presentBackupRestore(host: host)
+            return
         case .manualTransfer:
             // Reopening must also admit an active operation or authoritative
             // preview. Only the workflow's explicit actions start work.
@@ -377,6 +381,12 @@ struct AppCommands: Commands {
             Button("Import…") { context?.present(.deckImport) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.intake.canChoose != true)
+            Button("Back Up Now") { context?.collection.backups.create() }
+                .disabled(context?.collection.backups.canCreate != true || context?.fileActionsAvailable != true)
+                .accessibilityIdentifier("settings.backups.create")
+            Button("Restore from Backup…") { context?.present(.backupRestore) }
+                .disabled(context?.collection.backups.canOpenRestore != true || context?.fileActionsAvailable != true)
+                .accessibilityIdentifier("settings.backups.restore")
             Button("Export Collection…") { context?.present(.collectionExport) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)

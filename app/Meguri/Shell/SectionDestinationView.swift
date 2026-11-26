@@ -198,6 +198,12 @@ struct ShellFeatures {
             case .deckImport: AnyView(DeckImportSheet(model: collection.deckImport))
             case .deckName: AnyView(DeckNameForm(model: collection.deckActions))
             case .newDeckOptionsPreset: AnyView(NewDeckOptionsPresetForm(model: collection.deckOptions))
+            case .backupRestore:
+                AnyView(BackupRestoreSheet(collection: collection)
+                    #if os(macOS)
+                    .frame(idealWidth: ContentWidth.readable, minHeight: WindowMetrics.minimum.height)
+                    #endif
+                )
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
             case .manualTransfer:
                 AnyView(ManualTransferWorkflowView(model: collection.manualTransfers, close: navigation.dismissSheet)

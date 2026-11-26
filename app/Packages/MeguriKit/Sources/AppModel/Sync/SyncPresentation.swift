@@ -28,7 +28,7 @@ public enum SyncText {
 }
 
 nonisolated public enum SettingsPage: String, Hashable, Codable, CaseIterable, Sendable {
-    case accountSync, collection, ankiServer, integrations
+    case accountSync, collection, backups, ankiServer, integrations
 }
 nonisolated public enum CloudSyncEntry: String, Hashable, Sendable {
     case connect, publicationChoice, replaceLocal, replaceCloud

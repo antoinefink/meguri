@@ -1,6 +1,576 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing."
+          }
+        }
+      }
+    },
+    "Back Up Now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back Up Now"
+          }
+        }
+      }
+    },
+    "Last backup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last backup"
+          }
+        }
+      }
+    },
+    "Last backup unavailable. Try refreshing Backups.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last backup unavailable. Try refreshing Backups."
+          }
+        }
+      }
+    },
+    "No successful backup recorded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No successful backup recorded"
+          }
+        }
+      }
+    },
+    "The backup’s publication could not be confirmed. Check the backup folder before trying again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup’s publication could not be confirmed. Check the backup folder before trying again."
+          }
+        }
+      }
+    },
+    "Restore from Backup…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Backup…"
+          }
+        }
+      }
+    },
+    "Show in Finder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Finder"
+          }
+        }
+      }
+    },
+    "Show in Files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Files"
+          }
+        }
+      }
+    },
+    "Export Collection with Media…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Collection with Media…"
+          }
+        }
+      }
+    },
+    "The backup folder could not be opened. Check file access and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup folder could not be opened. Check file access and try again."
+          }
+        }
+      }
+    },
+    "Backups don’t include media files. Export the collection to save its media too.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backups don’t include media files. Export the collection to save its media too."
+          }
+        }
+      }
+    },
+    "Back up every (minutes)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back up every (minutes)"
+          }
+        }
+      }
+    },
+    "Daily backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily backups"
+          }
+        }
+      }
+    },
+    "Weekly backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weekly backups"
+          }
+        }
+      }
+    },
+    "Monthly backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monthly backups"
+          }
+        }
+      }
+    },
+    "Backup settings are unavailable until the collection is ready.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup settings are unavailable until the collection is ready."
+          }
+        }
+      }
+    },
+    "Automatic Backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic Backups"
+          }
+        }
+      }
+    },
+    "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field."
+          }
+        }
+      }
+    },
+    "Server Backups in Browser…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server Backups in Browser…"
+          }
+        }
+      }
+    },
+    "Opens this account’s Collection page on the configured Meguri Sync server. Sign in in your browser. Scheduled server backups include media; restoring there replaces the server collection.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens this account’s Collection page on the configured Meguri Sync server. Sign in in your browser. Scheduled server backups include media; restoring there replaces the server collection."
+          }
+        }
+      }
+    },
+    "Backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backups"
+          }
+        }
+      }
+    },
+    "Enter a whole number in the allowed range.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a whole number in the allowed range."
+          }
+        }
+      }
+    },
+    "Loading Backups…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Backups…"
+          }
+        }
+      }
+    },
+    "No Backups Yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Backups Yet"
+          }
+        }
+      }
+    },
+    "Create a backup on this device, or check the configured backup folder.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create a backup on this device, or check the configured backup folder."
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "Server copy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server copy"
+          }
+        }
+      }
+    },
+    "Can’t be restored": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can’t be restored"
+          }
+        }
+      }
+    },
+    "Restore from Backup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Backup"
+          }
+        }
+      }
+    },
+    "Restore…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore…"
+          }
+        }
+      }
+    },
+    "Restore": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore"
+          }
+        }
+      }
+    },
+    "The current collection is backed up first. The restored collection stays on this device until you choose what to do with iCloud.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current collection is backed up first. The restored collection stays on this device until you choose what to do with iCloud."
+          }
+        }
+      }
+    },
+    "The current collection is backed up first. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current collection is backed up first. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing."
+          }
+        }
+      }
+    },
+    "The current collection is backed up first. This replaces the collection on this device. Media files are kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current collection is backed up first. This replaces the collection on this device. Media files are kept."
+          }
+        }
+      }
+    },
+    "Restoring Backup…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restoring Backup…"
+          }
+        }
+      }
+    },
+    "Creating Backup…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Creating Backup…"
+          }
+        }
+      }
+    },
+    "Meguri could not determine which collection is active. Quit and reopen Meguri before continuing. Recovery files have been kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri could not determine which collection is active. Quit and reopen Meguri before continuing. Recovery files have been kept."
+          }
+        }
+      }
+    },
+    "The selected backup is now active, but recovery did not finish. Check Sync and reopen the collection before continuing.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected backup is now active, but recovery did not finish. Check Sync and reopen the collection before continuing."
+          }
+        }
+      }
+    },
+    "The backup was not restored. Try another backup or resolve the problem and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup was not restored. Try another backup or resolve the problem and try again."
+          }
+        }
+      }
+    },
+    "The operation was cancelled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The operation was cancelled."
+          }
+        }
+      }
+    },
+    "This backup is damaged. Choose another backup.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This backup is damaged. Choose another backup."
+          }
+        }
+      }
+    },
+    "This backup needs a newer version of Meguri.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This backup needs a newer version of Meguri."
+          }
+        }
+      }
+    },
+    "This backup uses an unsupported format. Choose another backup.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This backup uses an unsupported format. Choose another backup."
+          }
+        }
+      }
+    },
+    "The current collection could not be backed up, so it was not replaced. Free space or check file access, then try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current collection could not be backed up, so it was not replaced. Free space or check file access, then try again."
+          }
+        }
+      }
+    },
+    "Finish the active review before restoring a backup.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish the active review before restoring a backup."
+          }
+        }
+      }
+    },
+    "Another collection operation is running. Wait for it to finish and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another collection operation is running. Wait for it to finish and try again."
+          }
+        }
+      }
+    },
+    "There isn’t enough free space. Free space on this device and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There isn’t enough free space. Free space on this device and try again."
+          }
+        }
+      }
+    },
+    "The collection is damaged. Restore a known-good backup.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection is damaged. Restore a known-good backup."
+          }
+        }
+      }
+    },
+    "The collection is unavailable. Wait for the current operation, or reopen Meguri and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection is unavailable. Wait for the current operation, or reopen Meguri and try again."
+          }
+        }
+      }
+    },
+    "A backup with this name already exists. Try again shortly.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A backup with this name already exists. Try again shortly."
+          }
+        }
+      }
+    },
+    "This backup is no longer available. Refresh the list and choose another.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This backup is no longer available. Refresh the list and choose another."
+          }
+        }
+      }
+    },
+    "The backup could not be read or written. Check file access and free space, then try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The backup could not be read or written. Check file access and free space, then try again."
+          }
+        }
+      }
+    },
+    "Created %@ (%@)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created %@ (%@)"
+          }
+        }
+      }
+    },
+    "Safety copy: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Safety copy: %@"
+          }
+        }
+      }
+    },
+    "Replace the current collection with the backup from %@?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace the current collection with the backup from %@?"
+          }
+        }
+      }
+    },
+    "Running operation: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running operation: %@"
+          }
+        }
+      }
+    },
     "Preparing Export…": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Preparing Export…" } }

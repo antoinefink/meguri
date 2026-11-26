@@ -301,11 +301,16 @@ public struct HomeView: View {
             EmptyStateView(Text("Couldn’t Start Empty", bundle: .module), systemImage: "exclamationmark.triangle",
                 description: Text("Quit and reopen Meguri before trying again. Any collection file already created will be kept.", bundle: .module))
         case .failed(let message):
+            VStack {
             ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: message),
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
                 #if DEBUG
                 .debugRetryAccessibilityValue(collection.openFailureDiagnosticValue ?? "")
                 #endif
+                Button { collection.presentBackupRestore() } label: { Text("Restore from Backup…", bundle: .module) }
+                    .disabled(!collection.backups.canOpenRestore)
+                    .accessibilityIdentifier("settings.backups.restore")
+            }
         case .noDecks:
             // N27.1: only after a finished read found no deck.
             if deckPageDetail == nil {

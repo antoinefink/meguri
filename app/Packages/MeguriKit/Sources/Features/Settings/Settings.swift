@@ -49,7 +49,7 @@ public struct SettingsView: View {
             if shellLayout == .compact, sizeClass == .regular, verticalSizeClass == .regular, wide {
                 HStack {
                     List(selection: Binding<String?>(get: { section }, set: { if let value = $0 { selectedSection = value } })) {
-                        ForEach([SettingsPage.accountSync, .collection], id: \.self) { page in
+                        ForEach([SettingsPage.accountSync, .collection, .backups], id: \.self) { page in
                             SettingsPageLabel(page: page)
                                 .tag(page.rawValue)
                                 .accessibilityIdentifier(page.rowIdentifier)
@@ -57,11 +57,14 @@ public struct SettingsView: View {
                     }
                     .frame(width: proxy.size.width / 3)
                     NavigationStack {
-                        Form {
-                            if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
-                            else { SyncSettingsSections(collection: collection, draft: draft) }
+                        if section == "backups" { BackupsView(collection: collection) }
+                        else {
+                            Form {
+                                if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
+                                else { SyncSettingsSections(collection: collection, draft: draft) }
+                            }
+                            .formStyle(.grouped)
                         }
-                        .formStyle(.grouped)
                     }
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
@@ -70,7 +73,7 @@ public struct SettingsView: View {
         #endif
     }
     #if !os(macOS)
-    private var section: String { selectedSection == "collection" ? "collection" : "accountSync" }
+    private var section: String { ["collection", "backups"].contains(selectedSection) ? selectedSection : "accountSync" }
     /// A request to show the Sync section selects it where sections are a list.
     private func consumeSyncRequest() {
         guard collection.syncPresentation.settingsRequest != nil else { return }
@@ -82,6 +85,10 @@ public struct SettingsView: View {
         Form {
             SyncSettingsSections(collection: collection, draft: draft)
             SettingsCollectionFilesSection(collection: collection)
+            Section {
+                NavigationLink(value: Destination.settingsPage(.backups)) { SettingsPageLabel(page: .backups) }
+                    .accessibilityIdentifier("settings.backups.open")
+            }
             if SettingsPage.showsAnkiServer {
                 // The hidden legacy interface keeps its pages for its own suites.
                 Section {
@@ -105,6 +112,7 @@ struct SettingsPageLabel: View {
     var body: some View {
         switch page {
         case .accountSync: Label(SyncText.value("sync.settings.sync.section"), systemImage: "icloud")
+        case .backups: Label { Text("Backups", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
         case .collection: Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
         case .integrations: Label("Integrations", systemImage: "puzzlepiece.extension")
         case .ankiServer: Label { Text("Anki Server", bundle: .module) } icon: { Image(systemName: "network") }
@@ -118,6 +126,7 @@ public struct SettingsPageView: View {
     public init(collection: ReviewCollection, page: SettingsPage) { self.collection = collection; self.page = page }
     public var body: some View {
         if page == .accountSync { AccountSyncView(collection: collection) }
+        else if page == .backups { BackupsView(collection: collection) }
         else {
             Form {
                 if page == .collection {
@@ -257,6 +266,8 @@ public struct MacSettingsView: View {
                     // The pane's title bar names it; the touch page keeps its section headers.
                     AccountSyncView(collection: collection, host: .settings, showsHeading: false)
                 }
+            } else if section == "backups" {
+                BackupsView(collection: collection, host: .settings).detailColumnChrome()
             } else if section == "integrations" {
                 SentenceMiningPane(model: collection.sentenceMining).detailColumnChrome()
             } else {
@@ -310,6 +321,7 @@ public struct MacSettingsView: View {
         guard !query.isEmpty else { return true }
         let terms: String = switch page {
         case .accountSync: SyncText.value("sync.settings.sync.section") + " iCloud " + SyncText.value("sync.service.meguri")
+        case .backups: String(localized: "Backups", bundle: .module) + " Restore Automatic Retention"
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
         case .integrations: "Integrations Connectors Migaku Sentence Mining AnkiConnect"
         case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"

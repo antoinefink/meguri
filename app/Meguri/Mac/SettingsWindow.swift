@@ -8,6 +8,8 @@ struct SettingsWindow: View {
     let collection: ReviewCollection
     let features: ShellFeatures
     let configuration: LaunchConfiguration
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var collectionSceneID = UUID()
     private var context: NativeCommandContext { .init(collection: collection, host: .settings) }
     var body: some View {
         // N15.7: as System Settings, a fixed width and a height the person can
@@ -21,6 +23,14 @@ struct SettingsWindow: View {
                 configuration: configuration, isActive: true, host: .settings))
             .modifier(LaunchEnvironment(configuration: configuration))
             .background(SettingsToolbarStyle())
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                if collection.updateSceneActivity(collectionSceneID, active: phase == .active, background: phase == .background) {
+                    collection.setForeground(false)
+                }
+            }
+            .onDisappear {
+                if collection.removeSceneActivity(collectionSceneID) { collection.setForeground(false) }
+            }
     }
 }
 

@@ -35,6 +35,12 @@ public struct MaintenanceFailure: Error, Sendable, Equatable {
     public let safetyBackup: String?
     public let restored: RestoredBackup?
     public let backupPublication: ImportBackupPublication
+    public init(cause: MaintenanceError, candidateActive: Bool = false, generation: UInt64? = nil,
+                safetyBackup: String? = nil, restored: RestoredBackup? = nil,
+                backupPublication: ImportBackupPublication = .unpublished) {
+        self.cause = cause; self.candidateActive = candidateActive; self.generation = generation
+        self.safetyBackup = safetyBackup; self.restored = restored; self.backupPublication = backupPublication
+    }
     init(_ raw: MeguriCoreBindings.MaintenanceFailure) {
         cause = MaintenanceError(raw.cause); candidateActive = raw.candidateActive; generation = raw.generation
         safetyBackup = raw.safetyBackup; restored = raw.restored.map(RestoredBackup.init)
@@ -47,6 +53,11 @@ public struct RestoredBackup: Sendable, Equatable {
     public let generation: UInt64
     public let cloudPublicationPending: Bool
     public let deadlineMilliseconds: Int64?
+    public init(name: String, safetyBackup: String?, generation: UInt64, cloudPublicationPending: Bool,
+                deadlineMilliseconds: Int64?) {
+        self.name = name; self.safetyBackup = safetyBackup; self.generation = generation
+        self.cloudPublicationPending = cloudPublicationPending; self.deadlineMilliseconds = deadlineMilliseconds
+    }
     init(_ raw: MeguriCoreBindings.RestoredBackup) {
         name = raw.name; safetyBackup = raw.safetyBackup; generation = raw.generation
         cloudPublicationPending = raw.cloudPublicationPending; deadlineMilliseconds = raw.deadlineMs
@@ -60,6 +71,10 @@ public struct BackupWallTime: Sendable, Equatable {
     public let hour: UInt8
     public let minute: UInt8
     public let second: UInt8
+    public init(year: UInt16, month: UInt8, day: UInt8, hour: UInt8, minute: UInt8, second: UInt8) {
+        self.year = year; self.month = month; self.day = day
+        self.hour = hour; self.minute = minute; self.second = second
+    }
     init(_ raw: MeguriCoreBindings.BackupWallTime) {
         year = raw.year; month = raw.month; day = raw.day; hour = raw.hour; minute = raw.minute; second = raw.second
     }
@@ -69,6 +84,9 @@ public struct BackupEntry: Sendable, Equatable {
     public let kind: BackupKind
     public let wallTime: BackupWallTime
     public let sizeBytes: UInt64
+    public init(name: String, kind: BackupKind, wallTime: BackupWallTime, sizeBytes: UInt64) {
+        self.name = name; self.kind = kind; self.wallTime = wallTime; self.sizeBytes = sizeBytes
+    }
     init(_ raw: MeguriCoreBindings.BackupEntry) {
         name = raw.name; wallTime = BackupWallTime(raw.wallTime); sizeBytes = raw.sizeBytes
         switch raw.kind { case .backup: kind = .backup; case .serverCopy: kind = .serverCopy; case .serverCopyUnverified: kind = .serverCopyUnverified }
