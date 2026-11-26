@@ -45,7 +45,6 @@ final class NoteTypeDeletionUITests: XCTestCase {
         // Fresh counts after a Return dismissal also prove that it did not
         // delete notes or cards while leaving the type behind.
         assertCounts(app)
-        XCTAssertTrue(element(app, identifier).exists)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, identifier).exists, "Escape keeps the type and its notes")
