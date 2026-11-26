@@ -359,7 +359,7 @@ fn f3_day_100_early_review_and_due_control_have_exact_schedule_and_log() {
         assert_eq!((saved.deck_id, saved.queue, saved.interval, saved.due, saved.original_due, saved.original_deck_id),
             (DeckId(1), CardQueue::Review, 1, 101, 0, DeckId(0)));
         let reader = h.collection.reader(ReaderRole::Query).unwrap();
-        let logs = h.logs();
+        let logs = reader.ids_after(meguri_storage::Table::Revlog, None, 100000).unwrap();
         assert_eq!(logs.len(), 1);
         let log = reader.revlog_entry(meguri_model::ids::RevlogId(logs[0])).unwrap().unwrap();
         assert_eq!((log.kind, log.button, log.last_interval, log.interval), (kind, 3, 10, 1));
@@ -431,7 +431,7 @@ fn preview_hard_and_positive_good_repeat_with_filtered_logs_and_exact_undo() {
         assert!(i64::from(saved.due) >= h.clock.now_ms() / 1000 + i64::from(seconds));
         assert_schedule(&saved, &home);
         let reader = h.collection.reader(ReaderRole::Query).unwrap();
-        let logs = h.logs();
+        let logs = reader.ids_after(meguri_storage::Table::Revlog, None, 100000).unwrap();
         assert_eq!(logs.len(), 1);
         let log = reader.revlog_entry(meguri_model::ids::RevlogId(logs[0])).unwrap().unwrap();
         assert_eq!((log.kind, log.button, log.interval, log.ease_factor), (RevlogKind::Filtered, rating as u8, -seconds, 0));
@@ -607,7 +607,7 @@ fn filtered_intent_and_prepared_recovery_apply_once_with_exact_membership_and_lo
         h.settle();
         let expected = card(&h.collection, id).to_cells();
         let reader = h.collection.reader(ReaderRole::Query).unwrap();
-        let logs = h.logs();
+        let logs = reader.ids_after(meguri_storage::Table::Revlog, None, 100000).unwrap();
         assert_eq!(logs.len(), 1);
         let expected_log = reader.revlog_entry(meguri_model::ids::RevlogId(logs[0])).unwrap().unwrap();
         drop(reader);
