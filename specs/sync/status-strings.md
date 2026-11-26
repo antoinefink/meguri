@@ -856,7 +856,7 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `settings.root`, `
 - The services are named "Meguri Sync" and "iCloud". Where iCloud is a choice, a heading or a row label, `sync.service.beta` follows it as a separate secondary label, never joined into one string; VoiceOver reads `sync.service.iCloud.accessibility`. Inside a sentence iCloud has no label.
 - A **needs you** text is exactly one sentence, with at most one action. A **waiting** text has no action, except Try Again on the two acceptance-unknown rows of T19.5 (decided 2026-11-19 (review F4)) and on its paused setup media row (changed 2026-11-21 (resume fix)). An **issues** entry is a row of a list that opens.
 - Both services use the same status words (T3's titles and "Last synced").
-- No text offers or names the user's Pause, Resume, Connect, Sign Out, Stop Using, a media setting, Review Conflicts or Show Details. No text says that cards and media sync together.
+- No text offers or names the user's Pause, Resume, Connect, Stop Using, a media setting, Review Conflicts or Show Details. Sign Out… is offered only in the signed-in Meguri Sync Account destination (user decision, 2026-11-26; T19.6). No text says that cards and media sync together.
 
 ### T19.2 The Service control, Off and switching (N15; V27.5; MP6.1, MP6.4)
 
@@ -1114,7 +1114,8 @@ The same four rules make the main status. The first condition that applies decid
 
 | Key | English | Use |
 |---|---|---|
-| `sync.settings.account` | Account | row, Meguri Sync only: its value is the username; it opens the page with Server Address and Username, and the sign-in fields while not signed in (T18.3) |
+| `sync.settings.account` | Account | row, Meguri Sync only: its value is the username; it opens the page with Server Address, Username and Sign Out… while signed in, and the sign-in fields while not signed in (T18.3; user decision, 2026-11-26) |
+| `sync.settings.account.signOut` | Sign Out… | native destructive button in the signed-in Account destination only (added 2026-11-26); opens T21.1's Service → Off alert and reuses its progress, refusal and error text; the withdrawn `sync.meguri.signOut` keys stay withdrawn |
 | `sync.settings.automatic` (T14) | Sync Automatically | switch, shown while a service is selected; disabled, showing its stored value, until the service is connected (`sync/policy#P25.3`; decided 2026-11-19 (review F8)) |
 | `sync.settings.automatic.footer` (T14) | | its footer |
 | `sync.now.command` (T6) | Sync Now | button |
@@ -1131,7 +1132,7 @@ The same four rules make the main status. The first condition that applies decid
 
 - `sync.settings.privacy` (T14) stays the Sync section's footer while iCloud is the service.
 - The two replace entries show for the selected service once it is set up. Each opens its preview and changes nothing; the preview's destructive button is the confirmation (N11.8). While the entry cannot run, it is disabled with its T13.6 or T18.5 reason under it.
-- The section shows no media toggle, no Pause, no Sign Out, no Stop Using row and no Advanced group.
+- The parent Sync section shows no media toggle, no Pause, no Sign Out, no Stop Using row and no Advanced group. Account's Sign Out… uses MP6.4's guarded Off handoff. Cancel keeps Account open; success returns to Sync settings at Off, where choosing Meguri Sync shows the editable sign-in fields.
 - Replaced media (decided 2026-11-19 (review F7); V27.7), in Troubleshooting, only while replaced-media copies exist:
 
 | Key | English | Use |
