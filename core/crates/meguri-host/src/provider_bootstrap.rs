@@ -260,14 +260,6 @@ impl CoreHost {
     }
     pub fn complete_meguri_bootstrap_for_generation(&self, generation: Generation, connection: &MeguriConnection,
         username: &str, id: &OperationId) -> Result<MediaAccounting> {
-        // MP5 installs a binding in the same generation. Serialize its final
-        // publication with W12's local removal, as with MP7's own save.
-        let _admission = self.admit_meguri_structure_job().map_err(|_| MeguriBootstrapError::Busy)?;
-        self.complete_meguri_bootstrap_admitted_for_generation(generation, connection, username, id)
-    }
-    /// MP7 already owns the structure lane through its media completion.
-    pub(crate) fn complete_meguri_bootstrap_admitted_for_generation(&self, generation: Generation,
-        connection: &MeguriConnection, username: &str, id: &OperationId) -> Result<MediaAccounting> {
         self.check_meguri_bootstrap_operation(connection, id)?;
         let media = self.media()?;
         let slot = self.engine().acquire_slot(LongOp::OneWaySync)?;

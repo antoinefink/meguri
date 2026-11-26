@@ -1,14 +1,14 @@
-//! W12's native local admission versus MP5's same-generation binding install.
+//! W12's local writer guard, bootstrap generation changes and retained setup.
 use super::{b, r, s};
-use meguri_engine::{CancelToken, EngineError, ProgressSink, UndoScope,
+use meguri_engine::{CancelToken, EngineError, Generation, ProgressSink, UndoScope,
     notetypes::{self, remove::{self, RemoveNotetype}},
-    progress::{Progress, ProgressListener, ProgressPhase}, undo::UndoStatus};
-use meguri_host::{CoreHost, HostConfig, MeguriBootstrapDirection, MeguriBootstrapError,
-    MeguriStructureOutcome, MeguriStructureUploadOutcome, MeguriUploadPending};
+    undo::UndoStatus};
+use meguri_host::{CoreHost, HostConfig, MeguriBootstrapDirection,
+    MeguriStructureOutcome, MeguriStructureStop, MeguriStructureUploadOutcome, MeguriUploadPending};
 use meguri_model::ids::NotetypeId;
 use meguri_storage::{ReadRows, ReaderRole, raw::{RawRows, SqlValue}};
-use meguri_sync::{policy::Operation, provider::{MeguriConnection, MeguriReadiness, Selection}};
-use std::{path::{Path, PathBuf}, sync::{Arc, Mutex, mpsc}, time::Duration};
+use meguri_sync::{Method, policy::{Operation, Phase}, provider::{MeguriConnection, MeguriReadiness, Selection}};
+use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration};
 
 fn request(notetype: NotetypeId) -> RemoveNotetype {
     RemoveNotetype { notetype, confirmed_notes: 1, confirmed_cards: 1 }
@@ -17,7 +17,7 @@ fn remove_local(host: &CoreHost, notetype: NotetypeId) -> Result<meguri_engine::
     host.remove_notetype_locally_for_generation(host.collection().unwrap().generation(), request(notetype),
         CancelToken::new(), ProgressSink::new())
 }
-fn unbound_after_transfer(root: &Path) -> (CoreHost, HostConfig, MeguriConnection, Operation, NotetypeId) {
+fn transfer_after_unbound_read(root: &Path) -> (CoreHost, HostConfig, MeguriConnection, Operation, NotetypeId, Generation) {
     let (host, config) = b::seeded(&root.join("local"));
     let notetype = s::basic(&host);
     s::add_note(&host, notetype, "Removal sentinel", "Answer sentinel");
@@ -32,9 +32,9 @@ fn unbound_after_transfer(root: &Path) -> (CoreHost, HostConfig, MeguriConnectio
     let script = b::collection_script(data, true);
     let preview = b::prepare(&host, &connection, &script, MeguriBootstrapDirection::UseDeviceCollection);
     let op = b::confirm(&host, &connection, &script, preview);
-    let op = b::finish_empty_media(&host, &connection, &op);
-    assert_eq!(host.collection().unwrap().generation(), generation);
-    (host, config, connection, op, notetype)
+    assert!(op.collection_complete && op.receipt.is_none(), "{op:?}");
+    assert_ne!(host.collection().unwrap().generation(), generation, "bootstrap activation advances the generation");
+    (host, config, connection, op, notetype, generation)
 }
 fn files(path: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     let mut found = Vec::new();
@@ -65,16 +65,39 @@ fn snapshot_facts(host: &CoreHost, config: &HostConfig) -> Facts {
         undo: collection.peek_undo(UndoScope::Global).unwrap(), redo: collection.peek_redo(UndoScope::Global).unwrap(),
         retained: [files(&config.backups_directory), files(&config.manual_transfer_directory)].concat() }
 }
+fn outcome_details(outcome: &MeguriStructureOutcome) -> String {
+    match outcome {
+        MeguriStructureOutcome::Saved(upload) => format!("Saved({upload:?})"),
+        MeguriStructureOutcome::NotSaved(stop) => match stop {
+            MeguriStructureStop::Refused(error) => format!("NotSaved(Refused({error:?}))"),
+            MeguriStructureStop::Round { result, .. } => format!(
+                "NotSaved(Round: recovery={:?}, collection={:?}, refusal={:?}, error={:?}, acceptance_unknown={:?})",
+                result.recovery, result.collection.as_ref().map(|c| c.state),
+                result.collection.as_ref().and_then(|c| c.refusal),
+                result.collection.as_ref().and_then(|c| c.error.as_ref()),
+                result.collection.as_ref().map(|c| c.acceptance_unknown)),
+            MeguriStructureStop::FullSyncRequired => "NotSaved(FullSyncRequired)".into(),
+            MeguriStructureStop::Cancelled => "NotSaved(Cancelled)".into(),
+            MeguriStructureStop::Unavailable => "NotSaved(Unavailable)".into(),
+        },
+    }
+}
 
 #[test]
-fn binding_installed_after_unbound_read_refuses_local_removal_in_the_same_generation() {
+fn bootstrap_after_unbound_read_refuses_local_removal_from_the_previous_generation() {
     let _lane = b::LANE.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let (host, config, connection, op, notetype) = unbound_after_transfer(root.path());
+    let (host, config, connection, op, notetype, observed) = transfer_after_unbound_read(root.path());
+    let op = b::finish_empty_media(&host, &connection, &op);
     let generation = host.collection().unwrap().generation();
-    // The helper observed a genuinely unbound service before setup began.
-    // Complete real MP5 before the exact host entry used by the local FFI
-    // removal worker, all within that same collection generation.
+    // This is the real UI interleaving: the .other read preceded setup.
+    // Its generation is stale even before the final binding publication.
+    let before = facts(&host, &config);
+    let refused = host.remove_notetype_locally_for_generation(observed, request(notetype),
+        CancelToken::new(), ProgressSink::new());
+    assert!(matches!(&refused, Err(EngineError::StaleGeneration { planned, current })
+        if *planned == observed && *current == generation), "local removal: {:?}", refused.err());
+    assert_eq!(facts(&host, &config), before);
     host.complete_meguri_bootstrap_for_generation(generation, &connection, b::USER, &op.id).unwrap();
     assert_eq!(host.collection().unwrap().generation(), generation);
     assert!(matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Ready));
@@ -88,55 +111,46 @@ fn binding_installed_after_unbound_read_refuses_local_removal_in_the_same_genera
     collection.undo(UndoScope::Global).unwrap();
     let before = facts(&host, &config);
     assert!(matches!(before.undo, UndoStatus::Available(_)) && matches!(before.redo, UndoStatus::Available(_)));
-    assert!(matches!(host.remove_notetype_locally_for_generation(generation, request(notetype),
-        CancelToken::new(), ProgressSink::new()), Err(EngineError::Busy { .. })));
+    let refused = host.remove_notetype_locally_for_generation(generation, request(notetype),
+        CancelToken::new(), ProgressSink::new());
+    assert!(matches!(&refused, Err(EngineError::Busy { .. })), "bound local removal: {:?}", refused.err());
     assert_eq!(facts(&host, &config), before);
     host.close().unwrap();
 }
 
-struct HoldPlanning(Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>);
-impl ProgressListener for HoldPlanning {
-    fn on_progress(&self, progress: &Progress) {
-        if progress.phase == ProgressPhase::Planning && progress.completed == 1
-            && let Some((entered, release)) = self.0.lock().unwrap().take() {
-            entered.send(()).unwrap();
-            // A dropped sender also releases the worker on an assertion failure.
-            let _ = release.recv_timeout(Duration::from_secs(20));
-        }
-    }
-}
-
 #[test]
-fn local_removal_holds_binding_installation_until_its_real_commit() {
+fn reopened_bootstrap_retains_setup_guards_until_same_generation_binding_publication() {
     let _lane = b::LANE.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let (host, config, connection, op, notetype) = unbound_after_transfer(root.path());
-    let host = Arc::new(host);
+    let (host, config, connection, op, notetype, _) = transfer_after_unbound_read(root.path());
+    host.close().unwrap();
+    let host = CoreHost::open(config.clone()).unwrap();
+    b::settle(&host);
     let generation = host.collection().unwrap().generation();
-    let before = facts(&host, &config);
-    let progress = ProgressSink::new();
-    let (entered, wait) = mpsc::channel();
-    let (release, held) = mpsc::channel();
-    progress.set_listener(Arc::new(HoldPlanning(Mutex::new(Some((entered, held))))));
-    let original = host.clone();
-    let worker = std::thread::spawn(move || original.remove_notetype_locally_for_generation(generation,
-        request(notetype), CancelToken::new(), progress));
-    wait.recv_timeout(Duration::from_secs(10)).expect("removal reached planning");
-    // The removal has real native admission and is paused in the engine's
-    // plan, before backup/commit; no fabricated flags or fake binding setter.
-    let binding = host.complete_meguri_bootstrap_for_generation(generation, &connection, b::USER, &op.id);
-    // Planning holds Maintenance; a derived refresh can need that same
-    // reader. The pre-worker snapshot already waited for derived idle.
-    let during = snapshot_facts(&host, &config);
-    drop(release);
-    let removed = worker.join().unwrap().unwrap();
-    assert!(matches!(binding, Err(MeguriBootstrapError::Busy)));
-    assert_eq!(during, before);
-    assert!(removed.value.removed && removed.value.notes_removed == 1 && removed.value.cards_removed == 1);
+    assert_eq!(host.provider_authority().snapshot().unwrap().meguri.as_ref(), Some(&connection));
+    assert!(matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { intent: Some(id) } if id == op.id));
+    assert_eq!(host.pending_meguri_bootstrap_preparation(&connection, b::USER).unwrap().as_ref(), Some(&op));
+    assert!(host.meguri_setup_transfer_holds_admission());
+
+    let op = b::finish_empty_media(&host, &connection, &op);
     assert_eq!(host.collection().unwrap().generation(), generation);
-    assert!(host.provider_authority().snapshot().unwrap().meguri_binding.is_none());
-    // Completion releases the lane; an actual metadata action can run again.
-    host.configure_meguri_connection(b::ENDPOINT).unwrap();
+    assert!(host.pending_meguri_bootstrap_preparation(&connection, b::USER).unwrap().is_none());
+    // An inactive policy row is not genuinely unbound. The facade resolves
+    // this retained intent to the Complete receipt; noteTypeDeletionService's
+    // meguriRetainsEffects guard refuses .other, even with no pending row.
+    assert_eq!(op.phase, Phase::Complete, "{op:?}");
+    assert!(op.collection_complete && op.receipt.is_some(), "{op:?}");
+    assert!(matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { intent: Some(id) } if id == op.id));
+    assert_eq!(host.manual_transfer_history().get(&op.id).unwrap(), op);
+    assert!(!host.meguri_structure_upload_pending().unwrap());
+    assert!(host.complete_meguri_bootstrap_for_generation(generation, &connection, b::USER, &op.id).unwrap().is_complete());
+    assert_eq!(host.collection().unwrap().generation(), generation);
+    assert!(matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Ready));
+    assert_eq!(host.provider_authority().snapshot().unwrap().meguri_binding.unwrap().operation(), &op.id);
+    let before = facts(&host, &config);
+    let refused = remove_local(&host, notetype);
+    assert!(matches!(&refused, Err(EngineError::Busy { .. })), "bound local removal: {:?}", refused.err());
+    assert_eq!(facts(&host, &config), before);
     host.close().unwrap();
 }
 
@@ -178,6 +192,7 @@ fn bound_removal_still_runs_mp7_online_and_offline() {
     for reachable in [true, false] {
         let root = tempfile::tempdir().unwrap();
         let rig = s::rig(root.path(), 1);
+        let generation = rig.host.collection().unwrap().generation();
         let mut steps = Vec::new();
         if reachable {
             steps.extend(s::quiet_round(&rig.host));
@@ -192,15 +207,29 @@ fn bound_removal_still_runs_mp7_online_and_offline() {
             Ok(())
         }), reachable).unwrap();
         let outcome = s::drive(&rig.host, &task);
-        assert!(saved.lock().unwrap().as_ref().unwrap().removed);
+        let details = format!("reachable={reachable}, {}, generation={generation:?}->{:?}, readiness={:?}, active={:?}",
+            outcome_details(&outcome), rig.host.collection().unwrap().generation(), rig.host.meguri_readiness(),
+            rig.host.manual_transfer_history().active());
+        let removed = saved.lock().unwrap().expect(&details);
+        assert!(removed.removed && removed.notes_removed == 1 && removed.cards_removed == 1, "{details}: {removed:?}");
         assert!(rig.host.collection().unwrap().reader(ReaderRole::Query).unwrap().notetype(rig.notetype).unwrap().is_none());
         if reachable {
-            assert!(matches!(*outcome, MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Uploaded { media_complete: true })));
-            assert!(matches!(rig.host.meguri_readiness().unwrap(), MeguriReadiness::Ready));
+            assert!(matches!(*outcome, MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Uploaded { media_complete: true })), "{details}");
+            assert!(matches!(rig.host.meguri_readiness().unwrap(), MeguriReadiness::Ready), "{details}");
+            assert_ne!(rig.host.collection().unwrap().generation(), generation, "{details}");
+            assert!(!rig.host.meguri_structure_upload_pending().unwrap(), "{details}");
+            assert_eq!(script.bodies(Method::Download).len(), 1, "{details}");
+            assert_eq!(script.bodies(Method::Upload).len(), 1, "{details}");
+            assert_eq!(script.bodies(Method::MediaBegin).len(), 1, "{details}");
+            assert_eq!(rig.host.collection().unwrap().undo_depth_for_testing().unwrap(), 0, "{details}");
         } else {
             assert!(matches!(*outcome, MeguriStructureOutcome::Saved(
-                MeguriStructureUploadOutcome::Pending(MeguriUploadPending::Unreachable))));
-            assert!(rig.host.meguri_structure_upload_pending().unwrap());
+                MeguriStructureUploadOutcome::Pending(MeguriUploadPending::Unreachable))), "{details}");
+            assert_eq!(rig.host.collection().unwrap().generation(), generation, "{details}");
+            assert!(rig.host.meguri_structure_upload_pending().unwrap(), "{details}");
+            rig.host.collection().unwrap().undo(UndoScope::Global).unwrap();
+            assert!(rig.host.collection().unwrap().reader(ReaderRole::Query).unwrap().notetype(rig.notetype).unwrap().is_some(), "{details}");
+            assert!(!rig.host.meguri_structure_upload_pending().unwrap(), "{details}");
         }
         script.assert_done();
         rig.host.close().unwrap();

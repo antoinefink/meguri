@@ -207,16 +207,14 @@ fn unsent(op: &Operation) -> bool {
 }
 
 impl CoreHost {
-    /// W12's local route. The UI's unbound read is advisory: MP5 can finish
-    /// without changing the collection generation. Share MP7's lane with that
-    /// binding installation and keep it through the actual removal commit.
+    /// W12's local route. Refuse a stale UI scope after bootstrap activation
+    /// advances the generation, and recheck the selected binding at the writer.
+    /// In the post-activation generation, retained bootstrap effects already
+    /// prevent the UI from choosing this route before binding publication.
     pub fn remove_notetype_locally_for_generation(&self, generation: Generation,
         request: meguri_engine::notetypes::remove::RemoveNotetype, cancel: Arc<CancelToken>,
         progress: meguri_engine::ProgressSink)
         -> Result<meguri_engine::OpResult<meguri_engine::notetypes::remove::Removed>, EngineError> {
-        self.collection_for_generation(generation)?;
-        let _admission = self.admit_meguri_structure_job().map_err(|_| EngineError::Busy {
-            running_op: "Meguri note type structure save".into() })?;
         let collection = self.collection_for_generation(generation)?;
         let doc = self.provider.snapshot()?;
         // A retained endpoint alone is still Off/unbound. A selected binding
@@ -408,8 +406,10 @@ impl CoreHost {
             },
             Stage::Media(media) => {
                 let complete = match (media.take_result(), (task.access)()) {
-                    (Some(Ok(op)), Ok(access)) => self.complete_meguri_bootstrap_admitted_for_generation(
-                        task.generation, access.connection(), access.username(), &op.id)
+                    // Upload activation advances the generation. Complete on
+                    // the current incarnation of this Host, as bootstrap does.
+                    (Some(Ok(op)), Ok(access)) => self.complete_meguri_bootstrap(
+                        access.connection(), access.username(), &op.id)
                         .is_ok_and(|accounting| accounting.is_complete()),
                     _ => false,
                 };
