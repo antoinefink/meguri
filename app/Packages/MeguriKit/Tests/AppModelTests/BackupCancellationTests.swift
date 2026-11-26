@@ -42,7 +42,8 @@ extension ReviewCollectionStartupTests {
             await service.configureDue(deadline: nil, held: true)
             var terminalTaskWasCancelled = false
             await service.beforeRestore { @MainActor in terminalTaskWasCancelled = Task.isCancelled }
-            restore = try #require(owner.backups.restoreConfirmed(name: entry.name))
+            let admittedRestore: Task<Void, Never> = try #require(owner.backups.restoreConfirmed(name: entry.name))
+            restore = admittedRestore
             await service.waitForStart()
             let operation = try #require(await service.restoreOperation)
             // Inspection has drained the attached provider, before any replacement.
