@@ -5314,7 +5314,7 @@ extension SyncCoordinator: NoteTypesMeguriSync {
         // Reserve the coordinator's action while inspecting: setup, sign-in,
         // and regular rounds cannot change the binding between these reads.
         let issued = issueMeguri { _ in
-            func current() -> Bool {
+            @MainActor func current() -> Bool {
                 self.generation == expected && self.hostRevision == revision && self.provider === provider
                     && self.providerState?.revision == providerRevision && self.providerState?.selection == .meguri
                     && self.meguriAddressEditRevision == editRevision
