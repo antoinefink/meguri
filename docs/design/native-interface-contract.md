@@ -1581,7 +1581,7 @@ Cause: the open set the collection ready before Home's first deck tree was read,
 
 ## N28. Device backup settings and restore (2026-11-26)
 
-Antoine rejected the tall attached Mac restore sheet and the iPhone interval row that wrapped its field onto a second line. His requested presentation supersedes N11.4's restore-sheet wording on Mac. This records the requested design; the revised native builds and captures still require verification and his visual agreement.
+Antoine rejected the tall attached Mac restore sheet and the iPhone interval row that wrapped its field onto a second line. His requested presentation supersedes N11.4's restore-sheet wording on Mac. On November 26, Antoine reviewed the final nine native screenshots in PR #230 and approved the compact Mac window and one-line interval setting. Technical results are recorded separately in the backup verification record.
 
 - Main task: select one exact device archive and confirm replacing this device's collection. Restore… is the primary action; date, size, selection and unavailable/source status stay visible. Exact filenames belong in accessibility and hover/context help, rather than repeating each visible timestamp. A same-second collision adds an Archive number; its confirmation also names the exact filename.
 - Mac: one real independently titled, resizable SwiftUI Window scene, Restore from Backup, with the standard titlebar and window controls. It shares the shell's collection and navigation intent. Settings, the focused File menu and damaged-collection recovery open that same scene. It is suppressed at launch and has no automatic restoration. The old sheet is excluded from Mac presentation; no touch path creates a Window.
