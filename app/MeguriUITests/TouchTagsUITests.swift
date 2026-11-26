@@ -7,6 +7,13 @@ import XCTest
 /// PNG attachments contain only the app, without test-driver annotations.
 @MainActor
 final class TouchTagsUITests: XCTestCase {
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        #if os(iOS) && !targetEnvironment(simulator)
+        throw XCTSkip("The host-generated typical-1 fixture is staged in the test VM; physical iOS runners cannot read host paths")
+        #endif
+    }
+
     func testTabSettingsDeletesParentKeepsSiblingAndUndoes() throws {
         let app = try launch(sizeClass: "compact")
         try openTags(app, sidebar: false)

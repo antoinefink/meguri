@@ -8,6 +8,13 @@ import UIKit
 /// The same case runs against the public typical recipe on both devices.
 @MainActor
 final class TouchNoteTypeDeletionUITests: XCTestCase {
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        #if os(iOS) && !targetEnvironment(simulator)
+        throw XCTSkip("The host-generated typical-1 fixture is staged in the test VM; physical iOS runners cannot read host paths")
+        #endif
+    }
+
     func testNativeDeleteConfirmsCountsCancelsThenRemovesOnlyTarget() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
