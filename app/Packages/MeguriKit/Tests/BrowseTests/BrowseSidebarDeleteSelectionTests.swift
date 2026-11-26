@@ -6,15 +6,14 @@ import Testing
 @MainActor struct BrowseSidebarDeleteSelectionTests {
     @Test func keyboardTargetRetainsTheDisplayedScopeWhenMatchingRowsReturn() throws {
         let deletion = BrowseTagDeletion(backend: CoreBrowseBackend())
-        var scope: UInt64 = 41
-        deletion.expectedGeneration = { scope }
+        deletion.expectedGeneration = { 41 }
         deletion.available = { true }; deletion.contains = { _ in true }
         var selection = BrowseSidebarDeleteSelection()
         selection.changed(from: browse, to: [.tag("Ink")], byKey: true, commandClick: false)
         selection.capture(deletion: deletion, tree: tree)
         let target = try #require(selection.target)
         #expect(deletion.canDelete(target))
-        scope = 42 // Same tree and UI epoch; Delete must use the issued target.
+        deletion.expectedGeneration = { 42 } // Same tree and UI epoch; Delete must use the issued target.
         #expect(selection.target == target)
         #expect(!deletion.canDelete(target))
         selection.capture(deletion: deletion, tree: tree)
