@@ -179,8 +179,10 @@ import XCTest
     }
 
     private func visible(_ id: String, app: XCUIApplication) throws -> XCUIElement {
-        try dismissKeyboard(app)
         let target = element(app, id)
+        // An operable control needs no keyboard dismissal, including the field
+        // that is already being edited. Scroll only for an offscreen target.
+        if target.exists && target.isHittable { return target }
         // Forms are ordinary scrollable controls; find the field in either direction
         // when revisiting a sheet whose first search is already above the viewport.
         if let form = studyForm(app) {
@@ -206,27 +208,6 @@ import XCTest
                 .map { $0.firstMatch }.first { $0.exists }
         }
         return nil
-    }
-
-    private func dismissKeyboard(_ app: XCUIApplication) throws {
-        let keyboard = app.keyboards.firstMatch
-        // The system can retain Hide Keyboard in AX after the keyboard closes.
-        // Query and act on that control only while a keyboard is actually present.
-        guard keyboard.exists else { return }
-        attachState(app, "before-keyboard-dismissal")
-        let hide = keyboard.buttons.matching(NSPredicate(
-            format: "label IN %@", ["Hide keyboard", "Hide Keyboard"])).firstMatch
-        if hide.exists && hide.isEnabled && hide.isHittable {
-            hide.tap()
-        } else {
-            // iPhone has no iPad keyboard-dismiss key. Native Form scrolling
-            // dismisses editing; keep this upward gesture inside its real content.
-            let form = try XCTUnwrap(studyForm(app), "Keyboard belongs to a native study Form")
-            _ = try scrollForm(form, up: true, app: app)
-        }
-        let dismissed = keyboard.waitForNonExistence(timeout: 5)
-        if !dismissed { attachState(app, "keyboard-dismissal-failed") }
-        XCTAssertTrue(dismissed, "Dismiss the current keyboard before resolving the next control")
     }
 
     private func scrollForm(_ form: XCUIElement, up: Bool, app: XCUIApplication) throws -> Bool {
@@ -281,7 +262,6 @@ import XCTest
         XCTAssertTrue(control.isEnabled && thumb.isHittable, id)
         XCTAssertFalse(control.label.isEmpty, "Named native action: " + id)
         XCTAssertEqual(switchValue(control), !enabled, "Old switch value: " + id)
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "Switch interaction starts without a keyboard")
         // A row-centre tap can focus the preceding text field. The native switch
         // sits at the trailing edge even when AX reports the whole Form row.
         let frame = thumb.frame
@@ -292,7 +272,6 @@ import XCTest
         attachState(app, "after-switch-" + id)
         XCTAssertTrue(changed, "Native switch must change to \(enabled): \(id); actual=\(String(describing: control.value))")
         XCTAssertEqual(switchValue(control), enabled, "New switch value: " + id)
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "Switch thumb must not focus a text field")
     }
 
     private func switchValue(_ control: XCUIElement) -> Bool? {

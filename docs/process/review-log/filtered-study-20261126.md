@@ -63,3 +63,5 @@ Planinterop independently reviewed the complete 23,767-byte touch journey. The f
 After the upstream MCP media status changed, Plancheck reviewed the complete merged 72,424-byte verification register. It contains public test and integration metadata. Its verified SHA-256 is `ac341a60bbd004b30fb17fd4798d7d90d19b012b027d6b86ac4263ff63afd857`.
 
 Planinterop re-reviewed the complete 23,768-byte touch test after it adopted the current SDK’s rectangle formatter. The file remains public. Its verified SHA-256 is `bb1165bc654036b458500f14144b4e8b592d21eb14a088b64b4e98affe5e5484`.
+
+Planinterop reviewed the full 22,564-byte touch test after it began editing visible fields with the keyboard open. The code and inputs are public and synthetic. Its verified SHA-256 is `20a75301658060e8904c4f43a2b685f748e1d2cf44ce6ba69e7cb929e91a88b5`.

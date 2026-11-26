@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/FilteredStudyTouchUITests.swift":
-        "bb1165bc654036b458500f14144b4e8b592d21eb14a088b64b4e98affe5e5484",
+        "20a75301658060e8904c4f43a2b685f748e1d2cf44ce6ba69e7cb929e91a88b5",
     "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
         "61695e0b755bcd741efff9aa6d31f15daeba8907508ef9893ea2508cd6d50225",
     "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
