@@ -101,11 +101,27 @@ final class BrowseTagDeletionUITests: XCTestCase {
                       "Deleting a tag preserves the collection's \(mode.lowercased()): \(status(app))")
         capture(app.windows.firstMatch, "tag-delete-\(name)-surviving-\(mode.lowercased())-\(appearance)")
 
+        // Clear can leave a search field's NSTextView owning Edit > Undo.
+        // Give the native results table the keys before checking collection Undo,
+        // using an existing row without editing a note or changing the query.
+        let table = app.outlines.matching(identifier: "browse.results.table").firstMatch
+        let row = table.outlineRows.element(boundBy: 0)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        // SwiftUI's outline row itself can be non-hittable; use its visible area.
+        let tableBounds = table.frame
+        let visibleRow = row.frame.intersection(tableBounds)
+        XCTAssertFalse(visibleRow.isNull || visibleRow.isEmpty, "An existing result must be visible")
+        table.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: visibleRow.midX - tableBounds.minX, dy: visibleRow.midY - tableBounds.minY)).click()
+        XCTAssertTrue(waitUntil { row.isSelected }, "The native results table receives the click")
+
         app.menuBars.menuBarItems["Edit"].click()
-        let undo = app.menuItems["Undo Delete Tag"]
+        let undoCaption = NSPredicate(format: "title == 'Undo Delete Tag' OR label == 'Undo Delete Tag'")
+        let undo = app.menuItems.matching(undoCaption).firstMatch
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled)
-        captureMenu(app.menus.containing(NSPredicate(format: "title == 'Undo Delete Tag'")).firstMatch,
+        captureMenu(app.menus.containing(undoCaption).firstMatch,
                 "tag-delete-\(name)-undo-menu-\(appearance)")
         undo.click()
         XCTAssertTrue(tag.waitForExistence(timeout: 15), "Undo restores the native tag row")
