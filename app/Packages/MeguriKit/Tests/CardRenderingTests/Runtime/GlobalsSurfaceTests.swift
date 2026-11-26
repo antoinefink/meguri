@@ -474,6 +474,7 @@ extension WebKitSuites.CardRuntimeSuites {
                 try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
                 let captured = try await page.run("""
                     await MathJax.startup.promise;
+                    await MathJax.loader.load('[tex]/enclose');
                     var names = ['protocol', 'host', 'search', 'hash', 'username', 'password', 'pathname', 'href'];
                     var saved = names.map(function (name) { return Object.getOwnPropertyDescriptor(URL.prototype, name); });
                     var reads = 0;
