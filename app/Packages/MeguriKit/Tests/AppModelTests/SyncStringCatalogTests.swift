@@ -52,6 +52,7 @@ import Testing
         ("sync.needsYou.action.setUp", "Set Up Again…"), ("sync.needsYou.action.repair", "Show Repair Options"),
         ("sync.waiting.cloudError", "iCloud sync isn’t working right now. Meguri keeps trying."),
         ("sync.settings.account", "Account"), ("sync.settings.troubleshooting", "Troubleshooting"),
+        ("sync.settings.account.signOut", "Sign Out…"),
         ("sync.trouble.replaceDevice", "Replace This Device’s Collection…"),
         ("sync.trouble.replaceService.iCloud", "Replace the iCloud Collection…"),
         ("sync.trouble.replaceService.meguri", "Replace the Meguri Sync Collection…"),
