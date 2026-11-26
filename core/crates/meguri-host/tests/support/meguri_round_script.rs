@@ -49,6 +49,9 @@ impl Script {
     pub fn bodies(&self, method: Method) -> Vec<Vec<u8>> {
         self.calls.lock().unwrap().iter().filter(|(m, _)| *m == method).map(|(_, body)| body.clone()).collect()
     }
+    pub fn methods(&self) -> Vec<Method> {
+        self.calls.lock().unwrap().iter().map(|(method, _)| *method).collect()
+    }
     pub fn assert_done(&self) {
         loop {
             if self.steps.lock().unwrap().is_empty() { break; }
