@@ -31,7 +31,7 @@ use meguri_sched::{
         token::{self, RenderKey, StateToken},
     },
     states::{
-        engine::{SchedulingStates, StateInput, next_states},
+        engine::{SchedulingStates, StateInput},
         fsrs_glue::FsrsCache,
     },
 };
@@ -2115,6 +2115,9 @@ fn sibling_ids(
     preset: &meguri_sched::model::preset::PresetView,
     undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<Vec<CardId>, EngineError> {
+    if meguri_sched::states::filtered::options(rows, card)?.is_some_and(|d| !d.reschedule) {
+        return Ok(Vec::new());
+    }
     let mut siblings = rows.cards_of_note(card.note_id)?;
     if let Some(entry) = undo {
         for sibling in &mut siblings {
@@ -2243,6 +2246,7 @@ fn capture_state(
             None
         },
     });
+    let token = token::with_filtered_options(token, inputs.filtered.as_ref());
     let input = StateInput {
         card: &card,
         preset: &inputs.preset,
@@ -2261,7 +2265,7 @@ fn capture_state(
         inputs.preset.fields().bury_reviews.then_some(card.note_id),
         meguri_sched::states::fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
     );
-    let states = next_states(models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
+    let states = meguri_sched::states::filtered::next_states(rows, models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
     Ok((token, states, Captured { image, card, inputs }))
 }
 #[allow(clippy::too_many_arguments)]

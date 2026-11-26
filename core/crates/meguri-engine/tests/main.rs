@@ -175,3 +175,6 @@ pub mod undo_truncation;
 
 #[path = "mining_writer.rs"]
 pub mod mining_writer;
+
+#[path = "filtered_review.rs"]
+pub mod filtered_review;

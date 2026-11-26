@@ -13,6 +13,10 @@ pub enum Phase {
     Interday,
     Review,
     New,
+    FilteredIntraday,
+    FilteredInterday,
+    FilteredReview,
+    FilteredNew,
 }
 
 pub(crate) fn candidates(
@@ -46,8 +50,13 @@ pub(crate) fn candidates_overlay(
         Phase::Interday => "c.queue=3 AND c.due<=?2",
         Phase::Review => "c.queue=2 AND c.due<=?2",
         Phase::New => "c.queue=0",
+        Phase::FilteredIntraday => "c.queue IN (1,4) AND c.due<?4",
+        Phase::FilteredInterday => "c.queue=3 AND c.due<=?2",
+        Phase::FilteredReview => "c.queue=2",
+        Phase::FilteredNew => "c.queue=0",
     };
     let keys = match phase {
+        Phase::FilteredIntraday | Phase::FilteredInterday | Phase::FilteredReview | Phase::FilteredNew => "c.due,fnvhash(c.id,c.mod)",
         Phase::Intraday | Phase::New => "c.did,c.id",
         _ => match order {
             1 => "c.due,d.key,fnvhash(c.id,c.mod)",
@@ -64,6 +73,10 @@ pub(crate) fn candidates_overlay(
             12 => "meguri_relative_retrievability(c.data,c.due,c.ivl,?2,?3),fnvhash(c.id,c.mod)",
             _ => "c.due,fnvhash(c.id,c.mod)",
         },
+    };
+    let membership = match phase {
+        Phase::FilteredIntraday | Phase::FilteredInterday | Phase::FilteredReview | Phase::FilteredNew => "1",
+        _ => "c.odid=0",
     };
     let columns = Table::Cards
         .columns()
@@ -89,7 +102,7 @@ pub(crate) fn candidates_overlay(
         )
     };
     let sql = format!(
-        "{prefix}SELECT {columns} FROM {source} c JOIN json_each(?1) d ON c.did=d.value WHERE {predicate} AND ?2 IS NOT NULL AND ?3 IS NOT NULL AND ?4 IS NOT NULL AND ?5 IS NOT NULL ORDER BY {keys}"
+        "{prefix}SELECT {columns} FROM {source} c JOIN json_each(?1) d ON c.did=d.value WHERE {predicate} AND {membership} AND ?2 IS NOT NULL AND ?3 IS NOT NULL AND ?4 IS NOT NULL AND ?5 IS NOT NULL ORDER BY {keys}"
     );
     let override_values = overrides
         .iter()
@@ -146,9 +159,17 @@ pub(crate) fn aggregate(
     boundary: i64,
     ahead: u32,
 ) -> Result<Vec<DeckAggregate>, StorageError> {
+    let mut decks = conn.prepare_cached("SELECT id,name,mtime_secs,usn,common,kind FROM decks")?;
+    let decks = decks.query_map([], |row| rows::row_image(row, Table::Decks))?
+        .map(|row| meguri_model::deck::Deck::from_cells(&row?).map_err(StorageError::from))
+        .collect::<Result<Vec<_>, _>>()?;
+    let filtered = decks.into_iter().filter_map(|deck| {
+        matches!(deck.kind.kind, meguri_model::proto::deck::DeckKind::Filtered(_)).then_some(deck.id.0)
+    }).collect::<Vec<_>>();
+    let filtered = serde_json::to_string(&filtered).expect("integer ids");
     let sums = |q: &str, day: &str, instant: &str| {
         format!(
-            "sum({q}=0),sum({q}=2 AND due<={day}),sum({q}=3 AND due<={day}),sum(({q}=1 AND due<{instant}+?4) OR ({q}=4 AND due<={instant}+?4))"
+            "sum({q}=0),sum({q}=2 AND (due<={day} OR did IN (SELECT value FROM json_each(?6)))),sum({q}=3 AND due<={day}),sum(({q}=1 AND due<{instant}+?4) OR ({q}=4 AND due<={instant}+?4))"
         )
     };
     let current = sums("queue", "?1", "?2");
@@ -170,6 +191,7 @@ pub(crate) fn aggregate(
                 boundary,
                 i64::from(ahead),
                 i64::from(today.wrapping_add(1)),
+                filtered,
             ),
             |r| {
                 let totals = |i: usize| -> rusqlite::Result<Totals> {

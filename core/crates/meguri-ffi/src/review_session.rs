@@ -431,6 +431,7 @@ impl From<engine::StepInfo> for ReviewStepInfo {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum ReviewSchedulingState {
+    Preview { scheduled_secs: u32, finished: bool },
     New {
         position: u32,
     },
@@ -634,6 +635,7 @@ impl From<engine::StepKind> for ReviewStepKind {
 impl From<states::State> for ReviewSchedulingState {
     fn from(v: states::State) -> Self {
         match v {
+            states::State::Preview { scheduled_secs, finished } => Self::Preview { scheduled_secs, finished },
             states::State::New { position } => Self::New { position },
             states::State::Learning(v) => Self::Learning { state: v.into() },
             states::State::Review(v) => Self::Review { state: v.into() },
@@ -1354,5 +1356,14 @@ pub(crate) mod tests {
             ));
         }
         assert_eq!(digest(vec![77; 32], "state token").unwrap(), [77; 32]);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn preview_state_conversion_preserves_repeat_and_completion() {
+    for (scheduled_secs, finished) in [(60, false), (0, true)] {
+        assert_eq!(ReviewSchedulingState::from(states::State::Preview { scheduled_secs, finished }),
+            ReviewSchedulingState::Preview { scheduled_secs, finished });
     }
 }

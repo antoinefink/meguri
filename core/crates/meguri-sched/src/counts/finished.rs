@@ -44,7 +44,9 @@ pub fn build(
     empty: bool,
 ) -> DeckStudyState {
     let full = env.subtree(q.deck, false);
-    let normal = env.subtree(q.deck, true);
+    let normal = if env.index(q.deck).is_some_and(|i| env.filtered(i)) {
+        vec![q.deck]
+    } else { env.subtree(q.deck, true) };
     let selected = groups.iter().filter(|g| full.contains(&g.deck)).collect::<Vec<_>>();
     let native = selected.iter().filter(|g| normal.contains(&g.deck)).collect::<Vec<_>>();
     let next_due = native.iter().filter_map(|g| g.next_learning_due).min();

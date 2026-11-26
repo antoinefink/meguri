@@ -20,7 +20,7 @@ use meguri_sched::{
         rebuild_rules::{self, Action, Context, Stamp},
     },
     states::{
-        engine::{AnswerState, SchedulingStates, State, StateInput, next_states},
+        engine::{AnswerState, SchedulingStates, State, StateInput},
         fsrs_glue::FsrsCache,
         fuzz,
     },
@@ -581,8 +581,9 @@ pub(crate) fn predict_in(
         _ => return Err(state_error("InFilteredDeck")),
     };
     let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
+    let preview = meguri_sched::states::filtered::options(rows, &card)?.is_some_and(|d| !d.reschedule);
     let mut history = Vec::new();
-    if card.card_type != CardType::New && card.data.memory_state.is_none() {
+    if !preview && card.card_type != CardType::New && card.data.memory_state.is_none() {
         rows.visit_fsrs_histories(
             &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
             |_, found| -> Result<(), StorageError> {
@@ -591,8 +592,12 @@ pub(crate) fn predict_in(
             },
         )?;
     }
-    let memory = meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, next_day_at)
-        .map_err(state_error)?;
+    let memory = if preview {
+        card.data.memory_state
+    } else {
+        meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, next_day_at)
+            .map_err(state_error)?
+    };
     let last_review_time = match card.data.last_review_secs {
         Some(t) => Some(t),
         None => rows.fsrs_last_review_time(id)?,
@@ -610,7 +615,7 @@ pub(crate) fn predict_in(
         short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
         learn_ahead: cfg.collapse_time()?,
     };
-    let states = next_states(models, &input, chooser).map_err(state_error)?;
+    let states = meguri_sched::states::filtered::next_states(rows, models, &input, chooser).map_err(state_error)?;
     let state_token = rows
         .row_digest(Table::Cards, &RowKey::Id(id.0))?
         .ok_or_else(|| missing(Table::Cards, id.0))?;
@@ -626,11 +631,8 @@ pub(crate) fn predict_in(
 }
 
 fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::deck::Deck), EngineError> {
-    if card.original_deck_id.0 != 0 {
-        return Err(state_error("InFilteredDeck"));
-    }
     let deck = rows
-        .deck(card.deck_id)?
+        .deck(meguri_sched::model::card_sched::CardSched::new(card).home_deck())?
         .ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
     let DeckKind::Normal(normal) = &deck.kind.kind else {
         return Err(state_error("InFilteredDeck"));
@@ -745,7 +747,21 @@ pub(crate) fn apply_in(
         .card(request.card)?
         .ok_or_else(|| missing(Table::Cards, request.card.0))?;
     let (preset, deck) = home(ctx.scope(), &card)?;
-    FsrsCache::default().model(&preset).map_err(state_error)?;
+    let filtered = meguri_sched::states::filtered::options(ctx.scope(), &card)?;
+    let preview = filtered.as_ref().is_some_and(|deck| !deck.reschedule);
+    if preview != matches!(request.current, State::Preview { .. }) {
+        return Err(invalid("filtered study mode changed"));
+    }
+    if let Some(definition) = filtered.as_ref().filter(|_| preview) {
+        let states = meguri_sched::states::filtered::preview_states(definition,
+            SchedConfig::new(ctx.scope()).collapse_time()?);
+        if meguri_sched::ops::grade_now::select(&states, request.rating) != request.chosen {
+            return Err(invalid("preview delays changed"));
+        }
+    }
+    if !preview {
+        FsrsCache::default().model(&preset).map_err(state_error)?;
+    }
     let normal = match &deck.kind.kind {
         DeckKind::Normal(n) => n,
         _ => return Err(state_error("InFilteredDeck")),
@@ -758,12 +774,7 @@ pub(crate) fn apply_in(
     if request.chosen.delay != request.chosen.state.delay(until)
         || request.chosen.revlog.interval != request.chosen.delay.revlog_interval()
         || request.chosen.revlog.last_interval != request.current.delay(until).revlog_interval()
-        || request.chosen.revlog.kind
-            != match request.current {
-                State::Review(_) => 1,
-                State::Relearning { .. } => 2,
-                _ => 0,
-            }
+        || request.chosen.revlog.kind != meguri_sched::states::engine::revlog_kind(&card, request.current, request.today)
     {
         return Err(invalid("inconsistent selected answer values"));
     }
@@ -808,7 +819,8 @@ pub(crate) fn apply_in(
         scope.add_answer_revlog(&log, request.answered_at)?
     };
     let decks = scope.deck_rows()?;
-    let mut current = Some(deck);
+    let answered_deck = scope.deck(card.deck_id)?.ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
+    let mut current = Some(answered_deck);
     while let Some(deck) = current {
         let changed = values::deck_stats::answered(
             &deck,
@@ -825,12 +837,15 @@ pub(crate) fn apply_in(
                 .cloned()
         });
     }
-    let buried = scope
-        .answer_siblings(card.note_id, card.id)?
-        .into_iter()
-        .filter(|s| values::siblings::allowed(card.queue, s.queue, preset.fields()))
-        .map(|s| s.id)
-        .collect::<Vec<_>>();
+    let buried = if preview {
+        Vec::new()
+    } else {
+        scope.answer_siblings(card.note_id, card.id)?
+            .into_iter()
+            .filter(|s| values::siblings::allowed(card.queue, s.queue, preset.fields()))
+            .map(|s| s.id)
+            .collect::<Vec<_>>()
+    };
     let queue_change = queue
         .as_ref()
         .map(|owner| {
