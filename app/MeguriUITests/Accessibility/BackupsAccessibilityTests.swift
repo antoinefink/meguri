@@ -156,8 +156,10 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 let errorHeading = "Unable to Load Backups"
                                 #if os(macOS)
                                 let errorDescription = "Check access to the backup folder and try again."
+                                let passiveText = true
                                 #else
                                 let errorDescription = "The backup could not be read or written. Check file access and free space, then try again."
+                                let passiveText = state == "empty"
                                 #endif
                                 let heading = state == "empty" ? emptyHeading : errorHeading
                                 let description = state == "empty" ? emptyDescription : errorDescription
@@ -170,8 +172,8 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 let explanation = self.staticText(description, in: textScope)
                                 let retry = textScope.buttons["settings.backups.retry"].firstMatch
                                 let order = [title, explanation, retry]
-                                for (index, item) in [(title, "list heading", state == "empty"),
-                                                      (explanation, "list explanation", state == "empty"),
+                                for (index, item) in [(title, "list heading", passiveText),
+                                                      (explanation, "list explanation", passiveText),
                                                       (retry, "list retry", false)].enumerated() {
                                     let (element, detail, passive) = item
                                     try verify(element, detail: detail, reach: {
