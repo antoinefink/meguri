@@ -72,7 +72,16 @@ extension WebKitSuites {
             #expect(error.templateOrdinal == 2 && error.templateDescriptor == "Math preview")
             #expect(error.message.contains("Missing") && !error.message.contains("[object Object]"))
             #expect(!pair.diagnostics.entries.contains { $0.kind == "bridgeRejected" })
-            #expect(try await fixture.bool("return !!document.querySelector('#qa [data-mml-node=merror]') && document.getElementById('qa').style.opacity === '1';") == true)
+            #expect(try await fixture.bool(#"""
+                var failure = document.querySelector('#qa [data-meguri-math-error]');
+                var code = failure && failure.querySelector('code');
+                return !!failure && failure.getAttribute('role') === 'group' &&
+                  failure.getAttribute('aria-label') === 'Formula could not be rendered' &&
+                  failure.querySelector('strong').textContent.includes('Formula could not be rendered') &&
+                  !!code && code.textContent === '\\(\\frac{1}\\)' &&
+                  code.getBoundingClientRect().height > 0 && getComputedStyle(code).visibility === 'visible' &&
+                  !failure.querySelector('svg') && document.getElementById('qa').style.opacity === '1';
+                """#) == true)
         }
 
         @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))

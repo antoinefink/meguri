@@ -136,7 +136,15 @@ extension WebKitSuites {
         @Test func bundledMathRoutesAreConfinedAndNeverUseCollectionMedia() async throws {
             let fixture = MediaFixture()
             let paths = CardRuntime.assetPaths.filter { $0.hasPrefix("mathjax/") }
-            #expect(paths.count == 85)
+            let root = try #require(CardRuntime.bundledMathResourceURL)
+            let files = try #require(FileManager.default.enumerator(
+                at: root, includingPropertiesForKeys: [.isRegularFileKey]))
+            var bundledScripts: Set<String> = []
+            for case let file as URL in files where file.pathExtension == "js" {
+                #expect(try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true)
+                bundledScripts.insert("mathjax/" + String(file.path.dropFirst(root.path.count + 1)))
+            }
+            #expect(Set(paths) == bundledScripts)
             // Runs against Bundle.module on both Mac and the hosted iOS suite.
             for path in paths {
                 let asset = try #require(CardRuntime.asset(at: path))
@@ -146,7 +154,8 @@ extension WebKitSuites {
                 #expect(task.response?.value(forHTTPHeaderField: "Content-Type") == "text/javascript; charset=utf-8")
                 #expect(task.body == asset.data)
             }
-            for path in ["mathjax/input/tex/extensions/texhtml.js", "mathjax/input/tex/extensions/setoptions.js",
+            for path in ["mathjax/input/tex/extensions/texhtml.js", "mathjax/input/tex/extensions/setoptions.js", "mathjax/input/tex/extensions/cancel.js",
+                         "mathjax/input/tex/extensions/newcommand.js", "mathjax/fonts/mathjax-bbm-font-extension/svg.js",
                          "mathjax/../runtime.js", "mathjax/font/svg/dynamic/../../tex-svg.js", "mathjax/tex-svg.js/extra",
                          "mathjax/LICENSE", "mathjax/a11y/speech.js", "mathjax/no.js", "mathjax/%74ex-svg.js"] {
                 #expect(CardRuntime.asset(at: path) == nil, "\(path)")

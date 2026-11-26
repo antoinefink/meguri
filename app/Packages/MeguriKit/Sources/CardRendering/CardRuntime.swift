@@ -120,7 +120,7 @@ public nonisolated enum CardRuntime {
             return Asset(data: Resources.data(file), mimeType: mimeType)
         }
         guard path.hasPrefix("mathjax/"), mathAssetPaths.contains(path),
-              let root = Bundle.module.url(forResource: "mathjax", withExtension: nil),
+              let root = bundledMathResourceURL,
               let data = try? Data(contentsOf: root.appending(path: String(path.dropFirst(8)))) else { return nil }
         return Asset(data: data, mimeType: "text/javascript")
     }
@@ -128,7 +128,9 @@ public nonisolated enum CardRuntime {
     /// The paths `asset(at:)` serves, including lazy extension and glyph routes.
     public static var assetPaths: [String] { (Array(assets.keys) + Array(mathAssetPaths)).sorted() }
 
-    // Exact unmodified 4.1.3 release inventory. No runtime directory walks,
+    static let bundledMathResourceURL = Bundle.module.url(forResource: "mathjax", withExtension: nil)
+
+    // Supported unmodified 4.1.3 component inventory. No runtime directory walks,
     // filename remapping, or collection-media fallback. Bundle's resource
     // lookup handles both macOS Contents/Resources and iOS flat bundles.
     private static let mathAssetPaths: Set<String> = Set("""
@@ -173,49 +175,8 @@ public nonisolated enum CardRuntime {
         font/svg/dynamic/symbols-b-i.js
         font/svg/dynamic/symbols.js
         font/svg/dynamic/variants.js
-        fonts/mathjax-bbm-font-extension/svg.js
-        fonts/mathjax-bboldx-font-extension/svg.js
-        fonts/mathjax-dsfont-font-extension/svg.js
         fonts/mathjax-mhchem-font-extension/svg.js
-        input/tex/extensions/action.js
-        input/tex/extensions/ams.js
-        input/tex/extensions/amscd.js
-        input/tex/extensions/autoload.js
-        input/tex/extensions/bbm.js
-        input/tex/extensions/bboldx.js
-        input/tex/extensions/bbox.js
-        input/tex/extensions/begingroup.js
-        input/tex/extensions/boldsymbol.js
-        input/tex/extensions/braket.js
-        input/tex/extensions/bussproofs.js
-        input/tex/extensions/cancel.js
-        input/tex/extensions/cases.js
-        input/tex/extensions/centernot.js
-        input/tex/extensions/color.js
-        input/tex/extensions/colortbl.js
-        input/tex/extensions/colorv2.js
-        input/tex/extensions/configmacros.js
-        input/tex/extensions/dsfont.js
-        input/tex/extensions/empheq.js
-        input/tex/extensions/enclose.js
-        input/tex/extensions/extpfeil.js
-        input/tex/extensions/fontsizev3.js
-        input/tex/extensions/gensymb.js
-        input/tex/extensions/html.js
-        input/tex/extensions/mathtools.js
         input/tex/extensions/mhchem.js
-        input/tex/extensions/newcommand.js
-        input/tex/extensions/noerrors.js
-        input/tex/extensions/noundefined.js
-        input/tex/extensions/physics.js
-        input/tex/extensions/require.js
-        input/tex/extensions/tagformat.js
-        input/tex/extensions/textcomp.js
-        input/tex/extensions/textmacros.js
-        input/tex/extensions/unicode.js
-        input/tex/extensions/units.js
-        input/tex/extensions/upgreek.js
-        input/tex/extensions/verb.js
         tex-svg.js
         """.split(separator: "\n").map { "mathjax/" + String($0) })
 

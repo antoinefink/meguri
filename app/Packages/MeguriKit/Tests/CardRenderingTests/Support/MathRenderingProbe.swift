@@ -24,7 +24,7 @@ enum MathRenderingProbe {
               mathML: math ? math.outerHTML : null
             };
           });
-          var errors = qa.querySelectorAll('[data-mml-node="merror"], merror').length;
+          var errors = qa.querySelectorAll('[data-mml-node="merror"], merror, [data-meguri-math-error]').length;
           return {
             count: nodes.length, errors: errors, containers: containers,
             valid: errors === 0 && containers.every(function (item) {

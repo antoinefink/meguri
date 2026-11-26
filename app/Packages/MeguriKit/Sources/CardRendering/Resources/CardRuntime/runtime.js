@@ -1122,7 +1122,7 @@
 
   // Offline MathJax. The facade preserves the template API before first use;
   // ordinary cards fetch no math assets. Only upstream bundled components may
-  // be loaded, including autoloaded TeX packages and dynamic SVG glyphs.
+  // be loaded, including supported TeX dependencies and dynamic SVG glyphs.
   const mathRoot = "meguri-media://media/_anki/mathjax/";
   let mathLoading = null;
   let mathEngine = null;
@@ -1186,8 +1186,12 @@
             || call(stringIndexOf, pathname, "\\") !== -1) {
           throw new ErrorCtor("Unbundled MathJax component refused");
         }
-        if (pathname === call(urlPathname, root) + "input/tex/extensions/empheq.js") {
-          throw new ErrorCtor("Unsupported optional MathJax extension: empheq");
+        const component = call(stringSlice, pathname, call(urlPathname, root).length);
+        if (component !== "tex-svg.js" && component !== "a11y/assistive-mml.js"
+            && component !== "input/tex/extensions/mhchem.js"
+            && component !== "fonts/mathjax-mhchem-font-extension/svg.js"
+            && !call(regexpExec, /^font\/svg\/dynamic\/[A-Za-z0-9-]+\.js$/, component)) {
+          throw new ErrorCtor("Unsupported MathJax component: " + component);
         }
       } catch (error) { reject(error); return; }
       const owner = mathOwner || mathStartupOwner;
@@ -1259,96 +1263,55 @@
       }
       return call(parseEnvironment, this, parser, name, method, args);
     };
-  }
 
-  function limitMathOptionalCommands(engine) {
-    // 4.1.3 has no loader.register hook. CommandMap's base constructor calls
-    // MapHandler.register before populating its entries via add(). Wrap each
-    // stored function so aliases copy the guard; resolve identities at use.
-    const tex = engine._.input.tex;
-    const maps = tex.MapHandler.MapHandler;
-    const Macro = tex.Token.Macro;
-    const register = maps.register;
-    let recursiveDepth = 0, recursiveCalls = 0;
-    maps.register = function (map) {
-      const mathtools = map.name === "mathtools-macros";
-      const braKet = map.name === "Physics-bra-ket-macros";
-      if (mathtools || map.name === "Physics-matrix-macros" || braKet) {
-        const add = map.add;
-        map.add = function (name, macro) {
-          const method = macro.func;
-          const guarded = function (parser, name, ...args) {
-            const methods = mathtools ? tex.mathtools.MathtoolsMethods.MathtoolsMethods : tex.physics.PhysicsMethods.default;
-            // The bra-ket family reparses arguments, sometimes duplicating
-            // them (including Expectation). Share one budget with mathtools
-            // brackets and all aliases copied from these registrations.
-            if (braKet || (mathtools && method === methods.UnderOverBracket)) {
-              if (!recursiveDepth) recursiveCalls = 0;
-              if (++recursiveCalls > 64) {
-                const TeXError = tex.TexError.default;
-                throw new TeXError("MeguriRecursiveCommandLimit", "At most 64 recursive optional commands are allowed");
-              }
-              recursiveDepth++;
-              try { return call(method, this, parser, name, ...args); }
-              finally { recursiveDepth--; }
+    const commands = tex.MapHandler.MapHandler.getMap("AMSmath-macros");
+    const sideset = commands.lookup("sideset");
+    const parseSideset = sideset.func;
+    commands.add("sideset", new tex.Token.Macro(sideset.token, function (parser, name, ...args) {
+      // SideSet parses three arguments, then may copy the third tree. Inspect
+      // that expanded tree before returning it to AMS, including macro uses.
+      // Only this parser instance is wrapped; restore it even on a TeX error.
+      const ownParseArg = describeProperty(parser, "ParseArg");
+      const parseArg = parser.ParseArg;
+      let argument = 0;
+      parser.ParseArg = function (...args) {
+        const node = call(parseArg, this, ...args);
+        if (++argument === 3) {
+          const pending = [{ node: node, depth: 1 }];
+          let count = 0;
+          while (pending.length) {
+            const entry = pending[pending.length - 1];
+            pending.length--;
+            if (!entry.node) continue;
+            // XML nodes copy a separate DOM tree, outside childNodes. Use the
+            // common unsupported-formula path rather than another copy hook.
+            if (++count > 1024 || entry.depth > 32 || entry.node.kind === "XML") {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported sideset base complexity");
             }
-            if (!mathtools && (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix)) {
-              const position = parser.i;
-              try {
-                const command = name;
-                let rows, columns;
-                let valid = true;
-                if (method === methods.DiagonalMatrix) {
-                  // Count with upstream's brace-aware delimiter reader, without
-                  // constructing the entry list or expanding the matrix.
-                  if (parser.GetNext() === "{") {
-                    const start = parser.i;
-                    parser.GetArgument(command);
-                    const end = parser.i;
-                    parser.i = start + 1;
-                    let entries = 0;
-                    while (parser.i < end) {
-                      if (++entries > 64) break;
-                      try { parser.GetUpTo(command, ","); } catch (_) { break; }
-                    }
-                    rows = columns = entries;
-                  }
-                } else if (method === methods.IdentityMatrix) {
-                  // IdentityMatrix accepts parseInt prefixes, unlike XMatrix.
-                  rows = parseInteger(parser.GetArgument(command), 10);
-                  columns = rows;
-                } else {
-                  parser.GetStar();
-                  parser.GetArgument(command); // Cell contents.
-                  const rowText = parser.GetArgument(command);
-                  const columnText = parser.GetArgument(command);
-                  rows = parseInteger(rowText, 10);
-                  columns = parseInteger(columnText, 10);
-                  // Leave upstream's canonical-number validation unchanged.
-                  valid = StringCtor(rows) === rowText && StringCtor(columns) === columnText;
-                }
-                if (valid && (rows > 64 || columns > 64)) {
-                  const TeXError = engine._.input.tex.TexError.default;
-                  throw new TeXError("MeguriMatrixLimit", "At most 64 rows and columns are allowed");
-                }
-              } finally {
-                parser.i = position;
-              }
+            const children = entry.node.childNodes || [];
+            if (count + pending.length + children.length > 1024) {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported sideset base complexity");
             }
-            return call(method, this, parser, name, ...args);
-          };
-          return call(add, this, name, new Macro(macro.token, guarded, macro.args));
-        };
+            for (let i = 0; i < children.length; i++) {
+              pending[pending.length] = { node: children[i], depth: entry.depth + 1 };
+            }
+          }
+        }
+        return node;
+      };
+      try { return call(parseSideset, this, parser, name, ...args); }
+      finally {
+        if (ownParseArg) defineProperty(parser, "ParseArg", ownParseArg);
+        else delete parser.ParseArg;
       }
-      return call(register, this, map);
-    };
+    }, sideset.args));
   }
 
   function limitMathChemistry(engine) {
     const tex = engine._.input.tex;
     const chemistry = tex.MapHandler.MapHandler.getMap("mhchem");
-    // Macro.func is getter-only in 4.1.3. Replace the entry so \let copies
-    // this guard along with the original token and arguments.
+    // Macro.func is getter-only in 4.1.3. Replace the entry while retaining
+    // the original token and arguments.
     for (const command of ["ce", "pu"]) {
       const macro = chemistry.lookup(command);
       const parse = macro.func;
@@ -1357,14 +1320,52 @@
         const position = parser.i;
         try {
           const text = parser.GetArgument(name);
-          // Both entry points can expand physical units before TeX's limits.
-          let fractions = 0;
-          for (let i = 0; i < text.length && fractions <= 4; i++) {
-            if (text[i] === "/") fractions++;
-          }
-          if (text.length > size || fractions > 4) {
-            const TeXError = tex.TexError.default;
-            throw new TeXError("MeguriUnitLimit", "mhchem allows at most " + size + " characters and 4 fraction separators");
+          const TeXError = tex.TexError.default;
+          // Internal conversions do not re-enter the command map. Check their
+          // arguments here, before upstream starts conversion. Each unit gets
+          // its own size/fraction allowance, even in a longer reaction.
+          const conversions = [{ command: command, start: 0, end: text.length, depth: 1 }];
+          for (let next = 0; next < conversions.length; next++) {
+            const part = conversions[next];
+            const limit = part.command === "pu" || part.depth > 1 ? 256 : size;
+            if (part.end - part.start > limit || part.depth > 4) {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported chemistry conversion size or depth");
+            }
+            let fractions = 0, braces = 0, brackets = 0;
+            for (let i = part.start; i < part.end; i++) {
+              // mhchem recognizes these literal nested commands itself.
+              const nested = text[i] === "\\"
+                && (call(stringSlice, text, i, i + 4) === "\\ce{"
+                  || call(stringSlice, text, i, i + 4) === "\\pu{");
+              if (nested) {
+                const start = i + 4;
+                let end = start, level = 1;
+                for (; end < part.end; end++) {
+                  if (text[end] === "{") level++;
+                  else if (text[end] === "}" && --level === 0) break;
+                }
+                // Leave malformed arguments to upstream's syntax diagnostics.
+                if (level === 0) {
+                  conversions[conversions.length] = {
+                    command: call(stringSlice, text, i + 1, i + 3),
+                    start: start, end: end, depth: part.depth + 1,
+                  };
+                  i = end;
+                  continue;
+                }
+              }
+              if (text[i] === "/" && ++fractions > 4) {
+                throw new TeXError("MeguriUnitLimit", "mhchem allows at most 4 fraction separators per conversion");
+              }
+              // Count raw grouping as mhchem does, including escaped braces.
+              if (text[i] === "{") braces++;
+              else if (text[i] === "[") brackets++;
+              else if (text[i] === "}" && braces) braces--;
+              else if (text[i] === "]" && brackets) brackets--;
+              if (braces + brackets > 8) {
+                throw new TeXError("MeguriUnsupportedFormula", "Unsupported chemistry grouping depth");
+              }
+            }
           }
         } finally {
           parser.i = position;
@@ -1372,6 +1373,35 @@
         return call(parse, this, parser, name, ...args);
       }, macro.args));
     }
+  }
+
+  function enforceMathPackages(engine) {
+    // The combined engine has already compiled optional packages. Its startup
+    // merges an array as additions, so replace the resulting list before it
+    // constructs the TeX input jax. AMS initializes its shared macro storage
+    // itself; enabling the optional newcommand package is unnecessary.
+    engine.config.tex.packages = ["base", "ams", "require", "autoload", "mhchem"];
+    engine.config.tex.require = { defaultAllow: false, allow: { ams: true, mhchem: true } };
+    engine.config.tex.autoload = {
+      action: [], amscd: [], bbox: [], boldsymbol: [], braket: [], bussproofs: [],
+      cancel: [], color: [], enclose: [], extpfeil: [], html: [],
+      mhchem: ["ce", "pu"], newcommand: [], unicode: [], verb: [],
+    };
+  }
+
+  function readableMathError(document, item) {
+    if (!item.inputData.meguriMathError || item.state() >= 200) return;
+    const adaptor = document.adaptor;
+    // MathItem retains unexpanded input and the actual matched delimiters.
+    // Replace only this expression's output, before insertion into the face.
+    const source = (item.start.delim || "") + item.math + (item.end.delim || "");
+    item.typesetRoot = adaptor.node("span", {
+      class: "mathjax_ignore", "data-meguri-math-error": "true",
+      role: "group", "aria-label": "Formula could not be rendered",
+    }, [
+      adaptor.node("strong", {}, [adaptor.text("Formula could not be rendered: ")]),
+      adaptor.node("code", { style: { "white-space": "pre-wrap" } }, [adaptor.text(source)]),
+    ]);
   }
 
   function loadMath() {
@@ -1398,7 +1428,7 @@
         ready: function () {
           const engine = win.MathJax;
           limitMathAlignments(engine);
-          limitMathOptionalCommands(engine);
+          enforceMathPackages(engine);
           limitMathChemistry(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
@@ -1426,11 +1456,18 @@
       options: {
         compileError: function (document, item, error) {
           mathError(error, mathOwner);
+          item.inputData.meguriMathError = true;
           document.compileError(item, error);
         },
         typesetError: function (document, item, error) {
           mathError(error, mathOwner);
+          item.inputData.meguriMathError = true;
           document.typesetError(item, error);
+        },
+        renderActions: {
+          readableMathError: [160, function (document) {
+            for (const item of document.math) readableMathError(document, item);
+          }, function (item, document) { readableMathError(document, item); }],
         },
         enableMenu: false,
         menuOptions: { settings: {
@@ -1514,11 +1551,12 @@
     tex: {
       inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]],
       processEscapes: false, processEnvironments: false, processRefs: false,
-      packages: { "[+]": ["ams", "mhchem"] },
+      packages: { "[-]": ["newcommand", "textmacros", "noundefined", "configmacros"], "[+]": ["mhchem"] },
       formatError: function (jax, error) {
         // TeXError is not an Error subclass in this release. Preserve its
         // original id/message rather than reporting "[object Object]".
         mathError(error.id + ": " + error.message, mathOwner);
+        jax.parseOptions.mathItem.inputData.meguriMathError = true;
         return jax.formatError(error);
       },
     },
