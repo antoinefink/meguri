@@ -3,9 +3,10 @@ mod common;
 mod session_support;
 
 use meguri_engine::{
-    OpSource, OpSpec,
+    CancelToken, OpSource, OpSpec, ProgressSink,
+    bulk::{CardTarget, change_deck::{self, DeckTarget}},
     decks::filtered::{self, Definition, Term},
-    session::{AnswerOutcome, Head, StartResult},
+    session::{AnswerOutcome, Head, ReviewTerminalState, StartResult},
 };
 use meguri_model::{clock::Clock, ids::DeckId, time::EpochMillis, usn::Usn};
 use meguri_sched::answer::Rating;
@@ -27,6 +28,146 @@ fn start(h: &Harness, deck: DeckId) -> (meguri_engine::SessionId, Head) {
         StartResult::Started { session_id, head, .. } => (session_id, head),
         other => panic!("start refused: {other:?}"),
     }
+}
+
+fn assert_finished(head: &Head) {
+    assert!(head.items.is_empty());
+    assert_eq!(head.counts, meguri_sched::queue::Counts::default());
+    assert_eq!(head.terminal_state, ReviewTerminalState::Finished);
+}
+
+#[test]
+fn delayed_empty_or_move_never_projects_or_admits_a_home_card_in_filtered_session() {
+    for reschedule in [false, true] {
+        for empty in [false, true] {
+            for head_first in [false, true] {
+                let h = Harness::new(1);
+                let deck = filtered::save(&h.collection, None, definition(&h, 0, reschedule), false)
+                    .unwrap().value;
+                let (session, head) = start(&h, deck);
+                let shown = &head.items[0];
+                let card = shown.card_id;
+                h.settle();
+                let gate = common::Gate::new();
+                let held = gate.clone();
+                h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+                    if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+                })));
+                if empty {
+                    filtered::empty(&h.collection, deck).unwrap();
+                } else {
+                    change_deck::run(&h.collection, &CardTarget::Cards(vec![card]),
+                        &DeckTarget::Deck(DeckId(1)), CancelToken::new(), ProgressSink::new()).unwrap();
+                }
+                gate.wait_entered();
+                let home = h.collection.reader(ReaderRole::Query).unwrap().card(card).unwrap().unwrap();
+                // On the buggy read path this poll mints a fresh ordinary token;
+                // try that exact token rather than only retrying the old one.
+                let polled = head_first.then(|| h.review.head(session, 3));
+                let token = polled.as_ref().and_then(|r| r.as_ref().ok())
+                    .and_then(|h| h.items.first()).map_or(shown.state_token, |h| h.state_token);
+                let outcome = h.review.answer(session, card, Rating::Easy, token,
+                    EpochMillis(h.clock.now_ms()), 100);
+                h.review.observe_hook_for_testing(None);
+                gate.open();
+
+                assert_eq!((home.deck_id, home.original_deck_id), (DeckId(1), DeckId(0)));
+                if let Some(polled) = polled { assert_finished(&polled.unwrap()); }
+                match outcome.unwrap() {
+                    AnswerOutcome::NotAtHead { fresh_head } | AnswerOutcome::Stale { fresh_head, .. } => {
+                        assert_finished(&fresh_head);
+                    }
+                    other => panic!("home card accepted: empty={empty} head_first={head_first} reschedule={reschedule}: {other:?}"),
+                }
+                h.settle();
+                assert!(h.logs().is_empty(), "wrong-deck answer wrote a review log");
+                assert_eq!(h.collection.reader(ReaderRole::Query).unwrap()
+                    .card(card).unwrap().unwrap().to_cells(), home.to_cells());
+                assert_finished(&h.review.head(session, 3).unwrap());
+                h.review.end(session).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn delayed_empty_clears_presented_and_waiting_preview_repeats() {
+    for delay in [60, 3600] {
+        let h = Harness::new(1);
+        let mut def = definition(&h, 0, false);
+        def.again_seconds = delay;
+        let deck = filtered::save(&h.collection, None, def, false).unwrap().value;
+        let (session, head) = start(&h, deck);
+        let shown = &head.items[0];
+        assert!(matches!(h.review.answer(session, shown.card_id, Rating::Again, shown.state_token,
+            EpochMillis(h.clock.now_ms()), 100).unwrap(), AnswerOutcome::Accepted { .. }));
+        h.settle();
+        let repeat = h.review.head(session, 3).unwrap();
+        assert_eq!(h.logs().len(), 1);
+        if delay == 3600 {
+            assert!(matches!(repeat.terminal_state, ReviewTerminalState::WaitingUntil { .. }));
+        } else {
+            assert_eq!(repeat.items[0].card_id, shown.card_id);
+        }
+        let gate = common::Gate::new();
+        let held = gate.clone();
+        let card = shown.card_id;
+        h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+            if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+        })));
+        filtered::empty(&h.collection, deck).unwrap();
+        gate.wait_entered();
+        let polled = h.review.head(session, 3);
+        let outcome = h.review.answer(session, card, Rating::Easy, shown.state_token,
+            EpochMillis(h.clock.now_ms()), 100);
+        h.review.observe_hook_for_testing(None);
+        gate.open();
+        assert_finished(&polled.unwrap());
+        assert!(matches!(outcome.unwrap(), AnswerOutcome::NotAtHead { .. }));
+        h.settle();
+        assert_eq!(h.logs().len(), 1, "Empty must leave only the prior preview log");
+        assert_finished(&h.review.head(session, 3).unwrap());
+        h.review.end(session).unwrap();
+    }
+}
+
+#[test]
+fn delayed_empty_does_not_reinsert_a_pending_preview_overlay() {
+    let h = Harness::new(1);
+    let deck = filtered::save(&h.collection, None, definition(&h, 0, false), false).unwrap().value;
+    let (session, head) = start(&h, deck);
+    h.settle();
+    let gate = common::Gate::new();
+    let held = gate.clone();
+    let card = head.items[0].card_id;
+    h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+        if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+    })));
+    // Occupy only the observer worker, leaving the writer free to Empty after
+    // accepting Again but before that pending answer can reach the writer.
+    h.collection.run(OpSpec::named("hold review observer", OpSource::Maintenance)
+        .stamp(StampMode::Raw), move |ctx| {
+            let mut row = ctx.scope().card(card)?.unwrap();
+            row.flags = 3;
+            ctx.scope().put(&row)?;
+            Ok(())
+        }).unwrap();
+    gate.wait_entered();
+    let pending = h.review.answer(session, card, Rating::Again, head.items[0].state_token,
+        EpochMillis(h.clock.now_ms()), 100);
+    filtered::empty(&h.collection, deck).unwrap();
+    let polled = h.review.head(session, 3);
+    let outcome = h.review.answer(session, card, Rating::Easy, head.items[0].state_token,
+        EpochMillis(h.clock.now_ms()), 100);
+    h.review.observe_hook_for_testing(None);
+    gate.open();
+    assert!(matches!(pending.unwrap(), AnswerOutcome::Accepted { .. }));
+    assert_finished(&polled.unwrap());
+    assert!(matches!(outcome.unwrap(), AnswerOutcome::NotAtHead { .. }));
+    h.settle();
+    assert!(h.logs().is_empty());
+    assert_finished(&h.review.head(session, 3).unwrap());
+    h.review.end(session).unwrap();
 }
 
 #[test]
@@ -137,7 +278,9 @@ fn lifecycle_revision_allows_optimistic_filtered_answer_chain_behind_writer() {
         gate.open();
         panic!("first optimistic answer refused: {first:?}");
     };
-    let next = &head_diff.head.items[0];
+    let polled = h.review.head(session, 3).unwrap();
+    assert_eq!(polled, head_diff.head);
+    let next = &polled.items[0];
     assert_eq!(next.card_id, shown.card_id);
     let second = h.review.answer(session, next.card_id, Rating::Easy, next.state_token,
         EpochMillis(h.clock.now_ms()), 100).unwrap();

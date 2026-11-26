@@ -1308,6 +1308,17 @@ impl ReviewService {
         let rows = r.snapshot()?;
         let day = timing(&*rows, &c, at)?;
         let p = session.presentation.lock().unwrap();
+        // A delayed observer may leave a returned/moved card in this queue.
+        // Check stored membership before an overlay can hide that commit or
+        // capture_state can mint an ordinary token for the now-home card.
+        if is_filtered(&*rows, session.deck)?
+            && !filtered_member(&*rows, session.deck, card, session.undo_view.as_ref())?
+        {
+            drop(p);
+            session.presentation.lock().unwrap().rebuild = true;
+            let head = project_snapshot(&c, session, &rows, 3, at, &mut FsrsCache::default())?;
+            return Ok(AnswerOutcome::NotAtHead { fresh_head: head });
+        }
         let kind = p.queue.kind(card).ok_or_else(|| invalid("missing queue entry"))?;
         let chooser = session.cache.snapshot();
         let mut models = FsrsCache::default();
@@ -2170,6 +2181,31 @@ fn presentation_card(
     Ok((image, card))
 }
 
+fn is_filtered(rows: &impl ReadRows, deck: DeckId) -> Result<bool, EngineError> {
+    Ok(rows.deck(deck)?.is_some_and(|d| matches!(d.kind.kind, DeckKind::Filtered(_))))
+}
+
+// Pending repeats still belong to the filtered deck in storage. A finishing
+// pending answer can return home, but has already removed its queue entry.
+// Ignore answer overlays here: they must not resurrect membership after Empty
+// or a move. Committed undo's projected before-image remains authoritative.
+fn filtered_member(
+    rows: &impl ReadRows,
+    deck: DeckId,
+    id: CardId,
+    undo: Option<&crate::undo::entry::Entry>,
+) -> Result<bool, EngineError> {
+    let card = if let Some(entry) = undo
+        && let Some(change) = entry.journal.entry(Table::Cards, &RowKey::Id(id.0))
+        && let Some(before) = entry.before(change)?
+    {
+        Some(Card::from_cells(&before).map_err(meguri_storage::StorageError::from)?)
+    } else {
+        rows.card(id)?
+    };
+    Ok(card.is_some_and(|c| c.deck_id == deck && c.original_deck_id.0 != 0))
+}
+
 // The projected note and card feed both the key and actual U62 payload,
 // including while committed undo waits for the writer.
 fn review_capture(
@@ -2381,6 +2417,21 @@ fn project_snapshot(
 ) -> Result<Head, EngineError> {
     let day = timing(&**rows, c, at)?;
     let mut p = s.presentation.lock().unwrap();
+    let filtered = is_filtered(&**rows, s.deck)?;
+    if filtered && !p.rebuild {
+        let mut removed = false;
+        // Include held learning/preview repeats, so Empty also clears a
+        // waiting head and its counts before the observer reaches us.
+        for id in p.queue.value().main.iter().map(|e| e.id)
+            .chain(p.queue.value().learning.iter().map(|e| e.id))
+        {
+            if !filtered_member(&**rows, s.deck, id, s.undo_view.as_ref())? {
+                removed = true;
+                break;
+            }
+        }
+        p.rebuild = removed;
+    }
     // Keep the boundary that supplied the shown labels. At day zero a real
     // boundary crossing need not change the clamped day number.
     let day_changed = p.rollover_due(day, at);
@@ -2405,11 +2456,12 @@ fn project_snapshot(
                 }
             }
         }
-        let mut overrides = p
-            .overlay
-            .rows()
-            .map(|card| (card.id, card.clone()))
-            .collect::<BTreeMap<_, _>>();
+        let mut overrides = BTreeMap::new();
+        for card in p.overlay.rows() {
+            if !filtered || filtered_member(&**rows, s.deck, card.id, s.undo_view.as_ref())? {
+                overrides.insert(card.id, card.clone());
+            }
+        }
         if let Some(entry) = &s.undo_view {
             for change in entry.journal.entries().filter(|change| change.table() == Table::Cards) {
                 if let Some(before) = entry.before(change)? {
