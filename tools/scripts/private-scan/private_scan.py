@@ -852,6 +852,8 @@ PUBLIC_ARTIFACTS = {
         '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
         '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BackupCancellationTests.swift':
+        '9f9c7b67a4354f50d6682b9463236280a375ebd5dd5774d5244ab564d8c546a0',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
         '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
