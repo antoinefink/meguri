@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 import UniformTypeIdentifiers
 
@@ -30,12 +31,33 @@ public final class MediaFolder {
     /// file directly inside it. Every media read (thumbnail, sound, open) goes
     /// through this check.
     public nonisolated static func file(_ name: String, in directory: URL) -> URL? {
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\\"), !name.contains("\0") else { return nil }
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
         let url = directory.appending(path: name, directoryHint: .notDirectory)
             .resolvingSymlinksInPath().standardizedFileURL
         guard url.deletingLastPathComponent().path == root.path,
               FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
+    }
+
+    /// IO reads hold the directory descriptor and refuse links and non-files,
+    /// so a name cannot escape the collection between checking and reading.
+    public nonisolated static func read(_ name: String, in directory: URL) throws -> Data {
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\\"), !name.contains("\0") else {
+            throw CocoaError(.fileReadNoPermission)
+        }
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
+        let parent = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard parent >= 0 else { throw CocoaError(.fileNoSuchFile) }
+        defer { close(parent) }
+        let descriptor = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { throw CocoaError(.fileNoSuchFile) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            close(descriptor); throw CocoaError(.fileReadNoPermission)
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        return try handle.readToEnd() ?? Data()
     }
 
     /// A clicked thumbnail's file, when it is an image: only images go to the

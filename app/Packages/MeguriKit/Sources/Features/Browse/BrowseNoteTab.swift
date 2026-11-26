@@ -54,9 +54,11 @@ struct BrowseNoteTab: View {
                         selectionRows
                         Divider().padding(.horizontal)
                         fields
-                        emptyFieldsRow
-                        Divider().padding(.horizontal)
-                        tagsSection
+                        if host?.maskEditorVisible != true {
+                            emptyFieldsRow
+                            Divider().padding(.horizontal)
+                            tagsSection
+                        }
                         if let failure = note.saveFailure { saveFailure(failure) }
                     }
                 }
@@ -181,12 +183,14 @@ struct BrowseNoteTab: View {
 
     @ViewBuilder private var fields: some View {
         if let host {
-            FieldEditorView(host: host)
+            OcclusionNoteEditor(host: host)
                 // The page, not the note: the next note opens in the same web view.
                 .id(ObjectIdentifier(host.webView))
                 // As tall as its fields: the page never scrolls, the pane does.
                 .frame(maxWidth: .infinity)
-                .frame(height: max(BrowseInspectorMetrics.fieldsMinimum, host.contentHeight))
+                .frame(height: note.draft.occlusionRoles != nil && note.draft.showsMaskEditor
+                       ? max(BrowseInspectorMetrics.editorMinimum, visible.height)
+                       : max(BrowseInspectorMetrics.fieldsMinimum, host.contentHeight))
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.content)).minY } action: { fieldsTop = $0 }
         }
     }

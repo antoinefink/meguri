@@ -1,6 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Getting Media…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Getting Media…" } } } },
+    "Tags" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tags" } } } },
     "“%@” is %@. Files this size don't sync to your other devices." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” is %@. Files this size don't sync to your other devices." } } } },
     "Add Anyway" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Anyway" } } } },
     "This File Won't Sync" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This File Won't Sync" } } } },

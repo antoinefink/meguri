@@ -346,6 +346,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let addStockNotetype = BridgeCall("add_stock_notetype")
     public static let cloneNotetype = BridgeCall("clone_notetype")
     public static let ensureImageOcclusionNotetype = BridgeCall("ensure_image_occlusion_notetype")
+    public static let editorEnsureImageOcclusionNotetype = BridgeCall("editor_ensure_image_occlusion_notetype")
     public static let imageOcclusionParse = BridgeCall("image_occlusion_parse")
     public static let imageOcclusionReading = BridgeCall("image_occlusion_reading")
     public static let imageOcclusionAllocate = BridgeCall("image_occlusion_allocate")
@@ -805,7 +806,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
         addNoteForScreen, addMinedNote, updateNote, patchNote, cardDeck, noteCards, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, editorPasteImagesAsPNG, startDeleteNotes, notetypeNames,
-        readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
+        readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype, editorEnsureImageOcclusionNotetype,
         imageOcclusionParse, imageOcclusionReading, imageOcclusionAllocate,
         imageOcclusionWrite, imageOcclusionNumbers, imageOcclusionDetect,
         renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, notetypeCardText, notetypeCardTextEdit, tagMutationJobResult,

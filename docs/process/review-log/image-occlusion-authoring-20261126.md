@@ -22,3 +22,5 @@ SHA-256 digests against the files in this checkout.
 The same reviewer admitted the entire 14,749-byte `app/MeguriUITests/IOAddEditUITests.swift`, including its synthetic geometry diagram, as public. Its reviewed SHA-256 is `963ca87f70935f16f0d6795230d020433cec1567fdb569536f1bfe8af55e223f`.
 
 The independent privacy reviewer read and admitted all 6,510 bytes of `app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift` as public. SHA-256 `5429e236529d0e8f8f87396c3d1c85b72da5dea8158046c78cd6b9921546c8ae`.
+
+The independent privacy reviewer read and admitted all 38,089 bytes of `app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift` as public. SHA-256 `8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec`.

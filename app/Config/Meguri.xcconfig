@@ -53,6 +53,7 @@ INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
 // The others write LSUIElement false: an empty value is not left out either.
 INFOPLIST_KEY_LSUIElement[sdk=macosx*] = $(MEGURI_MAC_UI_ELEMENT)
 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphone*] = YES
+INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphone*] = Photograph an image to study with image occlusion.
 // The launch screen is Info-iOS.plist's UILaunchScreen (N27.7), not a generated empty one.
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight

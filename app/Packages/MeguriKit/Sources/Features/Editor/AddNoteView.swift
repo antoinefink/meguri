@@ -51,7 +51,7 @@ public struct AddNoteView: View {
             if let draft = flow.draft {
                 AddNoteSelectionForm(flow: flow, draft: draft)
                 if let host = flow.runtime as? FieldEditorHost {
-                    FieldEditorView(host: host)
+                    OcclusionNoteEditor(host: host)
                         // The page, not the draft: after an add the same web view
                         // stays mounted and first responder (N17.1).
                         .id(ObjectIdentifier(host.webView))

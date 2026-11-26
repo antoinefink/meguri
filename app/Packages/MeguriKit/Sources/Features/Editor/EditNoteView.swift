@@ -39,7 +39,7 @@ public struct EditNoteView: View {
             facts
             #endif
             if let host {
-                FieldEditorView(host: host)
+                OcclusionNoteEditor(host: host)
                     .id(ObjectIdentifier(host.webView))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

@@ -12,11 +12,52 @@ import WebKit
 /// This component deliberately offers no Add/Edit/Browse persistence command.
 @Observable @MainActor
 public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteFieldRuntime, BrowseFieldRuntime {
+    public nonisolated struct FetchedImage: Sendable {
+        public let name: String
+        public let bytes: Data
+        public init(name: String, bytes: Data) { self.name = name; self.bytes = bytes }
+    }
+    /// Supplied by the common Rust remote-media fetch adapter (paste P10.2).
+    /// It must propagate task cancellation to the core job.
+    public var fetchOcclusionImage: (@Sendable (URL) async throws -> FetchedImage)?
+    /// P6's device setting; nil is Off. The default is 1024 pixels.
+    public var occlusionPhotoMaximumDimension: Int? = 1024
     public let draft: NoteEditorDraft
     public let webView: WKWebView
     public private(set) var editable = false
     public private(set) var held = false
     public private(set) var error: String?
+    let occlusionImage = OcclusionImageSession()
+    var flushNativeTags: (@MainActor () -> Void)?
+    public var acceptsHostInput: Bool { editable && !held && !draft.hostFieldsHeld && !closed && isCurrent() }
+    public var maskEditorVisible: Bool {
+        guard let roles = draft.occlusionRoles, draft.showsMaskEditor else { return false }
+        return draft.noteID == nil || (try? occlusionHasNumberedMask(draft.values[roles.occlusions])) != nil
+    }
+    var ownsDraft: Bool { !closed && isCurrent() }
+    func showFields(_ visible: Bool) {
+        if !visible {
+            flushNativeTags?()
+            #if os(macOS)
+            if let responder = webView.window?.firstResponder as? NSView,
+               responder === webView || responder.isDescendant(of: webView) { webView.window?.makeFirstResponder(nil) }
+            #else
+            webView.endEditing(true)
+            #endif
+            fieldFocused = false
+        }
+        webView.isHidden = !visible
+    }
+    func setNativeTags(_ tags: [String]) {
+        guard acceptsHostInput, tags != draft.tags else { return }
+        draft.setTags(tags)
+    }
+    public func setHostField(_ value: String, at index: Int) {
+        guard acceptsHostInput else { return }
+        draft.acceptHostField(value, at: index)
+        // Browse uses the same durable patch/undo path as a field blur.
+        onFieldBlur?()
+    }
     public private(set) var contentHeight: Double = 0
     public private(set) var canUndo = false
     public private(set) var canRedo = false
@@ -120,6 +161,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         super.init()
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
         browsing = previous.browsing
+        fetchOcclusionImage = previous.fetchOcclusionImage
+        occlusionPhotoMaximumDimension = previous.occlusionPhotoMaximumDimension
         onPlayMedia = previous.onPlayMedia; onOpenMedia = previous.onOpenMedia
         relay.owner = self; webView.navigationDelegate = self
         #if os(iOS)
@@ -167,7 +210,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// The field the one mode control acts on: the field that has, or last had, focus.
     public var modeField: Int? {
         guard editable, let ord = draft.focusedField, draft.fields.indices.contains(ord),
-              (browsing || !draft.fields[ord].collapsed), !draft.hiddenFields.contains(ord) else { return nil }
+              (browsing || !draft.fields[ord].collapsed), !draft.hiddenFields.contains(ord),
+              !draft.hostFields.contains(ord), !(draft.occlusionRoles != nil && draft.showsMaskEditor) else { return nil }
         return ord
     }
     public var focusedMode: NoteEditorDraft.Mode? { modeField.map { draft.fields[$0].mode } }
@@ -182,7 +226,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     /// The next or previous expanded field, as Tab moves (F4), without leaving the page.
     func adjacentField(previous: Bool) -> Int? {
-        let shown = draft.fields.indices.filter { (browsing || !draft.fields[$0].collapsed) && !draft.hiddenFields.contains($0) }
+        let shown = draft.fields.indices.filter { (browsing || !draft.fields[$0].collapsed) && !draft.hiddenFields.contains($0) && !draft.hostFields.contains($0) }
         guard let current = draft.focusedField, let index = shown.firstIndex(of: current) else { return nil }
         let target = index + (previous ? -1 : 1)
         return shown.indices.contains(target) ? shown[target] : nil
@@ -248,7 +292,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         try requireCurrent(expected)
         let display = try await draft.displayValues()
         try requireCurrent(expected)
-        let fields: [[String: Any]] = draft.fields.enumerated().map { index, field in
+        let fields: [[String: Any]] = draft.fields.enumerated().filter { !draft.hostFields.contains($0.offset) }.map { index, field in
             var family = field.definition.fontName
             if family.hasSuffix(" L") { family.removeLast(2); family += " Light" }
             if !family.isEmpty && family.range(of: #"^[a-z-]+$"#, options: .regularExpression) == nil {
@@ -267,8 +311,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             if draft.hiddenFields.contains(index) { value["hidden"] = true }
             return value
         }
-        let focus = !browsing ? draft.focusedField ?? draft.fields.indices.first(where: {
-            !draft.fields[$0].collapsed && !draft.hiddenFields.contains($0)
+        let shownFocus = draft.focusedField.flatMap { draft.hostFields.contains($0) ? nil : $0 }
+        let focus = !browsing && !(draft.occlusionRoles != nil && draft.showsMaskEditor) ? shownFocus ?? draft.fields.indices.first(where: {
+            !draft.fields[$0].collapsed && !draft.hiddenFields.contains($0) && !draft.hostFields.contains($0)
         }) : nil
         openedLoad = expected
         let mode = browsing ? "browse" : draft.noteID == nil ? "add" : "edit"
@@ -278,6 +323,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         try requireCurrent(expected)
         guard editable else { throw EditorRuntimeError.unavailable }
         held = false
+        draft.hostFieldsHeld = false
     }
 
     /// Resolve all earlier sequence numbers before returning the flushed draft
@@ -291,6 +337,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         while browsing, editable, commandLoad != nil { try await Task.sleep(for: .milliseconds(5)) }
         guard editable, let expected = activeLoad, commandLoad == nil else { throw EditorRuntimeError.unavailable }
         try requireCurrent(expected)
+        flushNativeTags?()
+        if hold { draft.hostFieldsHeld = true; occlusionImage.cancel() }
         commandLoad = expected
         defer { if commandLoad == expected { commandLoad = nil } }
         do {
@@ -308,13 +356,13 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public func release() async throws {
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
         _ = try await call(["type": "release", "loadId": expected], load: expected)
-        try requireCurrent(expected); held = false
+        try requireCurrent(expected); held = false; draft.hostFieldsHeld = false
     }
     /// Edit mode: the page loads again the fields the draft took from the
     /// stored note after a change made elsewhere (B3 `setField`).
     public func reload(fields ords: [Int]) async throws {
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
-        for ord in ords {
+        for ord in ords where !draft.hostFields.contains(ord) {
             let html = try await draft.displayValue(ord)
             try requireCurrent(expected)
             _ = try await call(["type": "setField", "loadId": expected, "ord": ord, "html": html], load: expected)
@@ -715,6 +763,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// Final disposal follows the containing owner's held flush/close guard.
     /// It never deletes targets or writes a note. Do not call on layout change.
     public func shutDown() {
+        occlusionImage.cancel()
         guard !closed else { return }
         closed = true
         if let expected = activeLoad { fail(EditorRuntimeError.unavailable, load: expected) }
@@ -837,7 +886,9 @@ extension ReviewCollection {
     @discardableResult public func prepareAddNoteEditor(presetDeck: Int64? = nil) async -> FieldEditorHost? {
         let flow = addNoteFlow
         guard await flow.open(presetDeck: presetDeck, continuingPage: true, makeRuntime: { draft, current in
-            try FieldEditorHost(draft: draft, isCurrent: current)
+            let host = try FieldEditorHost(draft: draft, isCurrent: current)
+            host.show(media: self.media)
+            return host
         }) else { return nil }
         return flow.runtime as? FieldEditorHost
     }
