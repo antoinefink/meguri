@@ -57,3 +57,5 @@ The reviewers examined the complete merged files and approved these exact public
 | Plancheck | `docs/design/native-interface-contract.md` | 293,400 | `cbd5905a9d183331c00deba0ded170f74bc13f7a9467d2d92461804f6e0991cb` |
 | Planinterop | `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings` | 51,334 | `61695e0b755bcd741efff9aa6d31f15daeba8907508ef9893ea2508cd6d50225` |
 | Planinterop | `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` | 166,524 | `5b329638e20ef17b258809d3e68089eaa04f059652cd6cfc4c113462be76f6ee` |
+
+Planinterop independently reviewed the complete 23,767-byte touch journey. The flagged comments describe the geometry of a native scrolling gesture. All inputs are synthetic and the file contains only public XCTest source. Its verified SHA-256 is `47644f411be5dda7625f6290ad20c6f5f60d79e70e5fe0980c545fe558430bc6`.

@@ -54,10 +54,14 @@ import XCTest
         XCTAssertTrue((element(app, "home.filteredStudy.first.search").value as? String ?? "").contains("is:due"))
         try replace("home.filteredStudy.name", with: "Touch Preview", app: app)
         try replace("home.filteredStudy.first.limit", with: "1", app: app)
-        try tap("home.filteredStudy.secondEnabled", app: app)
+        try setSwitch("home.filteredStudy.secondEnabled", to: true, app: app)
+        XCTAssertTrue(element(app, "home.filteredStudy.second.search").waitForExistence(timeout: 5),
+                      "Enabling the second search exposes its native fields")
         try replace("home.filteredStudy.second.search", with: "tag:filtered-ui", app: app)
         try replace("home.filteredStudy.second.limit", with: "5", app: app)
-        try tap("home.filteredStudy.reschedule", app: app)
+        try setSwitch("home.filteredStudy.reschedule", to: false, app: app)
+        XCTAssertTrue(element(app, "home.filteredStudy.again").waitForExistence(timeout: 5),
+                      "Disabling rescheduling exposes the preview delays")
         try replace("home.filteredStudy.again", with: "60", app: app)
         try replace("home.filteredStudy.hard", with: "invalid", app: app)
         XCTAssertFalse(element(app, "home.filteredStudy.save").isEnabled, "Native Hard binding validates typed text")
@@ -175,46 +179,147 @@ import XCTest
     }
 
     private func visible(_ id: String, app: XCUIApplication) throws -> XCUIElement {
-        let hideKeyboard = app.keyboards.buttons.matching(NSPredicate(
-            format: "label IN %@", ["Hide keyboard", "Hide Keyboard"])).firstMatch
-        if hideKeyboard.exists && hideKeyboard.isHittable {
-            hideKeyboard.tap()
-            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        }
+        try dismissKeyboard(app)
         let target = element(app, id)
         // Forms are ordinary scrollable controls; find the field in either direction
         // when revisiting a sheet whose first search is already above the viewport.
-        let filtered = element(app, "home.filteredStudy.sheet")
-        let custom = element(app, "home.customStudy.sheet")
-        let scroll = filtered.exists ? filtered : custom.exists ? custom : app
-        for _ in 0..<8 {
-            if target.exists && target.isHittable { break }
-            try scrollForm(scroll, up: true, app: app)
+        if let form = studyForm(app) {
+            for up in [true, false] {
+                for _ in 0..<8 {
+                    if target.exists && target.isHittable { break }
+                    if !(try scrollForm(form, up: up, app: app)) { break }
+                }
+            }
         }
-        for _ in 0..<8 {
-            if target.exists && target.isHittable { break }
-            try scrollForm(scroll, up: false, app: app)
-        }
-        XCTAssertTrue(wait { target.exists && target.isHittable }, id)
+        let ready = wait { target.exists && target.isHittable }
+        if !ready { attachState(app, "reveal-failed-" + id) }
+        XCTAssertTrue(ready, id)
         return target
     }
 
-    private func scrollForm(_ container: XCUIElement, up: Bool, app: XCUIApplication) throws {
-        // As in the native transfer journey, keep the gesture in the Form's
-        // viewport. A sheet-centred swipe can land on the software keyboard.
-        let form = container.collectionViews.firstMatch
-        var viewport = (form.exists ? form.frame : container.frame).intersection(app.frame)
+    private func studyForm(_ app: XCUIApplication) -> XCUIElement? {
+        for id in ["home.filteredStudy.sheet", "home.customStudy.sheet"] {
+            let sheet = element(app, id)
+            guard sheet.exists else { continue }
+            if [.collectionView, .table, .scrollView].contains(sheet.elementType) { return sheet }
+            return [sheet.collectionViews, sheet.tables, sheet.scrollViews]
+                .map { $0.firstMatch }.first { $0.exists }
+        }
+        return nil
+    }
+
+    private func dismissKeyboard(_ app: XCUIApplication) throws {
+        let keyboard = app.keyboards.firstMatch
+        // The system can retain Hide Keyboard in AX after the keyboard closes.
+        // Query and act on that control only while a keyboard is actually present.
+        guard keyboard.exists else { return }
+        attachState(app, "before-keyboard-dismissal")
+        let hide = keyboard.buttons.matching(NSPredicate(
+            format: "label IN %@", ["Hide keyboard", "Hide Keyboard"])).firstMatch
+        if hide.exists && hide.isEnabled && hide.isHittable {
+            hide.tap()
+        } else {
+            // iPhone has no iPad keyboard-dismiss key. Native Form scrolling
+            // dismisses editing; keep this upward gesture inside its real content.
+            let form = try XCTUnwrap(studyForm(app), "Keyboard belongs to a native study Form")
+            _ = try scrollForm(form, up: true, app: app)
+        }
+        let dismissed = keyboard.waitForNonExistence(timeout: 5)
+        if !dismissed { attachState(app, "keyboard-dismissal-failed") }
+        XCTAssertTrue(dismissed, "Dismiss the current keyboard before resolving the next control")
+    }
+
+    private func scrollForm(_ form: XCUIElement, up: Bool, app: XCUIApplication) throws -> Bool {
+        // Never fall back to the sheet: its pan recognizer can dismiss it.
+        XCTAssertTrue([.collectionView, .table, .scrollView].contains(form.elementType))
+        let window = app.windows.firstMatch
+        var viewport = form.frame.intersection(app.frame)
+        if window.exists { viewport = viewport.intersection(window.frame) }
         let keyboard = app.keyboards.firstMatch
         if keyboard.exists && viewport.intersects(keyboard.frame) {
             viewport.size.height = max(0, min(viewport.maxY, keyboard.frame.minY) - viewport.minY)
         }
-        XCTAssertFalse(viewport.isNull || viewport.isEmpty, "Visible native form viewport")
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        let top = origin.withOffset(CGVector(dx: viewport.midX - app.frame.minX,
-            dy: viewport.minY - app.frame.minY + viewport.height * 0.2))
-        let bottom = origin.withOffset(CGVector(dx: viewport.midX - app.frame.minX,
-            dy: viewport.minY - app.frame.minY + viewport.height * 0.8))
-        (up ? bottom : top).press(forDuration: 0.05, thenDragTo: up ? top : bottom)
+        XCTAssertTrue(!viewport.isNull && !viewport.isEmpty && !viewport.isInfinite
+                      && [viewport.minX, viewport.minY, viewport.width, viewport.height].allSatisfy { $0.isFinite },
+                      "Visible native form viewport")
+        let before = try form.snapshot()
+        var distance = viewport.height * 0.3
+        if !up {
+            // Do not pull down at the top, or drag farther than the content above
+            // the viewport. A slow drag prevents momentum handing off to the sheet.
+            let firstCell = form.cells.firstMatch
+            guard firstCell.exists else { return false }
+            let firstFrame = firstCell.frame
+            guard !firstFrame.isEmpty && !firstFrame.isNull && !firstFrame.isInfinite else { return false }
+            distance = min(distance, viewport.minY - firstFrame.minY)
+            guard distance > 1 else { return false }
+        }
+        let origin = form.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: viewport.midX - form.frame.minX,
+            dy: viewport.midY - form.frame.minY + (up ? distance / 2 : -distance / 2)))
+        let end = start.withOffset(CGVector(dx: 0, dy: up ? -distance : distance))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(form.exists, "Scrolling must retain the study Form")
+        return contentPosition(before) != contentPosition(try form.snapshot())
+    }
+
+    private func contentPosition(_ node: any XCUIElementSnapshot) -> [String] {
+        if node.elementType == .cell { return [node.identifier + node.label + NSStringFromCGRect(node.frame)] }
+        return node.children.flatMap { contentPosition($0) }
+    }
+
+    private func setSwitch(_ id: String, to enabled: Bool, app: XCUIApplication) throws {
+        _ = try visible(id, app: app)
+        let matches = app.switches.matching(identifier: id)
+        XCTAssertEqual(matches.count, 1, "One identified native switch: " + id)
+        let control = matches.firstMatch
+        // SwiftUI may expose a row-sized Switch wrapping a smaller native one.
+        let descendants = control.switches
+        XCTAssertLessThanOrEqual(descendants.count, 1, "Unambiguous native switch descendant: " + id)
+        let thumb = descendants.count == 1 ? descendants.firstMatch : control
+        attachState(app, "before-switch-" + id)
+        XCTAssertTrue(control.isEnabled && thumb.isHittable, id)
+        XCTAssertFalse(control.label.isEmpty, "Named native action: " + id)
+        XCTAssertEqual(switchValue(control), !enabled, "Old switch value: " + id)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Switch interaction starts without a keyboard")
+        // A row-centre tap can focus the preceding text field. The native switch
+        // sits at the trailing edge even when AX reports the whole Form row.
+        let frame = thumb.frame
+        XCTAssertTrue(frame.width > 0 && frame.height > 0)
+        thumb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: frame.width - min(30, frame.width / 2), dy: frame.height / 2)).tap()
+        let changed = wait { switchValue(control) == enabled }
+        attachState(app, "after-switch-" + id)
+        XCTAssertTrue(changed, "Native switch must change to \(enabled): \(id); actual=\(String(describing: control.value))")
+        XCTAssertEqual(switchValue(control), enabled, "New switch value: " + id)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Switch thumb must not focus a text field")
+    }
+
+    private func switchValue(_ control: XCUIElement) -> Bool? {
+        guard control.exists else { return nil }
+        if let value = control.value as? String, ["0", "1"].contains(value) { return value == "1" }
+        if let value = control.value as? NSNumber {
+            if value == NSNumber(value: 0) { return false }
+            if value == NSNumber(value: 1) { return true }
+        }
+        return nil
+    }
+
+    private func attachState(_ app: XCUIApplication, _ name: String) {
+        var lines = ["keyboardPresent=\(app.keyboards.firstMatch.exists)"]
+        func walk(_ node: any XCUIElementSnapshot) {
+            if node.identifier.hasPrefix("home.filteredStudy.") || node.identifier.hasPrefix("home.customStudy.")
+                || [.switch, .keyboard, .collectionView, .table, .scrollView].contains(node.elementType) {
+                lines.append("type=\(node.elementType) id=\(node.identifier) label=\(node.label.debugDescription) "
+                    + "value=\(String(describing: node.value)) enabled=\(node.isEnabled) frame=\(node.frame)")
+            }
+            node.children.forEach { walk($0) }
+        }
+        if let snapshot = try? app.snapshot() { walk(snapshot) }
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func tap(_ id: String, app: XCUIApplication) throws {
