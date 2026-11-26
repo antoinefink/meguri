@@ -97,6 +97,40 @@ final class DeckSearchTouchUITests: XCTestCase {
         XCTAssertTrue(row.waitForNonExistence(timeout: 10), "Delete Deck removes the deck and its subdeck")
     }
 
+    /// The page toolbar has no row presenter: its Delete uses the window's
+    /// native confirmation, while the long-press test above covers row anchors.
+    func testDeckPageToolbarDeleteAsksCancelsAndDeletes() throws {
+        let app = try launch(sizeClass: "compact")
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "home.deck.row.", "Local Review")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        let deckID = row.identifier.dropFirst("home.deck.row.".count)
+        row.tap()
+        let page = element(app, "home.deck.page.\(deckID)")
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        let actions = element(app, "home.deck.actions")
+        func ask() {
+            XCTAssertTrue(actions.waitForExistence(timeout: 10))
+            actions.tap()
+            let delete = element(app, "home.deckMenu.delete.\(deckID)")
+            XCTAssertTrue(delete.waitForExistence(timeout: 10))
+            delete.tap()
+            XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.staticTexts["Its subdeck and 4 cards will also be deleted."].exists)
+        }
+        ask()
+        let cancel = app.buttons["Cancel"].firstMatch
+        if cancel.exists { cancel.tap() } else { app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(page.exists, "Cancel keeps the selected deck")
+        ask()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@", "Delete Deck")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        confirm.tap()
+        XCTAssertTrue(page.waitForNonExistence(timeout: 10), "Confirmed deletion removes the selected deck")
+        XCTAssertTrue(row.waitForNonExistence(timeout: 10))
+    }
+
     private func launch(sizeClass: String) throws -> XCUIApplication {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()

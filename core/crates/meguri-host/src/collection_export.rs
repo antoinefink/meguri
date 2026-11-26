@@ -126,9 +126,9 @@ impl CoreHost {
             is_cancelled: &is_cancelled,
         };
         // The actual DB+WAL P10 budget precedes every output mutation, including recovery.
-        enum Plan {
+        enum Plan<'r> {
             Collection(meguri_package::MediaCollectionExportPlan),
-            Deck(meguri_package::DeckExportPlan),
+            Deck(meguri_package::DeckExportPlan<'r>),
         }
         let mut plan = match deck {
             Some((id, options)) => Plan::Deck(meguri_package::preflight_deck_export_from_live(&reader, &path, &context, id, options).map_err(package_error)?),

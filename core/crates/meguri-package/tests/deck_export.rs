@@ -599,27 +599,90 @@ fn subtree_selection_compares_complete_folded_names_and_literal_wildcards() {
 }
 
 #[test]
-fn written_counts_follow_the_final_pinned_selection() {
-    let f = seeded();
-    let path = f.dir.path().join("final-counts.apkg");
-    let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
-    let context = CollectionPackageWriteContext {
-        collection_directory: f.collection.path().parent().unwrap(), purpose: Purpose::Export,
-        finalisation: Finalisation::ExclusiveCreate, clock: f.clock.as_ref(), random: f.random.as_ref(),
-        space: &StatvfsSpace, is_cancelled: &|| false,
-    };
-    let options = DeckExportOptions { include_scheduling: true, include_presets: false, include_media: false };
-    let plan = preflight_deck_export_from_live(&reader, &path, &context, 100, options).unwrap();
-    assert_eq!(plan.note_count(), 2);
-    let card = f.cards[1];
-    f.collection.run(OpSpec::named("move before final export", OpSource::Maintenance), move |ctx| {
-        let mut card = ctx.scope().card(card)?.unwrap();
-        card.deck_id = DeckId(300);
-        ctx.scope().put(&card)?;
-        Ok(())
-    }).unwrap();
-    let output = write_deck_export_from_live(&reader, &path, &context, plan).unwrap();
-    assert_eq!(output.deck_counts, Some(meguri_package::DeckExportCounts { notes: 1, cards: 2, media: 0 }));
+fn preflight_and_write_keep_original_membership_and_payloads_with_or_without_media() {
+    for media in [false, true] {
+        let f = seeded();
+        let path = f.dir.path().join("pinned.apkg");
+        let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+        let context = CollectionPackageWriteContext {
+            collection_directory: f.collection.path().parent().unwrap(), purpose: Purpose::Export,
+            finalisation: Finalisation::ExclusiveCreate, clock: f.clock.as_ref(), random: f.random.as_ref(),
+            space: &StatvfsSpace, is_cancelled: &|| false,
+        };
+        let original = reader.note(reader.card(f.cards[1]).unwrap().unwrap().note_id).unwrap().unwrap();
+        let options = DeckExportOptions { include_scheduling: true, include_presets: false, include_media: media };
+        let plan = preflight_deck_export_from_live(&reader, &path, &context, 100, options).unwrap();
+        assert_eq!(plan.note_count(), 2);
+        assert_eq!(plan.card_count(), 3);
+        let moved_out = f.cards[1];
+        let moved_in = f.cards[2];
+        f.clock.step_ms(1000);
+        // Swap notes without changing the counts. A counts-only assertion
+        // would miss a writer that selects again, especially without media.
+        f.collection.run(OpSpec::named("move after export preflight", OpSource::Maintenance), move |ctx| {
+            for (id, deck) in [(moved_out, 300), (moved_in, 100)] {
+                let mut card = ctx.scope().card(id)?.unwrap();
+                card.deck_id = DeckId(deck);
+                ctx.scope().put(&card)?;
+            }
+            let mut note = ctx.scope().note(original.id)?.unwrap();
+            note.fields = "changed after preflight\u{1f}later back".into();
+            ctx.scope().put(&note)?;
+            Ok(())
+        }).unwrap();
+        f.clock.step_ms(1000);
+        let output = write_deck_export_from_live(&reader, &path, &context, plan).unwrap();
+        assert_eq!(output.deck_counts, Some(meguri_package::DeckExportCounts {
+            notes: 2, cards: 3, media: if media { 7 } else { 0 },
+        }));
+        verify_media(&path, media);
+        let scratch = tempfile::tempdir().unwrap();
+        let db = decoded(&path, scratch.path());
+        let opened = meguri_storage::deck_package::open_deck_candidate(&db, f.clock.as_ref(), f.random.as_ref()).unwrap();
+        let rows = opened.writer();
+        assert_eq!(rows.row_count(Table::Notes).unwrap(), 2);
+        assert_eq!(rows.row_count(Table::Cards).unwrap(), 3);
+        assert_eq!(rows.note(original.id).unwrap().unwrap().fields, original.fields);
+        assert_eq!(rows.card(moved_out).unwrap().unwrap().deck_id, DeckId(101));
+        assert!(rows.card(moved_in).unwrap().is_none());
+        assert_eq!(output.written.snapshot_modified, rows.col().unwrap().modified);
+        opened.close().unwrap();
+        // The consumed plan released its transaction; a new view sees the move.
+        let fresh = reader.begin_snapshot().unwrap();
+        assert_eq!(fresh.card(moved_out).unwrap().unwrap().deck_id, DeckId(300));
+        assert_ne!(output.written.snapshot_modified, fresh.col().unwrap().modified);
+    }
+}
+
+#[test]
+fn preflight_plan_refuses_another_reader_directory_or_destination() {
+    for mode in 0..3 {
+        let f = seeded();
+        let path = f.dir.path().join("bound.apkg");
+        let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+        let mut context = CollectionPackageWriteContext {
+            collection_directory: f.collection.path().parent().unwrap(), purpose: Purpose::Export,
+            finalisation: Finalisation::ExclusiveCreate, clock: f.clock.as_ref(), random: f.random.as_ref(),
+            space: &StatvfsSpace, is_cancelled: &|| false,
+        };
+        let options = DeckExportOptions { include_scheduling: true, include_presets: false, include_media: false };
+        let plan = preflight_deck_export_from_live(&reader, &path, &context, 100, options).unwrap();
+        let other = f.collection.reader(ReaderRole::Query).unwrap();
+        assert_eq!(reader.native_identity(), other.native_identity());
+        let different_destination = f.dir.path().join("different.apkg");
+        let (caller, destination) = match mode {
+            0 => (&*other, &path),
+            1 => {
+                context.collection_directory = f.dir.path();
+                (&*reader, &path)
+            }
+            _ => (&*reader, &different_destination),
+        };
+        assert!(matches!(write_deck_export_from_live(caller, destination, &context, plan), Err(Error::ExportSourceChanged)));
+        assert!(!path.exists());
+        assert!(!different_destination.exists());
+        assert!(reader.begin_snapshot().is_ok(), "refusal releases the plan's transaction");
+    }
 }
 
 #[test]

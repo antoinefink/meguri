@@ -1,6 +1,6 @@
 //! Production latest-format deck export (package/apkg-export A1–A12).
-//! Preflight owns no read transaction across calls. The writer repeats all
-//! selection checks on one pinned snapshot before creating its fresh database.
+//! The short-lived preflight plan pins the selection until its fresh database
+//! is built. The read transaction ends before media capture and publication.
 use crate::{
     CollectionPackageWriteContext, Error, LiveCollectionPackageWritten, MediaCollectionExportWritten, Result,
     cancelled,
@@ -30,7 +30,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Counts from the pinned selection actually written, not the earlier preflight.
+/// Counts from the pinned selection actually written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeckExportCounts {
     pub notes: u64,
@@ -43,21 +43,20 @@ pub struct DeckExportOptions {
     pub include_presets: bool,
     pub include_media: bool,
 }
-pub struct DeckExportPlan {
+pub struct DeckExportPlan<'r> {
+    snapshot: ReadSnapshot<'r>,
+    selection: DeckExportSelection,
     source: PathBuf,
     source_identity: (u64, u64),
+    source_size: u64,
     directory: PathBuf,
+    directory_identity: (u64, u64),
     destination: PathBuf,
-    deck_id: i64,
     options: DeckExportOptions,
     instant: i64,
-    references: BTreeSet<String>,
     validation: ExportSourceValidation,
-    name: String,
-    notes: u64,
-    cards: u64,
 }
-impl DeckExportPlan {
+impl DeckExportPlan<'_> {
     pub fn protect_retained_outputs(&mut self, paths: &[PathBuf], check: &(dyn Fn() -> bool + Sync)) -> Result<()> {
         for retained in paths {
             cancelled(check)?;
@@ -80,16 +79,16 @@ impl DeckExportPlan {
         self.validation.protect(paths, check)
     }
     pub fn note_count(&self) -> u64 {
-        self.notes
+        self.selection.notes.len() as u64
     }
     pub fn card_count(&self) -> u64 {
-        self.cards
+        self.selection.cards.len() as u64
     }
     pub fn media_count(&self) -> u64 {
         self.validation.files.len() as u64
     }
     pub fn suggested_name(&self) -> String {
-        Self::suggested_name_for_deck(&self.name)
+        Self::suggested_name_for_deck(&self.selection.name)
     }
     /// A single filesystem component that also fits the line-based ownership
     /// marker. Reserve the suffix before truncating at a UTF-8 boundary.
@@ -169,13 +168,13 @@ fn preflight_build(size: u64, context: &CollectionPackageWriteContext<'_>) -> Re
     }
     Ok(())
 }
-pub fn preflight_deck_export_from_live(
-    reader: &Reader,
+pub fn preflight_deck_export_from_live<'r>(
+    reader: &'r Reader,
     destination: &Path,
     context: &CollectionPackageWriteContext<'_>,
     deck_id: i64,
     options: DeckExportOptions,
-) -> Result<DeckExportPlan> {
+) -> Result<DeckExportPlan<'r>> {
     use std::os::unix::fs::MetadataExt;
     cancelled(context.is_cancelled)?;
     let (source, size) = reader.live_snapshot_source()?;
@@ -242,27 +241,25 @@ pub fn preflight_deck_export_from_live(
     let snapshot = reader.begin_snapshot()?;
     let selection = select(&snapshot, deck_id, options, instant, context.is_cancelled)?;
     let references = references(&snapshot, &selection, options.include_media, context.is_cancelled)?;
-    drop(snapshot);
     preflight_build(size, context)?;
     let validation = ExportSourceValidation::referenced(
         context.collection_directory,
         protected,
-        references.clone(),
+        references,
         context.is_cancelled,
     )?;
     Ok(DeckExportPlan {
+        snapshot,
+        selection,
         source,
         source_identity: reader.native_identity(),
+        source_size: size,
         directory: context.collection_directory.to_owned(),
+        directory_identity: (directory.dev(), directory.ino()),
         destination: destination.to_owned(),
-        deck_id,
         options,
         instant,
-        references,
         validation,
-        name: selection.name,
-        notes: selection.notes.len() as u64,
-        cards: selection.cards.len() as u64,
     })
 }
 
@@ -462,36 +459,31 @@ pub fn write_deck_export_from_live(
     reader: &Reader,
     destination: &Path,
     context: &CollectionPackageWriteContext<'_>,
-    mut plan: DeckExportPlan,
+    mut plan: DeckExportPlan<'_>,
 ) -> Result<MediaCollectionExportWritten> {
+    use std::os::unix::fs::MetadataExt;
     cancelled(context.is_cancelled)?;
-    let (source, size) = reader.live_snapshot_source()?;
-    if source != plan.source
+    // live_snapshot_source requires autocommit: the plan already owns this
+    // reader's transaction. Check its binding without opening another view.
+    let source = std::fs::metadata(&plan.source)?;
+    let directory = std::fs::metadata(context.collection_directory)?;
+    if !std::ptr::eq(reader, plan.snapshot.reader())
         || reader.native_identity() != plan.source_identity
+        || (source.dev(), source.ino()) != plan.source_identity
         || context.collection_directory != plan.directory.as_path()
+        || (directory.dev(), directory.ino()) != plan.directory_identity
         || destination != plan.destination
     {
         return Err(Error::ExportSourceChanged);
     }
     plan.validation.validate(context.is_cancelled)?;
     writer::check_exclusive_destination(destination, context.finalisation)?;
-    let snapshot = reader.begin_snapshot()?;
-    let selection = select(
-        &snapshot,
-        plan.deck_id,
-        plan.options,
-        plan.instant,
-        context.is_cancelled,
-    )?;
-    if references(&snapshot, &selection, plan.options.include_media, context.is_cancelled)? != plan.references {
-        return Err(Error::ExportSourceChanged);
-    }
-    preflight_build(size, context)?;
+    preflight_build(plan.source_size, context)?;
     cancelled(context.is_cancelled)?;
     let staging = staging_directory(context.collection_directory)?;
     let path = staging.path().join("snapshot.anki2");
-    let snapshot_modified = build(&snapshot, &selection, &path, plan.options, plan.instant, context)?;
-    drop(snapshot);
+    let snapshot_modified = build(&plan.snapshot, &plan.selection, &path, plan.options, plan.instant, context)?;
+    drop(plan.snapshot);
     export_capture::preflight_deck(
         std::fs::metadata(&path)?.len(),
         &plan.validation.files,
@@ -503,8 +495,8 @@ pub fn write_deck_export_from_live(
     Ok(MediaCollectionExportWritten {
         written: LiveCollectionPackageWritten { snapshot_modified },
         deck_counts: Some(DeckExportCounts {
-            notes: selection.notes.len() as u64,
-            cards: selection.cards.len() as u64,
+            notes: plan.selection.notes.len() as u64,
+            cards: plan.selection.cards.len() as u64,
             media: plan.validation.files.len() as u64,
         }),
         source_validation: plan.validation,
