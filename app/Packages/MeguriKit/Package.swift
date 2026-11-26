@@ -109,7 +109,7 @@ let package = Package(
                 // Browse's inspector shows the note in the round 5 editor (U273) and its Card Info (U274).
                 + (name == "Browse" ? ["Editor", "CardInfo"] : []) + (name == "Editor" ? ["ImageOcclusion"] : []) + (["Home", "Stats"].contains(name) ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo", "ImageOcclusion"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            exclude: name == "ImageOcclusion" ? ["AGENTS.md"] : [],
+            exclude: ["ImageOcclusion", "Editor"].contains(name) ? ["AGENTS.md"] : [],
             resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo", "ImageOcclusion"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
