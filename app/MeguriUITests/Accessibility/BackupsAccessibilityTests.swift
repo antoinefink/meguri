@@ -162,18 +162,31 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 #endif
                                 let heading = state == "empty" ? emptyHeading : errorHeading
                                 let description = state == "empty" ? emptyDescription : errorDescription
-                                XCTAssertFalse(self.staticText(state == "empty" ? errorHeading : emptyHeading, in: textScope).exists)
-                                XCTAssertFalse(self.staticText(state == "empty" ? errorDescription : emptyDescription, in: textScope).exists)
-                                if state == "error" {
-                                    XCTAssertFalse(self.staticText("The backup was not restored. Try another backup or resolve the problem and try again.", in: textScope).exists)
+                                var items: [(XCUIElement, String, Bool)] = []
+                                #if os(macOS)
+                                let snapshotError = state == "error"
+                                if snapshotError {
+                                    try self.assertRestoreError(in: restoreScope, heading: errorHeading, explanation: errorDescription,
+                                        absent: [emptyHeading, emptyDescription,
+                                                 "The backup was not restored. Try another backup or resolve the problem and try again."])
                                 }
-                                let title = self.staticText(heading, in: textScope)
-                                let explanation = self.staticText(description, in: textScope)
+                                #else
+                                let snapshotError = false
+                                #endif
+                                if !snapshotError {
+                                    XCTAssertFalse(self.staticText(state == "empty" ? errorHeading : emptyHeading, in: textScope).exists)
+                                    XCTAssertFalse(self.staticText(state == "empty" ? errorDescription : emptyDescription, in: textScope).exists)
+                                    if state == "error" {
+                                        XCTAssertFalse(self.staticText("The backup was not restored. Try another backup or resolve the problem and try again.", in: textScope).exists)
+                                    }
+                                    let title = self.staticText(heading, in: textScope)
+                                    let explanation = self.staticText(description, in: textScope)
+                                    items = [(title, "list heading", passiveText), (explanation, "list explanation", passiveText)]
+                                }
                                 let retry = textScope.buttons["settings.backups.retry"].firstMatch
-                                let order = [title, explanation, retry]
-                                for (index, item) in [(title, "list heading", passiveText),
-                                                      (explanation, "list explanation", passiveText),
-                                                      (retry, "list retry", false)].enumerated() {
+                                items.append((retry, "list retry", false))
+                                let order = items.map { $0.0 }
+                                for (index, item) in items.enumerated() {
                                     let (element, detail, passive) = item
                                     try verify(element, detail: detail, reach: {
                                         try self.reach(element, detail: detail, in: app, scope: restoreScope, preceding: Array(order.prefix(index)), passive: passive)
@@ -295,6 +308,66 @@ final class BackupsAccessibilityTests: XCTestCase {
             TouchTargets.assertMet(result.touchTargets)
         }
     }
+
+    #if os(macOS)
+    /// Read passive native error text from one unfiltered window snapshot: live
+    /// compound StaticText queries can miss nodes present in this AX tree.
+    private func assertRestoreError(in window: XCUIElement, heading: String, explanation: String,
+                                    absent: [String], file: StaticString = #filePath, line: UInt = #line) throws {
+        let snapshot = try window.snapshot()
+        var descendants: [(node: any XCUIElementSnapshot, visibleBounds: CGRect)] = []
+        func visit(_ node: any XCUIElementSnapshot, visibleBounds: CGRect) {
+            for child in node.children {
+                let childBounds = child.elementType == .scrollView || child.elementType == .collectionView
+                    ? visibleBounds.intersection(child.frame) : visibleBounds
+                descendants.append((child, childBounds))
+                visit(child, visibleBounds: childBounds)
+            }
+        }
+        visit(snapshot, visibleBounds: snapshot.frame)
+        let texts = descendants.filter { $0.node.elementType == .staticText }
+        let summary = "Restore window id=\(snapshot.identifier), role=\(snapshot.elementType), frame=\(snapshot.frame); "
+            + "static texts=\(texts.count) (first 16):\n"
+            + texts.prefix(16).map {
+                "id=\(String($0.node.identifier.prefix(100)).debugDescription), role=staticText, "
+                    + "label=\(String($0.node.label.prefix(180)).debugDescription), "
+                    + "value=\(String(($0.node.value as? String ?? "").prefix(180)).debugDescription), "
+                    + "frame=\($0.node.frame), viewport=\($0.visibleBounds)"
+            }.joined(separator: "\n")
+        func hasText(_ node: any XCUIElementSnapshot, _ expected: String) -> Bool {
+            node.label == expected || node.value as? String == expected
+        }
+        XCTAssertEqual(snapshot.elementType, .window, summary, file: file, line: line)
+        XCTAssertEqual(snapshot.identifier, "settings.backups.restoreWindow", summary, file: file, line: line)
+        XCTAssertFalse(snapshot.frame.isEmpty, summary, file: file, line: line)
+        let titles = texts.filter { hasText($0.node, heading) }
+        guard titles.count == 1, let title = titles.first else {
+            XCTFail("Expected one exact native error heading; found \(titles.count).\n\(summary)", file: file, line: line)
+            return
+        }
+        let explanations = descendants.filter { $0.node.identifier == "settings.backups.listFailure" }
+        guard explanations.count == 1, let detail = explanations.first else {
+            XCTFail("Expected one settings.backups.listFailure; found \(explanations.count).\n\(summary)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(detail.node.elementType, .staticText, summary, file: file, line: line)
+        XCTAssertTrue(hasText(detail.node, explanation), "Expected exact native folder-access instruction.\n\(summary)",
+                      file: file, line: line)
+        for (text, visibleBounds) in [title, detail] {
+            let geometry = "Native error text frame=\(text.frame), viewport=\(visibleBounds).\n\(summary)"
+            XCTAssertFalse(text.frame.isEmpty, geometry, file: file, line: line)
+            XCTAssertTrue(snapshot.frame.contains(text.frame), "Native error text must be fully inside its restore window.\n\(geometry)",
+                          file: file, line: line)
+            XCTAssertFalse(visibleBounds.isEmpty, geometry, file: file, line: line)
+            XCTAssertTrue(visibleBounds.contains(text.frame), "Native error text must be fully inside its usable viewport.\n\(geometry)",
+                          file: file, line: line)
+        }
+        for message in absent {
+            XCTAssertFalse(texts.contains { hasText($0.node, message) }, "Unexpected \(message.debugDescription).\n\(summary)",
+                           file: file, line: line)
+        }
+    }
+    #endif
 
     private func assertProgress(_ identifier: String, label expectedLabel: String, in app: XCUIApplication,
                                 file: StaticString = #filePath, line: UInt = #line) {
