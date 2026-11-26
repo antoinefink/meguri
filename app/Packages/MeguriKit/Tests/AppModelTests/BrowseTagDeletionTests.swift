@@ -36,6 +36,89 @@ import Testing
         #expect(backend.texts.isEmpty)
     }
 
+    @Test(arguments: [false, true])
+    func successfulSaveRevalidatesAnInvalidatedModelTree(duringSave: Bool) async {
+        let backend = TagDeletionBackend(), model = BrowseModel(backend: backend)
+        backend.coreGeneration = 41
+        await model.refreshTags()
+        let target = model.tagDeletion.target(["brask::oddly"])
+        model.tagDeletion.saveFirst = {
+            if duringSave { Self.invalidateTagTree(model) }
+            #expect(model.tagDeletion.expectedGeneration() == nil)
+            #expect(!model.hasTag("brask::oddly"))
+            return true
+        }
+        model.tagDeletion.delete(target)
+        if !duringSave { Self.invalidateTagTree(model) }
+        await model.tagDeletion.waitForCompletion()
+        #expect(backend.texts == ["brask::oddly"] && backend.expectedGenerations == [41])
+        #expect(model.tagDeletion.announcement?.count == 2 && model.tagDeletion.failed == nil)
+        #expect(!model.tagDeletion.busy)
+    }
+
+    @Test(arguments: [["brask", "brask::oddly"], ["brask", "Brask"], ["brask", "brask::odd"], ["brask", "missing"]])
+    func authoritativeRevalidationRequiresEveryExactMember(names: [String]) async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        var treeGeneration: UInt64? = 41
+        backend.coreGeneration = 41
+        deletion.expectedGeneration = { treeGeneration }
+        deletion.available = { true }
+        deletion.contains = { _ in treeGeneration != nil }
+        deletion.saveFirst = { treeGeneration = nil; return true }
+        let target = deletion.target(names)
+        deletion.delete(target)
+        await deletion.waitForCompletion()
+        let exists = names == ["brask", "brask::oddly"]
+        #expect(backend.texts == (exists ? ["brask brask::oddly"] : []))
+        #expect(deletion.failed == (exists ? nil : target))
+        #expect((deletion.announcement != nil) == exists && !deletion.busy)
+    }
+
+    @Test func authoritativeReadFailureIsReportedAndCanBeRetried() async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        var treeGeneration: UInt64? = 41
+        backend.coreGeneration = 41
+        deletion.expectedGeneration = { treeGeneration }
+        deletion.available = { true }
+        deletion.contains = { _ in treeGeneration != nil }
+        deletion.saveFirst = { treeGeneration = nil; return true }
+        backend.readTree = { throw BridgeError.unavailable(reason: "synthetic") }
+        let target = deletion.target(["brask"])
+        deletion.delete(target)
+        await deletion.waitForCompletion()
+        #expect(backend.texts.isEmpty && deletion.failed == target && !deletion.busy)
+        #expect(deletion.announcement == nil)
+        treeGeneration = 41 // The same collection's cache reload enables Retry.
+        backend.readTree = nil
+        #expect(deletion.canDelete(target))
+        deletion.delete(target)
+        await deletion.waitForCompletion()
+        #expect(backend.texts == ["brask"] && backend.expectedGenerations == [41])
+        #expect(deletion.failed == nil && deletion.announcement?.count == 2)
+    }
+
+    @Test(arguments: [false, true])
+    func replacementDuringAuthoritativeReadNeverDispatches(observedReplacement: Bool) async {
+        let backend = TagDeletionBackend(), model = BrowseModel(backend: backend)
+        backend.coreGeneration = 41
+        await model.refreshTags()
+        let target = model.tagDeletion.target(["brask"])
+        model.tagDeletion.saveFirst = {
+            Self.invalidateTagTree(model)
+            return true
+        }
+        backend.readTree = {
+            backend.coreGeneration = 42 // Successor deliberately has identical names.
+            if observedReplacement { model.collectionReplaced() }
+            return backend.reads.tagNodes
+        }
+        model.tagDeletion.delete(target)
+        await model.tagDeletion.waitForCompletion()
+        #expect(backend.texts.isEmpty && backend.expectedGenerations.isEmpty)
+        #expect(model.tagDeletion.announcement == nil && !model.tagDeletion.busy)
+        #expect(model.tagDeletion.failed == (observedReplacement ? nil : target))
+    }
+
     @Test func completionSurvivesTreeInvalidationAcrossTheWrite() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
         backend.coreGeneration = 41
@@ -249,6 +332,18 @@ import Testing
             if duringSave { #expect(deletion.failed == target) }
             else { #expect(deletion.failed == nil && !deletion.canDelete(target)) }
         }
+    }
+
+    private static func invalidateTagTree(_ model: BrowseModel) {
+        // Hold the cache at transient nil instead of racing its eager reload.
+        let ready = model.ready
+        model.ready = { false }
+        model.changesCommitted(ChangeSet(wholeCollection: false, source: .userUndoable,
+            cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [],
+            tags: [.init(name: "brask", change: .updated)], revlogAdded: [], revlogRemoved: [],
+            mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [], skippedIncomingNotes: [],
+            skippedIncomingDecks: [], collectionRow: false), seq: 1)
+        model.ready = ready
     }
 
 }

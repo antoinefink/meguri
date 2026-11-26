@@ -53,17 +53,28 @@ public final class BrowseTagDeletion {
         announcement = nil
         task = Task {
             defer { if target.epoch == epoch { busy = false; task = nil } }
-            guard matchesTree(target), available(), !Task.isCancelled else { return }
+            guard isCurrent(target), !Task.isCancelled else { return }
+            guard available() else { failed = target; return }
             // A global tag delete rewrites notes too: save the inspector's draft
             // first, just as the table's commands do, then recheck its collection.
             guard await saveFirst() else {
                 if isCurrent(target) { failed = target }
                 return
             }
-            guard matchesTree(target), !Task.isCancelled else { return }
-            guard available(), target.names.allSatisfy(contains) else { failed = target; return }
+            guard isCurrent(target), !Task.isCancelled else { return }
+            guard available() else { failed = target; return }
             do {
                 guard let expectedGeneration = target.expectedGeneration else { return }
+                // Saving a note can invalidate the cached tree before its
+                // replacement arrives. Revalidate the admitted command against
+                // an authoritative read, retaining its original collection scope.
+                if !matchesTree(target) || !target.names.allSatisfy(contains) {
+                    let tree = try await backend.scopedTagTree()
+                    guard isCurrent(target), !Task.isCancelled else { return }
+                    let names = Set(BrowseModel.tagNames(tree.value))
+                    guard available(), tree.generation == expectedGeneration,
+                          target.names.allSatisfy(names.contains) else { failed = target; return }
+                }
                 let result = try await backend.deleteTags(text: target.names.joined(separator: " "), expectedGeneration: expectedGeneration)
                 // The write's change event can invalidate the tree before this
                 // result arrives. Verify its retained scope against the receipt.
