@@ -559,18 +559,16 @@ struct BackupRestoreContent: View {
                         .accessibilityValue(Text("In progress", bundle: .module))
                         .accessibilityIdentifier("settings.backups.loading")
                 } else if showsListFailure, let error = presentation.listFailure {
-                    ScrollView {
-                        ContentUnavailableView {
-                            Label { Text("Unable to Load Backups", bundle: .module).backupMacLightTextStyle() } icon: { Image(systemName: "exclamationmark.triangle") }
-                        } description: {
-                            BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("settings.backups.listFailure")
-                        } actions: {
-                            retryButton
-                        }
-                        restoreNotices
+                    #if os(macOS)
+                    ViewThatFits(in: .vertical) {
+                        listFailureContent(error)
+                        ScrollView { listFailureContent(error) }
                     }
+                    #else
+                    ScrollView {
+                        listFailureContent(error)
+                    }
+                    #endif
                 } else if presentation.entries.isEmpty {
                     ContentUnavailableView {
                         Label { Text("No Backups Yet", bundle: .module).backupMacLightTextStyle() } icon: { Image(systemName: "clock.arrow.circlepath") }
@@ -584,6 +582,37 @@ struct BackupRestoreContent: View {
                 }
                 if !showsListFailure { restoreNotices }
             }
+    }
+    @ViewBuilder private func listFailureContent(_ error: MaintenanceError) -> some View {
+        let title = Text("Unable to Load Backups", bundle: .module).backupMacLightTextStyle()
+        #if os(macOS)
+        let failure = BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false,
+                                        ioMessage: "Check access to the backup folder and try again.")
+        #else
+        let failure = BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
+        #endif
+        let message = failure
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("settings.backups.listFailure")
+        #if os(macOS)
+        VStack {
+            title.font(.headline).accessibilityAddTraits(.isHeader)
+            message.font(.body)
+            retryButton
+            restoreNotices
+        }
+        .padding()
+        .fixedSize(horizontal: false, vertical: true)
+        #else
+        ContentUnavailableView {
+            Label { title } icon: { Image(systemName: "exclamationmark.triangle") }
+        } description: {
+            message
+        } actions: {
+            retryButton
+        }
+        restoreNotices
+        #endif
     }
     private var retryButton: some View {
         Button(action: refresh) {
@@ -827,6 +856,7 @@ private struct BackupFailureText: View {
     let candidateActive: Bool
     let uncertain: Bool
     let restore: Bool
+    var ioMessage: LocalizedStringKey = "The backup could not be read or written. Check file access and free space, then try again."
     var body: some View {
         VStack(alignment: .leading) {
             Text(cause, bundle: .module)
@@ -861,7 +891,7 @@ private struct BackupFailureText: View {
         case .collectionUnavailable: "The collection is unavailable. Wait for the current operation, or reopen Meguri and try again."
         case .destinationExists: "A backup with this name already exists. Try again shortly."
         case .invalidArgument: "This backup is no longer available. Refresh the list and choose another."
-        case .io: "The backup could not be read or written. Check file access and free space, then try again."
+        case .io: ioMessage
         }
     }
 }

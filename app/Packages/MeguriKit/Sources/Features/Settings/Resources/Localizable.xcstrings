@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Check access to the backup folder and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check access to the backup folder and try again."
+          }
+        }
+      }
+    },
     "The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing.": {
       "localizations": {
         "en": {
