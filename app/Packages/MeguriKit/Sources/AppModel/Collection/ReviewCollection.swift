@@ -356,13 +356,18 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     private var backupEditorDecision: EditorReplacementDecision?
     private var backupEditorReservation: UUID?
     private var backupPreparationTask: Task<Void, any Error>?
+    private var backupPreparationRevision: UInt64 = 0
+    private var backupRestoreDrainPending = false
+    @ObservationIgnored var readBackupLifecycle: @MainActor () async throws -> CollectionLifecycle = {
+        try await CoreCollectionService().lifecycle()
+    }
     var backupGeneration: UInt64 { generation }
     var backupsWritable: Bool { !backupRecoveryRequired && !closed && !closing && !opening && lifecycle == .ready(generation: generation) }
     var backupCancellationSafe: Bool {
         if case .exclusiveBusy(_, _, let cancellable) = lifecycle { return cancellable }
         return true
     }
-    var backupsAvailable: Bool { !backupRecoveryRequired && !closed && !closing && !opening && !starting && !sync.providerHandoffInProgress }
+    var backupsAvailable: Bool { !backupRecoveryRequired && !closed && !closing && (!opening || backupRestoreDrainPending) && !starting && !sync.providerHandoffInProgress }
     private var entryOwner: CollectionEntryCoordinator?
     public var entry: CollectionEntryCoordinator {
         if let entryOwner { return entryOwner }
@@ -920,6 +925,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
 
     public func start() async {
         guard state == .unopened || state == .noFile || isFailed, !opening else { return }
+        backupPreparationRevision &+= 1
         #if DEBUG
         openFailureDiagnosticValue = nil
         #endif
@@ -1192,6 +1198,8 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         return try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
     }
     func prepareBackups() async throws {
+        // A refused pre-write drain retains the already prepared predecessor.
+        if backupRestoreDrainPending { return }
         if let backupPreparationTask { try await backupPreparationTask.value; return }
         let task = Task {
             defer { backupPreparationTask = nil }
@@ -1203,22 +1211,50 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     private func prepareBackupHost() async throws {
         if let openTask { await openTask.value }
         guard !closing, !closed, !opening else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-        let prior = (state, lifecycle)
+        let prior = state, expected = backupPreparationRevision, originalGeneration = generation
+        func requireCurrent() throws {
+            guard !closing, !closed, !opening, expected == backupPreparationRevision, generation == originalGeneration else {
+                throw CancellationError()
+            }
+        }
         let location = try await prepareEntry()
+        try requireCurrent()
         let recovery = CoreManualTransferService(location: location,
             clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         try await recovery.prepareLocalRecoveryHost()
-        let retained = try await collection.prepareCloudConnectionHost(location,
-            randomSeed: try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max))
-        guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-        generation = retained
-        lifecycle = try await collection.lifecycle()
+        try requireCurrent()
+        let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+        try requireCurrent()
+        let retained = try await collection.prepareCloudConnectionHost(location, randomSeed: seed)
+        try requireCurrent()
+        let actual = try await readBackupLifecycle()
+        try requireCurrent()
         // Preparing the local recovery host neither opens the damaged file nor
         // takes away its recovery presentation. No account/network is required.
-        if case .failed = prior.0 { state = prior.0 }
-        else if prior.0 == .noFile { state = .noFile }
+        let presentation: State
+        switch actual {
+        case .ready(let next):
+            guard next == retained else { throw CancellationError() }
+            presentation = .ready
+        case .failed(let reason):
+            if case .failed = prior { presentation = prior }
+            else { presentation = .failed(Self.explanation(reason)) }
+        case .noCollection: presentation = .noFile
+        default: throw BridgeError.busy(runningOperation: "collection preparation")
+        }
+        // No suspension between validating the owner and publishing its state.
+        // Core's setup job drains and releases its open reservation itself; a
+        // stale preparation must never close a successor's retained host.
+        generation = retained; lifecycle = actual; state = presentation
     }
     func beginBackupRestore() async throws {
+        if backupRestoreDrainPending {
+            guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            // Only a successful retry may release the old sync capability.
+            try await drainEntryActivation()
+            backupRestoreDrainPending = false
+            _ = await finishBackupRestore(candidateActive: false, generation: nil)
+        }
         guard !closing, !closed, !opening else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         let decision = EditorReplacementDecision()
@@ -1233,15 +1269,22 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             throw CancellationError()
         }
         let previous = (state: state, lifecycle: lifecycle, generation: generation)
+        var drained = false
         do {
             try beginManualActivation(replacement: admission.id)
             backupRestoreState = previous
             sync.beginEntryActivation()
             backupTrigger.pauseTimer()
             try await drainEntryActivation()
+            drained = true
             try decision.admitEffect()
         } catch {
-            if backupRestoreState != nil { _ = await finishBackupRestore(candidateActive: false, generation: nil) }
+            if backupRestoreState != nil, !drained {
+                // No collection write ran. Keep input and sync held, but retain
+                // the healthy predecessor's presentation and permit drain retry.
+                backupRestoreDrainPending = true
+                finishEditorReplacement(admission.id); backupEditorReservation = nil; backupEditorDecision = nil
+            } else if backupRestoreState != nil { _ = await finishBackupRestore(candidateActive: false, generation: nil) }
             else { finishEditorReplacement(admission.id); backupEditorReservation = nil; backupEditorDecision = nil }
             throw error
         }
@@ -1436,6 +1479,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
               discovery || addFlowOwner?.isPresented != true else { throw BridgeError.busy(runningOperation: "Add Note") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
+        backupPreparationRevision &+= 1
         opening = true
         // A transfer may replace the collection: its last read is not kept for it.
         dropKeptHome(replaced: false)
@@ -1451,6 +1495,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 (replacement != nil && entryOwner === entry && allowsEntryActivation(entry: entry)) else {
             throw BridgeError.busy(runningOperation: "collection preparation")
         }
+        backupPreparationRevision &+= 1
         opening = true
         // An import or a first download replaces the collection: its last read is not kept for it.
         dropKeptHome(replaced: false)
@@ -2836,6 +2881,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         closing = true
         defer {
             closing = false
+            if closed, backupRestoreDrainPending {
+                backupRestoreDrainPending = false; backupRestoreState = nil; opening = false
+            }
             if !closed, !backupRecoveryRequired, case .ready(let next) = lifecycle {
                 backupTrigger.own(next)
                 backupTrigger.setTimerEnabled(foreground)

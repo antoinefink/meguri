@@ -132,12 +132,11 @@ private struct BackupLimitRow: View {
     let minimum: UInt32
     let enabled: Bool
     let save: (UInt32) -> Void
-    @State private var draft = ""
-    @State private var invalid = false
+    @State private var draft = BackupLimitDraft()
     @FocusState private var focused: Bool
     var body: some View {
         LabeledContent {
-            TextField(text: $draft) { Text(title, bundle: .module) }
+            TextField(text: $draft.text) { Text(title, bundle: .module) }
                 .labelsHidden()
                 .accessibilityLabel(Text(title, bundle: .module))
                 .accessibilityIdentifier(identifier)
@@ -147,17 +146,17 @@ private struct BackupLimitRow: View {
                 #endif
                 .focused($focused)
                 .onSubmit(commit)
-                .onChange(of: focused) { _, active in if !active { commit() } }
+                .onChange(of: focused) { _, active in
+                    if active { draft.reset(to: value) } else { commit() }
+                }
                 .disabled(!enabled)
         } label: { Text(title, bundle: .module) }
-        .onChange(of: value, initial: true) { _, value in if !focused { draft = String(value) } }
-        if invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
+        .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
+        if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
     }
     private func commit() {
         guard enabled else { return }
-        guard let number = UInt32(draft.trimmingCharacters(in: .whitespaces)), number >= minimum, number <= 9999 else { invalid = true; return }
-        invalid = false
-        if number != value { save(number) }
+        if let number = draft.commit(value: value, minimum: minimum) { save(number) }
     }
 }
 

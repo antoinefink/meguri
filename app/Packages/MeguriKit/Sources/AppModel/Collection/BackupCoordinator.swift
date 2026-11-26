@@ -46,6 +46,7 @@ public final class BackupCoordinator {
     @ObservationIgnored private var operation: MaintenanceOperation?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var loadRevision: UInt64 = 0
+    @ObservationIgnored private var limitsRevision: UInt64 = 0
     @ObservationIgnored private var ownership: UInt64 = 0
     @ObservationIgnored private var cancellationRequested = false
 
@@ -74,10 +75,11 @@ public final class BackupCoordinator {
             selectEligible()
             // A damaged host can still list/restore even when config/status reads fail.
             let readStatus = try? await service.status()
+            let limitsRead = limitsRevision, limitsWereSaving = savingLimits
             let readLimits = try? await service.backupLimits()
             guard read == loadRevision, expected == ownership, generation == host.backupGeneration else { return }
             status = readStatus
-            if !savingLimits { limits = readLimits }
+            if !limitsWereSaving, !savingLimits, limitsRead == limitsRevision { limits = readLimits }
         } catch {
             guard read == loadRevision, expected == ownership else { return }
             failure = Self.cause(error)
@@ -191,6 +193,7 @@ public final class BackupCoordinator {
         }
         guard current != limits else { return }
         let expected = ownership
+        limitsRevision &+= 1
         savingLimits = true
         defer { savingLimits = false }
         do {
