@@ -54,11 +54,13 @@ import XCTest
         XCTAssertTrue((element(app, "home.filteredStudy.first.search").value as? String ?? "").contains("is:due"))
         try replace("home.filteredStudy.name", with: "Touch Preview", app: app)
         try replace("home.filteredStudy.first.limit", with: "1", app: app)
+        finishCardLimitEditing(app)
         try setSwitch("home.filteredStudy.secondEnabled", to: true, app: app)
         XCTAssertTrue(element(app, "home.filteredStudy.second.search").waitForExistence(timeout: 5),
                       "Enabling the second search exposes its native fields")
         try replace("home.filteredStudy.second.search", with: "tag:filtered-ui", app: app)
         try replace("home.filteredStudy.second.limit", with: "5", app: app)
+        finishCardLimitEditing(app)
         try setSwitch("home.filteredStudy.reschedule", to: false, app: app)
         XCTAssertTrue(element(app, "home.filteredStudy.again").waitForExistence(timeout: 5),
                       "Disabling rescheduling exposes the preview delays")
@@ -249,6 +251,23 @@ import XCTest
         return node.children.flatMap { contentPosition($0) }
     }
 
+    private func finishCardLimitEditing(_ app: XCUIApplication) {
+        // Only these single-line limit edits precede switches. Do not submit
+        // or dismiss the keyboard while editing multiline literal tags.
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return }
+        let action: XCUIElement
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            action = app.buttons["Hide keyboard"].firstMatch
+        } else {
+            action = keyboard.buttons.matching(NSPredicate(
+                format: "identifier == %@ OR label == %@", "Return", "return")).firstMatch
+        }
+        guard action.exists && action.isEnabled && action.isHittable else { return }
+        action.tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "Native card-limit keyboard dismissal")
+    }
+
     private func setSwitch(_ id: String, to enabled: Bool, app: XCUIApplication) throws {
         _ = try visible(id, app: app)
         let matches = app.switches.matching(identifier: id)
@@ -266,6 +285,16 @@ import XCTest
         // sits at the trailing edge even when AX reports the whole Form row.
         let frame = thumb.frame
         XCTAssertTrue(frame.width > 0 && frame.height > 0)
+        let point = CGPoint(x: frame.maxX - min(30, frame.width / 2), y: frame.midY)
+        // isHittable can describe an exposed part of the row while the chosen
+        // thumb point is covered by the keyboard's accessory toolbar.
+        XCTAssertTrue(app.frame.contains(point), "Switch tap point is onscreen: " + id)
+        XCTAssertFalse(app.keyboards.allElementsBoundByIndex.contains {
+            $0.exists && $0.frame.contains(point)
+        }, "Switch tap point is covered by the keyboard: " + id)
+        XCTAssertFalse(app.toolbars.allElementsBoundByIndex.contains {
+            $0.exists && $0.isHittable && $0.frame.contains(point)
+        }, "Switch tap point is covered by a toolbar: " + id)
         thumb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
             dx: frame.width - min(30, frame.width / 2), dy: frame.height / 2)).tap()
         let changed = wait { switchValue(control) == enabled }

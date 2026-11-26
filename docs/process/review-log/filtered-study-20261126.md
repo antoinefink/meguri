@@ -69,3 +69,5 @@ Planinterop reviewed the full 22,564-byte touch test after it began editing visi
 Planinterop reviewed the full 22,619-byte touch journey after native Select All replaced cursor-relative deletion in its text helper. Its public synthetic content has verified SHA-256 `c26eb356b8475eb65c523bce25dd5f24869e38eda160c97f12442361d1b57701`.
 
 Plancheck reviewed the complete 14,332-byte form with persistent touch labels. It contains public native controls, localization keys, bindings and accessibility identifiers. Its verified SHA-256 is `bcc838fe6ba4a79d42d24870ed7a35aa3f6d03132dc129b86ab5024047e9152d`.
+
+Planinterop reviewed the complete 24,257-byte touch test after it used the native Return or Hide button before switch interactions. The iPhone hierarchy exposed Return as a button. The source uses synthetic study data and its verified public SHA-256 is `fb0b2c9568055b9bd202aef4888ad6c1cb1d9ce53beb51d5fb5f87f924554caa`.
