@@ -46,8 +46,9 @@ import XCTest
         let addWindow = app.windows["editor.add.window"]
         XCTAssertTrue(addWindow.waitForExistence(timeout: 15))
         try enlarge(addWindow, in: app)
-        try click(addWindow.popUpButtons["editor.add.type"])
-        try click(app.menuItems["Image Occlusion"])
+        try prepareInput()
+        addWindow.popUpButtons["editor.add.type"].click()
+        app.menuItems["Image Occlusion"].click()
         let paste = addWindow.buttons["Paste Image"]
         XCTAssertTrue(paste.waitForExistence(timeout: 15), "the on-demand stock type opens the image picker")
 
@@ -164,20 +165,22 @@ import XCTest
             let available = wait { actions.exists && actions.isEnabled && actions.isHittable }
             if !available { try attachReviewInputEvidence(bundle: bundle, stage: "io-toolbar-unavailable") }
             XCTAssertTrue(available)
-            try click(actions)
+            // Foreground was established before opening; activation while
+            // tracking dismisses the native menu.
+            actions.click()
             let edit = actions.menuItems["review.menu.editNote"]
             let enabled = wait { edit.exists && edit.isEnabled }
             if !enabled { try attachReviewInputEvidence(bundle: bundle, stage: "io-toolbar-edit-disabled") }
             XCTAssertTrue(enabled)
-            try click(edit)
+            edit.click()
         } else {
             let note = app.menuBars.menuBarItems["Note"]
             let command = note.menuItems.matching(NSPredicate(format: "title == %@", "Edit Note")).firstMatch
             let enabled = wait { command.exists && command.isEnabled }
             if !enabled { try attachReviewInputEvidence(bundle: bundle, stage: "io-menu-edit-disabled") }
             XCTAssertTrue(enabled)
-            try click(note)
-            try click(command)
+            note.click()
+            command.click()
         }
         let window = app.windows["review.editCurrent.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
