@@ -35,12 +35,12 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     /// Called at host creation and field-change boundaries, never from body.
     /// Binding echoes keep the codec, original source and local history intact.
-    func refreshMaskSession() {
+    func refreshMaskSession(startingHideAll: Bool = true) {
         guard let roles = draft.occlusionRoles else { return }
         let field = draft.values[roles.occlusions], image = draft.values[roles.image]
         if field != readOcclusionField {
             if let maskSession { maskSession.receive(field, isEditing: draft.noteID != nil) }
-            else { maskSession = MaskEditorSession(field: field, isEditing: draft.noteID != nil) }
+            else { maskSession = MaskEditorSession(field: field, isEditing: draft.noteID != nil, startingHideAll: startingHideAll) }
             readOcclusionField = field
             occlusionReadingError = maskSession?.readingError
         }
@@ -187,7 +187,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         self.draft = draft; self.isCurrent = isCurrent
         document = previous.document; relay = previous.relay; webView = previous.webView
         super.init()
-        refreshMaskSession()
+        // O7/M2: seed the blank next canvas without an edit or a history step,
+        // before its next image is acquired.
+        refreshMaskSession(startingHideAll: previous.maskSession?.hideAll ?? true)
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
         browsing = previous.browsing
         occlusionPhotoMaximumDimension = previous.occlusionPhotoMaximumDimension

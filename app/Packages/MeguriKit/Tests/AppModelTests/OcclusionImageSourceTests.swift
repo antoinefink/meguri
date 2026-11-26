@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import Network
 import Testing
+import UniformTypeIdentifiers
 @testable import AppModel
 @testable import Editor
 
@@ -97,6 +98,34 @@ private final class OcclusionHTTPImage {
 }
 
 extension ReviewCollectionStartupTests {
+    @MainActor private func checkOrderedOcclusionDrops(host: FieldEditorHost, root: URL) async throws {
+        let session = host.occlusionImage
+        let roles = try #require(host.draft.occlusionRoles)
+        let png = try OcclusionFieldFlowTests.bitmap()
+        let damaged = root.appending(path: "damaged.png")
+        let good = root.appending(path: "ordered.png")
+        try Data("damaged PNG".utf8).write(to: damaged)
+        try png.write(to: good)
+        let before = try await CoreMediaService().trackedNames().names
+        let untouched = NSItemProvider()
+        untouched.registerDataRepresentation(forTypeIdentifier: UTType.url.identifier, visibility: .all) { _ in
+            Issue.record("A usable earlier file must prevent loading a later URL provider")
+            return nil
+        }
+        // Unsupported, unreadable and undecodable files must all fall through.
+        let urls = [root.appending(path: "not-an-image.pdf"), root.appending(path: "missing.png"), damaged, good]
+        #expect(session.chooseProvider(urls.map { NSItemProvider(object: $0 as NSURL) } + [untouched], host: host))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while session.busy && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(!session.busy)
+        #expect(session.error == nil && session.image?.name == "ordered.png")
+        #expect(session.image?.size == CGSize(width: 4, height: 2))
+        #expect(OcclusionImageField.name(in: host.draft.values[roles.image]) == "ordered.png")
+        let after = try await CoreMediaService().trackedNames()
+        #expect(Set(after.names.map(\.name)).subtracting(before.map(\.name)) == ["ordered.png"])
+        #expect(try MediaFolder.read("ordered.png", in: after.root) == png)
+    }
+
     @Test @MainActor func occlusionImageSourcesUseRealFetchAndFenceCancellationAndDraftChanges() async throws {
         let path = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
         let root = URL(filePath: String(cString: path)).appending(path: UUID().uuidString)
@@ -117,6 +146,7 @@ extension ReviewCollectionStartupTests {
             let host = try #require(owner.addNoteFlow.runtime as? FieldEditorHost)
             let roles = try #require(host.draft.occlusionRoles)
             let session = host.occlusionImage
+            try await checkOrderedOcclusionDrops(host: host, root: root)
             let svg = Data("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"12\"><rect width=\"24\" height=\"12\" fill=\"red\"/></svg>".utf8)
             let good = try OcclusionHTTPImage(body: svg)
             defer { good.stop() }

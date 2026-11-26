@@ -348,6 +348,40 @@ extension FocusedValues {
     }
 }
 
+/// Add/Edit hosting roots can supply mask focus without a workspace context.
+/// When focus returns to a field, leave its native Undo/Redo items in charge.
+struct NativeUndoCommands {
+    var context: NativeCommandContext?
+    var maskEditor: MaskEditorCommandContext?
+
+    var replacesUndo: Bool { context?.replacesUndo == true || maskEditor?.isEnabled(.select) == true }
+
+    func route(redo: Bool) -> EditUndoRouting.Route {
+        if let context { return context.undoRoute(redo: redo) }
+        var inputs = EditUndoRouting.Inputs()
+        #if os(macOS)
+        let manager = MacUndoResponder.shared.firstResponder?.undoManager
+        inputs.textOwnsUndo = true
+        inputs.textAvailable = (redo ? manager?.canRedo : manager?.canUndo) == true
+        inputs.textTitle = redo ? manager?.redoMenuItemTitle : manager?.undoMenuItemTitle
+        #endif
+        return EditUndoRouting.route(inputs)
+    }
+
+    func enabled(redo: Bool) -> Bool {
+        maskEditor?.isEnabled(redo ? .redo : .undo) == true || route(redo: redo).enabled
+    }
+
+    func perform(redo: Bool) {
+        if maskEditor?.performIfEnabled(redo ? .redo : .undo) == true { return }
+        if let context { context.performUndo(redo: redo); return }
+        #if os(macOS)
+        guard route(redo: redo).enabled else { return }
+        NSApp.sendAction(redo ? Selector(("redo:")) : Selector(("undo:")), to: nil, from: nil)
+        #endif
+    }
+}
+
 /// N20.4: File, Edit, Deck and Card, the same on the Mac and in the iPad menu
 /// bar. There is no Study menu: Undo and Redo are Edit's alone.
 struct AppCommands: Commands {
@@ -385,22 +419,23 @@ struct AppCommands: Commands {
         }
         // Mask history takes precedence throughout its focused controls. With
         // no mask step, keep the existing parent route (also in Add/Edit sheets).
-        if let context, context.replacesUndo || maskEditor?.isEnabled(.select) == true {
+        let history = NativeUndoCommands(context: context, maskEditor: maskEditor)
+        if history.replacesUndo {
             CommandGroup(replacing: .undoRedo) {
-                let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
+                let undo = history.route(redo: false), redo = history.route(redo: true)
                 let maskUndo = maskEditor?.isEnabled(.undo) == true
                 let maskRedo = maskEditor?.isEnabled(.redo) == true
-                let reviewOwnsKeys = context.review != nil && maskEditor?.isEnabled(.select) != true
+                let reviewOwnsKeys = context?.review != nil && maskEditor?.isEnabled(.select) != true
                 Button(maskUndo ? String(localized: "Undo") : Self.title(undo, redo: false)) {
-                    if maskEditor?.performIfEnabled(.undo) != true { context.performUndo(redo: false) }
+                    history.perform(redo: false)
                 }
                     .keyboardShortcut(undoKey("z", modifiers: .command, review: reviewOwnsKeys))
-                    .disabled(!maskUndo && !undo.enabled)
+                    .disabled(!history.enabled(redo: false))
                 Button(maskRedo ? String(localized: "Redo") : Self.title(redo, redo: true)) {
-                    if maskEditor?.performIfEnabled(.redo) != true { context.performUndo(redo: true) }
+                    history.perform(redo: true)
                 }
                     .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: reviewOwnsKeys))
-                    .disabled(!maskRedo && !redo.enabled)
+                    .disabled(!history.enabled(redo: true))
             }
         }
         // The system's Find, Spelling, Substitutions and other text groups stay;

@@ -86,6 +86,7 @@ final class OcclusionImageSession {
 
     private func loadProvider(at index: Int,
                               ticket: UUID, host: FieldEditorHost) {
+        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
         guard index < providerCandidates.count else { busy = false; error = IONoteText.noPasteImage; return }
         let (provider, type) = providerCandidates[index]
         providerProgress = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
@@ -100,12 +101,61 @@ final class OcclusionImageSession {
                           url.isFileURL || Self.isRemoteImageURL(url) else {
                         self.loadProvider(at: index + 1, ticket: ticket, host: host); return
                     }
-                    self.busy = false
-                    if url.isFileURL { self.chooseFile(url, host: host) }
-                    else { self.chooseRemoteURL(url, host: host) }
-                } else { self.busy = false; self.chooseBitmap(data, host: host) }
+                    if url.isFileURL {
+                        guard Self.isImageFileURL(url) else {
+                            self.loadProvider(at: index + 1, ticket: ticket, host: host); return
+                        }
+                        self.prepareProvider(at: index, ticket: ticket, host: host) { asPNG in
+                            try await OcclusionImageInput.prepare(OcclusionImageInput.readFile(url),
+                                name: url.lastPathComponent, asPNG: asPNG)
+                        }
+                    } else { self.busy = false; self.chooseRemoteURL(url, host: host) }
+                } else {
+                    self.prepareProvider(at: index, ticket: ticket, host: host) { asPNG in
+                        try await OcclusionImageInput.prepare(data, name: nil, asPNG: asPNG)
+                    }
+                }
             }
         }
+    }
+
+    /// Probe only the current candidate. Failed reads/decodes may fall through;
+    /// once pixels are usable, import exactly once and never load later items.
+    private func prepareProvider(at index: Int, ticket: UUID, host: FieldEditorHost,
+                                 prepare: @escaping @Sendable (Bool) async throws -> OcclusionImageInput) {
+        guard let source = sourceRequest, let roles = host.draft.occlusionRoles else { return }
+        let original = host.draft.values[roles.image]
+        let current = { self.request == ticket && !source.isCancelled && host.acceptsHostInput && host.draft.values[roles.image] == original }
+        task = Task {
+            let prepared: OcclusionImageInput
+            do {
+                let png = (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false
+                guard current(), !Task.isCancelled else { return }
+                let preparation = Task.detached { try await prepare(png) }
+                prepared = try await withTaskCancellationHandler {
+                    try await preparation.value
+                } onCancel: { preparation.cancel() }
+            } catch {
+                guard current(), !Task.isCancelled else { return }
+                task = nil
+                loadProvider(at: index + 1, ticket: ticket, host: host)
+                return
+            }
+            guard current(), !Task.isCancelled else { return }
+            defer { if request == ticket { busy = false; task = nil } }
+            do {
+                try await store(prepared, host: host, source: source, roles: roles, current: current)
+            } catch {
+                guard current(), !Task.isCancelled else { return }
+                self.error = IONoteText.unreadableImage(prepared.name)
+            }
+        }
+    }
+
+    private static func isImageFileURL(_ url: URL) -> Bool {
+        url.isFileURL && (url.host == nil || url.host == "" || url.host == "localhost") &&
+            (OcclusionImageField.isUsableName(url.lastPathComponent) ||
+             UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
     }
 
     func cancel() {
@@ -214,22 +264,7 @@ final class OcclusionImageSession {
                     try await preparation.value
                 } onCancel: { preparation.cancel() }
                 guard current(), !Task.isCancelled else { return }
-                if prepared.bytes.isEmpty || prepared.bytes.count > 104_857_600 {
-                    let accepted = await withCheckedContinuation { continuation in
-                        sizeWarning = prepared.name; sizeWarningBytes = prepared.bytes.count; sizeAnswer = continuation
-                    }
-                    guard accepted, current(), !Task.isCancelled else { return }
-                }
-                // Core enforces generation at writer admission, even if the
-                // collection changes while this call is queued.
-                let stored = try await source.add(name: prepared.name, bytes: prepared.bytes, generation: host.draft.generation)
-                guard current(), !Task.isCancelled else { return }
-                sourceRequest = nil
-                let field = OcclusionImageField.html(name: stored)
-                host.setHostField(field, at: roles.image)
-                loadedField = field
-                image = OcclusionImageInput(name: stored, bytes: prepared.bytes, pixels: prepared.pixels)
-                replacing = false
+                try await store(prepared, host: host, source: source, roles: roles, current: current)
             } catch {
                 guard current(), !Task.isCancelled else { return }
                 if let failure = error as? FetchFailure {
@@ -237,6 +272,29 @@ final class OcclusionImageSession {
                 } else { self.error = IONoteText.unreadableImage(name) }
             }
         }
+    }
+
+    private func store(_ prepared: OcclusionImageInput, host: FieldEditorHost,
+                       source: ImageSourceRequest, roles: OcclusionFieldRoles,
+                       current: () -> Bool) async throws {
+        if prepared.bytes.isEmpty || prepared.bytes.count > 104_857_600 {
+            let accepted = await withCheckedContinuation { continuation in
+                sizeWarning = prepared.name; sizeWarningBytes = prepared.bytes.count; sizeAnswer = continuation
+            }
+            guard accepted, current(), !Task.isCancelled else { return }
+        }
+        guard current(), !Task.isCancelled else { return }
+        // Core enforces generation at writer admission, even if the
+        // collection changes while this call is queued.
+        let stored = try await source.add(name: prepared.name, bytes: prepared.bytes, generation: host.draft.generation)
+        guard current(), !Task.isCancelled else { return }
+        sourceRequest = nil
+        providerCandidates = []
+        let field = OcclusionImageField.html(name: stored)
+        host.setHostField(field, at: roles.image)
+        loadedField = field
+        image = OcclusionImageInput(name: stored, bytes: prepared.bytes, pixels: prepared.pixels)
+        replacing = false
     }
 
     private func watchDraft(_ host: FieldEditorHost, source: ImageSourceRequest) {

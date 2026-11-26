@@ -3,6 +3,15 @@ import Testing
 @testable import ImageOcclusion
 
 @MainActor @Suite struct MaskEditorCommandTests {
+    @Test(arguments: [false, true]) func nextAddCanvasStartsCleanInCarriedMode(hideAll: Bool) {
+        let session = MaskEditorSession(field: "", isEditing: false, startingHideAll: hideAll)
+        #expect(session.hideAll == hideAll && session.field.isEmpty && !session.isDirty)
+        #expect(session.document.shapes.isEmpty && !session.canUndo && !session.canRedo)
+        session.resetForImageChange()
+        #expect(session.hideAll == hideAll && session.field.isEmpty && !session.isDirty)
+        #expect(session.document.shapes.isEmpty && !session.canUndo && !session.canRedo)
+    }
+
     @Test func historyDispatchUsesSameGuardsForKeysMenusAndParentFallback() {
         let session = OcclusionDocumentTests().session()
         var active = true

@@ -50,6 +50,7 @@ enum MaskAlignment: String, CaseIterable {
     private var historyIndex = 0
 
     public var isDirty: Bool { document != initial }
+    public var hideAll: Bool { document.hideAll }
     public var canUndo: Bool { !polygon.isEmpty || historyIndex > 0 }
     public var canRedo: Bool { historyIndex + 1 < history.count }
     var canGroup: Bool {
@@ -58,11 +59,11 @@ enum MaskAlignment: String, CaseIterable {
     var canUngroup: Bool { document.items.contains { $0.count > 1 && selection.contains($0[0]) } }
     var displayed: OcclusionDocument { preview ?? document }
 
-    public init(field: String, isEditing: Bool) {
+    public init(field: String, isEditing: Bool, startingHideAll: Bool = true) {
         self.isEditing = isEditing
         self.field = field
         tool = isEditing ? .select : .rectangle
-        load(field, isEditing: isEditing)
+        load(field, isEditing: isEditing, startingHideAll: startingHideAll)
     }
 
     /// Host changes (including field editing and collection undo) replace the
@@ -72,13 +73,13 @@ enum MaskAlignment: String, CaseIterable {
         load(value, isEditing: isEditing)
     }
 
-    private func load(_ value: String, isEditing: Bool) {
+    private func load(_ value: String, isEditing: Bool, startingHideAll: Bool = true) {
         field = value; preview = nil; polygon = []; selection = []; errorKey = nil; readingError = nil
         do {
             let codec = try OcclusionCodec(field: value)
             self.codec = codec
             document = .init(shapes: codec.shapes.map { OcclusionShape($0) },
-                             hideAll: value.isEmpty && !isEditing ? true : codec.hideAll)
+                             hideAll: value.isEmpty && !isEditing ? startingHideAll : codec.hideAll)
             isReadable = true
         } catch {
             codec = nil; document = .init(); isReadable = false

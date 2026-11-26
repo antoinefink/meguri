@@ -4,7 +4,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
-import ImageOcclusion
+@testable import ImageOcclusion
 import Testing
 import UniformTypeIdentifiers
 import WebKit
@@ -336,6 +336,13 @@ extension ReviewCollectionStartupTests {
             #expect(imageSession.image?.size == CGSize(width: 8, height: 2))
             #expect(draft.values[roles.occlusions] == masks && draft.values[roles.image] != oldImage)
             #expect(try MediaFolder.read(imageName, in: media.root).isEmpty == false, "Changing images leaves the old file for Check Media")
+            let previousMasks = try #require(ioHost.maskSession)
+            previousMasks.setReferenceSizeIfNeeded(imageSize: .init(width: 800, height: 200),
+                area: .init(width: 800, height: 200), displayScale: 1)
+            previousMasks.setMode(false)
+            let savedMasks = previousMasks.field
+            ioHost.setHostField(savedMasks, at: roles.occlusions)
+            #expect(!previousMasks.hideAll && previousMasks.canUndo)
             draft.showsMaskEditor = false
             try await ioHost.setMode(.html, ord: roles.header)
             try #require(try await FieldEditorTests.replaceSource(ioHost, ord: roles.header, value: "<b>Diagram</b>"))
@@ -345,10 +352,15 @@ extension ReviewCollectionStartupTests {
             let added = try #require(await flow.save())
             #expect(added.cards.count == 2)
             let note = try await CoreNoteService().readNote(id: added.id)
-            #expect(note.fields[roles.occlusions] == masks && note.fields[roles.header] == "<b>Diagram</b>")
+            #expect(note.fields[roles.occlusions] == savedMasks && note.fields[roles.header] == "<b>Diagram</b>")
             #expect(note.fields[roles.backExtra] == "<i>Metadata</i>" && note.tags == ["io::flow", "kept"])
             let next = try #require(flow.draft)
             #expect(next.values[roles.occlusions].isEmpty && next.values[roles.image].isEmpty && next.showsMaskEditor)
+            let nextHost = try #require(flow.runtime as? FieldEditorHost)
+            let nextMasks = try #require(nextHost.maskSession)
+            #expect(nextMasks !== previousMasks && !nextMasks.hideAll)
+            #expect(nextMasks.document.shapes.isEmpty && !nextMasks.canUndo && !nextMasks.canRedo)
+            #expect(nextHost.occlusionImage.image == nil && nextMasks.field.isEmpty)
             #expect(await flow.requestClose())
             await owner.startStudy(deckID: draft.deck.id)
             let review = try #require(owner.review)
