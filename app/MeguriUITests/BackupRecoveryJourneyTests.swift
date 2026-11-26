@@ -544,6 +544,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         XCTAssertTrue(wait { target.exists && target.isEnabled && target.isHittable },
             "Expected an actionable native control: \(target.identifier)")
+        #if os(macOS)
+        try app.bringToFront(bundleIdentifier: bundle)
+        #endif
         target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).clickOrTap()
     }
 
