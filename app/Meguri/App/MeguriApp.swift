@@ -1,4 +1,5 @@
 import AppModel
+import Settings
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -165,6 +166,22 @@ struct MeguriApp: App {
             AppCommands()
             CloudSyncCommands(collection: collection)
         }
+        Window(BackupRestoreWindowLayout.title, id: BackupRestoreWindowLayout.id) {
+            #if MEGURI_TEST_HOOKS
+            if let state = TestHooks.BackupRestoreWindowPreview.state {
+                TestHooks.BackupRestoreWindowPreview.Content(state: state, configuration: configuration)
+            } else if let collection {
+                BackupRestoreWindow(collection: collection, configuration: configuration)
+            }
+            #else
+            if let collection { BackupRestoreWindow(collection: collection, configuration: configuration) }
+            #endif
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .defaultSize(BackupRestoreWindowLayout.defaultSize)
+        .windowResizability(.contentMinSize)
+        .commandsRemoved()
         SwiftUI.Settings {
             #if MEGURI_TEST_HOOKS
             if let preview = TestHooks.SyncRoutes.SettingsWindowPreview.shared.collection {

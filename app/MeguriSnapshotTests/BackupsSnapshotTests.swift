@@ -15,6 +15,8 @@ import Testing
                 let expected = SnapshotMatrix.cells(.pairwise, on: platform)
                 #expect(cases.filter { $0.state == state.rawValue }.map(\.cell) == expected)
                 #expect(cases.first { $0.state == state.rawValue }?.view() != nil)
+                let layout: SnapshotLayout = [.empty, .overflow, .error].contains(state) ? .backupRestore : .screen
+                #expect(cases.filter { $0.state == state.rawValue }.allSatisfy { $0.layout == layout })
             }
         }
     }

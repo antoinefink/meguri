@@ -24,9 +24,22 @@ public enum BackupsPreview: PreviewStates {
         .environment(\.openURL, OpenURLAction { _ in .handled })
     }
 
-    @MainActor public static func restore(_ state: PreviewState) -> some View {
-        BackupRestoreContent(presentation: restorePresentation(state), selectedName: .constant(selectedName(state)),
-                             refresh: {}, cancel: {}, restore: { _ in })
+    @MainActor public static func restore(_ state: PreviewState, cancel: @escaping () -> Void = {}) -> some View {
+        RestoreFixture(state: state, cancel: cancel)
+    }
+
+    private struct RestoreFixture: View {
+        let state: PreviewState
+        let cancel: () -> Void
+        @State private var selected: String?
+        init(state: PreviewState, cancel: @escaping () -> Void) {
+            self.state = state; self.cancel = cancel
+            _selected = State(initialValue: selectedName(state))
+        }
+        var body: some View {
+            BackupRestoreContent(presentation: restorePresentation(state), selectedName: $selected,
+                                 refresh: {}, cancel: cancel, restore: { _ in })
+        }
     }
 
     private static let limits = BackupLimits(daily: 12, weekly: 10, monthly: 9, minimumIntervalMinutes: 30)
@@ -65,6 +78,17 @@ public enum BackupsPreview: PreviewStates {
               wallTime: .init(year: 2026, month: 11, day: 22, hour: 8, minute: 0, second: 0), sizeBytes: 27_600_000),
     ]
 
+    private static var overflowEntries: [BackupEntry] {
+        let sameSecond = BackupEntry(name: "server-copy-2026-11-25-17.25.00.colpkg", kind: .serverCopy,
+            wallTime: entries[0].wallTime, sizeBytes: 28_300_000)
+        let older = (1...21).reversed().map { day in
+            BackupEntry(name: String(format: "backup-2026-11-%02d-08.00.00.colpkg", day), kind: .backup,
+                wallTime: .init(year: 2026, month: 11, day: UInt8(day), hour: 8, minute: 0, second: 0),
+                sizeBytes: 27_500_000)
+        }
+        return [entries[0], sameSecond] + Array(entries.dropFirst()) + older
+    }
+
     private static func selectedName(_ state: PreviewState) -> String? {
         switch state {
         case .typical: entries[0].name
@@ -78,7 +102,7 @@ public enum BackupsPreview: PreviewStates {
         case .empty: .init()
         case .typical: .init(entries: entries, provider: .localOnly)
         case .overflow:
-            .init(entries: entries, rejectedNames: [entries[3].name], provider: .meguri)
+            .init(entries: overflowEntries, rejectedNames: [entries[3].name], provider: .meguri)
         case .error: .init(listFailure: .io("Synthetic unreadable backup folder"))
         case .loading: .init(loading: true)
         }

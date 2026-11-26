@@ -403,11 +403,19 @@ import Testing
         ("settings/backups/overflow", .screen),
         ("settings/backups/error", .screen),
         ("settings/backups/loading", .screen),
+        #if os(macOS)
+        ("settings/backups/restore/empty", .screen),
+        ("settings/backups/restore/typical", .screen),
+        ("settings/backups/restore/overflow", .screen),
+        ("settings/backups/restore/error", .screen),
+        ("settings/backups/restore/loading", .screen),
+        #else
         ("settings/backups/restore/empty", .sheet),
         ("settings/backups/restore/typical", .sheet),
         ("settings/backups/restore/overflow", .sheet),
         ("settings/backups/restore/error", .sheet),
         ("settings/backups/restore/loading", .sheet),
+        #endif
         ("settings/import-export/error", .sheet),
         ("settings/import-export/loading", .sheet),
         ("settings/import-export/typical", .sheet),

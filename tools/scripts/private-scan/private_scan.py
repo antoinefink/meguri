@@ -935,7 +935,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '779ed4470a5cee15e0032580b31b6053ec425ea9c33865c87c6909936b0fca4f',
+        '102448d5a91090f1100d39c8d0f7225daa43113045b6b80e096e74b371ee0f74',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1093,9 +1093,9 @@ PUBLIC_ARTIFACTS = {
         '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
     # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
-        '0b4a1aa4b8af598fbd1f97d80e2894620413acf003708a745ff5c7339e33b596',
+        '2576b5eea8832dea7ddab4e88895497d7b5a119bc896f8cb2c0d2ccb6b24ff36',
     'docs/design/screen-inventory.yaml':
-        'cef48495e450b6ea42f401447b3165101f09f2119a751c34bef2e697a6d36a5d',
+        'b33bf7c5e36e81a305eb353917b2c660fd1e630f8817e24a44f381af44c6852d',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
@@ -1448,6 +1448,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': '06dd320c342942f2e84d5a8552493511310caca264929b1bf727eeb0a9910246',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '10614372d7279294c408d3638b01046d06c999d06d51f0daf413b17e2dee17ff',

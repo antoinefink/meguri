@@ -1,6 +1,7 @@
 import AppModel
 import Home
 import NoteTypes
+import Settings
 import SwiftUI
 
 /// Presents `AppNavigation.sheet` over the current screen (R25): Add, deck
@@ -16,9 +17,18 @@ struct PresentationHost: ViewModifier {
     /// The tab layout's list beside the detail: the naming form shows there (N20.3).
     var deckNameBesideList = false
 
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    private var opensRestoreWindow: Bool {
+        isActive && navigation.sheetHost == host && navigation.sheet == .backupRestore
+    }
+    #endif
+
     private var hostedSheet: SheetRoute? {
         guard isActive, navigation.sheetHost == host else { return nil }
         #if os(macOS)
+        // The intent still reserves collection input, but has its own native window.
+        if navigation.sheet == .backupRestore { return nil }
         if features.nativeMacWorkspace, case .add = navigation.sheet { return nil }
         if navigation.sheet == .noteTypeSave, features.noteTypeDeletionModel?.deletionQuestion != nil { return nil }
         #endif
@@ -47,6 +57,9 @@ struct PresentationHost: ViewModifier {
     func body(content: Content) -> some View {
         content
             #if os(macOS)
+            .onChange(of: opensRestoreWindow, initial: true) { _, requested in
+                if requested { openWindow(id: BackupRestoreWindowLayout.id) }
+            }
             .background {
                 if let model = features.noteTypeDeletionModel {
                     NoteTypeDeletionConfirmation(model: model,

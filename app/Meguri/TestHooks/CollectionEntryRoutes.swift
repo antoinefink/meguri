@@ -8,6 +8,13 @@ import SwiftUI
 
 extension TestHooks {
     enum CollectionEntryRoutes {
+        private static func backupRestore(_ state: PreviewState) -> InitialPresentation {
+            #if os(macOS)
+            BackupRestoreWindowPreview.presentation(state)
+            #else
+            .sheet { BackupsPreview.restore(state) }
+            #endif
+        }
         static func register(in registry: inout RouteRegistry) {
             registry.register("settings/account-sync/setup-needed") { context in
                 .screen { AccountSyncInspection(configuration: context.configuration) }
@@ -27,11 +34,11 @@ extension TestHooks {
             registry.register("settings/backups/overflow") { _ in .screen { BackupsPreview.settings(.overflow) } }
             registry.register("settings/backups/error") { _ in .screen { BackupsPreview.settings(.error) } }
             registry.register("settings/backups/loading") { _ in .screen { BackupsPreview.settings(.loading) } }
-            registry.register("settings/backups/restore/empty") { _ in .sheet { BackupsPreview.restore(.empty) } }
-            registry.register("settings/backups/restore/typical") { _ in .sheet { BackupsPreview.restore(.typical) } }
-            registry.register("settings/backups/restore/overflow") { _ in .sheet { BackupsPreview.restore(.overflow) } }
-            registry.register("settings/backups/restore/error") { _ in .sheet { BackupsPreview.restore(.error) } }
-            registry.register("settings/backups/restore/loading") { _ in .sheet { BackupsPreview.restore(.loading) } }
+            registry.register("settings/backups/restore/empty") { _ in backupRestore(.empty) }
+            registry.register("settings/backups/restore/typical") { _ in backupRestore(.typical) }
+            registry.register("settings/backups/restore/overflow") { _ in backupRestore(.overflow) }
+            registry.register("settings/backups/restore/error") { _ in backupRestore(.error) }
+            registry.register("settings/backups/restore/loading") { _ in backupRestore(.loading) }
             registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
             registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
             registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }

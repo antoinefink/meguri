@@ -113,7 +113,8 @@ enum MatrixRegistry {
             screen.type.previewStates.flatMap { state -> [SnapshotCase] in
                 guard let set = screen.set(platform, state) else { return [] }
                 return SnapshotMatrix.cells(set, on: platform).map {
-                    SnapshotCase(subject: screen.id, state: state.rawValue, cell: $0, layout: .screen)
+                    SnapshotCase(subject: screen.id, state: state.rawValue, cell: $0,
+                        layout: screen.id == "settings.backups" && [.empty, .overflow, .error].contains(state) ? .backupRestore : .screen)
                 }
             }
         }

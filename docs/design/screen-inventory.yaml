@@ -1117,17 +1117,28 @@ screens:
       progress and safe cancellation, the last successful backup's date and time, and the created
       filename and size or actionable failure. Restore from Backup…, Show in Finder (Mac) or Show in
       Files (touch), and Export Collection with Media… follow. Device backups omit media; the footer
-      explains that export includes media. Automatic Backups contains synced interval and retention
-      fields: Back up every (minutes), Daily backups, Weekly backups and Monthly backups. Interval
+      explains that export includes media. Automatic Backups has a synced Interval row with a trailing
+      editable number and visible min unit. Keep Backups has synced Daily, Weekly and Monthly counts.
+      These share native single-line label/value alignment at ordinary text sizes, with measured
+      full-UInt32 fields and content-driven reflow only at AX sizes; no fixed row heights or preset menus. Interval
       edits accept 5–9999, count edits 0–9999. Each field displays the full stored UInt32; editing one
       preserves the other three exactly. Failed collection hosts keep restoration and folder access
       while creation and limits are unavailable.
-      Restore from Backup is a scene-owned native sheet. Its list shows newest first the filename's
-      local wall date and time (without reinterpreting it in today's time zone), size and exact
-      filename. Verified retained server copies say Server copy; unverified and rejected entries say
+      Restore from Backup is a single independently titled, resizable native Mac Window scene
+      (N28), suppressed at launch, sharing the shell collection and context, with standard controls.
+      Settings, the focused File menu and damaged-collection recovery open it; the old Mac sheet is
+      excluded. Initial content size is 560 by 240 pt, minimum 420 by 230; large histories scroll and
+      user resizing is retained. Mac uses a native selectable Table with Backup Date and Size.
+      Touch keeps a native form sheet and selectable List with system medium/large detents, large
+      for AX text and long histories. Both show newest first the filename's local wall date and time
+      with seconds (without reinterpreting it in today's time zone) and size. Exact filenames remain
+      in accessibility and hover/context help. Same-second archives have a visible Archive number
+      and their confirmation names the exact file. Verified retained server copies say Server copy; unverified and rejected entries say
       Can’t be restored and cannot be selected. The newest eligible entry is selected initially;
       keyboard and touch can select an older entry. Empty and failed reads keep an actionable sheet
-      with Try Again. The toolbar has Cancel and Restore…; the latter advances to a destructive
+      with Try Again. The Mac window's bottom actions and the touch toolbar have Cancel and Restore…;
+      Cancel and standard Mac Close (Cmd-W or red control) clear the intent without writing.
+      Restore… advances to a destructive
       confirmation naming the selected date and time. The confirmation's standard English action
       title is Restore. Its message says the current collection is backed up first and explains only
       the current provider's publication decision: iCloud's device-local publication choice, Meguri
@@ -1146,8 +1157,9 @@ screens:
       that scheduled server backups include media and restoration there replaces the server collection.
       Stable identifiers: settings.backups.open, settings.backups.create, settings.backups.restore,
       settings.backups.restoreContent, settings.backups.entry.<exact filename>, settings.backups.apply and
-      settings.backups.cancel. The toolbar’s settings.backups.cancel is the common sheet witness and
-      capture anchor on Mac and touch. SwiftUI may merge restoreContent into the native list; no second
+      settings.backups.cancel. The settings.backups.cancel action is the common restore witness and
+      capture anchor on Mac and touch. Mac functional captures include the real window titlebar;
+      restore matrix cases capture an actual styled NSWindow on Mac and native sheets on touch. SwiftUI may merge restoreContent into the native list; no second
       list identifier is required. History readiness requires actual entry children and enabled Restore…,
       while loading has Loading Backups… progress and empty content offers Try Again. Unique app entry
       IDs support queries without depending on the platform’s native container shape.

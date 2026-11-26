@@ -91,25 +91,30 @@ struct BackupsContent: View {
                     .disabled(!presentation.canExport)
                     .accessibilityIdentifier("settings.backups.export")
                 if folderFailed { Text("The backup folder could not be opened. Check file access and try again.", bundle: .module) }
-            } footer: { Text("Backups don’t include media files. Export the collection to save its media too.", bundle: .module)
+            } footer: { Text("Device backups contain only the collection. Export it to save media too.", bundle: .module)
                 .accessibilityIdentifier("settings.backups.mediaExplanation") }
             Section {
                 if let limits = presentation.limits {
-                    limit("Back up every (minutes)", field: .interval, value: limits.minimumIntervalMinutes)
-                    limit("Daily backups", field: .daily, value: limits.daily)
-                    limit("Weekly backups", field: .weekly, value: limits.weekly)
-                    limit("Monthly backups", field: .monthly, value: limits.monthly)
+                    limit("Interval", field: .interval, value: limits.minimumIntervalMinutes)
                 } else {
                     Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
                 }
             } header: { Text("Automatic Backups", bundle: .module) }
-            footer: { Text("Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period.", bundle: .module) }
+            footer: { Text("Synced settings. Enter 5–9999 minutes.", bundle: .module) }
+            if let limits = presentation.limits {
+                Section {
+                    limit("Daily", field: .daily, value: limits.daily)
+                    limit("Weekly", field: .weekly, value: limits.weekly)
+                    limit("Monthly", field: .monthly, value: limits.monthly)
+                } header: { Text("Keep Backups", bundle: .module) }
+                footer: { Text("Synced settings. Enter 0–9999 backups per period.", bundle: .module) }
+            }
             if let url = presentation.serverBackupsURL {
                 Section {
                     Link(destination: url) { Text("Server Backups in Browser…", bundle: .module) }
                         .accessibilityIdentifier("settings.backups.server")
                 } footer: {
-                    Text("Opens this account’s Collection page on the configured Meguri Sync server. Sign in in your browser. Scheduled server backups include media; restoring there replaces the server collection.", bundle: .module)
+                    Text("Sign in to your Meguri Sync account in the browser. Scheduled server backups include media. Restoring there replaces the server collection.", bundle: .module)
                         .accessibilityIdentifier("settings.backups.serverExplanation")
                 }
             }
@@ -120,7 +125,7 @@ struct BackupsContent: View {
     }
 
     private func limit(_ title: LocalizedStringKey, field: BackupCoordinator.LimitField, value: UInt32) -> some View {
-        BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", value: value, minimum: field == .interval ? 5 : 0, enabled: presentation.canEditLimits) { edited in
+        BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", value: value, minimum: field == .interval ? 5 : 0, unit: field == .interval ? "min" : nil, enabled: presentation.canEditLimits) { edited in
             actions.editLimit(field, edited)
         }
     }
@@ -131,15 +136,35 @@ private struct BackupLimitRow: View {
     let identifier: String
     let value: UInt32
     let minimum: UInt32
+    let unit: LocalizedStringKey?
     let enabled: Bool
     let save: (UInt32) -> Void
     @State private var draft = BackupLimitDraft()
     @FocusState private var focused: Bool
+    @Environment(\.dynamicTypeSize) private var textSize
     var body: some View {
         LabeledContent {
+            HStack {
+                // Measure all ten UInt32 digits in the current font, including AX.
+                // The field takes only that space instead of proposing a full row.
+                ZStack(alignment: .trailing) {
+                    Text(verbatim: String(UInt32.max)).padding(.horizontal, Spacing.small).hidden().accessibilityHidden(true)
+                    input
+                }
+                .monospacedDigit()
+                .fixedSize(horizontal: true, vertical: false)
+                if let unit { Text(unit, bundle: .module).foregroundStyle(.secondary) }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        } label: { Text(title, bundle: .module) }
+        .labeledContentStyle(BackupLimitRowStyle(stacked: textSize.isAccessibilitySize))
+        .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
+        if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
+    }
+    private var input: some View {
             TextField(text: $draft.text) { Text(title, bundle: .module) }
                 .labelsHidden()
-                .accessibilityLabel(Text(title, bundle: .module))
+                .accessibilityLabel(minimum == 5 ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module))
                 .accessibilityIdentifier(identifier)
                 .multilineTextAlignment(.trailing)
                 #if os(iOS)
@@ -151,13 +176,26 @@ private struct BackupLimitRow: View {
                     if active { draft.reset(to: value) } else { commit() }
                 }
                 .disabled(!enabled)
-        } label: { Text(title, bundle: .module) }
-        .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
-        if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
     }
     private func commit() {
         guard enabled else { return }
         if let number = draft.commit(value: value, minimum: minimum) { save(number) }
+    }
+}
+
+/// Standard label/value alignment; only accessibility text sizes may reflow.
+private struct BackupLimitRowStyle: LabeledContentStyle {
+    let stacked: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if stacked {
+            ViewThatFits(in: .horizontal) {
+                row(configuration)
+                VStack(alignment: .leading) { configuration.label; configuration.content }
+            }
+        } else { row(configuration) }
+    }
+    private func row(_ configuration: Configuration) -> some View {
+        HStack { configuration.label; Spacer(); configuration.content }
     }
 }
 
@@ -170,7 +208,11 @@ public struct BackupRestoreSheet: View {
             get: { model.selectedName }, set: { model.selectedName = $0 }),
             refresh: { Task { await model.refresh() } }, cancel: {
                 if model.busy { model.cancel() }
-                else { collection.navigation.dismissSheet() }
+                #if os(macOS)
+                collection.navigation.dismissSheet()
+                #else
+                if !model.busy { collection.navigation.dismissSheet() }
+                #endif
             }, restore: { model.restoreConfirmed(name: $0) })
             .task { await model.openedRestore() }
     }
@@ -185,6 +227,7 @@ struct BackupRestoreContent: View {
     @Environment(\.locale) private var locale
     @State private var confirmation = false
     @State private var confirmedEntry: BackupEntry?
+    @Environment(\.dynamicTypeSize) private var textSize
     private var selectedEntry: BackupEntry? {
         presentation.entries.first { $0.name == selectedName && !unavailable($0) }
     }
@@ -192,7 +235,18 @@ struct BackupRestoreContent: View {
         presentation.work != .restore && !presentation.loading && presentation.entries.isEmpty && presentation.listFailure != nil
     }
     var body: some View {
-        NavigationStack {
+        #if os(macOS)
+        restoreBody
+            .frame(minWidth: BackupRestoreWindowLayout.minimumSize.width,
+                   minHeight: BackupRestoreWindowLayout.minimumSize.height)
+        #else
+        NavigationStack { restoreBody }
+            .presentationSizing(.form)
+            .presentationDetents(textSize.isAccessibilitySize || presentation.entries.count > 8 ? [.large] : [.medium, .large])
+            .interactiveDismissDisabled(presentation.busy || confirmation)
+        #endif
+    }
+    private var restoreBody: some View {
             VStack {
                 if presentation.work == .restore {
                     BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: cancel)
@@ -223,57 +277,116 @@ struct BackupRestoreContent: View {
                     actions: { Button(action: refresh) { Text("Try Again", bundle: .module) }
                         .accessibilityIdentifier("settings.backups.retry") }
                 } else {
-                    List(selection: Binding(get: { selectedName }, set: { name in
-                        guard let name, presentation.entries.contains(where: { $0.name == name && $0.kind != .serverCopyUnverified }),
-                              !presentation.rejectedNames.contains(name) else { return }
-                        selectedName = name
-                    })) {
-                        ForEach(presentation.entries, id: \.name) { entry in
-                            VStack(alignment: .leading) {
-                                Text(verbatim: BackupPresentation.timestamp(entry, locale: locale))
-                                Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
-                                Text(verbatim: entry.name).font(.caption).foregroundStyle(.secondary)
-                                if entry.kind == .serverCopy { Text("Server copy", bundle: .module) }
-                                if unavailable(entry) { Text("Can’t be restored", bundle: .module) }
-                            }
-                            .tag(entry.name)
-                            .selectionDisabled(unavailable(entry))
-                            .foregroundStyle(unavailable(entry) ? .secondary : .primary)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityAddTraits(selectedName == entry.name ? .isSelected : [])
-                            .accessibilityValue(Text(selectedName == entry.name ? "Selected" : "Not selected", bundle: .module))
-                            .accessibilityIdentifier("settings.backups.entry.\(entry.name)")
-                        }
-                    }
+                    history
                 }
                 if !showsListFailure { restoreNotices }
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.backups.restoreContent")
             .navigationTitle(Text("Restore from Backup", bundle: .module))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(action: cancel) { Text("Cancel", bundle: .module) }
-                        .keyboardShortcut(.cancelAction)
-                        .disabled(presentation.busy && !presentation.canCancel)
-                        .accessibilityIdentifier("settings.backups.cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        confirmedEntry = selectedEntry; confirmation = confirmedEntry != nil
-                    } label: { Text("Restore…", bundle: .module) }
-                        .disabled(!presentation.canOpenRestore || presentation.loading || selectedEntry == nil)
-                        .accessibilityIdentifier("settings.backups.apply")
-                }
+            #if os(macOS)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack { Spacer(); cancelButton; restoreButton }.padding()
             }
+            #else
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { cancelButton }
+                ToolbarItem(placement: .confirmationAction) { restoreButton }
+            }
+            #endif
             .confirmationDialog(confirmationTitle, isPresented: $confirmation, titleVisibility: .visible) {
                 Button(role: .destructive) {
                     if let entry = confirmedEntry { restore(entry.name) }
                 } label: { Text("Restore", bundle: .module) }
                 Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
             } message: { Text(confirmationMessage, bundle: .module) }
+    }
+    private var cancelButton: some View {
+        Button(action: cancel) { Text("Cancel", bundle: .module) }
+            .keyboardShortcut(.cancelAction)
+            .disabled(presentation.busy && !presentation.canCancel)
+            .accessibilityIdentifier("settings.backups.cancel")
+    }
+    private var restoreButton: some View {
+        Button {
+            confirmedEntry = selectedEntry; confirmation = confirmedEntry != nil
+        } label: { Text("Restore…", bundle: .module) }
+            .disabled(!presentation.canOpenRestore || presentation.loading || selectedEntry == nil)
+            .accessibilityIdentifier("settings.backups.apply")
+    }
+    private var selection: Binding<String?> {
+        Binding(get: { selectedName }, set: { name in
+            guard let name, presentation.entries.contains(where: { $0.name == name && !unavailable($0) }) else { return }
+            selectedName = name
+        })
+    }
+    @ViewBuilder private var history: some View {
+        #if os(macOS)
+        Table(of: BackupHistoryRow.self, selection: selection) {
+            TableColumn(Text("Backup Date", bundle: .module)) { row in
+                entryLabel(row.entry)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(Text(verbatim: entryAccessibilityLabel(row.entry)))
+                    .accessibilityAddTraits(selectedName == row.entry.name ? .isSelected : [])
+                    .accessibilityValue(Text(selectedName == row.entry.name ? "Selected" : "Not selected", bundle: .module))
+                    .accessibilityIdentifier("settings.backups.entry.\(row.entry.name)")
+            }
+            TableColumn(Text("Size", bundle: .module)) { row in
+                Text(verbatim: BackupPresentation.size(row.entry.sizeBytes))
+                    .foregroundStyle(unavailable(row.entry) ? .secondary : .primary)
+            }
+            .width(min: 70, ideal: 90)
+        } rows: {
+            ForEach(presentation.entries.map(BackupHistoryRow.init)) { row in
+                TableRow(row).selectionDisabled(unavailable(row.entry))
+            }
         }
-        .interactiveDismissDisabled(presentation.busy || confirmation)
+        .contextMenu(forSelectionType: String.self) { names in
+            if let name = names.first { Text(verbatim: name) }
+        }
+        #else
+        List(selection: selection) {
+            ForEach(presentation.entries, id: \.name) { entry in
+                HStack(alignment: .firstTextBaseline) {
+                    entryLabel(entry)
+                    Spacer()
+                    Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                }
+                .tag(entry.name)
+                .selectionDisabled(unavailable(entry))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.backups.entry.\(entry.name)")
+                .accessibilityLabel(Text(verbatim: entryAccessibilityLabel(entry)))
+                .accessibilityAddTraits(selectedName == entry.name ? .isSelected : [])
+                .accessibilityValue(Text(selectedName == entry.name ? "Selected" : "Not selected", bundle: .module))
+            }
+        }
+        #endif
+    }
+    private func entryLabel(_ entry: BackupEntry) -> some View {
+        VStack(alignment: .leading) {
+            Text(verbatim: BackupPresentation.timestamp(entry, locale: locale))
+            // Rare identical timestamps need a visible discriminator, not a
+            // repeated filename on every archive in the history.
+            if let index = duplicateIndex(entry) {
+                Text("Archive \(index)", bundle: .module).foregroundStyle(.secondary)
+            }
+            if entry.kind == .serverCopy { Text("Server copy", bundle: .module) }
+            if unavailable(entry) { Text("Can’t be restored", bundle: .module) }
+        }
+        .foregroundStyle(unavailable(entry) ? .secondary : .primary)
+        .help(entry.name)
+    }
+    private func duplicateIndex(_ entry: BackupEntry) -> Int? {
+        let sameTime = presentation.entries.filter { $0.wallTime == entry.wallTime }
+        guard sameTime.count > 1, let index = sameTime.firstIndex(where: { $0.name == entry.name }) else { return nil }
+        return index + 1
+    }
+    private func entryAccessibilityLabel(_ entry: BackupEntry) -> String {
+        var parts = [BackupPresentation.timestamp(entry, locale: locale), BackupPresentation.size(entry.sizeBytes), entry.name]
+        if entry.kind == .serverCopy { parts.append(String(localized: "Server copy", bundle: .module)) }
+        if unavailable(entry) { parts.append(String(localized: "Can’t be restored", bundle: .module)) }
+        return parts.joined(separator: ", ")
     }
     @ViewBuilder private var restoreNotices: some View {
         if !showsListFailure, let error = presentation.listFailure {
@@ -301,16 +414,19 @@ struct BackupRestoreContent: View {
     }
     private var confirmationTitle: Text {
         let date = confirmedEntry.map { BackupPresentation.timestamp($0, locale: locale) } ?? ""
+        if let entry = confirmedEntry, duplicateIndex(entry) != nil {
+            return Text("Replace the current collection with \(entry.name) from \(date)?", bundle: .module)
+        }
         return Text("Replace the current collection with the backup from \(date)?", bundle: .module)
     }
     private var confirmationMessage: LocalizedStringKey {
         switch presentation.provider {
         case .iCloud:
-            "The current collection is backed up first. The restored collection stays on this device until you choose what to do with iCloud."
+            "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device until you choose what to do with iCloud."
         case .meguri:
-            "The current collection is backed up first. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing."
+            "Meguri backs up the current collection first. Media files are kept. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing."
         default:
-            "The current collection is backed up first. This replaces the collection on this device. Media files are kept."
+            "Meguri backs up the current collection first. Media files are kept."
         }
     }
 }
@@ -348,7 +464,7 @@ private enum BackupPresentation {
         guard let date else { return entry.name }
         let formatter = DateFormatter()
         formatter.locale = locale; formatter.calendar = calendar; formatter.timeZone = .gmt
-        formatter.dateStyle = .medium; formatter.timeStyle = .medium
+        formatter.setLocalizedDateFormatFromTemplate("yMMMdjmmss")
         return formatter.string(from: date)
     }
 }
@@ -391,4 +507,18 @@ private struct BackupFailureText: View {
         case .io: "The backup could not be read or written. Check file access and free space, then try again."
         }
     }
+}
+
+// Table selection and touch List selection use the same stable file identity.
+private struct BackupHistoryRow: Identifiable {
+    let entry: BackupEntry
+    var id: String { entry.name }
+}
+
+/// A compact initial content viewport. The native window remains freely resizable.
+public enum BackupRestoreWindowLayout {
+    public static let id = "settings.backups.restoreWindow"
+    public static let defaultSize = CGSize(width: 560, height: 240)
+    public static let minimumSize = CGSize(width: 420, height: 230)
+    public static var title: String { String(localized: "Restore from Backup", bundle: .module) }
 }

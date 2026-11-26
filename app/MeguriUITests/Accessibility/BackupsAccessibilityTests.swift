@@ -51,7 +51,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                             }
                             let media = app.staticTexts["settings.backups.mediaExplanation"].firstMatch
                             if try self.reach(media, in: app) { try audit("media explanation") }
-                            XCTAssertTrue(media.label.contains("Backups don’t include media files"))
+                            XCTAssertTrue(media.label.contains("Device backups contain only the collection"))
                             if state != "error" {
                                 for field in ["interval", "daily", "weekly", "monthly"] {
                                     let input = app.textFields["settings.backups.limit.\(field)"].firstMatch
@@ -70,9 +70,15 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 let disclosure = app.staticTexts["settings.backups.serverExplanation"].firstMatch
                                 XCTAssertTrue(disclosure.exists)
                                 XCTAssertTrue(disclosure.label.contains("Scheduled server backups include media"))
-                                XCTAssertTrue(disclosure.label.contains("restoring there replaces the server collection"))
+                                XCTAssertTrue(disclosure.label.contains("Restoring there replaces the server collection"))
                             }
                         } else {
+                            #if os(macOS)
+                            let window = app.windows.containing(.any, identifier: anchor).firstMatch
+                            XCTAssertEqual(window.title, "Restore from Backup")
+                            XCTAssertTrue(window.buttons[XCUIIdentifierCloseWindow].exists)
+                            XCTAssertFalse(app.sheets.containing(.any, identifier: anchor).firstMatch.exists)
+                            #endif
                             let apply = app.buttons["settings.backups.apply"].firstMatch
                             XCTAssertEqual(apply.label, "Restore…")
                             XCTAssertEqual(apply.isEnabled, state == "typical" || state == "overflow")

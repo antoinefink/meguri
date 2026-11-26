@@ -13,7 +13,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     private let originalBack = "Synthetic recovery answer QZ83"
     private let editMarker = "postbackupQZ92"
     private let entryPrefix = "settings.backups.entry."
-    // Native sheet toolbar action on both platforms, independent of the
+    // Restore action on both platforms, independent of the
     // CollectionView/outline/group shape SwiftUI chooses for restoreContent.
     private let historyAnchor = "settings.backups.cancel"
     private let runID = UUID()
@@ -55,6 +55,23 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         try openHistory(app)
         XCTAssertTrue(wait { self.entryNames(app).contains(older) }, "The manual result must be in real history")
         try assertRunHistory(app)
+        #if os(macOS)
+        let beforeWindowClose = entryNames(app)
+        let restoreWindow = try captureWindow(app, anchor: historyAnchor)
+        restoreWindow.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(element(app, historyAnchor).waitForNonExistence(timeout: 10))
+        // Settings regains focus: its File command must reopen the same scene.
+        try act(app.menuBars.menuBarItems["File"], app)
+        try act(app.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@",
+            "Restore from Backup…", "Restore from Backup…")).firstMatch, app)
+        try waitForHistory(app)
+        XCTAssertEqual(entryNames(app), beforeWindowClose, "Cmd-W must not restore or create a backup")
+        let reopened = try captureWindow(app, anchor: historyAnchor)
+        try act(reopened.buttons[XCUIIdentifierCloseWindow], app)
+        XCTAssertTrue(element(app, historyAnchor).waitForNonExistence(timeout: 10))
+        try openHistory(app)
+        XCTAssertEqual(entryNames(app), beforeWindowClose, "The red control must clear the intent without writing")
+        #endif
         try cancelHistory(app)
         try capture(app, anchor: "settings.backups.create", state: "settings-manual-backup-created")
 
@@ -325,6 +342,16 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         },
             "Real history must load an eligible, preselected backup")
         try assertRunHistory(app)
+        #if os(macOS)
+        let window = try captureWindow(app, anchor: historyAnchor)
+        XCTAssertEqual(window.title, "Restore from Backup")
+        XCTAssertTrue(window.buttons[XCUIIdentifierCloseWindow].exists)
+        XCTAssertEqual(app.windows.containing(.any, identifier: historyAnchor).count, 1)
+        XCTAssertFalse(app.sheets.containing(.any, identifier: historyAnchor).firstMatch.exists,
+            "Restore must own a standard window with no old sheet underneath")
+        #else
+        XCTAssertTrue(app.navigationBars.containing(.button, identifier: historyAnchor).firstMatch.exists)
+        #endif
     }
 
     private func backupNames(minute: Int) -> [String] {
@@ -378,9 +405,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.calendar = parser.calendar; formatter.timeZone = .gmt
-        // Match production BackupPresentation.timestamp: medium wall date/time,
+        // Match production BackupPresentation.timestamp: localized wall date/time,
         // including seconds and the locale's exact (possibly nonbreaking) spaces.
-        formatter.dateStyle = .medium; formatter.timeStyle = .medium
+        formatter.setLocalizedDateFormatFromTemplate("yMMMdjmmss")
         let timestamp = formatter.string(from: date)
         let row = element(app, entryPrefix + filename)
         XCTAssertTrue(row.label.contains(filename) && row.label.contains(timestamp))
@@ -407,7 +434,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
             "Confirmation must name the date and time of the exact selected archive: \(filename)")
         let confirmation = try XCTUnwrap(found, "A native confirmation must own the destructive Restore action")
         XCTAssertTrue(destructiveRestore(confirmation).isEnabled)
-        XCTAssertTrue(containsText("The current collection is backed up first. This replaces the collection on this device. Media files are kept.",
+        XCTAssertTrue(containsText("Meguri backs up the current collection first. Media files are kept.",
             in: confirmation))
         return confirmation
     }
@@ -470,7 +497,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         // The list disappears as soon as progress replaces it. Only the whole
         // sheet closing after terminal delivery establishes durable completion.
         XCTAssertTrue(element(app, "settings.backups.cancel").waitForNonExistence(timeout: 30),
-            "The sheet's toolbar Cancel must disappear after durable replacement")
+            "The restore window or sheet must close after durable replacement")
         XCTAssertTrue(entryNames(app).isEmpty)
     }
 
