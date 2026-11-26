@@ -99,16 +99,18 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         #endif
         XCTAssertTrue(wait { self.entryNames(app).isSuperset(of: [older, newer]) })
         let beforeCancel = entryNames(app)
+        XCTAssertEqual(element(app, entryPrefix + older).value as? String, "Not selected",
+            "The older archive must start unselected while newer backups exist")
         try select(older, app)
         try capture(app, anchor: "settings.backups.list", state: "history-older-backup-selected")
         let historyWindow = try captureWindow(app, anchor: "settings.backups.list")
         let outside = try confirmationDismissalPoint(historyWindow)
-        let confirmation = try advanceToConfirmation(app)
+        let confirmation = try advanceToConfirmation(app, filename: older)
         capture(historyWindow, state: "confirmation-restore-older-backup")
         try cancelConfirmation(confirmation, app, outside: outside)
         XCTAssertTrue(element(app, "settings.backups.cancel").waitForExistence(timeout: 10), "Cancellation keeps the restore sheet open")
         XCTAssertTrue(element(app, "settings.backups.list").waitForExistence(timeout: 10))
-        XCTAssertTrue(wait { self.element(app, self.entryPrefix + older).isSelected },
+        XCTAssertTrue(wait { self.selectionMatches(older, app) },
             "Cancellation keeps the specifically selected older entry")
         XCTAssertEqual(entryNames(app), beforeCancel, "Cancelling confirmation must not create a safety backup")
         try cancelHistory(app)
@@ -341,10 +343,19 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let row = element(app, entryPrefix + filename)
         try act(row, app)
         XCTAssertTrue(element(app, "settings.backups.apply").isEnabled)
-        XCTAssertTrue(wait { row.isSelected }, "The exact archive must be selected before confirmation")
+        XCTAssertTrue(wait { self.selectionMatches(filename, app) }, "The exact archive must be selected before confirmation")
     }
 
-    private func advanceToConfirmation(_ app: XCUIApplication) throws -> XCUIElement {
+    private func selectionMatches(_ filename: String, _ app: XCUIApplication) -> Bool {
+        let names = entryNames(app)
+        // Native List may expose isSelected only on an ancestor row. The exact
+        // identified entry's AX value follows the model's selection on all platforms.
+        return names.contains(filename) && names.allSatisfy { name in
+            (element(app, entryPrefix + name).value as? String) == (name == filename ? "Selected" : "Not selected")
+        }
+    }
+
+    private func advanceToConfirmation(_ app: XCUIApplication, filename: String) throws -> XCUIElement {
         try act(element(app, "settings.backups.apply"), app)
         // System confirmation buttons lose app identifiers (app/AGENTS.md).
         let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
@@ -365,6 +376,19 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         // Exact caption + confirmation context exclude the parent's Restore…
         // (settings.backups.apply), even when the parent sheet is also visible.
         XCTAssertTrue(destructiveRestore(confirmation).isEnabled)
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.calendar = Calendar(identifier: .gregorian); parser.timeZone = .gmt
+        parser.dateFormat = "'backup-'yyyy-MM-dd-HH.mm.ss'.colpkg'"
+        let date = try XCTUnwrap(parser.date(from: filename))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.calendar = parser.calendar; formatter.timeZone = .gmt
+        formatter.dateStyle = .medium; formatter.timeStyle = .medium
+        let title = "Replace the current collection with the backup from \(formatter.string(from: date))?"
+        XCTAssertTrue(confirmation.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", title, title)).firstMatch.waitForExistence(timeout: 10),
+            "Confirmation must name the date and time of the exact selected archive: \(filename)")
         return confirmation
     }
 
@@ -406,7 +430,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func restore(_ filename: String, _ app: XCUIApplication) throws {
         try select(filename, app)
-        let confirmation = try advanceToConfirmation(app)
+        let confirmation = try advanceToConfirmation(app, filename: filename)
         try act(destructiveRestore(confirmation), app)
         XCTAssertTrue(destructiveRestore(confirmation).waitForNonExistence(timeout: 10))
         // The list disappears as soon as progress replaces it. Only the whole

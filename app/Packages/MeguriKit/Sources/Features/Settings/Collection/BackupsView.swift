@@ -222,6 +222,7 @@ struct BackupRestoreContent: View {
                             .foregroundStyle(unavailable(entry) ? .secondary : .primary)
                             .accessibilityElement(children: .combine)
                             .accessibilityAddTraits(selectedName == entry.name ? .isSelected : [])
+                            .accessibilityValue(Text(selectedName == entry.name ? "Selected" : "Not selected", bundle: .module))
                             .accessibilityIdentifier("settings.backups.entry.\(entry.name)")
                         }
                     }

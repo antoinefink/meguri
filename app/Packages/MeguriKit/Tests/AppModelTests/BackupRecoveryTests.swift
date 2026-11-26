@@ -227,7 +227,7 @@ extension ReviewCollectionStartupTests {
                 lease = nil
                 quit = Task { await owner.closeForQuit() }
             } else {
-                lease = try #require(owner.beginBackgroundTask(deadlineMilliseconds: 123_000))
+                lease = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
                 owner.backgroundTaskExpired(try #require(lease))
             }
             do { try await service.waitForOperationCancellation() }
