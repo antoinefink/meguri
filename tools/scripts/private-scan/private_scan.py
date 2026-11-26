@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
-        "82e52d65fb560efb80da23610896e896f4cf079263016238c5428f77736d8139",
+        "5144faa0a48eb993ba91dbc3900e53dff93b34c722838da6ccc0f2ccc19e3e51",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
         "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",

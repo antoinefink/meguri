@@ -93,8 +93,7 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
         alert.buttons["Cancel"].tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
 
-        // Reopening through the real menu proves cancellation left the model
-        // usable and did not silently submit the stale or renewed question.
+        // Reopening after Cancel shows the restored list can present the latest counts.
         let row = sampleVocabularyRow(app)
         openDeleteMenu(app, target: row)
         element(app, "noteTypes.list.delete").tap()
