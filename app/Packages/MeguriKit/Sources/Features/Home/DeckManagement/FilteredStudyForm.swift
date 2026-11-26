@@ -138,6 +138,7 @@ private struct StudyTextField: View {
     }
 
     @ViewBuilder private var field: some View {
+        #if os(macOS)
         if multiline {
             TextField(text: $text, axis: .vertical) { Text(title, bundle: .module) }
                 .accessibilityIdentifier(id)
@@ -145,6 +146,15 @@ private struct StudyTextField: View {
             TextField(text: $text) { Text(title, bundle: .module) }
                 .accessibilityIdentifier(id)
         }
+        #else
+        if multiline {
+            TextField("", text: $text, axis: .vertical)
+                .accessibilityIdentifier(id)
+        } else {
+            TextField("", text: $text)
+                .accessibilityIdentifier(id)
+        }
+        #endif
     }
 }
 

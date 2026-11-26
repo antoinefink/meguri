@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     "core/crates/meguri-engine/src/decks/custom_study.rs":
         "73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166",
     "app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift":
-        "bcc838fe6ba4a79d42d24870ed7a35aa3f6d03132dc129b86ab5024047e9152d",
+        "7365d1732a69f2cc3c08a7394d42727df98171af5278402d058c447c2191dc49",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
