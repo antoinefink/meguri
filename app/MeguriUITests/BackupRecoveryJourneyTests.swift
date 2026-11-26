@@ -97,7 +97,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         // Insertion position is a native text-system choice. Record the exact
         // committed result, then demand those bytes through cancel and recovery.
         try enter(editMarker, field: "Front", editor: edit, app: app, replacing: false)
-        let changedFront = try XCTUnwrap(fieldValue(front))
+        let changedFront = try XCTUnwrap(fieldValue(field("Front", editor: edit)))
         XCTAssertTrue(changedFront.contains(editMarker))
         XCTAssertNotEqual(changedFront, originalFront)
         try act(element(app, "review.editCurrent.done"), app)
@@ -237,7 +237,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func enter(_ content: String, field name: String, editor: XCUIElement,
                        app: XCUIApplication, replacing: Bool = true) throws {
-        let input = field(name, editor: editor)
+        var input = field(name, editor: editor)
         try act(input, app)
         #if os(macOS)
         if replacing {
@@ -255,14 +255,80 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertTrue(wait { nextMode.exists && (name == "Front" ? nextMode.isEnabled : !nextMode.isEnabled) },
             "The editor must process the native blur before reading the committed value")
         #else
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        if isPad {
+            let mode = element(app, name == "Front" ? "editor.field.0.htmlToggle" : "editor.field.1.htmlToggle")
+            XCTAssertTrue(wait { mode.exists && mode.isEnabled && app.keyboards.firstMatch.exists },
+                "Focus must reach the native field accessory. \(inputEvidence(name, content, editor, app))")
+            if !mode.isSelected { try act(mode, app) }
+            XCTAssertTrue(wait { mode.exists && mode.isSelected && mode.isEnabled },
+                "The native HTML Editor action must select source mode. \(inputEvidence(name, content, editor, app))")
+            // Switching hides the rich editable and exposes a different AX
+            // text view. Reacquire the genuine textarea, never reuse that node.
+            input = field(name, editor: editor)
+            try act(input, app)
+            XCTAssertTrue(wait {
+                input.exists && input.isHittable && mode.exists && mode.isEnabled
+                    && mode.isSelected && app.keyboards.firstMatch.exists
+            }, "Source input must have its focused-field accessory and keyboard. \(inputEvidence(name, content, editor, app))")
+            // These Add fields start empty. Avoid selection-menu/clipboard
+            // dependencies; Edit Current inserts the marker at the native caret.
+            if replacing {
+                XCTAssertEqual(fieldValue(input), "", inputEvidence(name, content, editor, app))
+            }
+        }
+        // iPad's genuine source textarea disables native correction and
+        // prediction in runtime.js. iPhone retains its passing rich input path.
         input.typeText(content)
+        if isPad {
+            XCTAssertTrue(wait {
+                guard let value = self.fieldValue(input) else { return false }
+                return replacing ? value == content : value.contains(content)
+            }, "Native typing must reach the expected value before blur. \(inputEvidence(name, content, editor, app))")
+        }
+        let beforeBlur = fieldValue(input)
         // Move focus to the other native field so WebKit commits the edit.
-        try act(field(name == "Front" ? "Back" : "Front", editor: editor), app)
+        let otherName = name == "Front" ? "Back" : "Front"
+        try act(field(otherName, editor: editor), app)
+        if isPad {
+            let nextMode = element(app, name == "Front" ? "editor.field.1.htmlToggle" : "editor.field.0.htmlToggle")
+            // The bridge handles blur's commit before the next focus message;
+            // the accessory ID is a visible acknowledgment of that sequence.
+            XCTAssertTrue(wait { nextMode.exists && nextMode.isEnabled && app.keyboards.firstMatch.exists },
+                "The other field must acknowledge focus after commit. \(inputEvidence(name, content, editor, app))")
+            input = field(name, editor: editor)
+            let expected = try XCTUnwrap(beforeBlur, inputEvidence(name, content, editor, app))
+            XCTAssertTrue(wait { self.fieldValue(input) == expected },
+                "Commit must preserve the exact pre-blur value. \(inputEvidence(name, content, editor, app))")
+        }
         #endif
         XCTAssertTrue(wait {
             guard let value = self.fieldValue(input) else { return false }
             return replacing ? value == content : value.contains(content)
-        }, "Native typing and blur must commit the expected field text")
+        }, "Native typing and blur must commit the expected field text. \(inputEvidence(name, content, editor, app))")
+    }
+
+    private func inputEvidence(_ name: String, _ intended: String, _ editor: XCUIElement,
+                               _ app: XCUIApplication) -> String {
+        // Only this journey's synthetic field text; no app-wide hierarchy or
+        // desktop capture. Bound raw AX text while retaining escapes/newlines.
+        func bounded(_ value: String?) -> String {
+            guard let value else { return "<unavailable>" }
+            return String(value.prefix(256)).debugDescription + (value.count > 256 ? " [truncated]" : "")
+        }
+        let input = field(name, editor: editor)
+        let actual = input.exists ? input.value as? String : nil
+        let modes = ["editor.field.0.htmlToggle", "editor.field.1.htmlToggle", "editor.add.htmlToggle"].compactMap { id -> String? in
+            let control = element(app, id)
+            guard control.exists else { return nil }
+            return "\(id): enabled=\(control.isEnabled), selected=\(control.isSelected)"
+        }.joined(separator: "; ")
+        #if os(iOS)
+        let keyboard = "keyboard=\(app.keyboards.firstMatch.exists)"
+        #else
+        let keyboard = ""
+        #endif
+        return "field=\(name), intended=\(bounded(intended)), actual AX=\(bounded(actual)), exists=\(input.exists); \(modes); \(keyboard)"
     }
 
     private func fieldValue(_ field: XCUIElement) -> String? {
