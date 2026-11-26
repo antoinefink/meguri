@@ -30,3 +30,5 @@ The corrective candidate passed all 169 selected MeguriKit tests (`swift-test/20
 The independent reviewer read the full public verification register (73692 bytes), SHA-256 `19f3014b0356a7049e2f9e29764b2a1432627532872ba0b380a145fa4d8de9d7`, verified before staging.
 
 The native deck pane now presents the chosen deck directly. The screen tests exercise explicit Back, failed saves and retry, and each loading state can be captured independently. The independent privacy reviewer read all 52381 bytes of `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings` before admission at SHA-256 `6ae51d989007b9b6e83a14fdb98faf0b5a36b0db3a6f10bddeaafecad237d7e4`.
+
+The synthetic fixture now avoids running backup lifecycle observers when no real collection is open. The reviewer approved the complete 184525-byte collection source at SHA-256 `e6714ebda67d5e160bf89ddb01523fef557b90403e4eaffefdd87cae49dd3c52`. The combined branch passed all 169 focused Swift tests again (`swift-test/20261126T203600Z-84780`).

@@ -130,7 +130,10 @@ extension TestHooks {
                     let state = ["home=\(home.calls)", "deck=\(deck.calls)", "browse=\(browse.calls)",
                                  "list=\(list.calls)", "record=\(record.calls)", "stats=\(stats.calls)",
                                  "filled=\(features.statsPage?.filled == true)", "section=\(navigation.section.rawValue)",
-                                 "pending=\(navigation.pendingDeckPage?.rawValue ?? 0)"]
+                                 "pending=\(navigation.pendingDeckPage?.rawValue ?? 0)",
+                                 "state=\(collection.state)", "homePhase=\(collection.homePhase)",
+                                 "generation=\(collection.generation)", "treeGeneration=\(collection.deckTreeGeneration ?? 0)",
+                                 "commandFailed=\(collection.error != nil)"]
                         .joined(separator: ",")
                     DistributedNotificationCenter.default().postNotificationName(
                         Notification.Name("\(bundle).testhooks.navigation.ack"), object: "\(command)|\(state)",

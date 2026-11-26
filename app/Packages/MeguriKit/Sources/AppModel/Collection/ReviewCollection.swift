@@ -3173,7 +3173,13 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         saveSelectedDeck = select
         browseOwner = browse
         noteTypesOwner = noteTypes
-        receiveLifecycle(.ready(generation: generation))
+        // This explicit synthetic owner has no Core host. Production lifecycle
+        // delivery starts opened-maintenance work; its backup refresh would
+        // prepare a real empty recovery host and replace the fixture with noFile.
+        // Seed only the fixture's read authority, then use ordinary navigation.
+        self.generation = generation
+        lifecycle = .ready(generation: generation)
+        state = .ready
         refreshCounts()
     }
 
