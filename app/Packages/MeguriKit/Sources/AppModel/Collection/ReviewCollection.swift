@@ -2751,6 +2751,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                     if !foreground, !closing, lease == backgroundLease, !backgroundLeaseExpired {
                         await backupTrigger.run(.background)
                     }
+                    // An expired lease skips Background, but still owns the
+                    // cancelled automatic operation until its terminal result.
+                    await backupTrigger.drain()
                     backupTrigger.pauseTimer()
                     #if os(macOS)
                     if miningOwner?.enabled == true {

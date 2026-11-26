@@ -125,7 +125,22 @@ extension ReviewCollectionStartupTests {
     func earlyBackupRestoreRefusalRejoinsTheUnchangedArmedDeadline(cancelBeforeInspection: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "backup-refusal-timer-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        let configuration = try backupConfiguration(root)
+        var configuration = try backupConfiguration(root)
+        let now = Date(timeIntervalSince1970: 1_894_701_600)
+        configuration.clock = .fixed(now)
+        configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let invalid = "backup-2030-01-15-11.59.00.colpkg"
+        let directory = configuration.collectionLocation.backupsDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let candidate = directory.appending(path: invalid)
+        try Data("Synthetic invalid backup".utf8).write(to: candidate)
+        // T2.2 counts every entry's creation time, including corrupt packages.
+        // Seed before opening so rejection cannot introduce a newer interval.
+        let created = now.addingTimeInterval(-60)
+        try FileManager.default.setAttributes([.creationDate: created, .modificationDate: created],
+            ofItemAtPath: candidate.path(percentEncoded: false))
+        let attributes = try FileManager.default.attributesOfItem(atPath: candidate.path(percentEncoded: false))
+        try #require((attributes[.creationDate] as? Date) == created)
         let owner = backupOwner(configuration, root: root)
         await owner.start()
         do {
@@ -133,13 +148,12 @@ extension ReviewCollectionStartupTests {
             _ = try await CoreDeckService().addDeck(name: "Synthetic pending backup")
             await owner.backupTrigger.run(.opened)
             let armed = try #require(owner.backupTrigger.deadlineMilliseconds)
+            #expect(armed == Int64(now.timeIntervalSince1970 * 1_000) + 29 * 60_000)
             if cancelBeforeInspection {
                 try await owner.beginBackupRestore()
                 #expect(owner.backupTrigger.deadlineMilliseconds == nil)
                 _ = await owner.finishBackupRestore(candidateActive: false, generation: nil)
             } else {
-                let invalid = "backup-2099-01-01-00.00.00.colpkg"
-                try Data("Synthetic invalid backup".utf8).write(to: configuration.collectionLocation.backupsDirectory.appending(path: invalid))
                 await owner.backups.openedRestore()
                 owner.backups.selectedName = invalid
                 let restore = try #require(owner.backups.restoreConfirmed(name: invalid))
@@ -147,6 +161,8 @@ extension ReviewCollectionStartupTests {
                 #expect(!owner.backups.candidateActive && owner.backups.failure != nil)
             }
             #expect(owner.state == .ready)
+            #expect(owner.backupTrigger.deadlineMilliseconds == armed)
+            await owner.backupTrigger.run(.deadline) // An early timer keeps the same future deadline.
             #expect(owner.backupTrigger.deadlineMilliseconds == armed)
             try #require(await owner.close())
         } catch { _ = await owner.close(); throw error }
@@ -212,42 +228,92 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupConfiguration(root)
         let service = BackupServiceProbe()
+        // Off has no cloud policy to acknowledge Quit. The configured-policy
+        // refusal and real quit-command ACK paths belong to the shutdown suite.
+        let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
+            configuration: nil, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil),
+            sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
-        await owner.start()
+        // Force study preparation's real Ready transition to follow the initial
+        // Opened call, rather than racing it while opening suppresses renewal.
+        let preparationGate = SyncOwnerGate()
+        var preparation = try #require(owner.studyPreparation.environment)
+        let startPreparation = preparation.start
+        preparation.start = {
+            await preparationGate.hold()
+            return try await startPreparation()
+        }
+        owner.studyPreparation.environment = preparation
+        let startup = Task { await owner.start() }
         do {
+            await preparationGate.waitUntilHeld()
+            let openLimit = ContinuousClock.now.advanced(by: .seconds(4))
+            while !owner.deckActionsReady, ContinuousClock.now < openLimit {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            try #require(owner.deckActionsReady)
+            #expect(await service.triggers == [.opened])
+            preparationGate.release()
+            await startup.value
+            let renewalLimit = ContinuousClock.now.advanced(by: .seconds(4))
+            while await service.triggers.count < 2, ContinuousClock.now < renewalLimit {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            await owner.backupTrigger.drain()
             try #require(owner.state == .ready)
+            #expect(sync.providerState?.selection == .localOnly)
+            #expect(await service.triggers == [.opened, .opened])
             await service.configureDue(deadline: nil, held: true)
-            let automatic = Task { await owner.backupTrigger.run(.deadline) }
+            var automaticEnded = false
+            let automatic = Task { await owner.backupTrigger.run(.deadline); automaticEnded = true }
             await service.waitForStart()
             var quit: Task<Bool, Never>?
+            var quitEnded = false
             let lease: UInt64?
             if quitting {
                 lease = nil
-                quit = Task { await owner.closeForQuit() }
+                quit = Task {
+                    let result = await owner.closeForQuit()
+                    quitEnded = true
+                    return result
+                }
             } else {
-                lease = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
+                // Keep the collection's UInt64 lease token for both expiries.
+                let token: UInt64? = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
+                lease = token
                 owner.backgroundTaskExpired(try #require(lease))
             }
             do { try await service.waitForOperationCancellation() }
             catch { await service.release(); await automatic.value; _ = await quit?.value; throw error }
+            #expect(!automaticEnded && !quitEnded)
             await service.release(); await automatic.value
-            if let quit { try #require(await quit.value) }
+            #expect(automaticEnded)
+            if let quit {
+                try #require(await quit.value)
+                #expect(quitEnded)
+                #expect(await service.triggers == [.opened, .opened, .deadline, .quit])
+            }
             else {
                 await owner.waitForLifecycle()
-                #expect(await service.triggers == [.opened, .deadline]) // Expired lease never starts Background.
+                // Both genuine startup Opened events count; expiry adds no Background.
+                #expect(await service.triggers == [.opened, .opened, .deadline])
                 owner.setForeground(true)
                 await owner.waitForLifecycle()
+                #expect(await service.triggers == [.opened, .opened, .deadline, .opened])
                 await service.configureDue(deadline: nil, held: true)
                 let foreground = Task { await owner.backupTrigger.run(.opened) }
                 await service.waitForStart()
                 owner.backgroundTaskExpired(try #require(lease)) // Stale expiry must not cancel new work.
                 try await service.requireOperationNotCancelled()
                 await service.release(); await foreground.value
+                #expect(await service.triggers == [.opened, .opened, .deadline, .opened, .opened])
                 try #require(await owner.close())
             }
-        } catch { await service.release(); _ = await owner.close(); throw error }
+        } catch {
+            preparationGate.release(); await service.release(); await startup.value
+            _ = await owner.close(); throw error
+        }
     }
 
     @Test func anotherForegroundSceneRetainsTheSharedCollectionLifetime() {

@@ -1089,12 +1089,11 @@ PUBLIC_ARTIFACTS = {
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'specs/sync/status-strings.md':
         '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
-    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+    # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
-        '8075ff26d0014382e34c434f36d8c3dc9974b606fd1d4008df0a953bf39b3ac7',
-    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+        'bc7d1bec20468401e2be0ec8d63f455f19574291252daae69a901b5ebb62ab94',
     'docs/design/screen-inventory.yaml':
-        'cad9cab5b364992250a8060399849a90efa81d20109e75e145ff914e24cf0361',
+        '1f9f3ed258e137a48c8fbfd194e148bd6c07f2bc806346776fcb5a69fba41620',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
@@ -1443,7 +1442,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '76fba0d5875291911cb83d657df271ebe6fecd4e98cee9e5336182a99151e701',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'c8475cdb14b3106e9d62251e7e3cc522d0287d17d0b57008b17005976af6577d',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
