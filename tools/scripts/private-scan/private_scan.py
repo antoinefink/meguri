@@ -1125,8 +1125,9 @@ PUBLIC_ARTIFACTS = {
         '5c252409842d08d9d53f0b196ca737e8ec2051fa28aa38ed6fecd219e70a9126',
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
+    # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     'server/README.md':
-        '4d6f4a0475d17afad978fd1ef20efc727372c7e0c5b0b8a7150ff7834fedaa72',
+        '39ee9aa5a30633b4e6fe148a8044450c34896b19a95e66dd72295f887d627d40',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
@@ -1151,9 +1152,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/native-owned-provider-ui-20261118.md":
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
-    # Complete public-file review: owned_diagnostic_review, 2026-11-19.
+    # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     "docs/process/verification-status.md":
-        "5accd9f059712aa180d62515ab215d93e886faf911a4fbc3e2dbb93a662e8764",
+        "780084139e51592f33c755c81f3d2b4298e396178f98669454cf60deed55ca96",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
