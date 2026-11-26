@@ -24,7 +24,8 @@ import Testing
         let blank = try #require(context.makeImage())
         let viewport = CanvasViewport(reference: .init(width: 100, height: 100), area: .init(width: 100, height: 100))
         let canvas = MaskCanvas(image: Image(decorative: blank, scale: 1), session: session,
-            viewport: .constant(viewport), translucent: false, fill: "#ffffff", editLabel: { _ in })
+            viewport: .constant(viewport), translucent: false, fill: "#ffffff", editLabel: { _ in },
+            focusCanvas: {})
         let renderer = ImageRenderer(content: canvas.frame(width: 100, height: 100))
         renderer.scale = 1
         let rendered = try #require(renderer.cgImage)

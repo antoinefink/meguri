@@ -81,14 +81,14 @@ import XCTest
         ])
         // The actual fields/masks composition must hide the native subtree,
         // restore it, and preserve every mask without an intervening save.
-        try click(addWindow.buttons["io.maskEditor.toggle"])
+        try click(element(addWindow, "io.maskEditor.toggle"))
         capture(addWindow, named: "image-occlusion-add-fields-after-toggle-synthetic")
         let hidden = addCanvas.viewport.waitForNonExistence(timeout: 10)
         if !hidden { captureToolbar(addWindow, stage: "fields-canvas-unexpectedly-visible") }
         XCTAssertTrue(hidden)
         XCTAssertFalse(element(addWindow, "io.mask.1").exists)
         XCTAssertFalse(element(addWindow, "io.mask.2").exists)
-        try click(addWindow.buttons["io.maskEditor.toggle"])
+        try click(element(addWindow, "io.maskEditor.toggle"))
         let restored = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "restored-masks")
         assertNativeImage(restored, in: addWindow, stage: "restored-masks")
         assertBounds(try maskBounds(in: addWindow, canvas: restored), equalTo: original)
