@@ -572,6 +572,7 @@ fn revlog_observation(session: &mut Session<'_>, request: &ObservationRequest) -
 fn state_value(state: meguri_sched::states::engine::State) -> Result<Value, ExecError> {
     use meguri_sched::states::engine::State;
     let (kind, mut value) = match state {
+        State::Preview { scheduled_secs, finished } => ("preview", json!({"scheduled_secs":scheduled_secs,"finished":finished})),
         State::New { position } => ("new", json!({"position":position})),
         State::Learning(l) => ("learning", learning_value(l)?),
         State::Review(r) => ("review", review_value(r)?),

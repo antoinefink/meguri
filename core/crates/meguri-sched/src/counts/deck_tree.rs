@@ -55,7 +55,7 @@ pub fn build(env: &Environment, groups: &[DeckAggregate], tomorrow: bool) -> Dec
     let mut effective = Vec::<Remaining>::with_capacity(env.decks.len());
     for (i, _) in env.decks.iter().enumerate() {
         let mut r = Remaining::for_deck(env, i, tomorrow);
-        if env.all_parents {
+        if env.all_parents && !env.filtered(i) {
             let parent = env.parents[i].map(|p| effective[p]).unwrap_or_else(Remaining::uncapped);
             r.new = r.new.min(parent.new);
             r.review = r.review.min(parent.review);
@@ -94,7 +94,7 @@ pub fn build(env: &Environment, groups: &[DeckAggregate], tomorrow: bool) -> Dec
                 for (_, t) in &nested {
                     add(&mut totals, *t);
                 }
-                let totals = cap(totals, effective[i]);
+                let totals = if env.filtered(i) { totals } else { cap(totals, effective[i]) };
                 (
                     Node {
                         id: d.id,

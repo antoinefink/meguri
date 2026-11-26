@@ -173,6 +173,8 @@ flowchart TB
 - R50. Home has Create Deck and Import File actions. The optional Get Decks action opens the shared-deck site in the default browser and uses no Anki credentials or sync endpoint; it is present only when its existing build availability rules allow it.
 - R51. Dropping an `.apkg` (or any file type the import area accepts) onto the Mac window, the Dock icon, the iPad window or the deck list starts the import flow; unsupported files show a short message naming the accepted types.
 - R52. Opening a supported file from Finder, Files, Mail or the share sheet ("Open in Meguri") starts the import flow over the current screen; if a review is in progress, the review stays underneath and resumes on the same card after the import sheet closes.
+**Scope update, 2026-11-26.** The request to build filtered decks and Custom Study supersedes this plan's original exclusions for creating, rebuilding, editing, emptying and studying filtered decks, and for Custom Study on deck and finished pages. The current contract, including behavior for existing synced decks, is `specs/decks/filtered-study.md` F1–F6. R54, normal-deck queue isolation and sync compatibility continue to apply.
+
 - R53. Filtered decks present in a synced collection appear in the tree in a distinct style with their counts, but cannot be studied; tapping one explains that filtered decks are not supported yet, and its menu offers only Rename and Delete.
 - R54. Deleting a filtered deck returns its cards to their home decks and deletes no cards, as in Anki.
 
@@ -751,7 +753,7 @@ flowchart TB
 - R512. The `anki` global provides `anki.imageOcclusion` (`setup`, `drawShape` and the shape classes), the deprecated alias `anki.setupImageCloze`, and `anki.mutateNextCardStates` as a no-op that leaves states unchanged and never delays the buttons.
 - R513. `ankiPlatform` is `"desktop"` on Mac and undefined on iOS/iPadOS.
 - R514. `$` and `jQuery` (3.7.1) are available.
-- R515. A minimal `MathJax` global exists whose typesetting functions (`typeset`, `typesetPromise`, `typesetClear`, `startup.promise`) do nothing and resolve, so templates calling them do not throw.
+- R515. A lazy `MathJax` global loads the real bundled offline runtime for template calls and automatic card typesetting (`render/card-runtime` C10.8; owner override 2026-11-26).
 - R516. The Anki-named page functions `_showQuestion`, `_showAnswer`, `_updateQA`, `_drawFlag`, `_drawMark` and `getTypedAnswer` exist with Anki's semantics, and Meguri adds no other page-world globals.
 - R517. `AnkiDroidJS`, `showAnswer`, `buttonAnswerEase1`–`4`, `study` and AnkiMobile's `setInnerHTML` are never defined, so templates that detect other clients behave as they do in AnkiMobile or Anki desktop.
 
@@ -812,8 +814,8 @@ flowchart TB
 - R561. `[sound:…]` tags naming a video play in order with the AV queue in a native player shown over the card area (inside the window, never a separate window), which closes at the end, on a tap, or on side change.
 - R562. Videos that the platform decodes natively (mp4, m4v, mov, 3gp) and those WebKit plays (webm, ogv) play; other video formats (mkv, avi, flv, mpg, mpeg, swf) show "Unsupported video format: <name>" in the player area and the queue continues (deviation: Anki desktop plays them with an external player).
 
-**MathJax, TTS and LaTeX fallbacks**
-- R563. `\(…\)` and `\[…\]` are not typeset, and their source text stays visible unchanged (deviation: MathJax is out of scope).
+**MathJax rendering and TTS and LaTeX fallbacks**
+- R563. `\(…\)` and `\[…\]` are typeset in card faces and previews by bundled MathJax 4.1.3, including AMS and chemistry. Dollars stay ordinary text. Owner override 2026-11-26 supersedes card-runtime MathJax exclusions below; field editing and Rust note storage still retain literal input.
 - R564. `{{tts …}}` / `[anki:tts …]…[/anki:tts]` show their inner text in place, with no play button and no audio (deviation: TTS is out of scope).
 - R565. Pre-generated LaTeX images (`latex-*.png|svg` with class `latex`) display like any media and are inverted in night mode, and Meguri never generates them.
 
@@ -1426,7 +1428,7 @@ flowchart TB
 - R970. `{{c1,2,3::text}}` belongs to cards 1, 2 and 3 (numbers deduplicated and sorted), and hints work with it.
 - R971. The same number used several times hides every occurrence on that card.
 - R972. Clozes nest up to 10 levels deep, and a `}}` outside any open cloze is literal text.
-- R973. Cloze parsing does not look at MathJax: a `}}` inside `\(…\)` or `\[…\]` closes a cloze like any other, as in Anki. HTML inside MathJax in `cloze:` output is stripped, even though MathJax rendering is out of scope, and where that removes one tag of a cloze span and not the other, the output stays unbalanced, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that parsing ignores `}}` inside MathJax so a cloze around math does not close early, which Anki's main branch does and the pinned 26.09.3 does not; `docs/process/review-log/U61.md`, A1.)
+- R973. Cloze parsing does not look at MathJax: a `}}` inside `\(…\)` or `\[…\]` closes a cloze like any other, as in Anki. HTML inside MathJax in `cloze:` output is stripped, and where that removes one tag of a cloze span and not the other, the output stays unbalanced, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that parsing ignores `}}` inside MathJax so a cloze around math does not close early, which Anki's main branch does and the pinned 26.09.3 does not; `docs/process/review-log/U61.md`, A1.)
 - R974. Front output for the active cloze is `<span class="cloze" data-cloze="<entity-encoded content>" data-ordinal="N">[...]</span>` (or `[hint]`), back output is `<span class="cloze" data-ordinal="N">content</span>`, and other clozes are `<span class="cloze-inactive" data-ordinal="M">content</span>` on both sides.
 - R975. A `{{cloze:Field}}` whose field contains no cloze for the current card renders as the empty string.
 - R976. A card whose cloze number appears in no field renders a "missing cloze" message, and a normal card whose front renders empty renders a "front of card is blank" message (both outside Browse). (Superseded 2026-11-21 for the wording, noted 2026-11-21: the two blank-card notices use Meguri's own sentences, not Anki's; layout and links unchanged; `specs/render/display-transform.md` D10, D11; `docs/process/standing-decisions.md` 2026-11-21.)
@@ -2787,7 +2789,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 - R1911. The rendering corpus includes the 16 user cases (U1–U16: Kaishi, Refold, three Migaku Custom types, Migaku stock, image occlusion, Tobira occlusion, JP syllabary type-in, WaniKani, Tobira, Jlab, editable-furigana Basic, German valency cloze, Lexicon and German Reading) and the 20 shared and synthetic cases (S1–S20: AnKing, legacy IO Enhanced, Lapis, JPMN, Yomitan output, Ultimate Geography, Core 2k/6k, Refold stock, persistence, script semantics, MathJax, media URL forms, night mode, tap pass-through, AnkiMobile bridge, tts, type-in variants, viewport and safe area, audio/video tags, large fonts).
 - R1912. Each corpus case also runs in Meguri's card web view on iPhone, iPad and Mac in light and dark, with DOM assertions (scripts ran, canvas drawn, input present and focused, no raw syntax visible) and behavioral checks (tapping interactive content never answers, front-to-back state survives).
 - R1913. For cases that depend on scripts or layout, Meguri's screenshots are compared with reference screenshots captured by hand from AnkiMobile (iOS path) and Anki desktop (Mac path), with a perceptual tolerance. During WIP, Antoine approves leaving this evidence pending until the end (2026-10-20). The comparison and any fixes remain required.
-- R1914. Cards containing MathJax or `{{tts}}` keep their text visible and raise no errors, verified by corpus cases even though those features are out of scope.
+- R1914. Cards typeset MathJax and keep the `{{tts}}` fallback visible. The rendering corpus checks both cases.
 - R1915. Personal note content never enters the shared rendering corpus; user-derived cases use the anonymized clone or synthetic notes.
 
 **Search, sort and stats conformance**
@@ -3148,7 +3150,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 - Haptics and sounds for answers and milestones (haptics out of scope).
 - Record own voice and replay own voice (Antoine's decision: not in the first version).
 - Reposition, Find Duplicates and Create Filtered Deck browser shortcuts (features out of scope or not listed).
-- MathJax/LaTeX editor shortcuts (Ctrl+M / Ctrl+T chords) (MathJax and LaTeX are out of scope).
+- MathJax/LaTeX editor shortcuts (Ctrl+M / Ctrl+T chords).
 - Legacy stats screen (Shift+T) and the debug console (Anki-specific, no user value).
 - Add-on manager, check-for-updates and add-on update toggles (no add-on system; App Store / direct distribution handles updates).
 - In-app Light/Dark override, UI scale, minimalist mode, hide-bars options, video driver choice (replaced by system settings).
@@ -3159,7 +3161,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 
 - Custom Study link and dialog on the congratulations screen: custom study is out of scope.
 - Reviewing filtered decks (preview states, Rebuild/Empty): filtered decks are out of scope; their cards and settings are only preserved.
-- MathJax typesetting: out of scope; source text stays visible (R563).
+- MathJax typesetting: included by the 2026-11-26 owner override (R563); editing remains literal.
 - TTS playback and `{{tts-voices:}}`: out of scope; text stays visible (R564).
 - LaTeX image generation: out of scope; existing images display (R565).
 - Custom scheduling JS (`anki.mutateNextCardStates` effects): out of scope; the function is a no-op (R512).
@@ -3183,7 +3185,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 
 **Notes, editor, note types and templates**
 
-- MathJax editing: the equation menu, MathJax inline/block/chemistry insertion (⌘M chords), the MathJax preview overlay and its setting (`renderMathjax` preserved, not used), because MathJax is out of scope; MathJax text in fields is kept as typed.
+- MathJax editing: the equation menu, MathJax inline/block/chemistry insertion (⌘M chords), the MathJax preview overlay and its setting (`renderMathjax` preserved, not used). The field editor keeps the TeX as typed.
 - LaTeX: `[latex]`, `[$]`, `[$$]` insertion (⌘T chords), LaTeX image generation, and the note type LaTeX options screen, because LaTeX is out of scope (settings preserved).
 - TTS playback of `{{tts}}` and the `{{tts-voices:}}` filter, because TTS is out of scope (markup is still produced, text shown).
 - Custom/add-on template filters and add-on editor buttons, because there is no add-on system (unknown filters pass through).
@@ -3252,7 +3254,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 - Conformance suites for filtered decks and custom study: features are out of scope; only data-preservation scenarios run.
 - SM-2 scheduler goldens: Meguri is FSRS only; SM-2 history is tested only as input to FSRS and to stats.
 - CSV/text import and export conformance: feature out of scope.
-- LaTeX and MathJax rendering parity: out of scope; only the "text stays visible" fallback is tested.
+- Generating LaTeX images is out of scope. Study cards typeset MathJax as described in R563.
 - TTS conformance (`{{tts}}`, `[anki:tts]`): out of scope; only graceful rendering is tested.
 - Easy Days conformance: out of scope; Easy Days settings are only preserved, and load-balancer tests use them unset.
 - Custom scheduling JS, reminders, haptics, Pencil, Siri/Shortcuts/Spotlight/Live Activities/Share extension: out of scope, so no verification suites.
@@ -7120,7 +7122,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 **Approach:**
 - **Skeleton:** R473–R474. Classes are written by native code (U67, R475), never from the user agent.
 - **Base CSS:** written by Meguri from the constants in R479–R487 (R1959). The font-family modernization in R479 (system-ui stack) is recorded as a known deviation (R1889, list owned by U4). `:root` tokens hold light and dark values with `color-scheme` (R485). No `.card`/`.cloze` defaults (R486).
-- **Side updates** run in the page world through Anki-named functions only (`_showQuestion`, `_showAnswer`, `_updateQA`, `_drawFlag`, `_drawMark`, `getTypedAnswer`, `_typeAnsPress`, `require`, the hook arrays, `anki`, `ankiPlatform`, `$`, `MathJax` stub). Updates are serialized (R466).
+- **Side updates** run in the page world through Anki-named functions only (`_showQuestion`, `_showAnswer`, `_updateQA`, `_drawFlag`, `_drawMark`, `getTypedAnswer`, `_typeAnsPress`, `require`, the hook arrays, `anki`, `ankiPlatform`, `$`, `MathJax`). Updates are serialized (R466).
 - **Order:** each update follows R467, split into two phases:
   - **prepare** (idle page, occluded): insert, re-create scripts as separate tasks, run `onUpdateHook`, set body classes, make `#qa` visible, then wait for a double rAF that confirms the visible content has painted beneath. Only then is the slot settled.
   - **present** (after the swap): run `onShownHook` only. Nothing the user sees depends on present.
@@ -7140,7 +7142,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
   - The AnkiMobile `cb` handler exists on iOS only (R511); its native mapping is in U67.
   - Forbidden globals are never defined (R517).
   - `anki.mutateNextCardStates` is a no-op that resolves at once (R512).
-  - The MathJax stub resolves (R515, R563).
+  - The bundled MathJax API typesets card content (R515, R563).
 - **Preload helper:** waits for not-yet-loaded images, stylesheets and fonts up to the R449 budgets. It also warms caches for the answer side and upcoming cards; U175 decides when (R443–R444, R499).
 - **Pause on swap:** video/audio elements in `#qa` are paused and unloaded before each update (R471). `reviewExtra` is appended after `#qa` (R472).
 - **Type-in:** `_typeAnsPress` reveals on Enter only when no composition is active (R508, R535). The question's shown-hook focuses `#typeans` (R534; keyboard behavior per the S1(e) outcome).
@@ -7162,7 +7164,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - Computed styles: `body` margin 20px, `#typeans` box-sizing, `.typeGood` background, `#_flag` fixed right 10px. `--canvas` is `#f5f5f5` in light and `#2c2c2c` in dark. `html` text-size-adjust is 100% (R479–R487).
 - S13: `.card{background:white}` is overridden by `body.nightMode`; `.card.nightMode{…}` wins; `prefers-color-scheme: dark` agrees with the classes; `.latex` is inverted; IO mask colors are unchanged (R488, R489, R491, R492).
 - `$.fn.jquery === "3.7.1"`, and `MathJax.typesetPromise()` resolves (R514, R515).
-- `\(x^2\)` source text stays visible (R563).
+- `\(x^2\)` renders as an equation. A formula that needs an unsupported extension shows its original TeX (R563, C10.8).
 
 **Verification:** All CardRenderingTests runtime suites pass on the macOS host and the iOS simulator via `tools/mg`; the similarity scan reports no flagged blocks for `app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/`.
 

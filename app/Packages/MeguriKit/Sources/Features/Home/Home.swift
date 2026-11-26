@@ -147,13 +147,14 @@ public struct HomeView: View {
         // H9.2: O on a normal deck's page opens its Deck Options (N20.9).
         .onKeyPress(keys: [KeyEquivalent("o")], phases: .down) { press in
             guard press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
-                  collection.deckOptions.canOpen(deckID: deckID) else { return .ignored }
+                  (collection.deckOptions.canOpen(deckID: deckID) || collection.filteredStudy.canEdit(deckID)) else { return .ignored }
             #if os(macOS)
             guard homeKeyboardActive else { return .ignored }
             #endif
             collection.openDeckOptions(deckID: deckID)
             return .handled
         }
+        .modifier(FilteredStudyFeedback(model: collection.filteredStudy))
         .accessibilityIdentifier("home.collection.screen")
     }
     #if !os(macOS)
@@ -378,6 +379,15 @@ public struct HomeView: View {
         let empty = nothingDue(deck)
         return List {
             deckSummary(deck, empty: empty)
+            Section {
+                if collection.deck(deck.id)?.filtered == true {
+                    FilteredDeckActions(collection: collection, deck: deck.id)
+                } else {
+                    Button { collection.filteredStudy.custom(deck.id) } label: { Text("Custom Study…", bundle: .module) }
+                        .disabled(!collection.filteredStudy.canCustom(deck.id))
+                        .accessibilityIdentifier("home.deck.customStudy")
+                }
+            }
             if !subdecks.isEmpty {
                 Section {
                     ForEach(subdecks, id: \.id) { node in
@@ -419,7 +429,12 @@ public struct HomeView: View {
                          widths: collection.navigation.activityRowWidths, page: .deck)
     }
     @ViewBuilder private func deckAction(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
-        if empty {
+        if collection.deck(deck.id)?.filtered == true && deck.counts.waiting == 0 {
+            Button { collection.filteredStudy.rebuild(deck.id) } label: { Text("Rebuild", bundle: .module) }
+                .buttonStyle(.borderedProminent)
+                .disabled(!collection.filteredStudy.canEdit(deck.id))
+                .accessibilityIdentifier("home.deck.rebuild")
+        } else if empty {
             Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
                 Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "plus") }
             }
@@ -1234,8 +1249,7 @@ public enum HomeSidebarPreview {
 }
 
 /// Starting a deck from the deck list (H3, H12): a double-click, or Return or S on its
-/// selected row. A filtered deck shows R53's explanation and a deck with nothing to study
-/// its page's state, on its page; any other goes through the deck page's Study path.
+/// selected row. A deck with nothing to study opens its page; any other starts study.
 public enum DeckListStudy {
     /// After the press's own actions: the double-click's second click and the selection's
     /// open run first, and the page they open never ends the review this starts.
@@ -1317,11 +1331,13 @@ public struct HomeAddMenu: View {
     let collection: ReviewCollection
     let deckID: Int64?
 
-    public init(collection: ReviewCollection, deckID: Int64? = nil) {
+    public init(collection: ReviewCollection, deckID: Int64? = nil, fromBrowse: Bool = false) {
         self.collection = collection
         self.deckID = deckID
+        self.fromBrowse = fromBrowse
     }
 
+    private var fromBrowse = false
     public var body: some View {
         let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
         return Menu {
@@ -1336,6 +1352,14 @@ public struct HomeAddMenu: View {
                 }
                 .disabled(!collection.deckActions.canPresent(.create))
                 .accessibilityIdentifier("home.collection.createDeck")
+                Button {
+                    if fromBrowse { collection.filteredStudy.createFromBrowse() }
+                    else { collection.filteredStudy.create(deck: deckID) }
+                } label: {
+                    Label { Text("Create Filtered Deck…", bundle: .module) } icon: { Image(systemName: "line.3.horizontal.decrease") }
+                }
+                .disabled(!collection.filteredStudy.canPresent)
+                .accessibilityIdentifier("home.collection.createFilteredDeck")
             }
             // N20.1: each item with its system symbol, on the Mac too.
             .labelStyle(.titleAndIcon)

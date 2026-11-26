@@ -404,6 +404,18 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         deckNamesOwner = value
         return value
     }
+    @ObservationIgnored public var showDeckStatistics: ((Int64) -> Void)?
+    private let filteredStudyService: (any FilteredStudyService)?
+    private var filteredStudyGeneration: UInt64?
+    private var filteredStudyOwner: FilteredStudyModel?
+    public var filteredStudy: FilteredStudyModel {
+        if let filteredStudyOwner, filteredStudyGeneration == generation { return filteredStudyOwner }
+        filteredStudyOwner?.invalidate()
+        let value = FilteredStudyModel(owner: self, service: filteredStudyService ?? CoreFilteredStudyService())
+        filteredStudyGeneration = generation
+        filteredStudyOwner = value
+        return value
+    }
     private var deckOptionsOwner: DeckOptionsPageModel?
     /// The Deck Options page's draft (N20.9), above the layout switch.
     public var deckOptions: DeckOptionsPageModel {
@@ -415,6 +427,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     }
     /// N20.9's entries: the deck's page, then its Deck Options pushed on it.
     public func openDeckOptions(deckID: Int64) {
+        if deck(deckID)?.filtered == true { filteredStudy.edit(deckID); return }
         guard deckOptions.canOpen(deckID: deckID) else { return }
         Task {
             if navigation.section != .home || navigation.homeDeckPage?.rawValue != deckID {
@@ -565,6 +578,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
 
     private var deckNamesReserved: Bool {
         if case .deckName = navigation.sheet { return true }
+        if case .filteredStudy = navigation.sheet { return true }
+        if case .customStudy = navigation.sheet { return true }
+        if filteredStudyOwner?.busy == true { return true }
         if deckOptionsOwner?.phase == .saving { return true }
         return deckNamesOwner?.busy == true || undoOwner?.busy == true || deckDeletionOwner?.busy == true
     }
@@ -607,6 +623,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
               manualOwner?.busy != true, manualOwner?.preview == nil, manualOwner?.mediaPreview == nil,
               deckOptionsOwner?.phase != .saving,
+              (filteredStudyOwner?.busy != true || route == .filteredStudy || route.map { if case .customStudy = $0 { true } else { false } } == true),
               deckDeletionOwner?.busy != true,
               navigation.sheet == route else { return false }
         return route == nil || navigation.sheetHost == .main
@@ -748,10 +765,11 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     /// How long a press on kept content waits for the first read before it is dropped (N27.4).
     @ObservationIgnored var firstReadWait: Duration = .seconds(3)
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, maintenanceService: (any MaintenanceService)? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, filteredStudyService: (any FilteredStudyService)? = nil, maintenanceService: (any MaintenanceService)? = nil) {
         let maintenance = maintenanceService ?? CoreMaintenanceService()
         self.maintenanceService = maintenance
         backupTrigger = BackupTrigger(service: maintenance, clock: configuration.clock)
+        self.filteredStudyService = filteredStudyService
         self.deckImportService = deckImportService ?? CoreDeckPackageImportService()
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
@@ -1835,6 +1853,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         undoOwner?.generationEnded()
         deckNamesOwner?.invalidate()
         deckOptionsOwner?.invalidate()
+        filteredStudyOwner?.invalidate()
         deckDeletionOwner?.invalidate()
         selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
@@ -2060,9 +2079,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     public func deckWaiting(_ id: Int64) -> DeckWaiting? {
         deckPage(id).map { DeckWaiting(counts: $0.counts, filtered: deck(id)?.filtered == true) }
     }
-    /// N14.3: Study is offered unless a regular deck has nothing waiting; the deck
-    /// page, the deck menu and the Mac's Study command all ask here.
-    public func offersStudy(deckID: Int64) -> Bool { deckWaiting(deckID)?.offersAddNote != true }
+    /// F6: Study is offered when cards wait in a normal or filtered deck.
+    /// An empty filtered page offers Rebuild instead.
+    public func offersStudy(deckID: Int64) -> Bool { deckWaiting(deckID).map { $0.total > 0 } ?? false }
 
     public func deckPage(_ id: Int64) -> DeckPageDetail? {
         if let node = deck(id) {
@@ -2512,14 +2531,13 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
 
     /// Starts the request's deck once no deck page is opening (a page that opened later would
     /// end the review), unless a later selection took the window elsewhere. The open of the
-    /// double-click's own second click is the same deck's and keeps the request. A filtered
-    /// deck shows R53's explanation and a deck with nothing to study its page's state, on its
-    /// page (H3); any other goes through the deck page's Study path.
+    /// double-click's own second click is the same deck's and keeps the request.
+    /// A deck with nothing to study opens its page; otherwise it starts ordinary study.
     public func startFromDeckList(_ request: DeckListStudyRequest) async {
         await Task.yield()
         await deckPageOpened()
-        guard deckListRequestIsCurrent(request), let node = deck(request.deckID) else { return }
-        guard !node.filtered, offersStudy(deckID: request.deckID) else {
+        guard deckListRequestIsCurrent(request), deck(request.deckID) != nil else { return }
+        guard offersStudy(deckID: request.deckID) else {
             if navigation.homeDeckPage?.rawValue != request.deckID { openDeckPage(deckID: request.deckID) }
             return
         }
@@ -2771,7 +2789,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 await backupOwner?.cancelAndDrain()
                 _ = await backupPreparationTask?.result
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain(); await deckImportOwner?.cancelAndDrain()
+                await filteredStudyOwner?.waitForOperation(); await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain(); await deckImportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -2818,6 +2836,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                     refreshCounts()
                     studyWarmup.warm()
                     deckNamesOwner?.resumeResult()
+                    if filteredStudyOwner?.needsRefresh == true { filteredStudyOwner?.refresh() }
                 } else {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
@@ -2948,6 +2967,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         meguriSignInPreparationTask?.cancel()
         await meguriSignInPreparationTask?.value
         invalidateDeckActions()
+        await filteredStudyOwner?.waitForOperation()
         await deckNamesOwner?.cancelAndDrain()
         await deckOptionsOwner?.cancelAndDrain()
         await noteTypesOwner?.cancelAndDrain()

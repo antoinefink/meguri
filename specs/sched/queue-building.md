@@ -30,7 +30,7 @@ A card belongs to the queue's decks when its `did` is one of them. A card whose 
 
 ### B2.2 Filtered decks among the studied decks
 
-Anki gathers the cards of a filtered deck that is a descendant of the studied deck, preview-repeat cards (queue 4) and interday learning included, with that deck's limits of 9999. Meguri does not study filtered decks (R706): it leaves every filtered deck out of the studied decks, so their cards are never gathered (R612, R707), and builds the queue from the normal decks alone. Deviation `queue-nested-filtered-deck` (golden `sched/queue/gather/nested-filtered`). The deck list still counts such a deck under its parent (`sched/counts#C3`), and the deck page shows the difference (`sched/counts#C5`).
+Anki gathers the cards of a filtered deck that is a descendant of the studied deck, preview-repeat cards (queue 4) and interday learning included, with that deck's limits of 9999. When a normal deck is selected, Meguri builds the queue from normal decks alone (R612). When a filtered deck is selected directly, `decks/filtered-study#F3` and F4 apply. Deviation `queue-nested-filtered-deck` (golden `sched/queue/gather/nested-filtered`). The deck list still counts such a deck under its parent (`sched/counts#C3`), and the deck page shows the difference (`sched/counts#C5`).
 
 ## B3. Which preset decides what (R604)
 
@@ -44,7 +44,7 @@ Anki gathers the cards of a filtered deck that is a descendant of the studied de
 Cards are gathered in four phases, in this order. Within a phase cards are offered in the order the phase states; each offered card is either taken, skipped by burying (B5) or refused by a limit (`sched/limits#L4`).
 
 1. **Intraday learning**: every card in queue 1 or queue 4 with `due` at or before `next_day_at`. All are taken; no limit applies (`sched/limits#L5`). They go to the learning list (B6). They are offered in ascending deck id, then ascending card id, which B6's ordering keeps for equal keys.
-   - Queue 4 (preview repeat) belongs to filtered decks, which Meguri never studies (B2.2), so a queue 4 card reaches the queue only when another client left one in a normal deck. It is then an intraday learning card in every respect: B5, B6, B8 and B9 treat queues 1 and 4 alike (golden `sched/queue/gather/preview-in-normal-deck`). How the session answers it is U43's and U44's.
+   - Queue 4 (preview repeat) belongs to filtered decks and is also supported when another client left such a card in a normal deck. It is then an intraday learning card in every respect: B5, B6, B8 and B9 treat queues 1 and 4 alike (golden `sched/queue/gather/preview-in-normal-deck`). How the session answers it is U43's and U44's.
 2. **Interday learning**: cards in queue 3 with `due` at or before today, in the studied deck's review sort order (`sched/orders#O4`), using the review limit.
 3. **Reviews**: cards in queue 2 with `due` at or before today, in the review sort order, using the review limit.
 4. **New cards**: cards in queue 0, in the new-card gather order (`sched/orders#O2`), using the new limit.

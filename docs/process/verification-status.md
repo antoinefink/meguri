@@ -2,6 +2,14 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+Filtered decks and Custom Study passed 239 focused Rust tests, 152 Swift
+tests and both end-to-end Mac journeys. The Mac journeys compared stored
+home schedules before and after a timed preview and relaunch. The iOS
+simulator app and UI test bundle also built successfully. The
+[feature review log](review-log/filtered-study-20261126.md) records the
+receipts. [PR #237](https://github.com/antoinefink/meguri/pull/237) carries
+the native screenshots and device-specific verification results.
+
 The macOS Option B image occlusion editor created two cards from two drawn
 masks. Moving one mask, saving, and reopening from Review retained both
 positions, the Header, and the tag. The ordinary-note keyboard reopen test

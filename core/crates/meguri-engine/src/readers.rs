@@ -279,9 +279,11 @@ impl<'a> ReaderLease<'a> {
         let last = self.exec.lock_commit();
         let inner = self.begin()?;
         let seq = *last;
+        let filtered_lifecycle = self.exec.filtered_lifecycle.lock().unwrap().clone();
         drop(last);
         Ok(Snapshot {
             inner,
+            filtered_lifecycle,
             seq,
             generation: self.generation,
             wal_identity: crate::WalIdentity::new(self.generation, self.reader().native_identity()),
@@ -418,6 +420,7 @@ impl Drop for ReaderLifetimePin<'_> {
 
 /// A read snapshot with the seq of the last commit it sees.
 pub struct Snapshot<'a> {
+    pub(crate) filtered_lifecycle: crate::session::filtered_lifecycle::FilteredLifecycle,
     inner: ReadSnapshot<'a>,
     seq: Seq,
     generation: Generation,

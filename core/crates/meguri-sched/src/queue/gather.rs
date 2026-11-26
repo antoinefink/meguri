@@ -14,7 +14,10 @@ pub fn build_overlay(
     deck: DeckId,
     overrides: &[Card],
 ) -> Result<Queue, StorageError> {
-    let selected = env.subtree(deck, true);
+    let filtered = env.index(deck).is_some_and(|i| env.filtered(i));
+    let preview = env.index(deck).is_some_and(|i| matches!(&env.decks[i].kind.kind,
+        meguri_model::proto::deck::DeckKind::Filtered(d) if !d.reschedule));
+    let selected = if filtered { vec![deck] } else { env.subtree(deck, true) };
     let preset = env.index(deck).and_then(|i| env.preset(i));
     let review_order = preset.map_or(0, |p| {
         if (0..=12).contains(&p.review_order) {
@@ -39,12 +42,21 @@ pub fn build_overlay(
     };
     let mut bury = BuryModes::default();
     let mut lists = [Vec::<Card>::new(), Vec::new(), Vec::new()];
-    for (phase, kind, index) in [
+    for (mut phase, kind, index) in [
         (Phase::Intraday, Kind::Learning, 0),
         (Phase::Interday, Kind::InterdayLearning, 0),
         (Phase::Review, Kind::Review, 1),
         (Phase::New, Kind::New, 2),
     ] {
+        if filtered {
+            phase = match phase {
+                Phase::Intraday => Phase::FilteredIntraday,
+                Phase::Interday => Phase::FilteredInterday,
+                Phase::Review => Phase::FilteredReview,
+                Phase::New => Phase::FilteredNew,
+                other => other,
+            };
+        }
         let mut cards = rows.sched_queue_candidates_overlay(
             &selected,
             phase,
@@ -54,7 +66,7 @@ pub fn build_overlay(
             env.next_day_at,
             overrides,
         )?;
-        if kind == Kind::New {
+        if kind == Kind::New && !filtered {
             order::gather(
                 &mut cards,
                 &selected,
@@ -63,7 +75,7 @@ pub fn build_overlay(
             );
         }
         for card in cards {
-            if kind != Kind::Learning && !limits::permits(&q.remaining_limits, card.deck_id, kind) {
+            if !filtered && kind != Kind::Learning && !limits::permits(&q.remaining_limits, card.deck_id, kind) {
                 if !bury.skips(&card, kind) {
                     if kind == Kind::New {
                         q.new_limit_reached = true;
@@ -73,7 +85,7 @@ pub fn build_overlay(
                 }
                 continue;
             }
-            if bury.offer(&card, kind, env.bury_preset(&card)) {
+            if !preview && bury.offer(&card, kind, env.bury_preset(&card)) {
                 continue;
             }
             if kind == Kind::Learning {
@@ -84,14 +96,14 @@ pub fn build_overlay(
                     mtime: card.mtime,
                 });
             } else {
-                limits::take(&mut q.remaining_limits, card.deck_id, kind);
+                if !filtered { limits::take(&mut q.remaining_limits, card.deck_id, kind); }
                 lists[index].push(card);
             }
         }
     }
     learning::order(&mut q.learning);
     let [interday, reviews, mut new] = lists;
-    order::sort_new(&mut new, preset.map_or(1, |p| p.new_card_sort_order), env.today);
+    if !filtered { order::sort_new(&mut new, preset.map_or(1, |p| p.new_card_sort_order), env.today); }
     q.counts = Counts {
         new: new.len() as u32,
         review: reviews.len() as u32,

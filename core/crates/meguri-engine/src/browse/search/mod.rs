@@ -19,6 +19,7 @@ mod selection;
 mod selection_counts;
 mod selection_reads;
 mod worker;
+pub(crate) use worker::context as search_context;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::ops::Range;

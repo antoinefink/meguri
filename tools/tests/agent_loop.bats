@@ -392,12 +392,34 @@ EOF
 
 @test "a second job queues for the host lease until the first releases it" {
   add_fixture_jobs
-  FX_HOLD=2 "$SB/tools/mg" fx-lease a >/dev/null 2>"$BATS_TEST_TMPDIR/a.err" &
-  local first=$!
+  local first second first_status first_result
+  FX_WORKTREE_RELEASE="$BATS_TEST_TMPDIR/host-lease.free"
+  FX_UNTIL="$FX_WORKTREE_RELEASE" "$SB/tools/mg" fx-lease a >"$BATS_TEST_TMPDIR/a.out" 2>"$BATS_TEST_TMPDIR/a.err" 3>&- &
+  first=$!
+  bg_track "$first"
   for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
-  FX_HOLD=0 mg fx-lease b
-  wait "$first"
+  [ -s "$FX_LOG" ]
+  FX_HOLD=0 "$SB/tools/mg" fx-lease b >"$BATS_TEST_TMPDIR/b.out" 2>"$BATS_TEST_TMPDIR/b.err" 3>&- &
+  second=$!
+  bg_track "$second"
+  # Release only after the second job has observed contention with the holder.
+  for _ in $(seq 1 50); do
+    grep -Fq "host lease: waiting for fx-lease in $SB" "$BATS_TEST_TMPDIR/b.err" && break
+    sleep 0.1
+  done
+  grep -Fq "host lease: waiting for fx-lease in $SB" "$BATS_TEST_TMPDIR/b.err"
+  touch "$FX_WORKTREE_RELEASE"
+  first_status=0
+  wait "$first" || first_status=$?
+  status=0
+  wait "$second" || status=$?
+  first_result="$(tail -n 1 "$BATS_TEST_TMPDIR/a.out")"
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/b.out")"
+  stderr="$(cat "$BATS_TEST_TMPDIR/b.err")"
+  [ "$first_status" -eq 0 ]
   [ "$status" -eq 0 ]
+  [ "$(jq -r .status "$first_result")" = pass ]
+  [ "$(field .status)" = pass ]
   [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starta enda startb endb " ]
   [ "$(awk '$1 == "start" && $2 == "b" {print $3}' "$FX_LOG")" \> "$(awk '$1 == "end" && $2 == "a" {print $3}' "$FX_LOG")" ]
   [[ "$stderr" == *"host lease: waiting for fx-lease in $SB"* ]]

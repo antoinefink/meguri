@@ -1,6 +1,8 @@
 @testable import CardRendering
 import Foundation
+import QuartzCore
 import Testing
+import WebKit
 
 /// `render/preview` V12 for the Note Types preview: a replay command plays
 /// only right after a click or tap on the card, so a card script that calls
@@ -28,6 +30,60 @@ extension WebKitSuites {
     /// with no click or tap on the card, is dropped and recorded; the same
     /// command right after a tap goes to the audio controller.
     @Suite struct PreviewTapGatePairTests {
+        @Test func previewMathIsReadyOnBothFaces() async throws {
+            let fixture = MediaFixture()
+            let configuration = CardWebConfiguration(store: .nonPersistent(), mediaNeedsGesture: true)
+            let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved(), platform: .mac)
+            pair.playNeedsTap = true
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let update = try await pair.prepare(CardPayload(cardID: 41,
+                question: #"\(a^2+b^2=c^2\)"#, answer: #"\[c=\sqrt{a^2+b^2}\]"#))
+            let prepared = pair.idle
+            #expect(prepared.settled)
+            try await MathRenderingProbe.expect(in: prepared.webView, count: 1, label: "preview front", display: false)
+            let commits = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            pair.onCommitted = { committed, _ in if committed == update { commits.continuation.yield(()) } }
+            defer { pair.onCommitted = nil; commits.continuation.finish() }
+            do {
+                CATransaction.begin()
+                defer { CATransaction.commit() }
+                _ = try pair.present(update)
+            }
+            try await Spike.deadline("preview math native commit", timeout: .seconds(3)) {
+                for await _ in commits.stream { return }
+                throw Spike.Failure("missing preview math commit")
+            }
+            _ = try await pair.showAnswer()
+            try await MathRenderingProbe.expect(in: pair.current.webView, count: 1, label: "preview back", display: true)
+            #expect(pair.diagnostics.templateErrors.isEmpty)
+        }
+
+        @Test func malformedMathReachesNativeTemplateErrors() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let pair = fixture.pair
+            try await fixture.present(CardPayload(cardID: 42, ordinal: 2, templateDescriptor: "Math preview",
+                question: #"\(x+1\)"#, answer: #"\(\frac{1}\)"#))
+            _ = try await pair.showAnswer()
+            let error = try #require(pair.diagnostics.templateErrors.first)
+            #expect(error.update == pair.current.update && error.update.side == .answer && error.kind == "math" && error.phase == "typeset")
+            #expect(error.templateOrdinal == 2 && error.templateDescriptor == "Math preview")
+            #expect(error.message.contains("Missing") && !error.message.contains("[object Object]"))
+            #expect(!pair.diagnostics.entries.contains { $0.kind == "bridgeRejected" })
+            #expect(try await fixture.bool(#"""
+                var failure = document.querySelector('#qa [data-meguri-math-error]');
+                var code = failure && failure.querySelector('code');
+                return !!failure && failure.getAttribute('role') === 'group' &&
+                  failure.getAttribute('aria-label') === 'Formula could not be rendered' &&
+                  failure.querySelector('strong').textContent.includes('Formula could not be rendered') &&
+                  !!code && code.textContent === '\\(\\frac{1}\\)' &&
+                  code.getBoundingClientRect().height > 0 && getComputedStyle(code).visibility === 'visible' &&
+                  !failure.querySelector('svg') && document.getElementById('qa').style.opacity === '1';
+                """#) == true)
+        }
+
         @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))
         func aScriptsReplayCommandWithoutATapPlaysNothing() async throws {
             let fixture = MediaFixture()

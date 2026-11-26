@@ -452,3 +452,57 @@ fn same_target(a: Target, b: Target) -> bool {
 fn clock_now(clock: &StepClock) -> i64 {
     meguri_model::clock::Clock::now_ms(clock)
 }
+
+#[test]
+fn answer_field_merge_saves_membership_and_preserves_later_identity_ordinal_and_flag_edits() {
+    use meguri_model::ids::{DeckId, NoteId};
+    use meguri_storage::Record;
+
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let writer = collection.writer();
+    let clock = clock();
+    let mut scope = writer.begin_write(StampMode::CallerSupplied, &clock, None).unwrap();
+    let mut original = card(NoteId(10), 0);
+    original.id = meguri_model::ids::CardId(10);
+    original.deck_id = DeckId(20);
+    original.original_deck_id = DeckId(1);
+    original.original_due = 105;
+    original.due = -100_000;
+    scope.put(&original).unwrap();
+    scope.commit().unwrap();
+    // Capture the answer's input before another saved operation changes fields
+    // the answer does not own. Use actual committed rows, not a fabricated
+    // expected cell list shared with the production merge implementation.
+    let mut answer = writer.card(original.id).unwrap().unwrap();
+    let mut scope = writer.begin_write(StampMode::CallerSupplied, &clock, None).unwrap();
+    let mut edited = scope.card(original.id).unwrap().unwrap();
+    edited.note_id = NoteId(11);
+    edited.ord = 2;
+    edited.flags = 0xb5;
+    scope.put(&edited).unwrap();
+    scope.commit().unwrap();
+    let edited = writer.row_image(Table::Cards, &RowKey::Id(original.id.0)).unwrap().unwrap();
+    answer.deck_id = DeckId(1);
+    answer.original_deck_id = DeckId(0);
+    answer.original_due = 0;
+    answer.card_type = CardType::Review;
+    answer.queue = CardQueue::Review;
+    answer.interval = 1;
+    answer.due = 101;
+    answer.reps += 1;
+    let mut scope = writer.begin_write(StampMode::CallerSupplied, &clock, None).unwrap();
+    scope.put_answer_card(&answer).unwrap();
+    scope.commit().unwrap();
+    let saved = writer.row_image(Table::Cards, &RowKey::Id(original.id.0)).unwrap().unwrap();
+    for index in [0, 1, 3, 16] {
+        assert_eq!(saved[index], edited[index], "protected column {index}");
+    }
+    let saved_card = writer.card(original.id).unwrap().unwrap();
+    assert_eq!((saved_card.deck_id, saved_card.original_deck_id, saved_card.original_due, saved_card.due),
+        (DeckId(1), DeckId(0), 0, 101));
+    let mut expected = answer.to_cells();
+    for index in [0, 1, 3, 16] { expected[index] = edited[index].clone(); }
+    assert_eq!(saved, expected);
+    collection.close().unwrap();
+}

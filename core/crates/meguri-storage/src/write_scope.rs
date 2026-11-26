@@ -506,8 +506,8 @@ impl<'c> WriteScope<'c> {
         Ok(entry.id)
     }
 
-    /// Only answer-owned fields are replaced; identity, original-deck fields
-    /// and flags retain their stored representation.
+    /// Only answer-owned fields are replaced, including filtered membership;
+    /// identity, template ordinal and flags retain their stored representation.
     pub fn put_answer_card(&mut self, card: &Card) -> Result<Written, StorageError> {
         let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(card.id.0))? else {
             return Err(StorageError::Mode {
@@ -515,7 +515,7 @@ impl<'c> WriteScope<'c> {
             });
         };
         let values = card.to_cells();
-        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+        for i in rows::cards::ANSWER_COLUMNS {
             image[i] = values[i].clone();
         }
         self.put_cells(Table::Cards, image, false)

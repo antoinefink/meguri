@@ -128,6 +128,45 @@ extension WebKitSuites {
             #expect(pair.diagnostics.entries.count == 256)
         }
 
+        @Test func mathDiagnosticsAdmitOnlyTheTypesetPairWithExistingLimits() async throws {
+            let fixture = MediaFixture()
+            let configuration = CardWebConfiguration(store: .nonPersistent())
+            let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved(), platform: .mac)
+            defer { pair.close() }
+            let page = pair.idle
+            let update = CardUpdate(card: 7, generation: 1, side: .answer)
+            page.begin(CardPayload(cardID: 7, ordinal: 2, templateDescriptor: "Math card", question: "q", answer: "a"), update: update)
+            let base: [String: Any] = ["signal": "error", "card": 7, "generation": 1, "side": "answer",
+                                       "kind": "math", "phase": "typeset", "message": "Missing argument"]
+            func send(_ changes: [String: Any] = [:]) {
+                configuration.bridge.receive(name: CardRuntime.signalHandlerName, world: CardRuntime.interactionWorldName,
+                    body: base.merging(changes, uniquingKeysWith: { _, value in value }), page: page)
+            }
+            send()
+            let accepted = try #require(pair.diagnostics.templateErrors.first)
+            #expect(accepted.update == update && accepted.kind == "math" && accepted.phase == "typeset")
+            #expect(accepted.templateOrdinal == 2 && accepted.templateDescriptor == "Math card")
+            #expect(accepted.message == "Missing argument" && accepted.scriptIndex == nil)
+            #expect(pair.diagnostics.entries.last?.kind == "script.math.typeset")
+            for phase in ["script", "later", "update-hook", "shown-hook"] {
+                var changes: [String: Any] = ["phase": phase]
+                if phase == "script" { changes["index"] = 1 }
+                send(changes)
+            }
+            for kind in ["exception", "rejection", "hook", "unknown"] { send(["kind": kind]) }
+            let invalid: [[String: Any]] = [
+                ["message": String(repeating: "x", count: 8_001)], ["source": String(repeating: "x", count: 4_097)],
+                ["index": 1], ["line": true], ["column": -1], ["extra": "field"],
+            ]
+            for changes in invalid { send(changes) }
+            #expect(pair.diagnostics.templateErrors == [accepted])
+            #expect(pair.diagnostics.entries.filter { $0.kind == "bridgeRejected" }.reduce(0) { $0 + $1.repeats } == 14)
+            send(["message": String(repeating: "x", count: 8_000), "source": String(repeating: "s", count: 4_096),
+                  "line": 0, "column": 1, "index": NSNull()])
+            #expect(pair.diagnostics.templateErrors.count == 2)
+            #expect(pair.diagnostics.templateErrors.last?.message.count == 2_000)
+        }
+
         @Test func bridgeReasonStoragePreservesLegacyPrivacyShape() {
             let diagnostics = CardDiagnostics()
             let update = CardUpdate(card: 7, generation: 2, side: .question)

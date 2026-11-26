@@ -1339,6 +1339,721 @@
           }
         }
       }
+    },
+    "Create Filtered Deck": {
+      "comment": "Title of the form for a new saved filtered search.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Filtered Deck"
+          }
+        }
+      }
+    },
+    "Edit Filtered Deck": {
+      "comment": "Title of the form for an existing filtered search.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Filtered Deck"
+          }
+        }
+      }
+    },
+    "Custom Study": {
+      "comment": "Title of the normal deck’s custom study form.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Study"
+          }
+        }
+      }
+    },
+    "Save and Build": {
+      "comment": "Default action: save the filtered definition and gather eligible cards.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save and Build"
+          }
+        }
+      }
+    },
+    "Apply": {
+      "comment": "Default action in Custom Study: apply the selected study choice.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "comment": "Retry reading the study form’s settings after a load failure.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "First Search": {
+      "comment": "Section title for the first filtered-deck search term.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Search"
+          }
+        }
+      }
+    },
+    "Second Search": {
+      "comment": "Section title for the optional second filtered-deck search term.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Second Search"
+          }
+        }
+      }
+    },
+    "Use a second search": {
+      "comment": "Toggle enabling a second independently limited filtered search.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a second search"
+          }
+        }
+      }
+    },
+    "Reschedule cards": {
+      "comment": "Toggle selecting scheduled study instead of schedule-preserving preview.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reschedule cards"
+          }
+        }
+      }
+    },
+    "Again (seconds)": {
+      "comment": "Preview delay in seconds after the Again answer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Again (seconds)"
+          }
+        }
+      }
+    },
+    "Hard (seconds)": {
+      "comment": "Preview delay in seconds after the Hard answer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hard (seconds)"
+          }
+        }
+      }
+    },
+    "Good (seconds)": {
+      "comment": "Preview delay in seconds after the Good answer.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Good (seconds)"
+          }
+        }
+      }
+    },
+    "Preview preserves each card’s home schedule. A zero delay finishes the card; Easy always finishes.": {
+      "comment": "Footer explaining the filtered deck’s preview delays and schedule preservation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview preserves each card’s home schedule. A zero delay finishes the card; Easy always finishes."
+          }
+        }
+      }
+    },
+    "Oldest review first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oldest review first"
+          }
+        }
+      }
+    },
+    "Random": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random"
+          }
+        }
+      }
+    },
+    "Shortest interval first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shortest interval first"
+          }
+        }
+      }
+    },
+    "Longest interval first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Longest interval first"
+          }
+        }
+      }
+    },
+    "Most lapses first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Most lapses first"
+          }
+        }
+      }
+    },
+    "Oldest note first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oldest note first"
+          }
+        }
+      }
+    },
+    "Due first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due first"
+          }
+        }
+      }
+    },
+    "Newest note first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Newest note first"
+          }
+        }
+      }
+    },
+    "Lowest retrievability first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lowest retrievability first"
+          }
+        }
+      }
+    },
+    "Highest retrievability first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Highest retrievability first"
+          }
+        }
+      }
+    },
+    "Relative overdueness": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relative overdueness"
+          }
+        }
+      }
+    },
+    "Unknown order": {
+      "comment": "Fallback title for a stored filtered-search order this app cannot name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown order"
+          }
+        }
+      }
+    },
+    "Card limit": {
+      "comment": "Maximum number of cards to gather for a study search.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card limit"
+          }
+        }
+      }
+    },
+    "Order": {
+      "comment": "Picker label for the order used to gather matching cards.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Order"
+          }
+        }
+      }
+    },
+    "Adjust today’s new limit": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust today’s new limit"
+          }
+        }
+      }
+    },
+    "Adjust today’s review limit": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust today’s review limit"
+          }
+        }
+      }
+    },
+    "Forgotten cards": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgotten cards"
+          }
+        }
+      }
+    },
+    "Review ahead": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review ahead"
+          }
+        }
+      }
+    },
+    "Preview recent new cards": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview recent new cards"
+          }
+        }
+      }
+    },
+    "Study by state or tags": {
+      "comment": "Custom Study mode option for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study by state or tags"
+          }
+        }
+      }
+    },
+    "New cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New cards"
+          }
+        }
+      }
+    },
+    "Due cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due cards"
+          }
+        }
+      }
+    },
+    "Previously introduced cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previously introduced cards"
+          }
+        }
+      }
+    },
+    "All cards (preview)": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All cards (preview)"
+          }
+        }
+      }
+    },
+    "Available cards before daily limits": {
+      "comment": "Count of eligible cards before the normal deck’s daily limits.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available cards before daily limits"
+          }
+        }
+      }
+    },
+    "Change in today’s limit": {
+      "comment": "Signed adjustment to today’s new or review allowance.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change in today’s limit"
+          }
+        }
+      }
+    },
+    "Days": {
+      "comment": "Number of days used by the chosen custom study mode.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Days"
+          }
+        }
+      }
+    },
+    "Choose 1–30 days.": {
+      "comment": "Range guidance for the forgotten-cards custom study mode.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose 1–30 days."
+          }
+        }
+      }
+    },
+    "Positive changes allow more cards today. Negative changes reduce today’s allowance.": {
+      "comment": "Footer explaining signed daily-limit adjustments.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Positive changes allow more cards today. Negative changes reduce today’s allowance."
+          }
+        }
+      }
+    },
+    "Preview preserves each card’s home schedule.": {
+      "comment": "Footer for custom study modes that preview without rescheduling.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview preserves each card’s home schedule."
+          }
+        }
+      }
+    },
+    "Card state": {
+      "comment": "Picker label for the eligibility state in custom study by state or tags.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card state"
+          }
+        }
+      }
+    },
+    "Include tags": {
+      "comment": "Input for literal tags, one per line; match any included tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include tags"
+          }
+        }
+      }
+    },
+    "Exclude tags": {
+      "comment": "Input for literal tags, one per line; exclude every listed tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclude tags"
+          }
+        }
+      }
+    },
+    "Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags.": {
+      "comment": "Footer explaining literal tag matching in Custom Study.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags."
+          }
+        }
+      }
+    },
+    "Couldn’t read study settings. Try again.": {
+      "comment": "Inline study-form load failure; retry leaves the draft intact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t read study settings. Try again."
+          }
+        }
+      }
+    },
+    "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first.": {
+      "comment": "Inline study-form write refusal with editable inputs.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first."
+          }
+        }
+      }
+    },
+    "The change was saved. Close this sheet to continue.": {
+      "comment": "Committed study change whose result cannot be recovered; do not repeat the write.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The change was saved. Close this sheet to continue."
+          }
+        }
+      }
+    },
+    "The change was saved. Refresh decks to continue.": {
+      "comment": "Committed study change awaiting a successful deck refresh.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The change was saved. Refresh decks to continue."
+          }
+        }
+      }
+    },
+    "Couldn’t Update Study Deck": {
+      "comment": "Alert title for a failed current foreground study-deck operation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Update Study Deck"
+          }
+        }
+      }
+    },
+    "Try again, or edit the search and card limits.": {
+      "comment": "Recovery message for a failed study-deck operation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again, or edit the search and card limits."
+          }
+        }
+      }
+    },
+    "Edit Filtered Deck…": {
+      "comment": "Command opening the saved filtered-search definition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Filtered Deck…"
+          }
+        }
+      }
+    },
+    "Create Filtered Deck…": {
+      "comment": "Command opening a new filtered-search definition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Filtered Deck…"
+          }
+        }
+      }
+    },
+    "Custom Study…": {
+      "comment": "Command opening custom study choices for a normal deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Study…"
+          }
+        }
+      }
+    },
+    "Rebuild": {
+      "comment": "Command gathering cards again with the filtered deck’s saved definition.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuild"
+          }
+        }
+      }
+    },
+    "Empty": {
+      "comment": "Command returning all filtered-deck members to their home decks.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty"
+          }
+        }
+      }
+    },
+    "Browse Cards": {
+      "comment": "Deck command opening Browse with the core’s exact deck scope.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browse Cards"
+          }
+        }
+      }
+    },
+    "Deck Statistics": {
+      "comment": "Deck command opening statistics for this deck.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Statistics"
+          }
+        }
+      }
+    },
+    "Deck": {
+      "comment": "Label for the source normal deck in Custom Study.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
+    },
+    "Save Empty Deck": {
+      "comment": "Explicit consent to save this exact filtered definition with no eligible cards.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Empty Deck"
+          }
+        }
+      }
+    },
+    "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged.": {
+      "comment": "Filtered-search refusal before explicit empty-save consent; the existing deck is kept.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged."
+          }
+        }
+      }
+    },
+    "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged.": {
+      "comment": "Custom Study refusal when no eligible cards match; the existing session is kept.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

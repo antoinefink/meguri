@@ -1,0 +1,16 @@
+MathJax 4.1.3
+Copyright The MathJax Consortium. Distributed under the Apache License,
+Version 2.0 (LICENSE). The mhchem parser is copyright 2015–2023 Martin
+Hensel and is distributed under the same license.
+
+The MathJax New Computer Modern and mhchem glyph outlines are copyright
+2024 MathJax, Inc. and derive from New Computer Modern, copyright
+2019–2021 Antonis Tsolomitis. The GUST Font License applies to the
+outlines. See GUST-FONT-LICENSE.txt and LPPL-1.3c.txt.
+
+Meguri bundles the stock tex-svg engine, assistive MathML, mhchem and its
+SVG font extension, and the New Computer Modern dynamic SVG glyph files.
+The TeX configuration enables base, AMS and mhchem, with require/autoload
+restricted to supported packages. Other packages compiled into tex-svg are
+disabled; their standalone components and optional font extensions are not
+shipped. All retained upstream engine, component and font files are unmodified.

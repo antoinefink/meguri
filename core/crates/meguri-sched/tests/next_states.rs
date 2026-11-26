@@ -64,7 +64,6 @@ fn elapsed_argument_keeps_the_pinned_wrapping_conversions() {
 #[test]
 fn resolved_absent_memory_and_imported_interval_wraps_do_not_refuse_or_panic() {
     use meguri_model::card::{CardQueue, CardType};
-    use meguri_sched::states::engine::StateError;
     let mut card = common::card();
     card.card_type = CardType::Review;
     card.queue = CardQueue::Review;
@@ -100,10 +99,9 @@ fn resolved_absent_memory_and_imported_interval_wraps_do_not_refuse_or_panic() {
         card: &filtered,
         ..input
     };
-    assert!(matches!(
-        next_states(&mut cache, &input, None),
-        Err(StateError::InFilteredDeck)
-    ));
+    let filtered_states = next_states(&mut cache, &input, None).unwrap();
+    assert_eq!(filtered_states.current, states.current);
+    assert_eq!(filtered_states.good, states.good);
 }
 
 #[test]
@@ -231,4 +229,23 @@ fn review_previews_keep_ease_leech_and_difficulty_separate() {
         next_states(&mut FsrsCache::default(), &input, None),
         Err(StateError::UnsupportedParams)
     ));
+}
+
+#[test]
+fn preview_answers_use_each_configured_delay_and_always_finish_on_easy() {
+    use meguri_model::proto::deck::FilteredDeck;
+    use meguri_sched::states::{filtered::preview_states, interval_limits::Delay};
+    let mut deck = FilteredDeck::default();
+    deck.preview_again_secs = 37;
+    deck.preview_hard_secs = 613;
+    deck.preview_good_secs = 17;
+    let states = preview_states(&deck, 1200);
+    for (chosen, seconds) in [(&states.again, 37), (&states.hard, 613), (&states.good, 17), (&states.easy, 0)] {
+        assert_eq!(chosen.state, State::Preview { scheduled_secs: seconds, finished: seconds == 0 });
+        assert_eq!(chosen.delay, Delay::Seconds(seconds));
+        assert_eq!((chosen.revlog.kind, chosen.revlog.factor, chosen.revlog.last_interval), (3, 0, 0));
+        assert_eq!(chosen.state.memory_state(), None);
+    }
+    deck.preview_again_secs = 0;
+    assert!(matches!(preview_states(&deck, 1200).again.state, State::Preview { finished: true, .. }));
 }

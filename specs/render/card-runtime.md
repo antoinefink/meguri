@@ -16,7 +16,7 @@ Not covered here: serving media and the page document from the media origin and 
 - **Update**: replacing the content of `#qa` with one side HTML and running its scripts and hooks (C6).
 - **Presented**: a page is presented while it is the page the user sees. Native code marks a page presented right after the swap that brings it to the front, and unpresented when it goes back behind (U67). A page starts unpresented. A preview page is presented as soon as it is shown.
 - **Page world**: the JavaScript world that card scripts run in. **Isolated world**: a separate WebKit content world that shares the DOM but not JavaScript objects with the page world. Card scripts cannot reach it.
-- **Runtime**: Meguri's page-world script (`runtime.js`) plus the vendored jQuery. **Interaction script**: Meguri's isolated-world script (`interaction.js`). **Native**: Meguri's Swift side (U67).
+- **Runtime**: Meguri's page-world script (`runtime.js`) loads with jQuery and loads the bundled MathJax engine on demand (C10.8). **Interaction script**: Meguri's isolated-world script (`interaction.js`). **Native**: Meguri's Swift side (U67).
 - **Card script**: any script that is not Meguri's: scripts inside side HTML, scripts they load or create, and the scripts of `reviewExtra` (C2.3).
 - **Identity** of an update: the card id and prepare generation native gives to the updates it starts (C6.8).
 
@@ -571,14 +571,17 @@ U68 adds `anki.imageOcclusion` and `anki.setupImageCloze`. There are no other me
 
 ### C10.8 `MathJax`
 
-A plain object (R515, R563):
+Owner override (2026-11-26, supersedes the card-runtime no-op in R515/R563 and D6): a lazy `MathJax` template API exists from page start. First math/API use loads unmodified bundled MathJax 4.1.3, real AMS and mhchem, accessible MathML and SVG glyph components, exclusively from the bundled origin. Speech, enrichment, explorer and menu components are disabled.
 
-- `MathJax.typeset(elements)` returns `undefined` and changes nothing;
-- `MathJax.typesetPromise(elements)` returns an already-resolved promise and changes nothing;
-- `MathJax.typesetClear(elements)` returns `undefined`;
-- `MathJax.startup.promise` is an already-resolved promise.
+Both faces and previews typeset `\(…\)` inline and `\[…\]` display math after side scripts/update hooks and before reveal/settled. Dollars remain ordinary text. Side replacement clears old MathItems. Startup/typesetting failures are reported without blocking review; ordinary cards fetch no MathJax assets. Once started the upstream template API is available, including `typeset`, `typesetPromise`, `typesetClear` and `startup.promise`. Before startup, `typeset` requests asynchronous typesetting, `typesetPromise` and `startup.promise` await the real runtime. Field editing and stored input stay literal.
 
-It exists from the start in every page. Meguri never loads MathJax and never typesets. `\(…\)` and `\[…\]` stay as plain text in the side (C15 D6).
+After startup, with no pending asynchronous typesetting, `typeset(elements)` uses the original synchronous API: already-loaded glyphs produce DOM before it returns, and synchronous exceptions are reported for the requesting side and rethrown. Calls made during startup or pending asynchronous typesetting use the existing side-scoped, eight-second bounded queue.
+
+Owner decision (2026-11-26). Meguri supports core TeX, AMS equations and mhchem chemistry. Standard AMS environments include aligned equations and piecewise cases. Meguri loads the SVG output, glyphs and assistive MathML that these features need from its bundle. Other optional TeX extensions are disabled, including extensions requested by a card template or a TeX command.
+
+If a formula needs an unsupported extension, show the original TeX and identify that formula as unsupported. Keep the rest of the card readable. Supported formulas on the same side still render. The reviewer can reveal the answer, rate the card and continue. Add another optional extension when a deck needs it and native tests cover it.
+
+Supported commands must keep review responsive. AMS accepts at most 64 alignment pairs per expression. Meguri may decline a formula that exceeds a rendering limit. The bundled upstream files stay unmodified.
 
 ### C10.9 jQuery
 
@@ -663,7 +666,7 @@ Each difference has its own test (R1889). The test names are suggestions in the 
 | D3 | R480 | card `<button>`s get the desktop UI button look | WebKit's default button look plus the margin | `BaseCSSTests.buttonKeepsPlatformAppearance` |
 | D4 | R506 | `ease1`–`ease4`, `edit`, `more` act | ignored and logged | `GlobalsSurfaceTests.pycmdIgnoresOtherCommands` |
 | D5 | R513, R505 | `ankiPlatform`, `pycmd`, `bridgeCommand` exist | iOS and iPadOS: undefined (AnkiMobile's environment) | `GlobalsSurfaceTests.iosHasNoDesktopBridge` |
-| D6 | R515, R563 | MathJax is loaded when a side contains `\(…\)` or `\[…\]` and typesets it; `MathJax` is undefined before that | never loaded; the stub always exists; source text stays | `GlobalsSurfaceTests.mathJaxStubResolves`, `GlobalsSurfaceTests.mathSourceStaysVisible` |
+| D6 | R515, R563 | MathJax is loaded when a side contains `\(…\)` or `\[…\]` and typesets it; `MathJax` is undefined before that | superseded by owner: bundled runtime typesets; lazy API exists before first use (C10.8) | `GlobalsSurfaceTests.mathJaxTemplateAPIProducesRealDOM`, `GlobalsSurfaceTests.mathFinishesBeforeShownAndReplacementClearsItems` |
 | D7 | R445, R465 | a side's scripts run when it is displayed | a pre-rendered question's scripts run while hidden, and its shown hooks at display; media is held (C8.2); Web Audio, speech and timers are not held | `SideUpdateTests.shownHooksWaitForPresent`, `SideUpdateTests.autoplayHeldUntilPresent` |
 | D8 | R516 | `_queueAction`, `_emulateMobile`, `_blockDefaultDragDropBehavior` are globals | not defined | `GlobalsSurfaceTests.globalsMatchAllowlist` |
 | D9 | R467 | waits for `load`/`error` of every `src` script, so a non-fetched `src` script (unknown `type`, `nomodule`) stops the reviewer for good | does not wait for scripts the engine will not fetch | `ScriptSemanticsTests.unfetchedScriptDoesNotBlock` |
@@ -787,8 +790,8 @@ These 13 positive and 17 negative forms were observed by the prepared WebKit tes
 | GS7 | iPhone: `typeof pycmd`, `typeof bridgeCommand`, `typeof ankiPlatform`, `require("anki/bridgecommand")` | `undefined` ×3; throws |
 | GS8 | Mac: `ankiPlatform`, `typeof webkit` | `"desktop"`, `"undefined"` |
 | GS8b | iOS handler inventory, valid replay string, invalid strings/internal messages and subframe attempts; repeat on Mac | iOS exposes only `cb` and `meguri`; the valid replay selects one AV entry, other operations are refused; Mac has no `webkit`; card code cannot reach isolated handlers |
-| GS9 | `await MathJax.typesetPromise()`, `await MathJax.startup.promise`, `MathJax.typeset()` | resolve, resolve, `undefined` |
-| GS10 | side `<p>\(x^2\) and \[y\]</p>` | the paragraph's text is exactly `\(x^2\) and \[y\]` after the update |
+| GS9 | `MathJax.typesetPromise()`, `MathJax.startup.promise`, `MathJax.typesetClear()` | real bundled runtime and rendered SVG/accessible MathML; cleared MathItems |
+| GS10 | inline/display TeX, AMS, mhchem, dynamic glyph, dollar text and side replacement | typeset before shown; dollars remain literal; replacement releases old MathItems |
 | GS11 | `$.fn.jquery`, `$ === jQuery` | `"3.7.1"`, `true` |
 | GS12 | `anki.mutateNextCardStates("k", t)` with a spy `t` | resolves `undefined`; `t` never called |
 | GS13 | AE18, page part: a front whose script, only when `typeof pycmd !== "undefined"`, hides `#qa` and calls `pycmd("ans")` | Mac: an `ans` `command` signal; iPhone: no exception, `#qa` shown with the question |
@@ -877,7 +880,7 @@ These are the traps the implementer writes into `CardRuntime/AGENTS.md`:
 
 - **Globals.** The runtime runs inside a function scope. Only C9.1 names are written to the global object. All `var`, `function`, `let`, `const` and `class` forms stay inside that scope.
 - **Classic-script semantics for cards.** Never change a card script's `type`, never add `"use strict"` or a wrapper to card code, never snapshot the script list before the walk (C6.5), and never re-run scripts by `cloneNode`.
-- **No Anki assets** (R1960). The runtime, base stylesheet and tests are written from this spec. Only upstream jQuery 3.7.1 is vendored, unmodified, with its notice.
+- **No Anki assets** (R1960). The runtime, base stylesheet and tests are written from this spec. Meguri bundles unmodified upstream jQuery 3.7.1, MathJax 4.1.3 and its SVG font data with their license notices.
 - **Run first.** The runtime, its capture-phase IME tracking (C10.4) and its listener hooks (C13) are in place before any other page script, `reviewExtra` included.
 - **Page-world handlers.** Register only iOS `cb` for the exact tap protocol and iOS `meguri` for the exact replay command strings (C9.3). Neither exposes internal/general signals. Mac has no page-world `webkit`; internal traffic stays isolated (C14).
 - **Token values are exact text** (C4.1, C4.2). Do not normalize colours.

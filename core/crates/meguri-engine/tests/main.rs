@@ -142,6 +142,8 @@ pub mod schema_gate;
 pub mod session;
 #[path = "session_controlled.rs"]
 pub mod session_controlled;
+#[path = "session_filtered_lifecycle.rs"]
+pub mod session_filtered_lifecycle;
 #[path = "session_freshness.rs"]
 pub mod session_freshness;
 #[path = "session_held.rs"]
@@ -175,3 +177,9 @@ pub mod undo_truncation;
 
 #[path = "mining_writer.rs"]
 pub mod mining_writer;
+
+#[path = "filtered_review.rs"]
+pub mod filtered_review;
+
+#[path = "filtered_study.rs"]
+pub mod filtered_study;

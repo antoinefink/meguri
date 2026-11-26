@@ -433,8 +433,9 @@ fn restore_replaces_generation_retains_current_safety_copy_and_publication_choic
     let f = Fixture::new();
     let original_name = f.deck_name();
     let backup = f.create();
-    f.rename("Current collection must survive in safety copy");
     let generation = f.generation();
+    let original_scope = meguri_ffi::filtered_study::filtered_study_deck_scope(1, generation).unwrap();
+    f.rename("Current collection must survive in safety copy");
     let started = maintenance::start_restore_backup(backup.name.clone()).unwrap();
     let (terminal, events) = finish(&f.rx, started.job.id);
     assert_eq!(terminal, JobOutcome::Succeeded);
@@ -442,6 +443,13 @@ fn restore_replaces_generation_retains_current_safety_copy_and_publication_choic
         panic!("restore receipt")
     };
     assert_eq!(restored.generation, generation + 1);
+    use meguri_ffi::filtered_study::{self, FilteredStudyCommand, CustomStudyMode, CustomStudyState, CustomStudyRequest};
+    let stale = meguri_ffi::CoreError::StaleGeneration { planned: generation, current: generation + 1 };
+    assert_eq!(filtered_study::filtered_study_deck_scope(1, generation).unwrap_err(), stale);
+    assert_eq!(filtered_study::start_filtered_study(FilteredStudyCommand::Custom { deck: 1,
+        request: CustomStudyRequest { mode: CustomStudyMode::IncreaseNew, amount: 5,
+            state: CustomStudyState::New, include_tags: vec![], exclude_tags: vec![] } }, generation).unwrap_err(), stale);
+    assert_eq!(filtered_study::filtered_study_deck_scope(1, generation + 1).unwrap(), original_scope);
     assert!(restored.cloud_publication_pending);
     assert_eq!(restored.name, backup.name);
     assert_eq!(f.deck_name(), original_name);

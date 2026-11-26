@@ -31,7 +31,7 @@ use meguri_sched::{
         token::{self, RenderKey, StateToken},
     },
     states::{
-        engine::{SchedulingStates, StateInput, next_states},
+        engine::{SchedulingStates, StateInput},
         fsrs_glue::FsrsCache,
     },
 };
@@ -280,6 +280,7 @@ fn diff(old: &[HeadItem], head: Head) -> HeadDiff {
 struct Presentation {
     queue: SessionQueue,
     overlay: Overlay,
+    filtered_revision: Option<Seq>,
     rebuild: bool,
     force: Option<CardId>,
     label_boundary: Option<i64>,
@@ -365,6 +366,7 @@ struct PendingRedo {
 struct Session {
     id: SessionId,
     deck: DeckId,
+    filtered: bool,
     generation: Generation,
     ending: bool,
     presentation: Arc<Mutex<Presentation>>,
@@ -768,7 +770,7 @@ impl ReviewService {
         let hooks = self.start_hooks.lock().unwrap().clone();
         // Admission and select share the existing writer transaction. Refusal
         // returns before hooks or any row writes, and enable uses this writer.
-        let admitted = c
+        let (admitted, filtered) = c
             .run(
                 OpSpec::named("set_current_deck", OpSource::UserNonUndoable).skip_undo(),
                 move |ctx| {
@@ -776,8 +778,11 @@ impl ReviewService {
                         return Err(EngineError::SessionActive);
                     }
                     if let Some(refusal) = admission(ctx.scope(), deck, policy.seen())? {
-                        return Ok(Some(refusal));
+                        return Ok((Some(refusal), false));
                     }
+                    // Keep the admitted identity even if the selected deck is
+                    // deleted before its asynchronous observer reaches us.
+                    let filtered = is_filtered(ctx.scope(), deck)?;
                     for hook in hooks {
                         hook.session_starting();
                     }
@@ -786,7 +791,7 @@ impl ReviewService {
                         *policy.review_active.lock().unwrap() = true;
                         *active.active_session.lock().unwrap() = Some(id);
                     });
-                    Ok(None)
+                    Ok((None, filtered))
                 },
             )?
             .value;
@@ -800,18 +805,21 @@ impl ReviewService {
             let built = snapshot.stamp;
             let mut queue = SessionQueue::new(snapshot.value, NEXT_BUILD.fetch_add(1, Ordering::Relaxed));
             queue.set_current(resume);
-            let time_lim = {
+            let (time_lim, filtered_revision) = {
                 let r = c.reader(ReaderRole::Interactive)?;
-                SchedConfig::new(&*r).time_limit()?
+                let rows = r.snapshot()?;
+                (SchedConfig::new(&*rows).time_limit()?, rows.filtered_lifecycle.revision(deck))
             };
             let mut session = Session {
                 id,
                 deck,
+                filtered,
                 generation: c.generation(),
                 ending: false,
                 presentation: Arc::new(Mutex::new(Presentation {
                     queue,
                     overlay: Overlay::default(),
+                    filtered_revision,
                     rebuild: false,
                     force: None,
                     label_boundary: None,
@@ -880,8 +888,10 @@ impl ReviewService {
                     crate::rendering::KeyBatch::new(&*rows, crate::rendering::RenderMode::Review, session_platform());
                 let item = project_item(
                     &mut render_keys,
+                    &rows.filtered_lifecycle,
                     &q,
                     &Overlay::default(),
+                    false,
                     e.id,
                     e.kind,
                     at,
@@ -1197,7 +1207,7 @@ impl ReviewService {
                 let reader = c.reader(ReaderRole::Interactive)?;
                 let rows = reader.snapshot()?;
                 let presentation = session.presentation.lock().unwrap();
-                let (_, card) = presentation_card(&*rows, &presentation.overlay, card, session.undo_view.as_ref())?;
+                let (_, card) = presentation_card(&*rows, &presentation.overlay, session.filtered, card, session.undo_view.as_ref())?;
                 review_capture(&*rows, card, session.undo_view.as_ref())?
             };
             if capture.key() != *key {
@@ -1307,12 +1317,25 @@ impl ReviewService {
         let rows = r.snapshot()?;
         let day = timing(&*rows, &c, at)?;
         let p = session.presentation.lock().unwrap();
+        // A delayed observer may leave a returned/moved card in this queue.
+        // Check stored membership before an overlay can hide that commit or
+        // capture_state can mint an ordinary token for the now-home card.
+        if session.filtered
+            && !filtered_member(&*rows, session.deck, card, session.undo_view.as_ref())?
+        {
+            drop(p);
+            session.presentation.lock().unwrap().rebuild = true;
+            let head = project_snapshot(&c, session, &rows, 3, at, &mut FsrsCache::default())?;
+            return Ok(AnswerOutcome::NotAtHead { fresh_head: head });
+        }
         let kind = p.queue.kind(card).ok_or_else(|| invalid("missing queue entry"))?;
         let chooser = session.cache.snapshot();
         let mut models = FsrsCache::default();
         let (token, states, captured) = capture_state(
             &*rows,
+            &rows.filtered_lifecycle,
             &p.overlay,
+            session.filtered,
             card,
             at,
             day.today,
@@ -1350,7 +1373,7 @@ impl ReviewService {
         .map_err(invalid)?;
         let mut post_image = captured.image.clone();
         let written = planned.card.to_cells();
-        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+        for i in meguri_storage::rows::cards::ANSWER_COLUMNS {
             post_image[i] = written[i].clone();
         }
         // The next optimistic answer consumes stored codec rounding, exactly
@@ -1397,6 +1420,7 @@ impl ReviewService {
                 queue,
                 event,
                 post.clone(),
+                request.chosen.state,
                 &buried,
                 at.div_euclid(1000),
                 day.next_day_at,
@@ -2115,6 +2139,9 @@ fn sibling_ids(
     preset: &meguri_sched::model::preset::PresetView,
     undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<Vec<CardId>, EngineError> {
+    if meguri_sched::states::filtered::options(rows, card)?.is_some_and(|d| !d.reschedule) {
+        return Ok(Vec::new());
+    }
     let mut siblings = rows.cards_of_note(card.note_id)?;
     if let Some(entry) = undo {
         for sibling in &mut siblings {
@@ -2142,6 +2169,7 @@ fn sibling_ids(
 fn presentation_card(
     rows: &impl ReadRows,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<(Vec<Cell>, Card), EngineError> {
@@ -2154,15 +2182,53 @@ fn presentation_card(
     {
         image = before;
     }
-    let stored = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
-    let card = overlay.row(id).cloned().unwrap_or(stored);
-    if overlay.row(id).is_some() {
+    if let Some(card) = overlay.row(id) {
+        if !filtered_session {
+            // Ordinary answers never change membership. Validate the stored
+            // (or committed-undo) row before answer columns can conceal a
+            // malformed assignment or a concurrent move to another deck.
+            let stored = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
+            answer::membership(rows, &stored)?;
+            if stored.deck_id != card.deck_id || stored.original_deck_id != card.original_deck_id {
+                return Err(invalid("pending card membership changed"));
+            }
+        }
         let post = card.to_cells();
-        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+        for i in meguri_storage::rows::cards::ANSWER_COLUMNS {
             image[i] = post[i].clone();
         }
     }
+    let card = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
     Ok((image, card))
+}
+
+fn is_filtered(rows: &impl ReadRows, deck: DeckId) -> Result<bool, EngineError> {
+    Ok(rows.deck(deck)?.is_some_and(|d| matches!(d.kind.kind, DeckKind::Filtered(_))))
+}
+
+// Pending repeats still belong to the filtered deck in storage. A finishing
+// pending answer can return home, but has already removed its queue entry.
+// Ignore answer overlays here: they must not resurrect membership after Empty
+// or a move. Committed undo's projected before-image remains authoritative.
+fn filtered_member(
+    rows: &impl ReadRows,
+    deck: DeckId,
+    id: CardId,
+    undo: Option<&crate::undo::entry::Entry>,
+) -> Result<bool, EngineError> {
+    let card = if let Some(entry) = undo
+        && let Some(change) = entry.journal.entry(Table::Cards, &RowKey::Id(id.0))
+        && let Some(before) = entry.before(change)?
+    {
+        Some(Card::from_cells(&before).map_err(meguri_storage::StorageError::from)?)
+    } else {
+        rows.card(id)?
+    };
+    let Some(card) = card.filter(|c| c.deck_id == deck) else {
+        return Ok(false);
+    };
+    let (_, filtered) = answer::membership(rows, &card)?;
+    Ok(filtered.is_some())
 }
 
 // The projected note and card feed both the key and actual U62 payload,
@@ -2193,7 +2259,9 @@ fn project_review_note(
 #[allow(clippy::too_many_arguments)]
 fn capture_state(
     rows: &impl ReadRows,
+    lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     at: i64,
     today: u32,
@@ -2202,7 +2270,7 @@ fn capture_state(
     undo: Option<&crate::undo::entry::Entry>,
     models: &mut FsrsCache,
 ) -> Result<(StateToken, SchedulingStates, Captured), EngineError> {
-    let (image, card) = presentation_card(rows, overlay, id, undo)?;
+    let (image, card) = presentation_card(rows, overlay, filtered_session, id, undo)?;
     let removed = undo
         .map(|entry| {
             entry
@@ -2243,6 +2311,8 @@ fn capture_state(
             None
         },
     });
+    let token = token::with_filtered_options(token, inputs.filtered.as_ref());
+    let token = if inputs.filtered.is_some() { lifecycle.token(token, card.deck_id) } else { token };
     let input = StateInput {
         card: &card,
         preset: &inputs.preset,
@@ -2261,14 +2331,16 @@ fn capture_state(
         inputs.preset.fields().bury_reviews.then_some(card.note_id),
         meguri_sched::states::fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
     );
-    let states = next_states(models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
+    let states = meguri_sched::states::filtered::next_states(rows, models, &input, if enabled { Some(&mut choose) } else { None }).map_err(invalid)?;
     Ok((token, states, Captured { image, card, inputs }))
 }
 #[allow(clippy::too_many_arguments)]
 fn project_item(
     render_keys: &mut crate::rendering::KeyBatch<'_, impl ReadRows>,
+    lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     q: &SessionQueue,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     kind: Kind,
     at: i64,
@@ -2279,7 +2351,7 @@ fn project_item(
     models: &mut FsrsCache,
 ) -> Result<HeadItem, EngineError> {
     let rows = render_keys.rows();
-    let (token, states, captured) = capture_state(rows, overlay, id, at, today, boundary, chooser, undo, models)?;
+    let (token, states, captured) = capture_state(rows, lifecycle, overlay, filtered_session, id, at, today, boundary, chooser, undo, models)?;
     let Captured { card, inputs, .. } = &captured;
     let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
     let mut predicted = [None; 4];
@@ -2300,7 +2372,7 @@ fn project_item(
         predicted[index] = prediction_queue
             .predict(
                 id,
-                Requeue::from_card(&planned.card, boundary),
+                Requeue::from_answer(&planned.card, chosen.state, boundary),
                 &siblings,
                 at.div_euclid(1000),
             )
@@ -2372,6 +2444,27 @@ fn project_snapshot(
 ) -> Result<Head, EngineError> {
     let day = timing(&**rows, c, at)?;
     let mut p = s.presentation.lock().unwrap();
+    let filtered = s.filtered;
+    if filtered && p.filtered_revision != rows.filtered_lifecycle.revision(s.deck) {
+        p.rebuild = true;
+    }
+    if filtered && !p.rebuild {
+        // Lifecycle identity catches Empty/rebuild for the entire queue. Moves
+        // need only guard the issued entries and the next waiting card; never
+        // read every queued card from SQLite on an ordinary head/answer.
+        let entries = p.queue.read(at.div_euclid(1000), count);
+        let waiting = if entries.is_empty() {
+            p.queue.value().learning.iter().min_by_key(|e| e.due).map(|e| e.id)
+        } else {
+            None
+        };
+        for id in entries.iter().map(|e| e.id).chain(waiting) {
+            if !filtered_member(&**rows, s.deck, id, s.undo_view.as_ref())? {
+                p.rebuild = true;
+                break;
+            }
+        }
+    }
     // Keep the boundary that supplied the shown labels. At day zero a real
     // boundary crossing need not change the clamped day number.
     let day_changed = p.rollover_due(day, at);
@@ -2396,11 +2489,12 @@ fn project_snapshot(
                 }
             }
         }
-        let mut overrides = p
-            .overlay
-            .rows()
-            .map(|card| (card.id, card.clone()))
-            .collect::<BTreeMap<_, _>>();
+        let mut overrides = BTreeMap::new();
+        for card in p.overlay.rows() {
+            if !filtered || filtered_member(&**rows, s.deck, card.id, s.undo_view.as_ref())? {
+                overrides.insert(card.id, card.clone());
+            }
+        }
         if let Some(entry) = &s.undo_view {
             for change in entry.journal.entries().filter(|change| change.table() == Table::Cards) {
                 if let Some(before) = entry.before(change)? {
@@ -2500,6 +2594,7 @@ fn project_snapshot(
                 p.queue.set_current(Some(force));
             }
             p.rebuild = false;
+            p.filtered_revision = rows.filtered_lifecycle.revision(s.deck);
             p.restore_cache = false;
             p.label_boundary = Some(day.next_day_at);
             s.built = Stamp {
@@ -2521,8 +2616,10 @@ fn project_snapshot(
     for e in entries {
         let item = project_item(
             &mut render_keys,
+            &rows.filtered_lifecycle,
             &p.queue,
             &p.overlay,
+            s.filtered,
             e.id,
             e.kind,
             at,

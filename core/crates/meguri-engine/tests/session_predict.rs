@@ -1,4 +1,5 @@
 //! Multi-answer C8 production sessions, with every rating probed through U44.
+mod common;
 mod session_support;
 use meguri_engine::{
     UndoScope,
@@ -151,4 +152,201 @@ fn c9_rapid_same_card_postimages_commit_in_order_without_extra_cache_contributio
             .reps,
         8
     );
+}
+
+#[test]
+fn malformed_membership_refuses_session_prediction_and_answer_without_journal_or_write() {
+    use meguri_engine::{EngineError, OpSource, OpSpec, decks::filtered::{self, Definition, Term}, sched::queue::QueueProvider, session::PeekResult};
+    use meguri_model::ids::DeckId;
+    use meguri_sched::states::fsrs_glue::FsrsCache;
+    use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StampMode, Table};
+    use std::{fs, sync::Arc};
+
+    for mode in [None, Some(false), Some(true)] {
+        for head_first in [false, true] {
+            let h = Harness::new(1);
+            let card = h.cards[0];
+            let deck = if let Some(reschedule) = mode {
+                filtered::save(&h.collection, None, Definition {
+                    name: "Malformed membership".into(),
+                    terms: vec![Term { search: format!("cid:{}", card.0), limit: 1, order: 5 }],
+                    reschedule,
+                    ..Definition::default()
+                }, false).unwrap().value
+            } else {
+                DeckId(1)
+            };
+            let meguri_engine::session::StartResult::Started { session_id, head, .. } =
+                h.review.start(deck, None).unwrap() else { panic!("valid fixture refused") };
+            let shown = &head.items[0];
+            h.settle();
+
+            // Delay only the observer: admission must inspect current storage,
+            // even while the old valid card remains in the shown queue.
+            let gate = common::Gate::new();
+            let held = gate.clone();
+            h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+                if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+            })));
+            h.collection.run(OpSpec::named("malformed session membership", OpSource::Maintenance)
+                .stamp(StampMode::Raw), move |ctx| {
+                    // Match U44's negative-home fixture, including an existing
+                    // normal row at -1; an unchecked home lookup succeeds.
+                    let mut home = ctx.scope().deck(DeckId(1))?.unwrap();
+                    home.id = if mode.is_some() { DeckId(-1) } else { DeckId(2) };
+                    home.name = "Other home".into();
+                    ctx.scope().put(&home)?;
+                    let mut row = ctx.scope().card(card)?.unwrap();
+                    row.original_deck_id = home.id;
+                    ctx.scope().put(&row)?;
+                    Ok(())
+                }).unwrap();
+            gate.wait_entered();
+            // Establish D8 before measuring answer-owned writes; the queue
+            // label query below uses the normal maintenance prelude.
+            h.collection.check_rollover().unwrap();
+
+            let images = || {
+                let r = h.collection.reader(ReaderRole::Query).unwrap();
+                (r.card(card).unwrap().unwrap().to_cells(),
+                 r.deck_rows().unwrap().iter().map(Record::to_cells).collect::<Vec<_>>(),
+                 r.row_image(Table::Col, &RowKey::Id(1)).unwrap())
+            };
+            let before = images();
+            let seq = h.collection.last_seq();
+            let journal = h.collection.path().parent().unwrap().join("meguri-pending-answers.jsonl");
+            let journal_before = fs::read(&journal).unwrap();
+            let polled = head_first.then(|| h.review.head(session_id, 3));
+            let answer = h.review.answer(session_id, card, Rating::Easy, shown.state_token,
+                EpochMillis(h.clock.now_ms()), 100);
+            let peek = h.review.peek_first_card(deck);
+            let queue = QueueProvider::default().queue_with_head_states(
+                &h.collection, Some(deck), &mut FsrsCache::default());
+            h.review.observe_hook_for_testing(None);
+            gate.open();
+            h.settle();
+
+            if let Some(polled) = polled { assert!(polled.is_err(), "{mode:?}"); }
+            assert!(answer.is_err(), "malformed answer admitted: {mode:?}: {answer:?}");
+            if mode.is_some() {
+                let expected = EngineError::InvalidArgument {
+                    message: "invalid filtered card home deck".into(),
+                };
+                assert_eq!(peek.err(), Some(expected.clone()), "malformed peek shown: {mode:?}");
+                assert_eq!(queue.err(), Some(expected), "malformed queue head predicted: {mode:?}");
+            } else {
+                // Fresh ordinary gather excludes nonzero odid. The stale
+                // shown session above must still reject admission.
+                assert!(matches!(peek, Ok(PeekResult::Empty)), "malformed peek shown: {mode:?}: {peek:?}");
+                let (queue, states) = queue.unwrap_or_else(|error| panic!("ordinary gather refused: {error:?}"));
+                assert!(queue.value.main.is_empty());
+                assert!(queue.value.learning.is_empty());
+                assert!(queue.value.presentation().is_empty());
+                assert!(states.is_none(), "malformed queue head predicted: {mode:?}");
+            }
+            assert!(h.logs().is_empty());
+            assert_eq!(images(), before);
+            assert_eq!(h.collection.last_seq(), seq);
+            assert_eq!(fs::read(&journal).unwrap(), journal_before);
+            h.review.end(session_id).unwrap();
+        }
+    }
+}
+
+#[test]
+fn ordinary_pending_overlay_cannot_hide_changed_stored_membership() {
+    use meguri_engine::{OpSource, OpSpec, decks::filtered::{self, Definition, Term}};
+    use meguri_model::ids::DeckId;
+    use meguri_storage::{ReadRows, ReaderRole, Record, StampMode};
+    use std::{fs, sync::Arc};
+
+    for change in ["malformed", "borrowed", "moved"] {
+        let h = Harness::new(1);
+        let card = h.cards[0];
+        // Review a normal descendant: membership is the card's own deck,
+        // rather than necessarily the selected session deck.
+        h.collection.run(OpSpec::named("descendant membership fixture", OpSource::Maintenance), move |ctx| {
+            let mut child = ctx.scope().deck(DeckId(1))?.unwrap();
+            child.id = DeckId(2);
+            child.name = format!("{}\u{1f}Child", child.name);
+            ctx.scope().put(&child)?;
+            child.id = DeckId(3);
+            child.name = "Other home".into();
+            ctx.scope().put(&child)?;
+            let mut row = ctx.scope().card(card)?.unwrap();
+            row.deck_id = DeckId(2);
+            ctx.scope().put(&row)?;
+            Ok(())
+        }).unwrap();
+        let borrowed = filtered::save(&h.collection, None, Definition {
+            name: "Borrowed pending card".into(),
+            terms: vec![Term { search: "cid:0".into(), limit: 1, order: 5 }],
+            ..Definition::default()
+        }, true).unwrap().value;
+        let (session, head) = h.start();
+        h.settle();
+        let gate = common::Gate::new();
+        let held = gate.clone();
+        h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+            if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+        })));
+        // Occupy the service worker before it can apply Again, keeping the
+        // writer free for the maintenance commit and its delayed observer.
+        h.collection.run(OpSpec::named("hold ordinary review observer", OpSource::Maintenance)
+            .stamp(StampMode::Raw), move |ctx| {
+                let mut row = ctx.scope().card(card)?.unwrap();
+                row.flags = 3;
+                ctx.scope().put(&row)?;
+                Ok(())
+            }).unwrap();
+        gate.wait_entered();
+        let AnswerOutcome::Accepted { head_diff, .. } = h.review.answer(
+            session, card, Rating::Again, head.items[0].state_token,
+            EpochMillis(h.clock.now_ms()), 100).unwrap()
+        else { panic!("valid descendant pending answer refused"); };
+        let repeat = &head_diff.head.items[0];
+        assert_eq!(repeat.card_id, card);
+        h.collection.run(OpSpec::named("change pending card membership", OpSource::Maintenance)
+            .stamp(StampMode::Raw), move |ctx| {
+                let mut row = ctx.scope().card(card)?.unwrap();
+                match change {
+                    "malformed" => row.original_deck_id = DeckId(3),
+                    "borrowed" => {
+                        row.deck_id = borrowed;
+                        row.original_deck_id = DeckId(2);
+                    }
+                    _ => row.deck_id = DeckId(3),
+                }
+                ctx.scope().put(&row)?;
+                Ok(())
+            }).unwrap();
+        let image = || h.collection.reader(ReaderRole::Query).unwrap()
+            .card(card).unwrap().unwrap().to_cells();
+        let before = image();
+        let seq = h.collection.last_seq();
+        let journal = h.dir.path().join("meguri-pending-answers.jsonl");
+        // Installing a hook is an ordered file-worker barrier: include the
+        // first intent before comparing bytes, without draining its answer.
+        h.review.journal_hook_for_testing(Arc::new(|_| {})).unwrap();
+        let journal_before = fs::read(&journal).unwrap();
+        let polled = h.review.head(session, 3);
+        let repeated = h.review.answer(session, card, Rating::Again, repeat.state_token,
+            EpochMillis(h.clock.now_ms()), 100);
+        h.review.journal_hook_for_testing(Arc::new(|_| {})).unwrap();
+        let journal_after = fs::read(&journal).unwrap();
+        let after = image();
+        let seq_after = h.collection.last_seq();
+        h.review.observe_hook_for_testing(None);
+        gate.open();
+        h.settle();
+
+        assert!(polled.is_err(), "pending prediction hid {change} membership");
+        assert!(repeated.is_err(), "second answer admitted: {change}: {repeated:?}");
+        assert_eq!(journal_after, journal_before, "{change}");
+        assert_eq!(after, before, "{change}");
+        assert_eq!(seq_after, seq, "{change}");
+        assert!(h.logs().is_empty(), "{change}");
+        assert_eq!(image(), before, "{change}");
+        h.review.end(session).unwrap();
+    }
 }

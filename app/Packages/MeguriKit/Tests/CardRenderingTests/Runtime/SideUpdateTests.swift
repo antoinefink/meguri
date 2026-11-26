@@ -473,6 +473,70 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: ["update", "shown"], ["rejection", "timeout"])
+        func lateHookRejectionKeepsItsOriginAfterReplacement(phase: String, failure: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                if failure == "timeout" { harness.media.hold("/_anki/mathjax/tex-svg.js") }
+                try await page.announce(card: 31, generation: 1)
+                try await page.present()
+                let hooks = phase == "update" ? "onUpdateHook" : "onShownHook"
+                try await page.showQuestion("""
+                    <p>Old question</p><script>
+                    \(hooks).push(function () {
+                      window.__oldHookEntered = true;
+                      if ('\(failure)' === 'timeout') return MathJax.startup.promise;
+                      return new Promise(function (_, reject) { window.__rejectOld = reject; });
+                    });
+                    </script>
+                    """)
+                try await harness.until("old hook entered") { try await page.bool("window.__oldHookEntered === true") }
+                // _updateQA can start while the old hook still drains.
+                try await page.run("await _updateQA('<p>Replacement</p>', '', function () {}, function () {});")
+                try await page.announce(card: 32, generation: 2)
+                try await page.runIsolated("meguriCard.present(12, 32, 2);")
+                if failure == "rejection" { try await page.run("__rejectOld(new Error('old hook failed'));") }
+                try await harness.until("originating hook diagnostic") { !harness.diagnostics.isEmpty }
+                let old = try #require(harness.diagnostics.first)
+                #expect(old.card == 31 && old.generation == 1 && old.side == "question")
+                #expect(old["kind"] as? String == "hook" && old["phase"] as? String == "\(phase)-hook")
+                try await page.showPresentedAnswer("""
+                    <p>Current answer</p><script>
+                    onUpdateHook.push(function () { throw new Error('current hook failed'); });
+                    </script>
+                    """)
+                let current = try #require(harness.diagnostics.last)
+                #expect(current.card == 32 && current.generation == 2 && current.side == "answer")
+                #expect(current["message"] as? String == "Error: current hook failed")
+                #expect(harness.diagnostics.count == 2)
+            }
+        }
+
+        @Test(arguments: ["update", "shown"])
+        func lateDirectHookRejectionHasNoNativeIdentity(phase: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.announce(card: 41, generation: 1)
+                try await page.showPresentedQuestion("<p>Native question</p>")
+                let hooks = phase == "update" ? "onUpdateHook" : "onShownHook"
+                let html = """
+                    <p>Template update</p><script>
+                    \(hooks).push(function () {
+                      return new Promise(function (_, reject) { window.__rejectDirect = reject; });
+                    });
+                    </script>
+                    """
+                try await page.run("window.__directUpdate = _updateQA(html, '', function () {}, function () {});", ["html": html])
+                try await harness.until("direct hook entered") { try await page.bool("typeof __rejectDirect === 'function'") }
+                try await page.announce(card: 42, generation: 2)
+                try await page.showPresentedAnswer("<p>Native answer</p>")
+                try await page.run("__rejectDirect(new Error('template hook failed')); await __directUpdate;")
+                #expect(harness.diagnostics.count == 1)
+                let diagnostic = try #require(harness.diagnostics.first)
+                #expect(diagnostic.card == nil && diagnostic.generation == nil && diagnostic.side == "question")
+                #expect(diagnostic["kind"] as? String == "hook" && diagnostic["phase"] as? String == "\(phase)-hook")
+                #expect(diagnostic["message"] as? String == "Error: template hook failed")
+            }
+        }
+
         // MARK: SU10, C6.6, D18
 
         @Test func settleWaitsForFonts() async throws {
@@ -1165,6 +1229,31 @@ extension WebKitSuites.CardRuntimeSuites {
                     """)
                 #expect(try await page.log() == ["script", "onupdate:0", "onshown:1", "resolved"])
                 #expect(try await page.bool(#"document.getElementById("u") !== null"#))
+            }
+        }
+
+        @Test(arguments: ["update", "shown"])
+        func overlappingUpdateQACannotRevealOrSignalForItsReplacement(phase: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.present()
+                try await page.run("""
+                    var hold = function () { return new Promise(function (resolve) { window.__releaseOld = resolve; }); };
+                    window.__oldUpdate = _updateQA('<p>Old</p>', '',
+                      phase === 'update' ? hold : function () {}, phase === 'shown' ? hold : function () {});
+                    """, ["phase": phase])
+                try await harness.until("old hook entered") { try await page.bool("typeof __releaseOld === 'function'") }
+                try await page.run("""
+                    window.__newUpdate = _updateQA('<p id="current">Current</p>', '', function () {
+                      return new Promise(function (resolve) { window.__releaseNew = resolve; });
+                    }, function () { log('current-shown'); });
+                    """)
+                try await harness.until("new hook entered") { try await page.bool("typeof __releaseNew === 'function'") }
+                try await page.run("__releaseOld(); await __oldUpdate;")
+                #expect(try await page.bool("document.getElementById('current') !== null && document.getElementById('qa').style.opacity === '0'"))
+                #expect(harness.signals("shown", from: page).isEmpty)
+                try await page.run("__releaseNew(); await __newUpdate;")
+                #expect(try await page.log() == ["current-shown"])
+                #expect(harness.signals("shown", from: page).count == 1)
             }
         }
 

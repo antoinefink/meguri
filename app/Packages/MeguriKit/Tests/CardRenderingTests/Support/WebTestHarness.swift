@@ -67,10 +67,9 @@ final class WebTestHarness {
         // base element (R520), so a page under /_anki/ would send
         // `import("./_m.js")` there.
         media.add("/", text: document, "text/html")
-        for path in CardRuntime.assetPaths {
-            let asset = CardRuntime.asset(at: path)!
-            media.add(CardRuntime.assetPrefix + path, asset.data, asset.mimeType)
-        }
+        // Serve production resources on demand; ordinary test pages never
+        // read the MathJax inventory or its multi-megabyte component data.
+        media.servesRuntime = true
         remote.holdsEverything = true
 
         let configuration = WKWebViewConfiguration()
@@ -320,9 +319,12 @@ final class TestPage {
     }
 
     private func call(_ body: String, _ arguments: [String: Any], in world: WKContentWorld) async throws -> Any? {
-        try await within("a script") { finish in
+        let stage = "a script in \(world.name ?? "page"): \(body)"
+        return try await within(stage) { finish in
             webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: world) { result in
-                finish(result.map { $0 as Any? })
+                finish(result.map { $0 as Any? }.mapError { error -> any Error in
+                    HarnessFailure("\(stage) threw \(error); \((error as NSError).userInfo)")
+                })
             }
         }
     }
@@ -528,8 +530,11 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private var files: [String: File] = [:]
     private var delays: [String: Duration] = [:]
     private var held: Set<String> = []
+    private var notFound: Set<String> = []
+    private var heldResponses: [ObjectIdentifier: (path: String, respond: () -> Void)] = [:]
     /// Answers nothing at all (C7.4's remote origin).
     var holdsEverything = false
+    var servesRuntime = false
     private(set) var requests: [Request] = []
     private var active: Set<ObjectIdentifier> = []
 
@@ -541,11 +546,25 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
         add(path, Data(text.utf8), mimeType)
     }
 
+    /// Returns a real 404 for this path while other bundle files remain available.
+    func respondNotFound(_ path: String) { notFound.insert(path) }
+
     /// Answers `path` only after `delay`.
     func delay(_ path: String, by delay: Duration) { delays[path] = delay }
 
-    /// Never answers `path`.
+    /// Holds `path` until explicitly released (or forever).
     func hold(_ path: String) { held.insert(path) }
+
+    /// Delivers pending responses too, so tests exercise late script execution
+    /// after a caller's deadline and reuse of the same page.
+    func release(_ path: String) {
+        held.remove(path)
+        let pending = heldResponses.filter { $0.value.path == path }
+        for (id, response) in pending {
+            heldResponses.removeValue(forKey: id)
+            response.respond()
+        }
+    }
 
     func requests(for path: String) -> [Request] { requests.filter { $0.path == path } }
 
@@ -558,8 +577,12 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
         requests.append(Request(path: path, time: ProcessInfo.processInfo.systemUptime))
         let id = ObjectIdentifier(task)
         active.insert(id)
-        if holdsEverything || held.contains(path) { return }
+        if holdsEverything { return }
         let range = task.request.value(forHTTPHeaderField: "Range")
+        if held.contains(path) {
+            heldResponses[id] = (path, { [weak self] in self?.respond(task, url: url, path: path, range: range) })
+            return
+        }
         if let delay = delays[path] {
             Task { @MainActor in
                 try? await Task.sleep(for: delay)
@@ -572,12 +595,23 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
         active.remove(ObjectIdentifier(task))
+        heldResponses.removeValue(forKey: ObjectIdentifier(task))
     }
 
     private func respond(_ task: any WKURLSchemeTask, url: URL, path: String, range: String?) {
         // A stopped task must never be answered: WebKit raises an exception.
         guard active.remove(ObjectIdentifier(task)) != nil else { return }
-        guard let file = files[path] else {
+        if notFound.contains(path) {
+            send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
+            return
+        }
+        let file: File
+        if let provided = files[path] {
+            file = provided
+        } else if servesRuntime, path.hasPrefix(CardRuntime.assetPrefix),
+                  let asset = CardRuntime.asset(at: String(path.dropFirst(CardRuntime.assetPrefix.count))) {
+            file = File(data: asset.data, mimeType: asset.mimeType)
+        } else {
             send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
             return
         }

@@ -1,4 +1,5 @@
 //! Production C5 service; E2 stays an independent read-only admission path.
+pub(crate) mod filtered_lifecycle;
 mod frozen;
 pub mod held;
 pub(crate) mod journal;

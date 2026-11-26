@@ -45,3 +45,14 @@ The Mac audit completed all ten states in light and dark appearance in `a11y/202
 The final design review, `critic/20261126T181407Z-5994`, reported zero high and five medium findings. Three concerned the native loading indicator. The iPad form capture shows the detail view at full width. The regular-width iPad gallery shows the app with its sidebar. The area above the empty sheet in the cited iPad image is a uniform gray.
 
 The [integration register](../verification-status.md) retains the failed full-project gate. The latest complete gate is `gate/20261116T005859Z-94440`. A later attempt stopped during the Swift suite. The focused results above cover the backup subsystem.
+
+## Integration with filtered study
+
+File commands require both backup and filtered-study operations to be idle. The collection retains both injected services. The independent reviewer checked the Swift resolutions against both branches. Independent complete-content reviews classified the following merged files as PUBLIC.
+
+| File | Reviewer | SHA-256 |
+|---|---|---|
+| `docs/design/native-interface-contract.md` | Codex privacy_contract | `bb9c4c828bc517515439ba098cf68872498372f393c0ae99ae22f613eba250ae` |
+| `docs/process/verification-status.md` | Codex privacy_register | `c35e559d50bd784595eb5f754db073626d68c505221e027a761ea8c4771628c2` |
+| `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` | Codex privacy_register | `b57f23a9e355f6905fc383ce12118a9c087d3daeb91d3c12918e48c32de378f9` |
+| `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings` | Codex privacy_inventory | `ccda8e4316fac11e362249c54f0a00a431f10649d791d0d13541beda5e716f85` |

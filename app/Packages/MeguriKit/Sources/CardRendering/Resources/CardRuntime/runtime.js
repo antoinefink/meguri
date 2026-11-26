@@ -25,13 +25,27 @@
   const parseJSON = JSON.parse;
   const StringCtor = String;
   const isSafeInteger = Number.isSafeInteger;
+  const parseInteger = parseInt;
   const ErrorCtor = Error;
+  const ErrorEventCtor = ErrorEvent;
   const URLCtor = URL;
+  const urlProtocol = getter(URLCtor.prototype, "protocol");
+  const urlHost = getter(URLCtor.prototype, "host");
+  const urlSearch = getter(URLCtor.prototype, "search");
+  const urlHash = getter(URLCtor.prototype, "hash");
+  const urlUsername = getter(URLCtor.prototype, "username");
+  const urlPassword = getter(URLCtor.prototype, "password");
+  const urlPathname = getter(URLCtor.prototype, "pathname");
+  const urlHref = getter(URLCtor.prototype, "href");
   const CustomEventCtor = CustomEvent;
   const CSSStyleSheetCtor = CSSStyleSheet;
   const WeakMapCtor = WeakMap;
   const WeakRefCtor = WeakRef;
   const SetCtor = Set;
+  const mapForEach = Map.prototype.forEach;
+  const mapClear = Map.prototype.clear;
+  const mapSet = Map.prototype.set;
+  const objectKeys = Object.keys;
   const ElementCtor = Element;
   const HTMLElementCtor = HTMLElement;
   const InputCtor = HTMLInputElement;
@@ -55,6 +69,7 @@
   const setAdd = Set.prototype.add;
 
   const setTimeoutFn = win.setTimeout;
+  const clearTimeoutFn = win.clearTimeout;
   const requestFrame = win.requestAnimationFrame;
   const scrollToFn = win.scrollTo;
   const performanceNow = Performance.prototype.now;
@@ -69,6 +84,12 @@
   const composedPath = Event.prototype.composedPath;
   const eventTarget = getter(Event.prototype, "target");
   const customDetail = getter(CustomEvent.prototype, "detail");
+  const errorEventError = getter(ErrorEvent.prototype, "error");
+  const errorEventFilename = getter(ErrorEvent.prototype, "filename");
+  const errorEventMessage = getter(ErrorEvent.prototype, "message");
+  const errorEventLine = getter(ErrorEvent.prototype, "lineno");
+  const errorEventColumn = getter(ErrorEvent.prototype, "colno");
+  const rejectionReason = getter(PromiseRejectionEvent.prototype, "reason");
   const abortedGetter = getter(AbortSignal.prototype, "aborted");
 
   const getElementById = Document.prototype.getElementById;
@@ -76,6 +97,7 @@
   const documentQueryAll = Document.prototype.querySelectorAll;
   const documentBody = getter(Document.prototype, "body");
   const documentHead = getter(Document.prototype, "head");
+  const documentCurrentScript = getter(Document.prototype, "currentScript");
   const documentFonts = getter(Document.prototype, "fonts");
   const fontsStatus = getter(FontFaceSet.prototype, "status");
   const fontsReady = getter(FontFaceSet.prototype, "ready");
@@ -300,30 +322,36 @@
     emit(signal);
   }
 
-  function reportHook(value, phase) {
-    report({ kind: "hook", message: describe(value), phase: phase });
+  function reportHook(value, phase, update) {
+    updateSignal("error", update, { kind: "hook", message: describe(value), phase: phase });
   }
 
   call(nativeAdd, win, "error", function (event) {
-    if (call(eventTarget, event) !== win) return;
+    if (call(eventTarget, event) !== win || !(event instanceof ErrorEventCtor)) return;
+    if (call(weakMapGet, mathEvaluationErrors, event)) return;
+    const filename = call(errorEventFilename, event);
     let phase = "later";
     let index;
     if (runningScript) {
       phase = "script";
       index = runningScript;
-    } else if (awaitedScript && event.filename === awaitedScript.url) {
+    } else if (awaitedScript && filename === awaitedScript.url) {
       phase = "script";
       index = awaitedScript.index;
     } else if (hookPhase) {
       phase = hookPhase;
     }
-    const value = event.error;
-    const filename = event.filename;
+    const value = call(errorEventError, event);
+    if (filename && call(stringIndexOf, filename, mathRoot) === 0) {
+      mathError(value === undefined || value === null ? call(errorEventMessage, event) : value,
+        mathOwner || mathStartupOwner, filename);
+      return;
+    }
     report({
       kind: "exception",
-      message: describe(value === undefined || value === null ? event.message : value),
-      line: event.lineno,
-      column: event.colno,
+      message: describe(value === undefined || value === null ? call(errorEventMessage, event) : value),
+      line: call(errorEventLine, event),
+      column: call(errorEventColumn, event),
       source: !filename || filename === pageURL || filename === doc.URL ? "inline" : filename,
       phase: phase,
       index: index,
@@ -331,7 +359,12 @@
   });
 
   call(nativeAdd, win, "unhandledrejection", function (event) {
-    report({ kind: "rejection", message: describe(event.reason), phase: "later" });
+    const reason = call(rejectionReason, event);
+    const owner = isObject(reason) && call(weakMapGet, mathFontReasons, reason);
+    // Only exact loader reasons have provenance. Leave the event available to
+    // card listeners, and leave unrelated (even identically worded) Errors alone.
+    if (owner && owner !== (latest && latest.mathToken)) return;
+    report({ kind: "rejection", message: describe(reason), phase: "later" });
   });
 
   // ---------------------------------------------------------------------------
@@ -936,13 +969,13 @@
   // Hooks (C6.4).
 
   // Waits for a value a hook returned; rejections are recorded.
-  function settleHookValue(value, phase) {
+  function settleHookValue(value, phase, update) {
     if (value === null || (typeof value !== "object" && typeof value !== "function")) return resolved();
     let thenMethod;
     try {
       thenMethod = value.then;
     } catch (error) {
-      reportHook(error, phase);
+      reportHook(error, phase, update);
       return resolved();
     }
     if (typeof thenMethod !== "function") return resolved();
@@ -953,18 +986,18 @@
             resolve();
           },
           function (reason) {
-            reportHook(reason, phase);
+            reportHook(reason, phase, update);
             resolve();
           },
         ]);
       } catch (error) {
-        reportHook(error, phase);
+        reportHook(error, phase, update);
         resolve();
       }
     });
   }
 
-  async function runHooks(hooks, phase) {
+  async function runHooks(hooks, phase, update) {
     const waits = [];
     for (let i = 0; i < hooks.length; i++) {
       const hook = hooks[i];
@@ -973,12 +1006,12 @@
       try {
         value = apply(hook, undefined, []);
       } catch (error) {
-        reportHook(error, phase);
+        reportHook(error, phase, update);
         continue;
       } finally {
         hookPhase = null;
       }
-      waits[waits.length] = settleHookValue(value, phase);
+      waits[waits.length] = settleHookValue(value, phase, update);
     }
     await all(waits);
   }
@@ -1103,7 +1136,681 @@
     return await woken;
   }
 
+  // Offline MathJax. The facade preserves the template API before first use;
+  // ordinary cards fetch no math assets. Only upstream bundled components may
+  // be loaded, including supported TeX dependencies and dynamic SVG glyphs.
+  const mathRoot = "meguri-media://media/_anki/mathjax/";
+  let mathLoading = null;
+  let mathEngine = null;
+  let mathTypeset = null;
+  let mathTypesetSync = null;
+  let mathStarted = false;
+  let mathPending = 0;
+  let mathClear = null;
+  let mathWhenReady = null;
+  let mathOwner = null;
+  let mathStartupOwner = null;
+  const mathEvaluationErrors = new WeakMapCtor();
+  const mathFontReasons = new WeakMapCtor();
+  const mathCancelled = new ErrorCtor("MathJax typesetting cancelled");
+  mathCancelled.name = "AbortError";
+  let mathCard = null;
+  const mathTeXStates = [];
+
+  function copyMathValues(values) {
+    const copy = createObject(null);
+    for (const name of objectKeys(values)) copy[name] = values[name];
+    return copy;
+  }
+
+  function mathCommands(map) {
+    const copy = createObject(null);
+    call(mapForEach, map, function (value, name) { copy[name] = value; });
+    return copy;
+  }
+
+  function trackMathTeX(engine) {
+    // 4.1.3 integration: public equation filters expose the input-jax-local
+    // tags and new-Command map used by AMS DeclareMathOperator. Leave the
+    // upstream package/configuration maps (including stock operators) alone.
+    for (const jax of engine.startup.document.inputJax) {
+      if (jax.name !== "TeX") continue;
+      const tags = jax.parseOptions.tags;
+      const commands = jax.parseOptions.handlers.retrieve("new-Command").map;
+      const items = new WeakMapCtor(), before = new WeakMapCtor();
+      const state = { jax: jax, items: items, commands: commands,
+        labels: copyMathValues(tags.allLabels), ids: copyMathValues(tags.allIds),
+        counter: tags.allCounter, baseline: mathCommands(commands) };
+      mathTeXStates[mathTeXStates.length] = state;
+      jax.preFilters.add(function (args) {
+        // A component retry can have applied declarations before suspending.
+        if (!call(weakMapGet, before, args.math)) {
+          call(weakMapSet, before, args.math, mathCommands(commands));
+        }
+      });
+      jax.postFilters.add(function (args) {
+        const prior = call(weakMapGet, before, args.math);
+        const current = mathCommands(commands);
+        const old = call(weakMapGet, items, args.math);
+        const changes = old ? old.commands : createObject(null);
+        for (const name of objectKeys(current)) {
+          if (current[name] !== prior[name]) changes[name] = current[name];
+        }
+        for (const name of objectKeys(prior)) {
+          if (current[name] === undefined) changes[name] = undefined;
+        }
+        call(weakMapSet, items, args.math, { labels: copyMathValues(tags.labels),
+          ids: copyMathValues(tags.ids), counter: tags.counter, commands: changes });
+        call(weakMapSet, before, args.math, null);
+      });
+    }
+  }
+
+  function clearMath(elements, update) {
+    call(mathClear, mathEngine, elements);
+    const newCard = update && update.identity && mathCard !== update.identity.card;
+    for (const state of mathTeXStates) {
+      const labels = copyMathValues(state.labels), ids = copyMathValues(state.ids);
+      const commands = copyMathValues(state.baseline);
+      let counter = state.counter;
+      // Only surviving MathItems contribute tags. This releases question
+      // labels even on a same-card FrontSide answer, retaining page targets
+      // and references without recompiling or replacing their output.
+      for (const item of mathEngine.startup.document.math) {
+        const contribution = call(weakMapGet, state.items, item);
+        if (!contribution) continue;
+        for (const name of objectKeys(contribution.labels)) labels[name] = contribution.labels[name];
+        for (const name of objectKeys(contribution.ids)) ids[name] = contribution.ids[name];
+        counter = mathMax(counter, contribution.counter);
+        for (const name of objectKeys(contribution.commands)) commands[name] = contribution.commands[name];
+      }
+      const tags = state.jax.parseOptions.tags;
+      tags.allLabels = labels;
+      tags.allIds = ids;
+      tags.counter = tags.allCounter = counter;
+      // Declarations survive removed sides of this card. On the next card,
+      // retain only baseline definitions and those owned by surviving items.
+      if (newCard) {
+        call(mapClear, state.commands);
+        for (const name of objectKeys(commands)) {
+          if (commands[name] !== undefined) call(mapSet, state.commands, name, commands[name]);
+        }
+      }
+    }
+    if (newCard) mathCard = update.identity.card;
+  }
+
+  // Cleanup, startup and rendering share the pending face's wait budget.
+  // Once shown, each template API call gets a fresh deadline (card buttons
+  // may request math long after reveal).
+  function mathBudget(update) {
+    if (!update || update.shown) return 8000;
+    if (update.mathDeadline === undefined) update.mathDeadline = now() + 8000;
+    return mathMax(0, update.mathDeadline - now());
+  }
+
+  function mathError(error, update, source) {
+    // Late work belongs to its requesting side, never the page's next user.
+    if (!update || update !== latest) return;
+    updateSignal("error", update, {
+      kind: "math", message: describe(error), phase: "typeset", source: source || mathRoot + "tex-svg.js",
+    });
+  }
+
+  function mathStartup() {
+    const update = latest;
+    const waiting = mathDeadline(loadMath(), mathBudget(update));
+    then(waiting, noop, function (error) {
+      if (update) update.mathFailed = true;
+      mathError(error, update);
+    });
+    return waiting;
+  }
+
+  function mathDeadline(work, milliseconds) {
+    return promise(function (resolve, reject) {
+      const timer = call(setTimeoutFn, win, function () {
+        reject(new ErrorCtor("Bundled MathJax timed out"));
+      }, milliseconds);
+      then(work, function (value) {
+        call(clearTimeoutFn, win, timer);
+        resolve(value);
+      }, function (error) {
+        call(clearTimeoutFn, win, timer);
+        reject(error);
+      });
+    });
+  }
+
+  function loadMathScript(path) {
+    return promise(function (resolve, reject) {
+      let url;
+      try {
+        url = new URLCtor(path, mathRoot);
+        // The Swift manifest admits the exact release files. Here constrain
+        // requests to that immutable directory, including on the harness host.
+        // URL normalizes dot segments; encoded separators/dots are refused too.
+        const root = new URLCtor(mathRoot);
+        const pathname = call(urlPathname, url);
+        if (call(urlProtocol, url) !== call(urlProtocol, root) || call(urlHost, url) !== call(urlHost, root)
+            || call(urlSearch, url) || call(urlHash, url) || call(urlUsername, url) || call(urlPassword, url)
+            || call(stringIndexOf, pathname, call(urlPathname, root)) !== 0
+            || call(stringIndexOf, pathname, "%") !== -1
+            || call(stringIndexOf, pathname, "\\") !== -1) {
+          throw new ErrorCtor("Unbundled MathJax component refused");
+        }
+        const component = call(stringSlice, pathname, call(urlPathname, root).length);
+        if (component !== "tex-svg.js" && component !== "a11y/assistive-mml.js"
+            && component !== "input/tex/extensions/mhchem.js"
+            && component !== "fonts/mathjax-mhchem-font-extension/svg.js"
+            && !call(regexpExec, /^font\/svg\/dynamic\/[A-Za-z0-9-]+\.js$/, component)) {
+          throw new ErrorCtor("Unsupported MathJax component: " + component);
+        }
+      } catch (error) { reject(error); return; }
+      const owner = mathOwner || mathStartupOwner;
+      const source = call(urlHref, url);
+      const script = call(createElement, doc, "script");
+      // interaction.js observes resource errors in the isolated world. This
+      // shared DOM marker excludes only our loader requests from mediaError;
+      // their math diagnostics retain the requesting update captured here.
+      call(setAttribute, script, "data-meguri-preload", "");
+      let finished = false;
+      const finish = function (error) {
+        if (finished) return;
+        finished = true;
+        call(nativeRemove, win, "error", evaluationFailed, true);
+        call(nativeRemove, script, "load", loaded);
+        call(nativeRemove, script, "error", loadFailed);
+        const parent = call(parentNodeOf, script);
+        if (parent) call(removeChild, parent, script);
+        if (error) {
+          mathError(error, owner, source);
+          reject(error);
+        } else resolve();
+      };
+      const evaluationFailed = function (event) {
+        if (call(eventTarget, event) !== win || !(event instanceof ErrorEventCtor)) return;
+        if (call(errorEventFilename, event) !== source) return;
+        const current = call(documentCurrentScript, doc);
+        if (current && current !== script) return;
+        // Classic scripts still emit load after evaluation throws. Reject
+        // before that event lets upstream mark a missing component loaded.
+        // The global reporter must not attribute this to a replacement side.
+        call(weakMapSet, mathEvaluationErrors, event, true);
+        finish(new ErrorCtor(call(errorEventMessage, event) || "Bundled MathJax component evaluation failed"));
+      };
+      const loaded = function () { finish(); };
+      const loadFailed = function () { finish(new ErrorCtor("Bundled MathJax component failed")); };
+      // Removing a classic script cannot cancel execution. Keep its constrained
+      // configuration and real completion alive; only callers have deadlines.
+      call(nativeAdd, win, "error", evaluationFailed, true);
+      call(nativeAdd, script, "load", loaded);
+      call(nativeAdd, script, "error", loadFailed);
+      call(setAttribute, script, "src", source);
+      call(appendChild, call(documentHead, doc), script);
+    });
+  }
+
+  function limitMathAlignments(engine) {
+    // Version-pinned application integration; the combined tex-svg bundle
+    // already registered AMS. Replacing AmsMethods alone misses its stored
+    // function references. Guard the registered environment parser instead.
+    if (engine.version !== "4.1.3") throw new ErrorCtor("Unsupported bundled MathJax version");
+    const tex = engine._.input.tex;
+    const environments = tex.MapHandler.MapHandler.getMap("AMSmath-environment");
+    const parseEnvironment = environments.parser;
+    const alignAt = tex.ams.AmsMethods.AmsMethods.AlignAt;
+    const xalignAt = tex.ams.AmsMethods.AmsMethods.XalignAt;
+    const TeXError = tex.TexError.default;
+    environments.parser = function (parser, name, method, args) {
+      if (method === alignAt || method === xalignAt) {
+        // Read the same argument AMS will use, including alignedat's optional
+        // placement, then rewind. Macro expansion has already reached this
+        // parser. Leave syntax validation and ordinary inputs to upstream.
+        const position = parser.i;
+        try {
+          const command = "\\begin{" + name + "}";
+          if (name === "alignedat") parser.GetBrackets(command);
+          const pairs = parser.GetArgument(command);
+          if (call(regexpExec, /^[0-9]+$/, pairs) && +pairs > 64) {
+            throw new TeXError("MeguriAlignmentLimit", "At most 64 alignment pairs are allowed");
+          }
+        } finally {
+          parser.i = position;
+        }
+      }
+      return call(parseEnvironment, this, parser, name, method, args);
+    };
+
+    const commands = tex.MapHandler.MapHandler.getMap("AMSmath-macros");
+    const sideset = commands.lookup("sideset");
+    const parseSideset = sideset.func;
+    commands.add("sideset", new tex.Token.Macro(sideset.token, function (parser, name, ...args) {
+      // SideSet parses three arguments, then may copy the third tree. Inspect
+      // that expanded tree before returning it to AMS, including macro uses.
+      // Only this parser instance is wrapped; restore it even on a TeX error.
+      const ownParseArg = describeProperty(parser, "ParseArg");
+      const parseArg = parser.ParseArg;
+      let argument = 0;
+      parser.ParseArg = function (...args) {
+        const node = call(parseArg, this, ...args);
+        if (++argument === 3) {
+          const pending = [{ node: node, depth: 1 }];
+          let count = 0;
+          while (pending.length) {
+            const entry = pending[pending.length - 1];
+            pending.length--;
+            if (!entry.node) continue;
+            // XML nodes copy a separate DOM tree, outside childNodes. Use the
+            // common unsupported-formula path rather than another copy hook.
+            if (++count > 1024 || entry.depth > 32 || entry.node.kind === "XML") {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported sideset base complexity");
+            }
+            const children = entry.node.childNodes || [];
+            if (count + pending.length + children.length > 1024) {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported sideset base complexity");
+            }
+            for (let i = 0; i < children.length; i++) {
+              pending[pending.length] = { node: children[i], depth: entry.depth + 1 };
+            }
+          }
+        }
+        return node;
+      };
+      try { return call(parseSideset, this, parser, name, ...args); }
+      finally {
+        if (ownParseArg) defineProperty(parser, "ParseArg", ownParseArg);
+        else delete parser.ParseArg;
+      }
+    }, sideset.args));
+  }
+
+  function limitMathChemistry(engine) {
+    const tex = engine._.input.tex;
+    const chemistry = tex.MapHandler.MapHandler.getMap("mhchem");
+    // Macro.func is getter-only in 4.1.3. Replace the entry while retaining
+    // the original token and arguments.
+    for (const command of ["ce", "pu"]) {
+      const macro = chemistry.lookup(command);
+      const parse = macro.func;
+      const size = command === "ce" ? 4096 : 256;
+      chemistry.add(command, new tex.Token.Macro(macro.token, function (parser, name, ...args) {
+        const position = parser.i;
+        try {
+          const text = parser.GetArgument(name);
+          const TeXError = tex.TexError.default;
+          // Internal conversions do not re-enter the command map. Check their
+          // arguments here, before upstream starts conversion. Each unit gets
+          // its own size/fraction allowance, even in a longer reaction.
+          const conversions = [{ command: command, start: 0, end: text.length, depth: 1 }];
+          for (let next = 0; next < conversions.length; next++) {
+            const part = conversions[next];
+            const limit = part.command === "pu" || part.depth > 1 ? 256 : size;
+            if (part.end - part.start > limit || part.depth > 4) {
+              throw new TeXError("MeguriUnsupportedFormula", "Unsupported chemistry conversion size or depth");
+            }
+            let fractions = 0, braces = 0, brackets = 0;
+            for (let i = part.start; i < part.end; i++) {
+              // mhchem recognizes these literal nested commands itself.
+              const nested = text[i] === "\\"
+                && (call(stringSlice, text, i, i + 4) === "\\ce{"
+                  || call(stringSlice, text, i, i + 4) === "\\pu{");
+              if (nested) {
+                const start = i + 4;
+                let end = start, level = 1;
+                for (; end < part.end; end++) {
+                  if (text[end] === "{") level++;
+                  else if (text[end] === "}" && --level === 0) break;
+                }
+                // Leave malformed arguments to upstream's syntax diagnostics.
+                if (level === 0) {
+                  conversions[conversions.length] = {
+                    command: call(stringSlice, text, i + 1, i + 3),
+                    start: start, end: end, depth: part.depth + 1,
+                  };
+                  i = end;
+                  continue;
+                }
+              }
+              if (text[i] === "/" && ++fractions > 4) {
+                throw new TeXError("MeguriUnitLimit", "mhchem allows at most 4 fraction separators per conversion");
+              }
+              // Count raw grouping as mhchem does, including escaped braces.
+              if (text[i] === "{") braces++;
+              else if (text[i] === "[") brackets++;
+              else if (text[i] === "}" && braces) braces--;
+              else if (text[i] === "]" && brackets) brackets--;
+              if (braces + brackets > 8) {
+                throw new TeXError("MeguriUnsupportedFormula", "Unsupported chemistry grouping depth");
+              }
+            }
+          }
+        } finally {
+          parser.i = position;
+        }
+        return call(parse, this, parser, name, ...args);
+      }, macro.args));
+    }
+  }
+
+  function enforceMathPackages(engine) {
+    // The combined engine has already compiled optional packages. Its startup
+    // merges an array as additions, so replace the resulting list before it
+    // constructs the TeX input jax. AMS initializes its shared macro storage
+    // itself; enabling the optional newcommand package is unnecessary.
+    engine.config.tex.packages = ["base", "ams", "require", "autoload", "mhchem"];
+    engine.config.tex.require = { defaultAllow: false, allow: { ams: true, mhchem: true } };
+    engine.config.tex.autoload = {
+      action: [], amscd: [], bbox: [], boldsymbol: [], braket: [], bussproofs: [],
+      cancel: [], color: [], enclose: [], extpfeil: [], html: [],
+      mhchem: ["ce", "pu"], newcommand: [], unicode: [], verb: [],
+    };
+  }
+
+  function readableMathError(document, item) {
+    if (!item.inputData.meguriMathError || item.state() >= 200) return;
+    const adaptor = document.adaptor;
+    // MathItem retains unexpanded input and the actual matched delimiters.
+    // Replace only this expression's output, before insertion into the face.
+    const source = (item.start.delim || "") + item.math + (item.end.delim || "");
+    item.typesetRoot = adaptor.node("span", {
+      class: "mathjax_ignore", "data-meguri-math-error": "true",
+      role: "group", "aria-label": "Formula could not be rendered",
+    }, [
+      adaptor.node("strong", {}, [adaptor.text("Formula could not be rendered: ")]),
+      adaptor.node("code", { style: { "white-space": "pre-wrap" } }, [adaptor.text(source)]),
+    ]);
+  }
+
+  function loadMath() {
+    if (mathLoading) return mathLoading;
+    mathStartupOwner = latest;
+    // tex-svg contains the base font and menu constructor. Disable saved
+    // menu preferences for this document only, before its constructor runs.
+    // In particular enableMenu:false alone does not stop mergeUserSettings.
+    const configuration = {
+      loader: {
+        paths: {
+          mathjax: call(stringSlice, mathRoot, 0, -1),
+          fonts: "[mathjax]/fonts",
+          "mathjax-newcm": "[mathjax]/font",
+        },
+        load: ["[tex]/ams", "[tex]/mhchem", "a11y/assistive-mml"],
+        // Never pass Meguri's window.require to the upstream component loader.
+        // The release's other require references are guarded Node-only paths.
+        require: loadMathScript,
+      },
+      startup: {
+        typeset: false,
+        output: "svg",
+        ready: function () {
+          const engine = win.MathJax;
+          limitMathAlignments(engine);
+          enforceMathPackages(engine);
+          limitMathChemistry(engine);
+          const Menu = engine._.ui.menu.Menu.Menu;
+          engine.config.options.MenuClass = class extends Menu {
+            mergeUserSettings() {}
+          };
+          engine.startup.defaultReady();
+          const font = engine.startup.document.outputJax.font;
+          // In 4.1.3 only these synchronous SVG font lookups throw a retry
+          // Error carrying the exact dynamic-font promise. Error rendering can
+          // discard it; observe that promise without changing upstream's loader
+          // or the retry object received by its original awaiters.
+          for (const name of ["getChar", "getDelimiter"]) {
+            const lookup = font[name];
+            font[name] = function (...args) {
+              const token = mathOwner && mathOwner.mathToken;
+              try {
+                return call(lookup, this, ...args);
+              } catch (error) {
+                if (error instanceof ErrorCtor && error.retry instanceof PromiseCtor) {
+                  then(error.retry, noop, function (reason) {
+                    // Retain only a side identity, never its update or markup.
+                    // Page work before the first side has no render owner.
+                    if (token && isObject(reason) && !call(weakMapGet, mathFontReasons, reason)) {
+                      call(weakMapSet, mathFontReasons, reason, token);
+                    }
+                  });
+                }
+                throw error;
+              }
+            };
+          }
+          mathEngine = engine;
+          trackMathTeX(engine);
+          mathCard = latest && latest.identity ? latest.identity.card : null;
+          mathTypesetSync = engine.typeset;
+          mathTypeset = engine.typesetPromise;
+          mathClear = engine.typesetClear;
+          // Internal queueing keeps upstream's entry point; templates retain
+          // the public method and may wrap it independently.
+          mathWhenReady = engine.whenReady;
+          // Keep template waits bounded and attributed to their requesting side.
+          engine.typeset = mathFacade.typeset;
+          engine.typesetPromise = mathFacade.typesetPromise;
+          engine.typesetClear = mathFacade.typesetClear;
+        },
+      },
+      // Templates can make several requests while the first script is in flight.
+      typeset: mathFacade.typeset,
+      typesetPromise: mathFacade.typesetPromise,
+      typesetClear: mathFacade.typesetClear,
+      tex: mathFacade.tex,
+      options: {
+        compileError: function (document, item, error) {
+          mathError(error, mathOwner);
+          item.inputData.meguriMathError = true;
+          document.compileError(item, error);
+        },
+        typesetError: function (document, item, error) {
+          mathError(error, mathOwner);
+          item.inputData.meguriMathError = true;
+          document.typesetError(item, error);
+        },
+        renderActions: {
+          readableMathError: [160, function (document) {
+            for (const item of document.math) readableMathError(document, item);
+          }, function (item, document) { readableMathError(document, item); }],
+        },
+        enableMenu: false,
+        menuOptions: { settings: {
+          enrich: false, speech: false, braille: false,
+          assistiveMml: true, inTabOrder: false,
+        } },
+        enableExplorer: false, enableEnrichment: false,
+        enableSpeech: false, enableBraille: false, enableAssistiveMml: true,
+      },
+    };
+    // This getter is only for templates before the script executes. Upstream
+    // creates a separate startup object with its own promise. Capture that
+    // original before exposing bounded template waits below (a script load
+    // event also fires after a JS evaluation error).
+    defineProperty(configuration.startup, "promise", { get: mathStartup });
+    win.MathJax = configuration;
+    mathLoading = promise(function (resolve, reject) {
+      configuration.loader.failed = function (error) {
+        reject(error);
+        // 4.1.3 catches component failures before ready(), so its original
+        // startup promise otherwise stays pending after our load has failed.
+        const startup = win.MathJax.startup;
+        if (startup && typeof startup.promiseReject === "function") startup.promiseReject(error);
+      };
+      then(then(loadMathScript(mathRoot + "tex-svg.js"), function () {
+        const engine = win.MathJax;
+        if (engine.version !== "4.1.3" || !engine.startup || !engine.startup.promise) {
+          throw new ErrorCtor("Bundled MathJax did not initialize");
+        }
+        // Until startup installs the real methods, preserve template calls.
+        if (!engine.typeset) engine.typeset = mathFacade.typeset;
+        if (!engine.typesetPromise) engine.typesetPromise = mathFacade.typesetPromise;
+        if (!engine.typesetClear) engine.typesetClear = mathFacade.typesetClear;
+        const startup = engine.startup.promise;
+        // The bundle resolves startup via promiseResolve, not this property.
+        // Keep the original privately, while template waits remain bounded.
+        defineProperty(engine.startup, "promise", { get: mathStartup });
+        return then(startup, function () {
+          mathStarted = true;
+          mathStartupOwner = null;
+          return engine;
+        });
+      }), resolve, reject);
+    });
+    then(mathLoading, noop, noop);
+    return mathLoading;
+  }
+
+  function requestMath(elements) {
+    const update = latest;
+    // Undefined preserves upstream's document-wide template API scope.
+    const targets = elements;
+    mathPending++;
+    const start = function (engine) {
+      return call(mathWhenReady, engine, async function () {
+        // Requests before the first update belong to the page itself.
+        if (update && update !== latest) throw mathCancelled;
+        mathOwner = update;
+        try {
+          await call(mathTypeset, engine, targets);
+        } finally {
+          mathOwner = null;
+        }
+      });
+    };
+    // whenReady temporarily opens its queue only during the callback's
+    // synchronous turn. Enter upstream there, before that window closes.
+    const work = mathStarted ? start(mathEngine) : then(loadMath(), start);
+    // Keep the synchronous API out of the document until the real queued
+    // work finishes, even if its caller's deadline has already expired.
+    then(work, function () { mathPending--; }, function () { mathPending--; });
+    const waiting = mathDeadline(work, mathBudget(update));
+    then(waiting, noop, function (error) {
+      if (error === mathCancelled) return;
+      if (update) update.mathFailed = true;
+      mathError(error, update);
+    });
+    return waiting;
+  }
+
+  const mathFacade = {
+    tex: {
+      inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]],
+      processEscapes: false, processEnvironments: false, processRefs: false,
+      packages: { "[-]": ["newcommand", "textmacros", "noundefined", "configmacros"], "[+]": ["mhchem"] },
+      formatError: function (jax, error) {
+        // TeXError is not an Error subclass in this release. Preserve its
+        // original id/message rather than reporting "[object Object]".
+        mathError(error.id + ": " + error.message, mathOwner);
+        jax.parseOptions.mathItem.inputData.meguriMathError = true;
+        return jax.formatError(error);
+      },
+    },
+    typeset: function typeset(elements) {
+      if (!mathStarted || mathPending) { requestMath(elements); return; }
+      const update = latest;
+      mathOwner = update;
+      try {
+        return call(mathTypesetSync, mathEngine, elements);
+      } catch (error) {
+        mathError(error, update);
+        throw error;
+      } finally {
+        mathOwner = null;
+      }
+    },
+    typesetPromise: function typesetPromise(elements) { return requestMath(elements); },
+    typesetClear: function typesetClear(elements) { if (mathClear) clearMath(elements); },
+    startup: {},
+  };
+  defineProperty(mathFacade.startup, "promise", { get: mathStartup });
+
+  const mathProcessClass = /(?:^| )mathjax_process(?: |$)/;
+  const mathIgnoreClass = /(?:^| )mathjax_ignore(?: |$)/;
+  const mathSkippedTags = /^(?:script|noscript|style|textarea|pre|code|math|select|option|mjx-container)$/i;
+
+  function mathClassMode(node) {
+    const classes = call(getAttribute, node, "class") || "";
+    if (call(regexpExec, mathProcessClass, classes)) return 1;
+    return call(regexpExec, mathIgnoreClass, classes) ? 2 : 0;
+  }
+
+  function hasMath(qa) {
+    let node = qa, scope = null, ignored = false;
+    let inline = -1, display = -1, slash = false, escaped = false;
+    // Walk parent/sibling links without a recursion stack or assembled strings.
+    while (node) {
+      const kind = call(nodeTypeOf, node);
+      let text = "";
+      if (kind === 3) text = call(characterData, node);
+      else if (kind !== 8) {
+        const tag = kind === 1 ? call(stringLower, call(localNameOf, node)) : "";
+        if (tag === "br") text = "\n";
+        else if (tag !== "wbr") {
+          inline = display = -1;
+          slash = escaped = false;
+          if (kind === 1) {
+            const mode = mathClassMode(node);
+            const child = call(firstChildOf, node);
+            if (child && !call(getAttribute, node, "data-MJX")
+                && (mode === 1 || !call(regexpExec, mathSkippedTags, tag))) {
+              if (mode) {
+                scope = { node: node, ignored: ignored, previous: scope };
+                ignored = mode === 2;
+              }
+              node = child;
+              continue;
+            }
+          }
+        }
+      }
+      if (!ignored) {
+        for (let i = 0; i < text.length; i++) {
+          const c = text[i];
+          // Opening matches ignore preceding escapes (processEscapes:false).
+          // The newest opening has the fewest outstanding braces of its kind.
+          if (slash && c === "(") inline = 0;
+          if (slash && c === "[") display = 0;
+          if (escaped) {
+            if ((c === ")" && inline === 0) || (c === "]" && display === 0)) return true;
+            escaped = false;
+          } else if (c === "\\") escaped = true;
+          else if (c === "{") {
+            if (inline >= 0) inline++;
+            if (display >= 0) display++;
+          } else if (c === "}") {
+            if (inline > 0) inline--;
+            if (display > 0) display--;
+          }
+          slash = c === "\\";
+        }
+      }
+      for (;;) {
+        if (node === qa) return false;
+        if (scope && node === scope.node) {
+          ignored = scope.ignored;
+          scope = scope.previous;
+        }
+        const sibling = call(nextSiblingOf, node);
+        if (sibling) { node = sibling; break; }
+        node = call(parentNodeOf, node);
+        inline = display = -1;
+        slash = escaped = false;
+      }
+    }
+    return false;
+  }
+
+  function typesetSide(qa) {
+    if (!hasMath(qa)) return null;
+    const ready = then(requestMath([qa]), noop, noop);
+    // A template may have exhausted the wait on startup alone. Still request
+    // rendering, but reveal without a second wait; late work checks its side.
+    return latest && latest.mathFailed ? null : ready;
+  }
+
   async function runUpdate(update) {
+    update.mathToken = createObject(null);
     latest = update;
     if (update.side !== null) side = update.side;
     else update.side = side;
@@ -1116,19 +1823,69 @@
       shownHooks[0] = update.onShown;
       // 2. Preload wait.
       await preloadAndWait(update.html);
+      if (update !== latest) return;
       // 3. Hide.
       let qa = findQA();
       setOpacity(qa, "0");
       // 4. Video release.
       releaseVideos(qa);
+      // Retain outgoing nodes without disconnecting them before replacement:
+      // custom-element callbacks must see the new side, as with innerHTML alone.
+      const oldNodes = [];
+      if (mathEngine) {
+        for (let node = call(firstChildOf, qa); node; node = call(nextSiblingOf, node)) {
+          oldNodes[oldNodes.length] = node;
+        }
+      }
       // 5. Insert.
       held = [];
       call(innerHTMLSetter, qa, StringCtor(update.html));
       labelGeneratedReplays(qa, update.replayIDs);
+      // Upstream retries need old source/output nodes together, isolated from
+      // the actual #qa. Retarget synchronously before any work can resume.
+      if (mathEngine) {
+        const oldQA = call(cloneNode, qa, false);
+        for (let i = 0; i < oldNodes.length; i++) {
+          const node = oldNodes[i];
+          // A callback may have moved an outgoing node into its own new home.
+          if (!call(parentNodeOf, node)) call(appendChild, oldQA, node);
+        }
+        // findMath normally already ran before a component wait; constrain any
+        // late scan too. Subsequent queued typesets set their own elements.
+        const options = mathEngine.startup.document.options;
+        const staleElements = [oldQA];
+        options.elements = staleElements;
+        const cleanup = call(mathWhenReady, mathEngine, function () {
+          try {
+            clearMath(staleElements, update);
+          } finally {
+            // Upstream clear leaves this scan target; release only ours.
+            if (options.elements === staleElements) options.elements = null;
+          }
+        });
+        try {
+          if (mathOwner) {
+            then(cleanup, noop, noop);
+          } else {
+            await mathDeadline(cleanup, mathBudget(update));
+          }
+        } catch (error) {
+          update.mathFailed = true;
+          mathError(error, update);
+        }
+        if (update !== latest) return;
+      }
       // 6. Script walk.
       await walkScripts(qa);
+      if (update !== latest) return;
       // 7. Update hooks.
-      await runHooks(updateHooks, "update-hook");
+      await runHooks(updateHooks, "update-hook", update);
+      if (update !== latest) return;
+      // Scripts and hooks can add math. Finish it before reveal/settled on
+      // reviewer faces and previews alike; math failures still reveal the side.
+      const mathReady = typesetSide(findQA());
+      if (mathReady) await mathReady;
+      if (update !== latest) return;
       // 8. Show.
       qa = findQA();
       setOpacity(qa, "1");
@@ -1138,10 +1895,13 @@
       if (!presented) {
         if (queued()) return;
         if ((await parkUnpresented(update, qa)) !== "present") return;
+        if (update !== latest) return;
       }
-      await runHooks(shownHooks, "shown-hook");
+      await runHooks(shownHooks, "shown-hook", update);
+      if (update !== latest) return;
       updateSignal("shown", update);
     } catch (error) {
+      if (update !== latest) return;
       updateSignal("updateFailed", update, { error: describe(error) });
     }
   }
@@ -1381,14 +2141,7 @@
       return resolved(undefined);
     },
   };
-  win.MathJax = {
-    typeset: function typeset() {},
-    typesetPromise: function typesetPromise() {
-      return resolved(undefined);
-    },
-    typesetClear: function typesetClear() {},
-    startup: { promise: resolved(undefined) },
-  };
+  win.MathJax = mathFacade;
   if (isMac) {
     win.ankiPlatform = "desktop";
     defineProperty(win, "pycmd", { value: pycmd, writable: true, enumerable: true, configurable: false });

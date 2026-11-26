@@ -511,6 +511,7 @@ public struct ReviewStepInfo: Sendable, Hashable {
 }
 
 public enum ReviewSchedulingState: Sendable, Hashable {
+    case preview(scheduledSecs: UInt32, finished: Bool)
     case new(position: UInt32)
     case learning(state: ReviewLearningState)
     case review(state: ReviewReviewState)
@@ -518,6 +519,8 @@ public enum ReviewSchedulingState: Sendable, Hashable {
 
     init(_ value: MeguriCoreBindings.ReviewSchedulingState) {
         switch value {
+        case .preview(let scheduledSecs, let finished):
+            self = .preview(scheduledSecs: scheduledSecs, finished: finished)
         case .new(let position):
             self = .new(position: position)
         case .learning(let state):
