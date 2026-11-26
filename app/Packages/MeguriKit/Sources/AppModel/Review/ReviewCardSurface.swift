@@ -109,6 +109,8 @@ public final class ReviewPages: ReviewCardSurface {
     private var committedMediaUpdate: CardUpdate?
     #if os(macOS)
     private var editedFocusUpdate: CardUpdate?
+    // Offscreen tests supply window ownership without activating the app.
+    var editedCardWindowReady: (CardPlatformView) -> Bool? = ReviewInputOwnership.editedCardWindowReady
     #endif
     var onMediaReady: (() -> Void)?
     /// The Study click's way to the first card (R1813): this surface marks the
@@ -211,8 +213,9 @@ public final class ReviewPages: ReviewCardSurface {
     #if os(macOS)
     /// The successful edit refresh names the replacement, not the old page
     /// that AppKit retained while the editor window held the keys.
-    func restoreFocusAfterEditing(cardID: Int64) {
-        guard !closed, inputActive, let pair, pair.current.update?.card == cardID else { return }
+    func restoreFocusAfterEditing(cardID: Int64, side: CardRenderSide) {
+        guard !closed, inputActive, let pair, pair.current.update?.card == cardID,
+              pair.current.update?.side == side else { return }
         editedFocusUpdate = pair.current.update
         establishEditedCardFocus()
     }
@@ -221,7 +224,7 @@ public final class ReviewPages: ReviewCardSurface {
         guard let update = editedFocusUpdate else { return }
         guard !closed, inputActive, !editing, presenter.isAvailable,
               let pair, pair.current.update == update else { editedFocusUpdate = nil; return }
-        guard let ready = ReviewInputOwnership.editedCardWindowReady(in: pair.current.webView) else { return }
+        guard let ready = editedCardWindowReady(pair.current.webView) else { return }
         guard ready else { editedFocusUpdate = nil; return }
         // Both orders occur: the page commits before key return, or the
         // editor closes before the presentation's asynchronous commit.
@@ -370,6 +373,9 @@ public final class ReviewPages: ReviewCardSurface {
         priorityHead = []; currentMediaRefs = []; visibleMediaNames = []
     }
     public func close() {
+        #if os(macOS)
+        editedFocusUpdate = nil
+        #endif
         #if os(iOS)
         tapZones?.close(); tapZones = nil
         #endif

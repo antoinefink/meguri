@@ -113,7 +113,7 @@ public final class ReviewCoordinator {
     private var presentationRevision: UInt64 = 0
     private var refreshPending = false
     #if os(macOS)
-    private var editedCardToRefocus: Int64?
+    private var editedCardToRefocus: (session: UInt64, card: Int64, answer: Bool)?
     #endif
     private var forceQuestion = false
     private var pendingAnswer: ReviewRecord.Answer?
@@ -687,24 +687,30 @@ public final class ReviewCoordinator {
         leaveForRefresh()
         underCard = showsCard
         let question = forceQuestion; forceQuestion = false; refreshPending = false
-        #if os(macOS)
-        let editedCard = editedCardToRefocus
-        editedCardToRefocus = nil
-        #endif
         operation = Task {
             do {
                 try await apply(client.head(sessionID: sessionID), question: question, intent: presentationIntent)
                 try await persist()
                 #if os(macOS)
-                if let editedCard, item?.cardId == editedCard, showsCard, !paused, !editingNote, !closingAdmission {
-                    (surface as? ReviewPages)?.restoreFocusAfterEditing(cardID: editedCard)
-                }
+                restoreEditedCardFocus()
                 #endif
             }
             catch { fail(error) }
             completeOperation()
         }
     }
+    #if os(macOS)
+    private func restoreEditedCardFocus() {
+        guard !paused, !editingNote, !closingAdmission, let edited = editedCardToRefocus else { return }
+        editedCardToRefocus = nil
+        guard sessionID == edited.session, item?.cardId == edited.card,
+              shownItem?.renderKey == item?.renderKey, presentedKey == item?.renderKey,
+              showsCard, sideIsAnswer == edited.answer else { return }
+        // ReviewPages waits for this exact native update's commit and key return.
+        (surface as? ReviewPages)?.restoreFocusAfterEditing(
+            cardID: edited.card, side: edited.answer ? .answer : .question)
+    }
+    #endif
     private func completeOperation() {
         busy = false
         if refreshPending && !paused && !editingNote { refresh() }
@@ -765,6 +771,9 @@ public final class ReviewCoordinator {
         guard let sessionID else { return }
         let previous = item
         item = head.items.first
+        #if os(macOS)
+        if editedCardToRefocus?.card != item?.cardId { editedCardToRefocus = nil }
+        #endif
         switch head.terminalState {
         case .active:
             guard item != nil else { throw BridgeError.internal("Active review head has no item") }
@@ -1014,6 +1023,9 @@ public final class ReviewCoordinator {
             guard !closingAdmission, revision == pauseRevision else { busy = false; return }
             paused = false
             (surface as? ReviewPages)?.inputActive = !editingNote
+            #if os(macOS)
+            restoreEditedCardFocus()
+            #endif
             if item != nil, phase == .question || phase == .answer {
                 if !editingNote { timer.resume(at: uptime()) }
                 activeTime.resume(at: uptime())
@@ -1029,6 +1041,9 @@ public final class ReviewCoordinator {
     /// Nothing is written and nothing is rendered again.
     @discardableResult public func beginEditingNote() -> Bool {
         guard canEditNote else { return false }
+        #if os(macOS)
+        editedCardToRefocus = nil
+        #endif
         editingNote = true; heldInput = nil
         timer.pause(at: uptime())
         surface.pair?.pauseAudio()
@@ -1052,8 +1067,10 @@ public final class ReviewCoordinator {
         if saved {
             #if os(macOS)
             // The refresh swaps pages. Restore only its replacement after
-            // success and key return, preserving any other input owner.
-            editedCardToRefocus = paused ? nil : item?.cardId
+            // success and key return, including when the save precedes resume.
+            if let sessionID, let item {
+                editedCardToRefocus = (sessionID, item.cardId, sideIsAnswer)
+            }
             #endif
             // The same card and side, presented again from the saved note. The
             // person's own step: the answers wait for the new labels (F3).
@@ -1131,6 +1148,9 @@ public final class ReviewCoordinator {
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
         closingAdmission = true
+        #if os(macOS)
+        editedCardToRefocus = nil
+        #endif
         dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
@@ -1158,6 +1178,9 @@ public final class ReviewCoordinator {
     }
     public func generationEnded() {
         closingAdmission = true
+        #if os(macOS)
+        editedCardToRefocus = nil
+        #endif
         dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
@@ -1199,6 +1222,9 @@ public final class ReviewCoordinator {
     }
     private func fail(_ error: any Error) {
         guard phase != .ended else { return }
+        #if os(macOS)
+        editedCardToRefocus = nil
+        #endif
         startTrace?.cancel()
         presentationRevision &+= 1
         preload?.cancel()
