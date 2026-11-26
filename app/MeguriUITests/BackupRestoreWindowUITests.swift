@@ -102,16 +102,21 @@ final class BackupRestoreWindowUITests: XCTestCase {
         let trackFrame = scrollbar.frame
         let thumbFrame = thumb.frame
         let windowFrame = window.frame
-        XCTAssertTrue(!trackFrame.isEmpty && initialViewport.contains(trackFrame)
-            && !thumbFrame.isEmpty && trackFrame.contains(thumbFrame),
+        XCTAssertTrue(!trackFrame.isEmpty
+            && !thumbFrame.isEmpty && trackFrame.contains(thumbFrame) && initialViewport.contains(thumbFrame),
             "The same native vertical track must contain its visible thumb")
+        let startPoint = CGPoint(x: thumbFrame.midX, y: thumbFrame.midY)
+        let endPoint = CGPoint(x: trackFrame.midX, y: trackFrame.maxY - thumbFrame.height / 2)
+        XCTAssertTrue(initialViewport.contains(startPoint) && trackFrame.contains(startPoint)
+            && initialViewport.contains(endPoint) && trackFrame.contains(endPoint),
+            "Both native drag points must lie within the viewport and the actual scrollbar track")
         // ValueIndicator and ScrollView are passive, disabled AX objects. Anchor
         // input to the key restore window using their actual screen-space frames.
         let origin = window.coordinate(withNormalizedOffset: .zero)
-        let start = origin.withOffset(CGVector(dx: thumbFrame.midX - windowFrame.minX,
-            dy: thumbFrame.midY - windowFrame.minY))
-        let end = origin.withOffset(CGVector(dx: trackFrame.midX - windowFrame.minX,
-            dy: trackFrame.maxY - thumbFrame.height / 2 - windowFrame.minY))
+        let start = origin.withOffset(CGVector(dx: startPoint.x - windowFrame.minX,
+            dy: startPoint.y - windowFrame.minY))
+        let end = origin.withOffset(CGVector(dx: endPoint.x - windowFrame.minX,
+            dy: endPoint.y - windowFrame.minY))
         try app.bringToFront(bundleIdentifier: bundle)
         // One native mouse drag, using only this thumb and its vertical track.
         // Align the thumb's bottom with the track's bottom; AppKit clamps it.
