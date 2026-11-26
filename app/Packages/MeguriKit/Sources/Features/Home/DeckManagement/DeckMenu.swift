@@ -3,13 +3,14 @@ import CoreBridge
 import SwiftUI
 
 /// The deck's long-press and right-click menu (N20.2): study and inspection,
-/// study setup, deck management, then deletion. A filtered deck takes
-/// neither notes nor subdecks; its settings edit the saved search definition.
+/// study setup, deck management, then Export Deck… and Delete Deck.
+/// A filtered deck keeps its study actions and Export Deck…, takes neither
+/// notes nor subdecks; its settings edit the saved search definition.
 struct DeckMenu: View {
     let collection: ReviewCollection
     let deck: CountedDeckNode
-    /// The list the row belongs to, where its delete question shows (N20.7).
-    var place = "list"
+    /// Row menus ask beside their row; toolbar menus use the window presenter (N20.7).
+    var deletionAnchor: DeckDeletionModel.Anchor = .row(place: "list")
 
     var body: some View {
         // N20.2: each item with its system symbol, on the Mac too.
@@ -99,8 +100,14 @@ struct DeckMenu: View {
             }
         }
         Divider()
+        Button { collection.collectionExport.presentDeck(deck.id) } label: {
+            Label { Text("Export Deck…", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
+        }
+        .disabled(!collection.collectionExport.canPresentDeck(deck.id))
+        .accessibilityIdentifier("home.deckMenu.export.\(deck.id)")
+        Divider()
         Button(role: .destructive) {
-            collection.deckDeletion.delete(deckID: deck.id, anchor: .row(place: place))
+            collection.deckDeletion.delete(deckID: deck.id, anchor: deletionAnchor)
         } label: {
             Label { Text("Delete Deck", bundle: .module) } icon: { Image(systemName: "trash") }
         }
@@ -116,7 +123,7 @@ extension View {
     /// The row's deck menu: a long press on touch, a right-click on the Mac.
     @ViewBuilder func deckMenu(collection: ReviewCollection?, deck: CountedDeckNode, place: String = "list") -> some View {
         if let collection {
-            contextMenu { DeckMenu(collection: collection, deck: deck, place: place) }
+            contextMenu { DeckMenu(collection: collection, deck: deck, deletionAnchor: .row(place: place)) }
                 .deckDeletionQuestion(collection: collection, deckID: deck.id, place: place)
         } else {
             self

@@ -46,3 +46,14 @@ The final search, engine and scheduling selection passed all 239 tests in `core-
 Both Mac journeys passed without skips in `ui-test/20261126T140102Z-38683`. The Browse journey used overlapping queries, Empty, Undo, Rebuild and timed preview across relaunch. The finished-review journey selected actual cards through included and excluded tags. Both compared stored scheduling fields and card identities before and after preview. The iOS simulator build passed in `build-app/20261126T132404Z-48445`. The 14-step native capture completed every action; its separate hierarchy audit reported the existing sync toolbar button's missing identifier. The filtered study journeys themselves passed. Captures of the isolated fixture are attached to [PR #237](https://github.com/antoinefink/meguri/pull/237).
 
 Plancheck independently inspected every byte of the updated 71,387-byte verification register. It contains public checks, synthetic scenarios and repository references. The verified SHA-256 for `docs/process/verification-status.md` is `6fbebade36e4f5cadb45762fe6bde91c769d9ab54b1197c0e380502c629e3f61`.
+
+### Integration with selected-deck export
+
+The reviewers examined the complete merged files and approved these exact public contents. The records contain UI source and localization, public design requirements and synthetic verification results.
+
+| Reviewer | File | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Plancheck | `docs/process/verification-status.md` | 72,225 | `8d491a279fc12638458d91f8ba60706257402813d3fefdb29802cacc04a27f63` |
+| Plancheck | `docs/design/native-interface-contract.md` | 293,400 | `cbd5905a9d183331c00deba0ded170f74bc13f7a9467d2d92461804f6e0991cb` |
+| Planinterop | `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings` | 51,334 | `61695e0b755bcd741efff9aa6d31f15daeba8907508ef9893ea2508cd6d50225` |
+| Planinterop | `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` | 166,524 | `5b329638e20ef17b258809d3e68089eaa04f059652cd6cfc4c113462be76f6ee` |

@@ -22,6 +22,8 @@ pub mod backup_service;
 pub mod backup_writer;
 #[path = "collection_package.rs"]
 pub mod collection_package;
+#[path = "deck_export.rs"]
+pub mod deck_export;
 #[path = "inspection.rs"]
 pub mod inspection;
 #[path = "live_writer.rs"]

@@ -154,6 +154,14 @@ struct NativeCommandContext {
         guard let deck = shownDeck else { return false }
         return collection.canStudy && collection.offersStudy(deckID: deck)
     }
+    var canExportShownDeck: Bool {
+        guard let deck = shownDeck else { return false }
+        return collection.collectionExport.canPresentDeck(deck)
+    }
+    func exportShownDeck() {
+        guard canExportShownDeck, let deck = shownDeck else { return }
+        collection.collectionExport.presentDeck(deck)
+    }
     var canRenameShownDeck: Bool { shownDeck.map { collection.deckActions.canPresent(.rename($0), host: host) } ?? false }
     var canAddSubdeck: Bool { shownDeck.map { collection.deckActions.canPresent(.subdeck($0), host: host) } ?? false }
     var canOpenDeckOptions: Bool {
@@ -386,6 +394,8 @@ struct AppCommands: Commands {
             Button("Import…") { context?.present(.deckImport) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.intake.canChoose != true)
+            Button("Export Deck…") { context?.exportShownDeck() }
+                .disabled(context?.canExportShownDeck != true)
             Button("Export Collection…") { context?.present(.collectionExport) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
@@ -517,6 +527,9 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: [.command, .option])
             .disabled(context?.canOpenDeckOptions != true)
+            Divider()
+            Button("Export Deck…") { context?.exportShownDeck() }
+                .disabled(context?.canExportShownDeck != true)
             Divider()
             Button("Delete Deck") { context?.deleteShownDeck() }
                 .keyboardShortcut(.delete, modifiers: .command)

@@ -23,6 +23,7 @@ serde_json.workspace = true
 meguri-sched.workspace = true
 zip.workspace = true
 zstd.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 meguri-testkit.workspace = true

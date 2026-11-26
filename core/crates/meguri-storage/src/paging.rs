@@ -704,6 +704,15 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }
 
+    /// Read only the selected name, without decoding unrelated record blobs.
+    fn deck_name(&self, id: DeckId) -> Result<Option<String>, StorageError> {
+        use rusqlite::OptionalExtension;
+        self.connection()
+            .query_row("SELECT name FROM decks WHERE id=?1", [id.0], |row| row.get(0))
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Deck rows in the hierarchy's unicase order (decks/decks D3).
     fn deck_rows(&self) -> Result<Vec<Deck>, StorageError> {
         let mut statement = self

@@ -1016,6 +1016,18 @@ Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the s
 - Strings (new unless marked): "Deck Options" (title; the undo step's name exists), "Deck Options…" (exists in R283), "Preset" (K4's tab text, here a row label), "Daily Limits" (K2), "New Cards per Day", "Maximum Reviews per Day", "Memory", "Desired Retention", "Used by %@ decks. Changes apply to all of them.", "Used by this deck only.", "How likely you are to remember a card when it comes back.", "This deck has its own limits, which stay in force.", "This deck has its own desired retention, which stays in force.", "Save", and the existing "Discard changes?", "Discard", "Keep Editing", "Cancel". Keys: K10.
 - Replaces, for this version: N11.9's Preset Actions menu, Save to All Subdecks, restore-default and help buttons, the reload row, two columns and the review-time sheet (each comes back with the unit that brings its part); R736's Anki labels for these three options (6B: Apple title case, K10); R740's and R742's tabs; the screen contract `deckOptions.options`' layout until the Advanced page lands.
 
+### N20.10 Selected-deck export (2026-11-26, pending native design review)
+
+Export Deck… in the deck's context menu, the touch deck menu and the Mac File and Deck
+menus opens a grouped form showing the full deck name and the Anki deck package format.
+The action applies to the deck the menu names, including its subdecks and all cards of
+each selected note.
+
+Include Scheduling Information and Include Deck Presets start off. Include Media starts
+on. A completed preparation remembers the three choices on this device for the next
+deck export. Export opens the native destination flow of N17.3 with a deck-named
+`.apkg` file. Cancel closes the options form.
+
 ## N21. Round 8: Browse (2026-11-20)
 
 Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Approved with those specs by Antoine on 2026-11-20. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.

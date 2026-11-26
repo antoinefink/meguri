@@ -10,6 +10,13 @@ simulator app and UI test bundle also built successfully. The
 receipts. [PR #237](https://github.com/antoinefink/meguri/pull/237) carries
 the native screenshots and device-specific verification results.
 
+The selected-deck package branch passed 25 focused package, host and FFI cases
+(`core-test/20261126T121257Z-27087`), five associated unit cases and 21
+media-capture and package cases after the final protection change
+(`core-test/20261126T121753Z-50849`). The fresh-import check covers all eight
+scheduling, presets and media combinations. See the [deck export review log](review-log/selected-deck-export-20261126.md)
+and [PR #235](https://github.com/antoinefink/meguri/pull/235) for native verification.
+
 The tag and note type deletion branch passed 44 focused Swift tests
 (`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed
@@ -71,6 +78,7 @@ See [the repair rule](merge.md#failure-register).
 | Check group | State and evidence | Next check |
 |---|---|---|
 | Review controls and native Mac note editing | [Unit evidence](review-log/review-and-editor-20261125.md) records Done and replay, opaque rating buttons, the Add window, and editing and rendering imported fields with gaps. The original empty-deck create-and-study journey passed in Mac VM run `220323Z-49704`. | Include these surfaces in the next complete gate. |
+| Mac Add and Edit opening focus | Both first-field regressions and all 13 field-editor tests passed. The separate durable Add-to-Study test stalled in Study startup with both original and fixed editor resources. [Review and receipts](review-log/mac-note-opening-focus-20261126.md). | Investigate the inherited Study startup wait. |
 | Scheduled collection and media recovery | [Backup verification](review-log/meguri-sync-collection-backups-20261125.md) records the server restart, native sync download, retention checks and browser recovery flow on synthetic accounts. | Run the same recovery test when changing server storage or the restore protocol. |
 | Core and native conformance | Core `183312Z-79774` finished with 5,564 passed, 40 failed and 10 skipped. Both 150,000-record sync cases passed. Conformance `191454Z-3799` failed on the same two testkit cases. Focused Core `203502Z-17307` on clean `419312bf6` passed 21 of 35 and retained 14 account-admission failures. Focused Core `205342Z-40708` on clean `85d5f4c66` passed all 16 selected native-absence cases after the no-file discovery fixture repair. These two runs cover 35 of the original failures. The four capacity cases now pass the unchanged focused checks below, covering 39 of the 40 original failure IDs. Focused `222320Z-45639` passed the remaining isolated-publication cancellation preview and nine related cases on the reviewed candidate committed as `3e7aa7bb`. Structured IDs now cover all 40 original Core failures in focused runs. | Complete native conformance and the original-base gate. |
 | Host tooling rebuild | `selftest-host/20261118T195313Z-31339` passed 28 of 29. The dev image rebuild stopped before its cache comparison. Child `dev-image/20261118T195444Z-68797` reports a rustup timeout during locked cargo-fuzz installation. | Retain the failed receipt and verify the normal rebuild and cache comparison. |

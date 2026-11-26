@@ -189,17 +189,15 @@ pub(crate) struct Taken {
 }
 
 /// A6's running position counter over the taken cards, in ascending id.
-pub(crate) struct CardShaper<'t> {
-    taken: &'t Taken,
+pub(crate) struct CardShaper {
+    scheduling: bool,
+    return_home: bool,
     next: u32,
 }
 
 impl Taken {
-    pub fn shaper(&self) -> CardShaper<'_> {
-        CardShaper {
-            taken: self,
-            next: self.first_position,
-        }
+    pub fn shaper(&self) -> CardShaper {
+        CardShaper::new(self.scheduling, self.return_home, self.first_position)
     }
 
     /// A note's tags as I6 leaves them: without scheduling, `marked` and
@@ -212,12 +210,20 @@ impl Taken {
     }
 }
 
-impl CardShaper<'_> {
+impl CardShaper {
+    pub(crate) fn new(scheduling: bool, return_home: bool, first_position: u32) -> Self {
+        Self {
+            scheduling,
+            return_home,
+            next: first_position,
+        }
+    }
+
     /// A5 or A6 on one taken card. Every taken card passes through here in
     /// ascending id, whether or not it is added afterwards.
     pub fn shape(&mut self, card: &mut Card) {
-        if self.taken.scheduling {
-            if self.taken.return_home && card.original_deck_id.0 > 0 {
+        if self.scheduling {
+            if self.return_home && card.original_deck_id.0 > 0 {
                 card.original_deck_id = DeckId(0);
                 if card.original_due != 0 {
                     card.due = card.original_due;

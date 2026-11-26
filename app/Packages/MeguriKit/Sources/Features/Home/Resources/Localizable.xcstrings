@@ -1,6 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Export Deck…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Export Deck…" } }
+      }
+    },
     "Add Note": {
       "localizations": {
         "en": {

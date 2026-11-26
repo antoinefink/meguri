@@ -990,6 +990,12 @@ impl CollectionBuilder {
         self.collection.path()
     }
 
+    /// New-file statistics before any deck, preset or note type is added (B2).
+    pub fn analyze_initial(&self) -> Result<(), StorageError> {
+        self.collection.writer().conn.execute_batch("ANALYZE")?;
+        Ok(())
+    }
+
     /// A scope with no journal. `mode` is `Raw` or `CallerSupplied`.
     pub fn begin<'c>(&'c self, mode: StampMode, clock: &'c dyn Clock) -> Result<WriteScope<'c>, StorageError> {
         if !matches!(mode, StampMode::Raw | StampMode::CallerSupplied) {

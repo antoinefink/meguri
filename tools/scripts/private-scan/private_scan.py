@@ -836,13 +836,17 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
-        "6b96ea5123988e28e5a4a8a79187594ffeb5ef0ff85ee2f7871821dff1e16275",
+        "61695e0b755bcd741efff9aa6d31f15daeba8907508ef9893ea2508cd6d50225",
     "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
         "847e05fc1456d929196a53a7deb4b401bf06e2441ebb67ba38ff3d4ce7be1fcc",
     "core/crates/meguri-engine/src/decks/custom_study.rs":
         "73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166",
     "app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift":
         "4ded70a1d10bb62adf87d3342b98857a266c92a7a1c7508a8f4ba43f32a29419",
+    "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
+    "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
+    "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
+    "core/crates/meguri-host/src/collection_export.rs": "88c340e10981b59a4e4ea5f64766c547c5fa9182c70e4a36ca47b5b04f05e867",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
@@ -939,7 +943,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        'bb9a40b994d55e420f4408d58927b6deddf0072e78b404677503591044c4bf24',
+        'cbd5905a9d183331c00deba0ded170f74bc13f7a9467d2d92461804f6e0991cb',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1157,7 +1161,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: owned_diagnostic_review, 2026-11-19.
     "docs/process/verification-status.md":
-        "6fbebade36e4f5cadb45762fe6bde91c769d9ab54b1197c0e380502c629e3f61",
+        "8d491a279fc12638458d91f8ba60706257402813d3fefdb29802cacc04a27f63",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1453,7 +1457,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'fb7df5a364e8fc7d99f79196d53705eca5bfa7826a00518486236a63cd6858cd',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '5b329638e20ef17b258809d3e68089eaa04f059652cd6cfc4c113462be76f6ee',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

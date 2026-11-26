@@ -321,6 +321,9 @@ pub(crate) fn verify_export(
         .by_index(1)
         .map_err(|failure| corrupt(format!("collection: {failure}")))?;
     let maximum = decoded_limit(member.compressed_size(), COLLECTION_LIMIT);
+    if expected.length > maximum {
+        return Err(Error::ExportFormatLimit);
+    }
     let mut collection_hash = Sha256::new();
     let collection_length = zstd_read(member, maximum, &mut decoded_bytes, check, |part| {
         collection_hash.update(part)
@@ -371,6 +374,9 @@ pub(crate) fn verify_export(
         zstd_read(member, 0, &mut decoded_bytes, check, |_| {})?;
     } else {
         let maximum = decoded_limit(member.compressed_size(), crate::export_capture::MAP_LIMIT);
+        if crate::export_capture::map_length(media)? > maximum {
+            return Err(Error::ExportFormatLimit);
+        }
         let mut next_source = media.iter();
         let mut source = next_source.next();
         let mut pending = Vec::with_capacity(160);
