@@ -463,11 +463,11 @@ mod tests {
         let url = format!("http://{}/image", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
         let server = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
             let mut stream = loop {
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock && meguri_engine::monotonic::now() < deadline => {
                         std::thread::sleep(Duration::from_millis(2));
                     }
                     Err(e) => panic!("loopback accept: {e}"),

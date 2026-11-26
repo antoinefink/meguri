@@ -68,48 +68,69 @@ struct NativeCanvasAccessibility: NSViewRepresentable {
         }
     }
 
-    // AppKit may pass these identities between AX threads. All mutable canvas
-    // state stays on MainActor; SDK overrides synchronously enter it below.
+    // AppKit may pass these identities between AX threads. The unchecked
+    // conformance also permits the concrete hit-test result through onMain.
+    // All mutable canvas state stays in the MainActor-isolated State.
     nonisolated final class Element: NSAccessibilityElement, @unchecked Sendable {
-        @MainActor private weak var owner: Container?
+        private nonisolated let state: State
         let identifier: String
-        @MainActor var item: Item?
-        @MainActor var enabled = true
+        @MainActor var item: Item? {
+            get { state.item }
+            set { state.item = newValue }
+        }
+        @MainActor var enabled: Bool {
+            get { state.enabled }
+            set { state.enabled = newValue }
+        }
         @MainActor init(owner: Container, identifier: String) {
-            self.owner = owner; self.identifier = identifier
+            self.state = State(owner: owner); self.identifier = identifier
             super.init()
             setAccessibilityElement(true)
             setAccessibilityIdentifier(identifier)
         }
         override func accessibilityParent() -> Any? {
-            let parent: Container? = NativeCanvasAccessibility.onMain { self.owner }
+            let parent: Container? = NativeCanvasAccessibility.onMain { [state] in state.owner }
             return parent
         }
-        // Resolve on every AX read: window moves, scrolling and flipped local
-        // coordinates must not leave a cached global frame behind.
         override func accessibilityFrame() -> NSRect {
-            NativeCanvasAccessibility.onMain {
-                guard let owner = self.owner, let window = owner.window, let item = self.item else { return .zero }
-                return window.convertToScreen(owner.convert(item.frame, to: nil))
-            }
+            NativeCanvasAccessibility.onMain { [state] in state.frame() }
         }
         override func accessibilityPerformPress() -> Bool {
-            NativeCanvasAccessibility.onMain {
-                guard self.enabled, let press = self.item?.press else { return false }
-                press(); return true
-            }
+            NativeCanvasAccessibility.onMain { [state] in state.press() }
         }
-        override func accessibilityPerformIncrement() -> Bool { adjust(true) }
-        override func accessibilityPerformDecrement() -> Bool { adjust(false) }
-        private func adjust(_ increment: Bool) -> Bool {
-            NativeCanvasAccessibility.onMain {
-                guard self.enabled, let action = self.item?.adjust else { return false }
-                action(increment); return true
-            }
+        override func accessibilityPerformIncrement() -> Bool {
+            NativeCanvasAccessibility.onMain { [state] in state.adjust(true) }
+        }
+        override func accessibilityPerformDecrement() -> Bool {
+            NativeCanvasAccessibility.onMain { [state] in state.adjust(false) }
         }
         fileprivate func performCustomAction(at index: Int) -> Bool {
-            NativeCanvasAccessibility.onMain {
-                guard self.enabled, let item = self.item, item.actions.indices.contains(index) else { return false }
+            NativeCanvasAccessibility.onMain { [state] in state.performCustomAction(at: index) }
+        }
+
+        @MainActor private final class State {
+            weak var owner: Container?
+            var item: Item?
+            var enabled = true
+
+            init(owner: Container) { self.owner = owner }
+
+            // Resolve on every AX read: window moves, scrolling and flipped
+            // local coordinates must not leave a cached global frame behind.
+            func frame() -> NSRect {
+                guard let owner, let window = owner.window, let item else { return .zero }
+                return window.convertToScreen(owner.convert(item.frame, to: nil))
+            }
+            func press() -> Bool {
+                guard enabled, let press = item?.press else { return false }
+                press(); return true
+            }
+            func adjust(_ increment: Bool) -> Bool {
+                guard enabled, let action = item?.adjust else { return false }
+                action(increment); return true
+            }
+            func performCustomAction(at index: Int) -> Bool {
+                guard enabled, let item, item.actions.indices.contains(index) else { return false }
                 item.actions[index].1(); return true
             }
         }
