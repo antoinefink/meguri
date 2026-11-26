@@ -96,7 +96,7 @@ Of a card in a normal deck (`odid` 0), by its type (`sched/card-data#K1`):
 | 2 review | T3 |
 | 3 relearning | `relearning`: the learning part as for type 1 but with the relearning steps; the review part has `scheduled_days` = `ivl`, `elapsed_days` = `ivl`, `ease_factor` = `factor` / 1000, `lapses` = `lapses`, `leeched` false, `memory_state` = T2.4 |
 
-- A card in a filtered deck (`odid` not 0) is out of scope (filtered decks are not studied in Meguri, R612): the engine refuses it with `InFilteredDeck` (T14) instead of computing the states of a normal deck.
+- A filtered card uses `decks/filtered-study#F3` for its effective due and home preset, or F4 when previewing.
 - Only the review part of a relearning card is carried into its next states (T9); its `elapsed_days` is the interval, not a count of days.
 
 ## T8. Leaving the learning steps (R651, R642)
@@ -214,7 +214,7 @@ Again on a review card carries the leech flag (T12).
 
 Review-log day intervals retain their low 32 bits as a signed integer. This applies to both `ivl` and `lastIvl`: a current review interval 2,147,483,648 produces `lastIvl` −2,147,483,648, and 4,294,967,295 produces −1. It is not a positive clamp or an input refusal. Normal computed review intervals are within the preset bounds; the distinction matters for imported current intervals. Seconds retain the negative, saturating rule above.
 
-**Errors:** `UnsupportedParams` (T1, T13; every refusal of the crate's model constructor is this error), `InFilteredDeck` (T7), and the crate's other errors (T1). None of them changes anything.
+**Errors:** `UnsupportedParams` (T1, T13; every refusal of the crate's model constructor is this error) and the crate's other errors (T1). None of them changes anything.
 
 **FSRS instances:** the engine may keep `FSRS` instances made from a parameter list for reuse, keyed by the exact `f32` values of the list; a reused instance gives the same results as a new one. U46, U47 and U50 use the same instances and the same T13 check.
 
@@ -232,7 +232,7 @@ Review-log day intervals retain their low 32 bits as a signed integer. This appl
 | `sched/steps/*` | T7, T8, T9 with `sched/steps` |
 | `fp-probe/*` | T1 to T5 on many inputs (`conformance/float-determinism`) |
 
-All goldens are recorded. U45 activates the five pure FSRS scenarios. `ae23-answer` and `input-boundaries` remain pending until U44's answer adapter exists; U45's direct tests already consume their next-state snapshots. T13 and the `InFilteredDeck` refusal are unit tests only.
+All goldens are recorded. U45 activates the five pure FSRS scenarios. `ae23-answer` and `input-boundaries` remain pending until U44's answer adapter exists; U45's direct tests already consume their next-state snapshots. T13 is covered by unit tests.
 
 ## T16. Where the plan's wording differs from Anki
 

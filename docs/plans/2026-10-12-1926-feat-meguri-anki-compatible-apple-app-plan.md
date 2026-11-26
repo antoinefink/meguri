@@ -173,6 +173,8 @@ flowchart TB
 - R50. Home has Create Deck and Import File actions. The optional Get Decks action opens the shared-deck site in the default browser and uses no Anki credentials or sync endpoint; it is present only when its existing build availability rules allow it.
 - R51. Dropping an `.apkg` (or any file type the import area accepts) onto the Mac window, the Dock icon, the iPad window or the deck list starts the import flow; unsupported files show a short message naming the accepted types.
 - R52. Opening a supported file from Finder, Files, Mail or the share sheet ("Open in Meguri") starts the import flow over the current screen; if a review is in progress, the review stays underneath and resumes on the same card after the import sheet closes.
+**Scope update, 2026-11-26.** The request to build filtered decks and Custom Study supersedes this plan's original exclusions for creating, rebuilding, editing, emptying and studying filtered decks, and for Custom Study on deck and finished pages. The current contract, including behavior for existing synced decks, is `specs/decks/filtered-study.md` F1–F6. R54, normal-deck queue isolation and sync compatibility continue to apply.
+
 - R53. Filtered decks present in a synced collection appear in the tree in a distinct style with their counts, but cannot be studied; tapping one explains that filtered decks are not supported yet, and its menu offers only Rename and Delete.
 - R54. Deleting a filtered deck returns its cards to their home decks and deletes no cards, as in Anki.
 

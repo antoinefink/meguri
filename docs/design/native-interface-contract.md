@@ -808,7 +808,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 - Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
 - After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
 - With no result and no create row, H6.3's one-line message shows.
-- Return or a click opens a result: its deck page, with the sidebar selection on that deck; a filtered deck shows R53's explanation (`decks/deck-list` H3). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
+- Return or a click opens a result: its deck page, with the sidebar selection on that deck (including the filtered deck page, `decks/filtered-study#F6`). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
 - Mac: after each edit the first result is highlighted, or the create row when nothing is listed; ↑ and ↓ move the highlight over all rows and wrap (H6.3). The highlight does not change the detail; Return opens the highlighted row. iPad: a tap opens a result; Return in the field opens the first.
 - ⌘F (Edit › Find…, N20.4), ⇧⌘O (a second key of Find…, with no menu item of its own) and "/" in the `decks.list` and `decks.page` contexts (H9.2; never while a text field or other view owns the key, N4) put the focus in the field, showing the sidebar first when it is hidden. In the tab layout the same keys present the deck list's Search (N14.2). During review Find… is disabled.
 - Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`) and New Deck… (`folder.badge.plus`). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
@@ -823,14 +823,14 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 | Group | Item | Symbol | Mac key | Filtered deck |
 |---|---|---|---|---|
-| 1 | Study | `play` | ⌘R | absent |
+| 1 | Study | `play` | ⌘R | shown |
 | 1 | Add Note | `square.and.pencil` | | absent |
 | 2 | Rename… | `pencil` | ⇧⌘R | shown |
 | 2 | New Subdeck… | `folder.badge.plus` | | absent |
-| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | absent |
+| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | opens Edit Filtered Deck |
 | 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
 
-- A filtered deck's menu holds Rename… and Delete Deck (R53).
+- A filtered deck's menu exposes Study, Edit Filtered Deck, Rebuild and Empty alongside its Browse, Statistics, Rename and Delete actions. Custom Study is available from the normal deck page and its finished state (`decks/filtered-study#F6`).
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -873,7 +873,7 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Edit | Undo <step name>, Redo <step name> | ⌘Z, ⇧⌘Z | titled with the core's undo step name ("Undo Rename Deck", "Undo Answer Card"), the review's existing pattern, until `review/reviewer-strings` S5's catalog keys exist (R173); plain "Undo" and "Redo", disabled, when nothing can be undone or redone. During review they use the review session's own restore (session-aware); outside review, the collection's undo history. On Mac a focused text input keeps its own undo. On iPad text focus is not detected outside sheets, so a sheet keeps the system's text undo |
 | Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
 | Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows in the main window, no sheet or panel owns the keys, and no review runs; focuses N20.1's field (tab layout: presents the Search). While it is disabled, a text view's own Find keeps ⌘F |
-| Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
+| Deck | Study | ⌘R | the shown deck's Study is available (N14.3) (including filtered decks, H3) |
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
@@ -1323,7 +1323,7 @@ Then the collection's error line, as before (not beside the deck list, N14.1).
 
 - A deck row's number counts every card waiting: new + learning + to review (the touch rows' one number, N13.2, which the iPad already showed, and Today's totals). It is hidden at zero, as before. On the Mac it is the row's badge; on the iPad the trailing number, unchanged.
 - Hovering a row shows its help tag: the deck's full path (" › " between the names) on the first line, the three counts on the second ("6 new · 23 learning · 382 to review", zeros included). The Mac, and the iPad with a pointer. The row's accessibility value uses the same three counts ("to review", in place of "due").
-- A click (a tap) opens the deck page, unchanged. A double-click (the Mac only: on the iPad a pointer's double-click cannot be told from a finger's double tap) or, while the deck list has focus with the row selected, Return start the deck's review, and so does S on the iPad; as `decks/deck-list` H3 and H9.2 say (built now: H12). On the Mac sidebar S is not built: the system list's type-select keeps the letter keys, a platform default (changed 2026-11-21). Exception (round 10, Mac): Return is taken by a key monitor of the main window, not by the list. Need: a row's click leaves keyboard focus with the row's own button rather than the list, so neither the list nor its primary action (`contextMenu(forSelectionType:primaryAction:)`, tried first) ever sees Return. It acts only on Return or Enter without Command, Option, Control or Shift (Caps Lock does not count), not on a repeat, in the main window with no sheet, and while no text input, sheet of the app's own or review has the keys (`SidebarReturnKey`). Verification: `SidebarReturnKeyTests` for each guard; `MacDeckListKeysTests` in the test VM for Return on a deck row and on Today, the double-click, and S in the search field. The first click of a double-click opens the page, as a click does; the second starts the review. A deck with nothing to study shows what H3 says (its finished state, or H5.4's empty view); a filtered deck shows R53's explanation.
+- A click (a tap) opens the deck page, unchanged. A double-click (the Mac only: on the iPad a pointer's double-click cannot be told from a finger's double tap) or, while the deck list has focus with the row selected, Return start the deck's review, and so does S on the iPad; as `decks/deck-list` H3 and H9.2 say (built now: H12). On the Mac sidebar S is not built: the system list's type-select keeps the letter keys, a platform default (changed 2026-11-21). Exception (round 10, Mac): Return is taken by a key monitor of the main window, not by the list. Need: a row's click leaves keyboard focus with the row's own button rather than the list, so neither the list nor its primary action (`contextMenu(forSelectionType:primaryAction:)`, tried first) ever sees Return. It acts only on Return or Enter without Command, Option, Control or Shift (Caps Lock does not count), not on a repeat, in the main window with no sheet, and while no text input, sheet of the app's own or review has the keys (`SidebarReturnKey`). Verification: `SidebarReturnKeyTests` for each guard; `MacDeckListKeysTests` in the test VM for Return on a deck row and on Today, the double-click, and S in the search field. The first click of a double-click opens the page, as a click does; the second starts the review. A deck with nothing to study shows what H3 says (its finished state, or H5.4's empty view). An empty filtered deck offers Rebuild (`decks/filtered-study#F6`).
 
 ### N24.5 iPad and the Duo opened (5A)
 

@@ -54,3 +54,8 @@ localOffset
 md
 odid
 did
+customStudyIncludeTags
+customStudyExcludeTags
+preview_again_secs
+preview_hard_secs
+preview_good_secs

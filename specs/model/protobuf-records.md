@@ -238,7 +238,7 @@ The normal deck has no `other` field. Numbers 12 to 15 are reserved by Anki, and
 | 6 | `preview_good_secs` | uint32 | implicit | preview delay after Good |
 | 7 | `preview_again_secs` | uint32 | implicit | preview delay after Again |
 
-Meguri never creates filtered decks; it keeps them intact (R1483).
+Filtered deck creation and updates use these fields (`decks/filtered-study#F1`). Other operations preserve the definition (R1483).
 
 #### P6.5.4 Search term
 
