@@ -8,6 +8,9 @@ import ImageIO
 import Testing
 import UniformTypeIdentifiers
 import WebKit
+#if os(iOS)
+import UIKit
+#endif
 @testable import AppModel
 @testable import Editor
 
@@ -65,6 +68,25 @@ import WebKit
         #expect(OcclusionImageField.isUsableName("a.AVIF"))
         #expect(!OcclusionImageField.isUsableName("a.heic"))
     }
+
+    @Test func remoteImageEligibilityUsesTheWrittenURLIncludingQuery() throws {
+        for text in ["https://example.test/IMAGE.PNG", "https://example.test/download?name=diagram.png"] {
+            #expect(OcclusionImageSession.isRemoteImageURL(try #require(URL(string: text))))
+        }
+        for text in ["https://example.test/diagram.png?token=signed", "https://example.test/diagram.png#fragment"] {
+            #expect(!OcclusionImageSession.isRemoteImageURL(try #require(URL(string: text))))
+        }
+    }
+
+    #if os(iOS)
+    @Test func cameraBoundsPixelsBeforePNGAndKeepsFullResolutionWithLimitOff() throws {
+        let pixels = try OcclusionImageInput.decodeBitmap(Self.bitmap(width: 1600))
+        let image = UIImage(cgImage: pixels, scale: 2, orientation: .up)
+        #expect(OcclusionCamera.renderSize(image: image, maximumDimension: 640) == CGSize(width: 640, height: 1))
+        #expect(OcclusionCamera.renderSize(image: image, maximumDimension: nil) == CGSize(width: 1600, height: 2))
+        #expect(OcclusionCamera.renderSize(image: image, maximumDimension: 2048) == CGSize(width: 1600, height: 2))
+    }
+    #endif
 
     @Test func stickyHostFieldsClearAndMappingTargetsOnlyVisibleFields() throws {
         let type = Self.type(sticky: true)
@@ -189,6 +211,69 @@ import WebKit
 
 // Runtime and actual collection checks join the existing serialized owners.
 extension FieldEditorTests {
+    @Test func pendingImageSourcesRefuseFlushWithoutLosingAcquisitionOrMarkingTheDraftDirty() async throws {
+        for editing in [false, true] {
+            let type = OcclusionFieldFlowTests.type()
+            let values = [OcclusionFieldFlowTests.first, "<img src=\"original.png\">", "header", "extra", "comments"]
+            let draft: NoteEditorDraft
+            if editing {
+                draft = try NoteEditorDraft(editing: .init(id: 7, notetypeId: type.id, fields: values, tags: [], guid: "g"),
+                    notetype: type, deck: OcclusionFieldFlowTests.deck, generation: 1)
+            } else {
+                draft = try NoteEditorDraft(generation: 1, notetype: type, deck: OcclusionFieldFlowTests.deck, values: values)
+            }
+            let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+            defer { host.shutDown() }
+            try await host.start()
+            let session = host.occlusionImage
+            session.replacing = editing
+            let ticket = try #require(session.reserveSource(host: host))
+            for hold in [false, true] {
+                await #expect(throws: (any Error).self) { try await host.flush(hold: hold) }
+                try await host.release() // Save's error path must leave the source alive.
+                #expect(session.busy && host.acceptsHostInput && !host.held && !draft.hostFieldsHeld)
+                #expect(draft.values == values && !draft.hasChanges)
+            }
+            session.cancelSource(ticket: ticket)
+            #expect(!session.busy && !session.replacing && draft.values == values && !draft.hasChanges)
+            try await host.flush(hold: true)
+            #expect(host.held)
+            try await host.release()
+        }
+    }
+
+    @Test func pickerCancellationAndRefusedInputReleaseOnlyTheMatchingReservation() async throws {
+        let draft = try NoteEditorDraft(generation: 1, notetype: OcclusionFieldFlowTests.type(),
+            deck: OcclusionFieldFlowTests.deck, values: ["", "", "", "", ""])
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        defer { host.shutDown() }
+        try await host.start()
+        let session = host.occlusionImage
+        let old = try #require(session.reserveSource(host: host))
+        session.cancelSource(ticket: old)
+        let newer = try #require(session.reserveSource(host: host))
+        session.cancelSource(ticket: old)
+        session.receiveFile(nil, ticket: old, host: host)
+        session.receiveBitmap(nil, ticket: old, host: host)
+        session.sourceFailed("obsolete error", ticket: old, host: host)
+        #expect(session.busy && session.error == nil)
+        session.receiveBitmap(nil, ticket: newer, host: host)
+        #expect(!session.busy && !draft.hasChanges)
+
+        for bitmap in [false, true] {
+            let ticket = try #require(session.reserveSource(host: host))
+            draft.hostFieldsHeld = true
+            if bitmap { session.receiveBitmap(Data(), ticket: ticket, host: host) }
+            else { session.receiveFile(nil, ticket: ticket, host: host) }
+            #expect(!session.busy && !draft.hasChanges)
+            draft.hostFieldsHeld = false
+            let current = try #require(session.reserveSource(host: host))
+            await Task.yield() // The obsolete observation callback cannot cancel current.
+            #expect(session.busy)
+            session.cancelSource(ticket: current)
+        }
+    }
+
     @Test func unreadableMasksLeaveMetadataEditableAndTheirSourceByteIdentical() async throws {
         let type = OcclusionFieldFlowTests.type()
         let malformed = "{{c1::image-occlusion:rect:left=broken}}  <br/>"
@@ -307,6 +392,7 @@ extension ReviewCollectionStartupTests {
             let imageSession = ioHost.occlusionImage
             // Cancelled photo/file representations cannot become a later image.
             let ticket = try #require(imageSession.reserveSource(host: ioHost))
+            #expect(await flow.save() == nil && imageSession.busy && ioHost.acceptsHostInput)
             imageSession.cancel()
             imageSession.receiveBitmap(try OcclusionFieldFlowTests.bitmap(), ticket: ticket, host: ioHost)
             #expect(draft.values[roles.image].isEmpty)
@@ -373,6 +459,10 @@ extension ReviewCollectionStartupTests {
             let edit = owner.editNoteFlow
             let editDraft = try #require(edit.draft), editHost = try #require(edit.runtime as? FieldEditorHost)
             #expect(editDraft.values == note.fields && editDraft.tags == note.tags && editDraft.showsMaskEditor)
+            let pendingImage = try #require(editHost.occlusionImage.reserveSource(host: editHost))
+            #expect(await edit.save() == false && edit.isPresented && editHost.occlusionImage.busy)
+            editHost.occlusionImage.cancelSource(ticket: pendingImage)
+            #expect(!editDraft.hasChanges)
             let before = try await CoreUndoService().peekUndo(scope: .global)
             #expect(await edit.save()) // no completed change: no write/undo step
             #expect(try await CoreUndoService().peekUndo(scope: .global) == before)

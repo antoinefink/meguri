@@ -141,7 +141,7 @@ public struct AddNoteView: View {
         Button(action: add) { Text("Add", bundle: .module) }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!flow.canAdd || (flow.runtime as? FieldEditorHost)?.editable != true)
+            .disabled(!flow.canAdd || (flow.runtime as? FieldEditorHost)?.editable != true || (flow.runtime as? FieldEditorHost)?.occlusionImage.busy == true)
             .accessibilityIdentifier("editor.add.save")
     }
     private var closeRole: ButtonRole {

@@ -188,7 +188,7 @@ struct BrowseNoteTab: View {
                 .id(ObjectIdentifier(host.webView))
                 // As tall as its fields: the page never scrolls, the pane does.
                 .frame(maxWidth: .infinity)
-                .frame(height: note.draft.occlusionRoles != nil && note.draft.showsMaskEditor
+                .frame(height: host.maskEditorVisible
                        ? max(BrowseInspectorMetrics.editorMinimum, visible.height)
                        : max(BrowseInspectorMetrics.fieldsMinimum, host.contentHeight))
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.content)).minY } action: { fieldsTop = $0 }

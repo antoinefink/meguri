@@ -12,6 +12,8 @@ final class OcclusionImageSession {
     private nonisolated struct FetchFailure: Error { let cause: String }
     private(set) var image: OcclusionImageInput?
     private(set) var loadedField: String?
+    private(set) var loadRetry: UInt64 = 0
+    private var loadFailed = false
     private(set) var busy = false
     private(set) var gettingMedia = false
     var error: String?
@@ -37,19 +39,28 @@ final class OcclusionImageSession {
         return request
     }
     func receiveBitmap(_ data: Data?, ticket: UUID, host: FieldEditorHost, photo: Bool = false) {
-        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
+        guard request == ticket else { return }
+        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
+            cancelSource(ticket: ticket); return
+        }
         busy = false
         if let data { chooseBitmap(data, host: host, photo: photo) }
-        else { replacing = false }
+        else { cancelSource(ticket: ticket) }
     }
     func receiveFile(_ url: URL?, ticket: UUID, host: FieldEditorHost) {
-        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
+        guard request == ticket else { return }
+        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
+            cancelSource(ticket: ticket); return
+        }
         busy = false
-        if let url { chooseFile(url, host: host) } else { replacing = false }
+        if let url { chooseFile(url, host: host) } else { cancelSource(ticket: ticket) }
     }
     func loadBitmap(ticket: UUID, host: FieldEditorHost,
                     load: @escaping @Sendable () async throws -> Data?) {
-        guard request == ticket, sourceRequest?.isCancelled == false else { return }
+        guard request == ticket else { return }
+        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
+            cancelSource(ticket: ticket); return
+        }
         task = Task {
             do {
                 let bytes = try await load()
@@ -64,8 +75,10 @@ final class OcclusionImageSession {
         }
     }
     func sourceFailed(_ message: String, ticket: UUID, host: FieldEditorHost) {
-        guard request == ticket, sourceRequest?.isCancelled == false, host.ownsDraft else { return }
-        busy = false; error = message
+        guard request == ticket else { return }
+        let report = sourceRequest?.isCancelled == false && host.acceptsHostInput
+        cancel()
+        if report { error = message }
     }
 
     func chooseProvider(_ providers: [NSItemProvider], host: FieldEditorHost) -> Bool {
@@ -91,7 +104,10 @@ final class OcclusionImageSession {
         let (provider, type) = providerCandidates[index]
         providerProgress = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
             Task { @MainActor in
-                guard self.request == ticket, self.sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
+                guard self.request == ticket else { return }
+                guard self.sourceRequest?.isCancelled == false, host.acceptsHostInput else {
+                    self.cancelSource(ticket: ticket); return
+                }
                 self.providerProgress = nil
                 guard let data else {
                     self.loadProvider(at: index + 1, ticket: ticket, host: host); return
@@ -158,6 +174,19 @@ final class OcclusionImageSession {
              UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
     }
 
+    func cancelSource(ticket: UUID) {
+        guard request == ticket else { return }
+        cancel()
+        replacing = false
+    }
+
+    func retryFailedLoad() {
+        guard loadFailed, !busy else { return }
+        loadFailed = false
+        loadedField = nil
+        loadRetry &+= 1
+    }
+
     func cancel() {
         sourceRequest?.cancel(); sourceRequest = nil
         providerProgress?.cancel(); providerProgress = nil
@@ -173,8 +202,8 @@ final class OcclusionImageSession {
     func load(host: FieldEditorHost) async {
         guard let roles = host.draft.occlusionRoles else { return }
         let field = host.draft.values[roles.image]
-        guard field != loadedField else { return }
-        cancel(); image = nil; loadedField = nil; error = nil
+        guard !busy, field != loadedField else { return }
+        cancel(); image = nil; loadedField = nil; loadFailed = false; error = nil
         let expected = request
         guard let name = OcclusionImageField.name(in: field) else {
             loadedField = field
@@ -197,6 +226,7 @@ final class OcclusionImageSession {
         } catch {
             guard request == expected, host.draft.values[roles.image] == field else { return }
             loadedField = field
+            loadFailed = true
             self.error = (error as? CocoaError)?.code == .fileNoSuchFile
                 ? IONoteText.missingImage(name) : IONoteText.unusableImage(name)
         }

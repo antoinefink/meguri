@@ -104,7 +104,7 @@ public struct EditNoteView: View {
         }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!flow.canSave || host?.editable != true)
+            .disabled(!flow.canSave || host?.editable != true || host?.occlusionImage.busy == true)
             .accessibilityIdentifier("review.editCurrent.done")
     }
     private func done() {

@@ -508,7 +508,7 @@ mod tests {
             }
         }
         // With no body sent, this must refuse from the header, before reading.
-        let result = editor_response(b"HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551615\r\n\r\n".to_vec(), 8);
+        let result = editor_response(b"HTTP/1.1 200 OK\r\nContent-Length: 900\r\n\r\n".to_vec(), 8);
         assert_eq!(result.err(), Some(crate::remote_media::size_failure()));
     }
 

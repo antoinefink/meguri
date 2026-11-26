@@ -20,8 +20,8 @@ public struct OcclusionNoteEditor: View {
     @State private var fileTicket: UUID?
     #if os(iOS)
     @State private var photo: PhotosPickerItem?
-    @State private var camera = false
-    @State private var cameraTicket: UUID?
+    private struct CameraSource: Identifiable { let id: UUID }
+    @State private var cameraSource: CameraSource?
     #endif
     private var draft: NoteEditorDraft { host.draft }
     private var session: OcclusionImageSession { host.occlusionImage }
@@ -67,6 +67,7 @@ public struct OcclusionNoteEditor: View {
         .accessibilityIdentifier("io.editor")
         .onChange(of: masksShown, initial: true) { _, shown in host.showFields(!shown) }
         .onChange(of: roles.map { draft.values[$0.occlusions] }) { host.refreshMaskSession() }
+        .onAppear { session.retryFailedLoad() }
         .task(id: host.occlusionImageLoadKey) {
             host.refreshMaskSession()
             await session.load(host: host)
@@ -77,19 +78,22 @@ public struct OcclusionNoteEditor: View {
         )) {
             Button { host.maskSession?.retainedCardNotice = nil } label: { Text("OK", bundle: .module) }
         }
-        .fileImporter(isPresented: $filePicker, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
-            guard let ticket = fileTicket else { return }
-            fileTicket = nil
-            switch result {
-            case .success(let urls):
-                session.receiveFile(urls.first, ticket: ticket, host: host)
-            case .failure(let error):
-                session.receiveFile(nil, ticket: ticket, host: host)
-                if (error as NSError).code != NSUserCancelledError {
-                    session.sourceFailed(error.localizedDescription, ticket: ticket, host: host)
+        .fileImporter(isPresented: $filePicker, allowedContentTypes: [.image], allowsMultipleSelection: false,
+            onCompletion: { [ticket = fileTicket] result in
+                guard let ticket else { return }
+                if fileTicket == ticket { fileTicket = nil }
+                switch result {
+                case .success(let urls):
+                    session.receiveFile(urls.first, ticket: ticket, host: host)
+                case .failure(let error):
+                    if (error as NSError).code == NSUserCancelledError { session.cancelSource(ticket: ticket) }
+                    else { session.sourceFailed(error.localizedDescription, ticket: ticket, host: host) }
                 }
-            }
-        }
+            }, onCancellation: { [ticket = fileTicket] in
+                guard let ticket else { return }
+                if fileTicket == ticket { fileTicket = nil }
+                session.cancelSource(ticket: ticket)
+            })
         .confirmationDialog(Text(verbatim: IONoteText.changeTitle), isPresented: $changeImage, titleVisibility: .visible) {
             Button { session.replacing = true } label: { Text(verbatim: IONoteText.confirmChange) }
             Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
@@ -114,12 +118,12 @@ public struct OcclusionNoteEditor: View {
             session.loadBitmap(ticket: ticket, host: host) { try await item.loadTransferable(type: Data.self) }
             photo = nil
         }
-        .sheet(isPresented: $camera) {
-            OcclusionCamera { data in
-                camera = false
-                if let ticket = cameraTicket { session.receiveBitmap(data, ticket: ticket, host: host, photo: true) }
-                cameraTicket = nil
+        .sheet(item: $cameraSource) { source in
+            OcclusionCamera(maximumDimension: host.occlusionPhotoMaximumDimension) { data in
+                if cameraSource?.id == source.id { cameraSource = nil }
+                session.receiveBitmap(data, ticket: source.id, host: host, photo: true)
             }
+            .onDisappear { session.cancelSource(ticket: source.id) }
         }
         #endif
     }
@@ -200,7 +204,7 @@ public struct OcclusionNoteEditor: View {
                     .accessibilityIdentifier("io.picker.photoLibrary")
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button {
-                        if let ticket = session.reserveSource(host: host) { cameraTicket = ticket; camera = true }
+                        if let ticket = session.reserveSource(host: host) { cameraSource = CameraSource(id: ticket) }
                     } label: { Text(verbatim: IONoteText.takePhoto) }
                         .accessibilityIdentifier("io.picker.takePhoto")
                 }
@@ -245,25 +249,41 @@ public struct OcclusionNoteEditor: View {
 }
 
 #if os(iOS)
-private struct OcclusionCamera: UIViewControllerRepresentable {
+struct OcclusionCamera: UIViewControllerRepresentable {
+    let maximumDimension: Int?
     let finished: (Data?) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(finished: finished) }
+    func makeCoordinator() -> Coordinator { Coordinator(maximumDimension: maximumDimension, finished: finished) }
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera; picker.mediaTypes = [UTType.image.identifier]; picker.delegate = context.coordinator
         return picker
     }
     func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+    /// UIImage.size is in points; render oriented source pixels, bounded before
+    /// allocating the PNG intermediate. Off preserves the complete source size.
+    static func renderSize(image: UIImage, maximumDimension: Int?) -> CGSize {
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        guard let maximumDimension, maximumDimension > 0,
+              max(pixels.width, pixels.height) > CGFloat(maximumDimension) else { return pixels }
+        let scale = CGFloat(maximumDimension) / max(pixels.width, pixels.height)
+        return CGSize(width: max(1, (pixels.width * scale).rounded()),
+                      height: max(1, (pixels.height * scale).rounded()))
+    }
+
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let maximumDimension: Int?
         let finished: (Data?) -> Void
-        init(finished: @escaping (Data?) -> Void) { self.finished = finished }
+        init(maximumDimension: Int?, finished: @escaping (Data?) -> Void) {
+            self.maximumDimension = maximumDimension; self.finished = finished
+        }
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { finished(nil) }
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             // Rendering applies UIImage's orientation before the common encoder.
             guard let image = info[.originalImage] as? UIImage else { finished(nil); return }
+            let size = OcclusionCamera.renderSize(image: image, maximumDimension: maximumDimension)
             let format = UIGraphicsImageRendererFormat(); format.scale = 1
-            let rendered = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: image.size))
+            let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
             }
             finished(rendered.pngData())
         }

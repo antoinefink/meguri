@@ -180,6 +180,8 @@ extension ReviewCollectionStartupTests {
                 session.chooseRemoteURL(slow.url, host: host)
                 let completion = session.completion
                 try await slow.waitForRequest()
+                await #expect(throws: (any Error).self) { try await host.flush(hold: true) }
+                #expect(session.busy && session.gettingMedia && host.acceptsHostInput)
                 if changeDraft { host.setHostField("", at: roles.image) }
                 else { session.cancel() }
                 await completion?.value
@@ -190,12 +192,28 @@ extension ReviewCollectionStartupTests {
             }
             host.occlusionPhotoMaximumDimension = 2
             session.chooseBitmap(try OcclusionFieldFlowTests.bitmap(), host: host, photo: true)
+            await #expect(throws: (any Error).self) { try await host.flush(hold: true) }
+            #expect(session.busy && host.acceptsHostInput)
             await session.completion?.value
             #expect(session.image?.size == CGSize(width: 2, height: 1))
             host.occlusionPhotoMaximumDimension = nil
             session.chooseBitmap(try OcclusionFieldFlowTests.bitmap(), host: host, photo: true)
             await session.completion?.value
             #expect(session.image?.size == CGSize(width: 4, height: 2))
+            // A missing installed file is cached for this appearance, then
+            // retried when a later explicit reload requests another attempt.
+            let laterName = "arrives-later.svg"
+            host.setHostField(OcclusionImageField.html(name: laterName), at: roles.image)
+            await session.load(host: host)
+            #expect(session.image == nil && session.error != nil)
+            let failedKey = host.occlusionImageLoadKey
+            #expect(try await CoreMediaService().addMedia(name: laterName, bytes: Array(svg)) == laterName)
+            await session.load(host: host)
+            #expect(session.image == nil && host.occlusionImageLoadKey == failedKey)
+            try await host.reload(fields: [roles.image])
+            #expect(host.occlusionImageLoadKey != failedKey)
+            await session.load(host: host)
+            #expect(session.image?.size == CGSize(width: 24, height: 12))
             owner.addNoteFlow.generationEnded(); owner.editNoteFlow.generationEnded()
             #expect(await owner.close())
         } catch {

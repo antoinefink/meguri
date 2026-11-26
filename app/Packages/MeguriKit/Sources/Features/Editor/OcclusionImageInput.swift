@@ -41,13 +41,11 @@ nonisolated struct OcclusionImageInput: Sendable {
             return Self(name: name, bytes: bytes, pixels: try await decode(bytes))
         }
         // Conversion still honors P7's output-size setting, including Off.
+        // Apply it during ImageIO/SVG decoding, before allocating source pixels.
         // The preview ceiling must not silently reduce the written image.
-        var pixels = try await decode(bytes, maximumDimension: nil)
-        if let maximumDimension, maximumDimension > 0, max(pixels.width, pixels.height) > maximumDimension {
-            let scale = Double(maximumDimension) / Double(max(pixels.width, pixels.height))
-            pixels = try render(pixels, width: max(1, Int((Double(pixels.width) * scale).rounded())),
-                                height: max(1, Int((Double(pixels.height) * scale).rounded())), opaque: !asPNG)
-        } else if !asPNG { pixels = try render(pixels, width: pixels.width, height: pixels.height, opaque: true) }
+        let limit = maximumDimension.flatMap { $0 > 0 ? $0 : nil }
+        var pixels = try await decode(bytes, maximumDimension: limit)
+        if !asPNG { pixels = try render(pixels, width: pixels.width, height: pixels.height, opaque: true) }
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output as CFMutableData,
             (asPNG ? UTType.png.identifier : UTType.jpeg.identifier) as CFString, 1, nil) else {

@@ -28,9 +28,10 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     struct ImageLoadKey: Equatable {
         let draft: UUID
         let field: String?
+        let retry: UInt64
     }
     var occlusionImageLoadKey: ImageLoadKey {
-        .init(draft: draft.identity, field: draft.occlusionRoles.map { draft.values[$0.image] })
+        .init(draft: draft.identity, field: draft.occlusionRoles.map { draft.values[$0.image] }, retry: occlusionImage.loadRetry)
     }
 
     /// Called at host creation and field-change boundaries, never from body.
@@ -203,6 +204,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)? {
         guard editable, !closed, !processTerminated, loadID < Self.maximumID else { return nil }
         // End this host as shutDown() does, but leave the page and its handler alive.
+        occlusionImage.cancel()
         closed = true
         if let expected = activeLoad { fail(EditorRuntimeError.unavailable, load: expected) }
         return FieldEditorHost(continuing: self, draft: draft, isCurrent: isCurrent)
@@ -366,10 +368,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         // Browse's inspector flushes for a save, a cloze and a reload: a flush
         // waits for the one under way rather than fail (no input is skipped).
         while browsing, editable, commandLoad != nil { try await Task.sleep(for: .milliseconds(5)) }
+        // A pending source has not committed the Image host field. Saving the
+        // previous image here would silently discard the user's acquisition.
+        guard !occlusionImage.busy else {
+            throw BridgeError.unavailable(reason: "Finish choosing the image, or cancel it, before continuing.")
+        }
         guard editable, let expected = activeLoad, commandLoad == nil else { throw EditorRuntimeError.unavailable }
         try requireCurrent(expected)
         flushNativeTags?()
-        if hold { draft.hostFieldsHeld = true; occlusionImage.cancel() }
+        if hold { draft.hostFieldsHeld = true }
         commandLoad = expected
         defer { if commandLoad == expected { commandLoad = nil } }
         do {
@@ -386,6 +393,10 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     public func release() async throws {
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
+        try requireCurrent(expected)
+        // A refused flush never held the page. Avoid publishing a spurious
+        // input-state change that would cancel the still-current source.
+        guard held || draft.hostFieldsHeld else { return }
         _ = try await call(["type": "release", "loadId": expected], load: expected)
         try requireCurrent(expected); held = false; draft.hostFieldsHeld = false
     }
@@ -394,6 +405,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public func reload(fields ords: [Int]) async throws {
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
         refreshMaskSession()
+        occlusionImage.retryFailedLoad()
         for ord in ords where !draft.hostFields.contains(ord) {
             let html = try await draft.displayValue(ord)
             try requireCurrent(expected)
@@ -917,9 +929,10 @@ final class FieldEditorWebView: WKWebView {
 extension ReviewCollection {
     @discardableResult public func prepareAddNoteEditor(presetDeck: Int64? = nil) async -> FieldEditorHost? {
         let flow = addNoteFlow
+        let media = self.media
         guard await flow.open(presetDeck: presetDeck, continuingPage: true, makeRuntime: { draft, current in
             let host = try FieldEditorHost(draft: draft, isCurrent: current)
-            host.show(media: self.media)
+            host.show(media: media)
             return host
         }) else { return nil }
         return flow.runtime as? FieldEditorHost
