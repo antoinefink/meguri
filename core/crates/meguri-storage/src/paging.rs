@@ -78,6 +78,18 @@ pub struct NoteIdentity {
     pub mtime: i64,
 }
 
+/// One filtered-study term evaluated against the connection's live rows.
+pub struct FilteredGather<'a> {
+    pub search_sql: &'a str,
+    pub search_params: &'a [Cell],
+    pub filtered: &'a [DeckId],
+    pub order: u32,
+    pub limit: u32,
+    pub today: u32,
+    pub now: i64,
+    pub salt: i64,
+}
+
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
@@ -362,6 +374,44 @@ pub trait ReadRows: sealed::Connected {
         Ok(statement
             .query_map(params_from_iter(params), |row| row.get::<_, i64>(0).map(CardId))?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Eligible, uncapped Custom Study availability. Borrowed, suspended,
+    /// buried and learning cards do not count toward either extension.
+    fn study_availability(&self, decks: &[DeckId], today: u32) -> Result<(u32, u32), StorageError> {
+        let ids = crate::search_rows::json_list(&decks.iter().map(|d| d.0).collect::<Vec<_>>());
+        let (new, review): (i64, i64) = self.connection().query_row(
+            "SELECT coalesce(sum(queue = 0), 0), coalesce(sum(queue = 2 AND due <= ?2), 0) \
+             FROM cards WHERE odid = 0 AND did IN (SELECT value FROM json_each(?1))",
+            rusqlite::params![ids, i64::from(today)], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok((u32::try_from(new).unwrap_or(u32::MAX), u32::try_from(review).unwrap_or(u32::MAX)))
+    }
+
+    /// Filtered-study gathering on this connection, including a live writer
+    /// scope after releasing prior members. Eligibility wraps the complete
+    /// search, so OR operands cannot escape it.
+    fn filtered_card_ids(&self, gather: FilteredGather<'_>) -> Result<Vec<CardId>, StorageError> {
+        let FilteredGather { search_sql, search_params, filtered, order, limit, today, now, salt } = gather;
+        let key = match order {
+            0 => "(SELECT max(r.id) FROM revlog r WHERE r.cid = c.id) ASC".to_owned(),
+            1 => format!("fnvhash(c.id, {salt}) ASC"),
+            2 => "c.ivl ASC".into(),
+            3 => "c.ivl DESC".into(),
+            4 => "c.lapses DESC".into(),
+            5 => "c.nid ASC, c.ord ASC".into(),
+            6 => format!("CASE WHEN c.due > 1000000000 THEN c.due ELSE {now} + (CAST(c.due AS INTEGER) - {today}) * 86400 END ASC, c.ord ASC"),
+            7 => "c.nid DESC, c.ord ASC".into(),
+            8 | 9 => format!("meguri_retrievability(c.data, c.due, c.ivl, {today}, {now}) {}", if order == 8 { "ASC" } else { "DESC" }),
+            10 => format!("meguri_relative_retrievability(c.data, c.due, c.ivl, {today}, {now}) ASC"),
+            _ => return Err(StorageError::Mode { detail: "invalid filtered study order".into() }),
+        };
+        let mut params = search_params.to_vec();
+        params.push(Cell::text(crate::search_rows::json_list(&filtered.iter().map(|d| d.0).collect::<Vec<_>>())));
+        let sql = format!(
+            "SELECT c.id FROM cards c WHERE c.id IN ({search_sql}) AND c.queue >= 0 AND c.odid = 0 \
+             AND c.did NOT IN (SELECT value FROM json_each(?{})) \
+             ORDER BY {key}, fnvhash(c.id, c.mod) ASC LIMIT {limit}", params.len());
+        self.search_card_ids(&sql, &params)
     }
 
     /// Runs one read-only statement compiled by the search crate whose one

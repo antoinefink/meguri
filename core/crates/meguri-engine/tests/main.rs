@@ -178,3 +178,6 @@ pub mod mining_writer;
 
 #[path = "filtered_review.rs"]
 pub mod filtered_review;
+
+#[path = "filtered_study.rs"]
+pub mod filtered_study;

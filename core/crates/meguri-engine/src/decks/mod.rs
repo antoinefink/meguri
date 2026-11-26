@@ -1,6 +1,7 @@
 //! Deck records and operations (specs/decks/decks.md). All mutations read
 //! live rows in the writer's scope; blobs keep their original bytes.
 pub mod current;
+pub mod custom_study;
 pub mod delete;
 pub mod filtered;
 pub mod names;
