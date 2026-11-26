@@ -5,6 +5,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #else
+import CoreText
 import UIKit
 #endif
 
@@ -318,8 +319,22 @@ private struct BackupLimitTouchField: UIViewRepresentable {
     let enabled: Bool
     let trailing: Bool
     @Environment(\.layoutDirection) private var layoutDirection
-    @ScaledMetric(relativeTo: .body) private var pointSize = UIFont.preferredFont(
-        forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)).pointSize
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private func preferredFont(for field: UITextField) -> UIFont {
+        let traits = field.traitCollection.modifyingTraits {
+            $0.preferredContentSizeCategory = UIContentSizeCategory(dynamicTypeSize)
+        }
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+        guard trailing else { return font }
+        let descriptor = font.fontDescriptor.addingAttributes([
+            .featureSettings: [[
+                UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
+                UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector
+            ]]
+        ])
+        return UIFont(descriptor: descriptor, size: 0)
+    }
 
     func makeUIView(context: Context) -> UITextField {
         let field = UITextField()
@@ -334,8 +349,7 @@ private struct BackupLimitTouchField: UIViewRepresentable {
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.parent = self
         if field.text != text { field.text = text }
-        field.font = trailing ? .monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
-            : UIFont.preferredFont(forTextStyle: .body).withSize(pointSize)
+        field.font = preferredFont(for: field)
         field.semanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         let rightToLeft = field.effectiveUserInterfaceLayoutDirection == .rightToLeft
         field.textAlignment = trailing == rightToLeft ? .left : .right
@@ -347,7 +361,7 @@ private struct BackupLimitTouchField: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
         // The regular row asks for an ideal width. Reserve the same ten digits
         // and horizontal space as its existing SwiftUI measuring text.
-        let font = uiView.font ?? UIFont.preferredFont(forTextStyle: .body).withSize(pointSize)
+        let font = uiView.font ?? preferredFont(for: uiView)
         let idealWidth = trailing
             ? (String(UInt32.max) as NSString).size(withAttributes: [.font: font]).width + 2 * Spacing.small
             : uiView.intrinsicContentSize.width
