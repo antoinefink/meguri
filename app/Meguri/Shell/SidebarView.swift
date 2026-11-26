@@ -16,6 +16,13 @@ struct SidebarView: View {
         content
             #if os(macOS)
             .background(MacSidebarSelectionHandoff(navigation: navigation))
+            // H12: keep Return available across both sidebars while a row's display
+            // handoff is pending. Committed Browse keeps its filter Return path.
+            // A row's click leaves focus with its button, so the window monitors the key;
+            // text input, sheets, review, shortcut modifiers and repeats keep their keys.
+            .background(ReturnKeyStudyMonitor(
+                allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
+                act: studyOnReturn))
             #endif
             .sidebarColumnChrome()
             .navigationTitle(Text(verbatim: "Meguri"))
@@ -88,18 +95,7 @@ struct SidebarView: View {
                 }
             }
         }
-        #if os(macOS)
-        // H12: in the Mac's sidebar layout Return starts the selected deck's review, or
-        // Today's Study with Today selected, whether the sidebar or the page beside it has
-        // focus (H9.2 gives Return the same meaning on a deck page). A row's click leaves
-        // focus with SwiftUI's button, not the list, so neither the table nor a primary
-        // action sees the key: a key monitor of this window does. Never while a text input,
-        // a sheet or a review has the keys, and never on a key's repeat. S is not bound on
-        // the Mac sidebar: the list's type-select keeps the letters (H12).
-        .background(ReturnKeyStudyMonitor(
-            allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
-            act: studyOnReturn))
-        #else
+        #if !os(macOS)
         // H12: with the list focused (a hardware keyboard), Return or S starts the selected
         // deck's review, or Today's Study on the Today row; once per press, never on a key's
         // repeat, and never while a text input (the deck search field) has focus (R197).
@@ -115,6 +111,7 @@ struct SidebarView: View {
     /// Take the key now, then use the existing Study path after this row commits.
     func studyOnReturn() -> Bool {
         guard navigation.sidebarInteractionPending else {
+            guard navigation.section != .browse else { return false }
             return features.sidebarStudy(navigation.sidebarSelection)
         }
         let item = navigation.displayedSidebarSelection

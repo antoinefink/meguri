@@ -49,6 +49,32 @@ import Testing
         #expect(navigation.sidebarSelection == (superseded ? .section(.browse) : .deck(DeckID(1))))
     }
 
+    @Test func browseToTodayReturnWaitsForHeldHandoff() throws {
+        let navigation = AppNavigation()
+        navigation.select(.section(.browse))
+        var studied: [SidebarItem] = []
+        var features = ShellFeatures.standard
+        features.sidebarStudy = { item in
+            #expect(!navigation.sidebarInteractionPending)
+            #expect(navigation.section == .home)
+            studied.append(item)
+            return true
+        }
+        let sidebar = SidebarView(navigation: navigation, features: features)
+        #expect(!sidebar.studyOnReturn())
+        #expect(studied.isEmpty)
+        navigation.selectFromSidebar(.section(.home))
+        let intent = try #require(navigation.macSidebarSelectionID)
+        #expect(navigation.section == .browse)
+        #expect(navigation.displayedSidebarSelection == .section(.home))
+        #expect(sidebar.studyOnReturn())
+        #expect(studied.isEmpty)
+        navigation.commitMacSidebarSelection(intent)
+        #expect(studied == [.section(.home)])
+        navigation.commitMacSidebarSelection(intent)
+        #expect(studied == [.section(.home)])
+    }
+
     @Test func unrelatedHeldSectionKeepsReturnAndCommittedSelectionUsesExistingAction() throws {
         let navigation = AppNavigation()
         var studied: [SidebarItem] = []
@@ -61,10 +87,10 @@ import Testing
         navigation.commitMacSidebarSelection(intent)
         #expect(studied.isEmpty)
         #expect(!sidebar.studyOnReturn())
-        #expect(studied == [.section(.browse)])
+        #expect(studied.isEmpty)
         navigation.select(.section(.home))
         #expect(sidebar.studyOnReturn())
-        #expect(studied == [.section(.browse), .section(.home)])
+        #expect(studied == [.section(.home)])
     }
 }
 #endif
