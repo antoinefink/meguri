@@ -264,7 +264,7 @@ import XCTest
     }
 
     private func contentPosition(_ node: any XCUIElementSnapshot) -> [String] {
-        if node.elementType == .cell { return [node.identifier + node.label + NSStringFromCGRect(node.frame)] }
+        if node.elementType == .cell { return [node.identifier + node.label + NSCoder.string(for: node.frame)] }
         return node.children.flatMap { contentPosition($0) }
     }
 
