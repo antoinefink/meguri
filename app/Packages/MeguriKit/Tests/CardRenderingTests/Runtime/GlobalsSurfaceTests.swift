@@ -1487,10 +1487,14 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(try await page.bool("document.querySelector('script[src$=\"/font/svg/dynamic/fraktur.js\"]').hasAttribute('data-meguri-preload')"))
                 try await page.announce(card: 122, generation: 3)
                 try await page.showPresentedQuestion("<p id='current'>Replacement card</p>")
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0.card == 121 && $0.generation == 2 && $0.side == "answer"
+                        && ($0["message"] as? String)?.contains("Bundled MathJax timed out") == true
+                }, "\(harness.diagnostics.map(\.body))")
                 harness.media.release(path)
                 try await page.run("await MathJax.whenReady(function () {});")
                 #expect(harness.signals("mediaError", from: page).isEmpty)
-                #expect(!harness.diagnostics.contains { $0.card == 122 })
+                #expect(!harness.diagnostics.contains { $0.card == 122 }, "\(harness.diagnostics.map(\.body))")
                 // An authored script at the very same URL is still media.
                 try await page.run("""
                     window.__authoredDone = new Promise(function (resolve) {
@@ -1508,7 +1512,29 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(media.contains { $0["tag"] as? String == "script" && ($0["url"] as? String)?.hasSuffix(path) == true })
                 #expect(media.contains { $0["tag"] as? String == "img" && ($0["url"] as? String)?.hasSuffix("/missing-math-fixture.png") == true })
                 #expect(try await page.string("document.getElementById('current').textContent") == "Replacement card")
-                #expect(!harness.diagnostics.contains { $0.card == 122 })
+                #expect(!harness.diagnostics.contains { $0.card == 122 }, "\(harness.diagnostics.map(\.body))")
+                // Observing the font's promise must still reject an awaiting caller.
+                let fontFailure = try await page.run("""
+                    const font = MathJax.startup.document.outputJax.font;
+                    try {
+                      await font.loadDynamicFile(font.CLASS.dynamicFiles.fraktur);
+                      return 'unexpected resolution';
+                    } catch (error) { return error.message; }
+                    """)
+                #expect(fontFailure as? String == "dynamic file 'fraktur' failed to load")
+                // An independent authored Error with the identical message is
+                // still a standalone rejection belonging to the replacement.
+                try await page.run("Promise.reject(new Error(\"dynamic file 'fraktur' failed to load\"));")
+                try await harness.until("authored rejection on replacement card") {
+                    harness.diagnostics.contains { $0.card == 122 }
+                }
+                let authoredErrors = harness.diagnostics.filter { $0.card == 122 }
+                #expect(authoredErrors.count == 1, "\(harness.diagnostics.map(\.body))")
+                #expect(authoredErrors.allSatisfy {
+                    $0.generation == 3 && $0.side == "question" && $0["kind"] as? String == "rejection"
+                        && $0["phase"] as? String == "later"
+                        && $0["message"] as? String == "Error: dynamic file 'fraktur' failed to load"
+                }, "\(harness.diagnostics.map(\.body))")
             }
         }
 

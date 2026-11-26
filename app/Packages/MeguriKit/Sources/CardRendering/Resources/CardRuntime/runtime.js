@@ -1546,6 +1546,16 @@
             mergeUserSettings() {}
           };
           engine.startup.defaultReady();
+          const font = engine.startup.document.outputJax.font;
+          const loadDynamicFile = font.loadDynamicFile;
+          font.loadDynamicFile = function (...args) {
+            const work = call(loadDynamicFile, this, ...args);
+            // 4.1.3 getChar/getDelimiter throw a retry carrying this promise;
+            // error rendering can discard it. Observe only this font's loads
+            // (including mhchem), preserving the original promise for callers.
+            then(work, noop, noop);
+            return work;
+          };
           mathEngine = engine;
           trackMathTeX(engine);
           mathCard = latest && latest.identity ? latest.identity.card : null;

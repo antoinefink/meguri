@@ -836,12 +836,12 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/CardRenderingTests/Runtime/GlobalsSurfaceTests.swift":
-        "9ceee672c14c8c25a81f94489d0d6908712b9ffd58e9dca7fcc5eef628da0091",
+        "309c8611b4eba9a942a7e3e4dd22f23e47940dba285a15e3bcf80b322fcac313",
     # Complete public source review of the bundled card runtime.
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
-        "b3cf37141e7dd6ccc6f1313aa8dce6bce33f732fb28bd8e8fdb60a8307871841",
+        "327d5e7a046f9b1550ee87b2b58feadc116c89807eacb98be7f3046f3a2d523f",
     "docs/process/review-log/mathjax-20261126.md":
-        "2316925d809aca3712f1c7ecbfb895b5c47f66cbe2444f0894e0151f812b3ff3",
+        "09239c15e0c9789d02e0b022ec959cf8c69a5cde2781c532fb9843f335aa6ea9",
     "specs/render/card-runtime.md":
         "3acd8972440e4d4ef0c1d6fd9e2d4a57554dd808b91b21c5de228b8a63ce0a7c",
     # Complete-content review of the MathJax card runtime and synthetic review fixture.
