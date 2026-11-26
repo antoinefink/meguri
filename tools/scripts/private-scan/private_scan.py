@@ -835,6 +835,7 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/MeguriUITests/NavigationFeedbackUITests.swift': '9a1cd8eadab248eccc1a8c901373ffecf07f201e9f78befddaae13085020ab04',
     "app/Packages/MeguriKit/Sources/AppModel/Collection/BackupTrigger.swift":
         "dde4dd4b82894df3eb270cded5a9abdac5ada95a203dea7c30e7a9e3bbb10859",
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":

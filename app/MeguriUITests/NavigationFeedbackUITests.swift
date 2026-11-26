@@ -113,28 +113,96 @@ import XCTest
         defer { app?.terminate() }
         try launchFeedback()
 
-        func assertWarmHandoff(from previous: String, to destination: String, section: String) {
+        func assertWarmHandoff(from previous: String, to destination: String, section: String) throws {
             let loading = app.activityIndicators.matching(NSPredicate(format: "label IN %@",
                 ["Loading Today", "Loading Statistics", "Searching Browse", "Loading Note Types"])).firstMatch
             // One AX query witnesses either side of the display-fenced handoff.
             // Separate old/new queries can straddle the frame and falsely report a blank.
             let content = app.descendants(matching: .any).matching(
                 NSPredicate(format: "identifier IN %@", [previous, destination])).firstMatch
-            XCTAssertFalse(loading.exists, "Warm navigation must not start loading")
-            XCTAssertTrue(content.exists, "Previous or cached destination content stays visible")
-            let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"),
-                object: element(destination))
-            let noLoading = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: loading)
-            noLoading.isInverted = true
-            let noBlank = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: content)
-            noBlank.isInverted = true
-            // The VM gets at most two seconds for a cached page's next display frame;
-            // monitor content and loading throughout that interval, including after arrival.
-            XCTAssertEqual(XCTWaiter().wait(for: [arrived, noLoading, noBlank], timeout: 2), .completed,
-                "Cached \(section) arrives without loading or a blank detail")
-            XCTAssertTrue(element(destination).exists)
-            XCTAssertFalse(loading.exists)
-            assertSelected("shell.root.sidebar.\(section)")
+            let target = element(destination)
+
+            func failHandoff(_ reason: String) {
+                // Capture the unfiltered window, not a content-scoped subtree.
+                // Optional status/title/selection nodes may be absent in a broken frame.
+                let fullWindow = app.windows.firstMatch
+                var details = ["\(previous) -> \(destination): \(reason)"]
+                if fullWindow.exists {
+                    details.append("Native title: \(fullWindow.title); label: \(fullWindow.label)")
+                    do {
+                        let snapshot = try fullWindow.snapshot()
+                        var hierarchy: [String] = []
+                        func describe(_ node: any XCUIElementSnapshot, depth: Int) {
+                            hierarchy.append(String(repeating: "  ", count: depth)
+                                + "\(node.elementType) id=\(node.identifier) label=\(node.label) value=\(String(describing: node.value))"
+                                + " selected=\(node.isSelected) enabled=\(node.isEnabled) frame=\(node.frame)")
+                            for child in node.children { describe(child, depth: depth + 1) }
+                        }
+                        describe(snapshot, depth: 0)
+                        details.append("fullWindow hierarchy:\n" + hierarchy.joined(separator: "\n"))
+                    } catch {
+                        details.append("Window snapshot failed: \(error)\n\(fullWindow.debugDescription)")
+                    }
+                } else {
+                    details.append("Native window missing\n\(app.debugDescription)")
+                }
+                for section in ["home", "stats", "browse", "noteTypes"] {
+                    let id = "shell.root.sidebar.\(section)"
+                    let control = element(id)
+                    let row = app.outlineRows.containing(.any, identifier: id).firstMatch
+                    let selected = (control.exists && control.isSelected) || (row.exists && row.isSelected)
+                    details.append("Sidebar \(section): selected=\(selected)")
+                }
+                let status = element("browse.status.text")
+                details.append(status.exists
+                    ? "Browse status: label=\(status.label); value=\(String(describing: status.value))"
+                    : "Browse status: absent")
+                let evidence = XCTAttachment(string: details.joined(separator: "\n"))
+                evidence.name = "warm-\(section)-failure-fullWindow"
+                evidence.lifetime = .keepAlways
+                add(evidence)
+                // Keep AX evidence even if the fixture itself fails to acknowledge.
+                let state = (try? command("query")) ?? "query failed"
+                let fixture = XCTAttachment(string: state)
+                fixture.name = "warm-\(section)-failure-fixture-query"
+                fixture.lifetime = .keepAlways
+                add(fixture)
+                XCTFail("Warm \(section): \(reason)")
+            }
+
+            try clickSection(section)
+            let deadline = ProcessInfo.processInfo.systemUptime + 2
+            var arrived = false
+            // Predicate expectations pump XCTest's run loop while doing AX work,
+            // allowing concurrent checks to recursively enter each other's queries.
+            // Sample serially for the whole budget, including after arrival. A slow
+            // first AX call still gets one complete sample; no sleeps or retries.
+            repeat {
+                guard content.exists else {
+                    failHandoff("Previous or cached destination content disappeared")
+                    return
+                }
+                guard !loading.exists else {
+                    failHandoff("Warm navigation started loading")
+                    return
+                }
+                if target.exists { arrived = true }
+            } while ProcessInfo.processInfo.systemUptime < deadline
+            guard arrived && target.exists else {
+                failHandoff("Cached destination did not arrive and remain within the two-second sample window")
+                return
+            }
+            guard !loading.exists else {
+                failHandoff("Warm navigation ended with loading")
+                return
+            }
+            let id = "shell.root.sidebar.\(section)"
+            let control = element(id)
+            let row = app.outlineRows.containing(.any, identifier: id).firstMatch
+            guard (control.exists && control.isSelected) || (row.exists && row.isSelected) else {
+                failHandoff("Native destination selection is missing")
+                return
+            }
         }
 
         try clickSection("stats")
@@ -160,28 +228,26 @@ import XCTest
         try command("hold.list")
         try command("refresh.list")
         XCTAssertTrue(element(basic).exists)
-        try clickSection("home")
-        assertWarmHandoff(from: "noteTypes.fields.table", to: "home.today.studyAll", section: "home")
+        // Passive content remains a witness while the display fence disables
+        // outgoing actions. Counts and loaded cells are checked again below.
+        try assertWarmHandoff(from: "noteTypes.fields.table", to: "home.today.studyAll.summary", section: "home")
         try command("hold.home")
         try command("refresh.home")
         XCTAssertTrue(element("home.today.studyAll").exists)
         assertNoProgress("Loading Today")
         try command("hold.stats")
-        try clickSection("stats")
-        assertWarmHandoff(from: "home.today.studyAll", to: "stats.box.knowledgeOverTime.plot", section: "stats")
+        try assertWarmHandoff(from: "home.today.studyAll.summary", to: "stats.box.knowledgeOverTime.plot", section: "stats")
         try waitForState("filled=false")
         XCTAssertTrue(knowledge.waitForExistence(timeout: 5))
         XCTAssertEqual(knowledge.label, loadedKnowledge, "Kept chart remains during an unfinished refresh")
         assertNoProgress("Loading Statistics")
-        try clickSection("browse")
-        assertWarmHandoff(from: "stats.box.knowledgeOverTime.plot", to: "browse.results.table", section: "browse")
+        try assertWarmHandoff(from: "stats.box.knowledgeOverTime.plot", to: "browse.status.text", section: "browse")
         XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
         XCTAssertEqual(displayedText(element("browse.status.text")), browseStatus)
         XCTAssertTrue(browseContent.exists)
         XCTAssertEqual(displayedText(browseContent), loadedBrowseContent, "The loaded result cell remains on return")
         assertNoProgress("Searching Browse")
-        try clickSection("noteTypes")
-        assertWarmHandoff(from: "browse.results.table", to: "noteTypes.fields.table", section: "noteTypes")
+        try assertWarmHandoff(from: "browse.status.text", to: "noteTypes.fields.table", section: "noteTypes")
         assertNoProgress("Loading Note Types")
         let after = try command("query")
         for key in ["browse", "record"] {
