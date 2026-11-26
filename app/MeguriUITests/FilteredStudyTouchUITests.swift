@@ -340,12 +340,23 @@ import XCTest
     private func replace(_ id: String, with text: String, app: XCUIApplication) throws {
         let target = try visible(id, app: app)
         XCTAssertTrue(target.isEnabled, id)
-        target.tap()
-        let previous = target.value as? String ?? ""
-        if !previous.isEmpty && previous != target.placeholderValue {
-            app.typeKey("a", modifierFlags: .command)
+        XCTAssertTrue([.textField, .textView, .searchField].contains(target.elementType), id)
+        // Favor the trailing end of the visible text. Wrapped or scrolled text
+        // can still leave the caret in the middle, so clear in both directions.
+        target.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.95)).tap()
+        let previous = try XCTUnwrap(target.value as? String, id)
+        let count = previous == target.placeholderValue ? 0 : previous.utf16.count
+        if count > 0 {
+            // UTF-16 length bounds the required key events, even if a deletion
+            // removes a whole selection or several code units at once.
+            target.typeText(String(repeating: XCUIKeyboardKey.forwardDelete.rawValue, count: count)
+                + String(repeating: XCUIKeyboardKey.delete.rawValue, count: count))
         }
-        app.typeText(text)
+        let cleared = try XCTUnwrap(target.value as? String, id)
+        let isEmpty = cleared.isEmpty || cleared == target.placeholderValue
+        XCTAssertTrue(isEmpty, "Native field must be empty before replacement: " + id)
+        guard isEmpty else { return }
+        target.typeText(text)
         XCTAssertEqual(target.value as? String, text, id)
     }
 

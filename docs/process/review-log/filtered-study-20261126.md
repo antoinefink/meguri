@@ -73,3 +73,5 @@ Plancheck reviewed the complete 14,332-byte form with persistent touch labels. I
 Planinterop reviewed the complete 24,257-byte touch test after it used the native Return or Hide button before switch interactions. The iPhone hierarchy exposed Return as a button. The source uses synthetic study data and its verified public SHA-256 is `fb0b2c9568055b9bd202aef4888ad6c1cb1d9ce53beb51d5fb5f87f924554caa`.
 
 Plancheck reviewed the complete public 14,618-byte form after the empty touch fields stopped repeating their persistent labels. The data bindings, accessibility labels and Mac fields are retained. Its verified SHA-256 is `7365d1732a69f2cc3c08a7394d42727df98171af5278402d058c447c2191dc49`.
+
+Planinterop reviewed the complete 25,175-byte public touch test. Its input helper clears synthetic fixture text around the insertion point and checks that the field is empty. Its verified SHA-256 is `1e27e026a80bd495134fa80bad0a07613202cd3fa00bd46fbf99117e305c4762`.
