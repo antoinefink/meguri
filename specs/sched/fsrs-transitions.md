@@ -5,7 +5,7 @@ Requirements: R587, R601, R646, R647, R648, R649, R651, R652, R654, R655, R657, 
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sched/fsrs/, conformance/scenarios/sched/steps/, conformance/scenarios/fp-probe/
 
-How the current state and the four answer states of a card are computed. Meguri always schedules with FSRS (R702), so answer states carry a memory state; a new card's current state has none. T1 to T6 were written for the floating-point probe (U14, `conformance/float-determinism`) and cover review cards; T7 to T14 add new, learning and relearning cards, short-term scheduling, the ease factor, leeches, parameters Meguri cannot use and the engine's interface (U45); T16 lists where the plan's wording differs from Anki. The steps themselves are `sched/steps`, fuzz is `sched/fuzz` and the button labels are `sched/answer-labels`; the load balancer (U44) plugs into `sched/fuzz#Z8`.
+How Meguri computes the current state and the four answer states. Scheduled answers use FSRS (R702) and carry a memory state. A new card’s current state has no memory state. Filtered preview uses the deck’s delays (`decks/filtered-study#F4`). T1 to T6 were written for the floating-point probe (U14, `conformance/float-determinism`) and cover review cards; T7 to T14 add new, learning and relearning cards, short-term scheduling, the ease factor, leeches, parameters Meguri cannot use and the engine's interface (U45); T16 lists where the plan's wording differs from Anki. The steps themselves are `sched/steps`, fuzz is `sched/fuzz` and the button labels are `sched/answer-labels`; the load balancer (U44) plugs into `sched/fuzz#Z8`.
 
 ## T1. The FSRS model
 
@@ -96,7 +96,7 @@ Of a card in a normal deck (`odid` 0), by its type (`sched/card-data#K1`):
 | 2 review | T3 |
 | 3 relearning | `relearning`: the learning part as for type 1 but with the relearning steps; the review part has `scheduled_days` = `ivl`, `elapsed_days` = `ivl`, `ease_factor` = `factor` / 1000, `lapses` = `lapses`, `leeched` false, `memory_state` = T2.4 |
 
-- A card in a filtered deck (`odid` not 0) is out of scope (filtered decks are not studied in Meguri, R612): the engine refuses it with `InFilteredDeck` (T14) instead of computing the states of a normal deck.
+- A filtered card uses `decks/filtered-study#F3` for its effective due and home preset, or F4 when previewing.
 - Only the review part of a relearning card is carried into its next states (T9); its `elapsed_days` is the interval, not a count of days.
 
 ## T8. Leaving the learning steps (R651, R642)
@@ -200,21 +200,23 @@ The model owns this inspection. Only its schema-11 boundary interprets `other`, 
 
 A pure function of its inputs: it reads nothing else and writes nothing.
 
-**Inputs:** the card's scheduling columns (`id`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odid`); its memory state or none (T2.4); its last review time or none (T2.3, with U46's review-log fallback injected); the home preset read with `sched/presets#V3` (T2.5, T2.1, and the markers of T13); the desired retention in force (T2.2); today, `next_day_at` and now (`sched/day-clock`); the keys `fsrsShortTermWithStepsEnabled` and `collapseTime` (`sched/config-keys#G2`); and optionally a fuzzed-day chooser (`sched/fuzz#Z8`; none means plain fuzz). The custom scheduling JavaScript (`cardStateCustomizer`) and the card's `cd` are never consulted (R764).
+**Inputs:** the card's scheduling columns (`id`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odid`, `odue`); the current deck's kind and, for a filtered deck, its `reschedule` setting and its Again, Hard and Good preview delays in seconds; the card's memory state or none (T2.4); its last review time or none (T2.3, with U46's review-log fallback injected); the home preset read with `sched/presets#V3` (T2.5, T2.1, and the markers of T13); the desired retention in force (T2.2); today, `next_day_at` and now (`sched/day-clock`); the keys `fsrsShortTermWithStepsEnabled` and `collapseTime` (`sched/config-keys#G2`); and optionally a fuzzed-day chooser (`sched/fuzz#Z8`; none means plain fuzz). The custom scheduling JavaScript (`cardStateCustomizer`) and the card's `cd` are never consulted (R764).
+
+For filtered rescheduling, calculate the current state with the effective home due from `decks/filtered-study#F3`. Use a nonzero `odue`, otherwise `due`. Use the actual home due for an early review, even when it exceeds today. For example, at day 12, an interval of 5 and original due 10 give elapsed days 7, regardless of the temporary build position. A preview uses F4’s delay states. The same card in decks with Again set to 60 and 300 seconds has an Again delay of 60 and 300 seconds respectively. A finishing preview state has zero delay.
 
 **Outputs:** the current state and the Again, Hard, Good and Easy states in the shape of `specs/conformance/observations.md` O5, and for each of the four:
 
 - the delay: seconds or whole days by `sched/steps#L7` for a learning or relearning state, `scheduled_days` for a review state;
 - `left`: `remaining_steps` of the (learning part of the) state, 0 for a review state;
 - the `factor` the answer stores (T11; unchanged for a learning state);
-- the review-log preview of the row the answer writes (R681, applied by U44): `ivl` = the state's delay as days (positive) or seconds (negative, `−seconds`, with seconds above 2,147,483,647 written as −2,147,483,647); `lastIvl` = the current state's delay the same way (a new card's is 0; a learning card's is its current step, a review card's its interval); `type` from the current state: 0 for new and learning cards, 1 for review, 2 for relearning; `factor` = `round(1000 × ((D − 1) / 9 + 0.1))` in `f32` from the state's difficulty `D` (543 for 4.990228, golden `sched/fsrs/ae23-answer`);
+- the review-log preview of the row the answer writes (R681, applied by U44): `ivl` = the state's delay as days (positive) or seconds (negative, `−seconds`, with seconds above 2,147,483,647 written as −2,147,483,647); `lastIvl` = the current state's delay the same way (a new card's is 0; a learning card's is its current step, a review card's its interval); `type` from the current state: 0 for new and learning cards, 1 for a due or overdue review, 2 for relearning, 3 for an early filtered review or preview; preview writes factor zero. For scheduled answers, `factor` = `round(1000 × ((D − 1) / 9 + 0.1))` in `f32` from the state's difficulty `D` (543 for 4.990228, golden `sched/fsrs/ae23-answer`);
 - the label (`sched/answer-labels`), computed from the same state, so a label always shows what answering applies (R656).
 
 Again on a review card carries the leech flag (T12).
 
 Review-log day intervals retain their low 32 bits as a signed integer. This applies to both `ivl` and `lastIvl`: a current review interval 2,147,483,648 produces `lastIvl` −2,147,483,648, and 4,294,967,295 produces −1. It is not a positive clamp or an input refusal. Normal computed review intervals are within the preset bounds; the distinction matters for imported current intervals. Seconds retain the negative, saturating rule above.
 
-**Errors:** `UnsupportedParams` (T1, T13; every refusal of the crate's model constructor is this error), `InFilteredDeck` (T7), and the crate's other errors (T1). None of them changes anything.
+**Errors:** `UnsupportedParams` (T1, T13; every refusal of the crate's model constructor is this error) and the crate's other errors (T1). None of them changes anything.
 
 **FSRS instances:** the engine may keep `FSRS` instances made from a parameter list for reuse, keyed by the exact `f32` values of the list; a reused instance gives the same results as a new one. U46, U47 and U50 use the same instances and the same T13 check.
 
@@ -232,7 +234,7 @@ Review-log day intervals retain their low 32 bits as a signed integer. This appl
 | `sched/steps/*` | T7, T8, T9 with `sched/steps` |
 | `fp-probe/*` | T1 to T5 on many inputs (`conformance/float-determinism`) |
 
-All goldens are recorded. U45 activates the five pure FSRS scenarios. `ae23-answer` and `input-boundaries` remain pending until U44's answer adapter exists; U45's direct tests already consume their next-state snapshots. T13 and the `InFilteredDeck` refusal are unit tests only.
+All goldens are recorded. U45 activates the five pure FSRS scenarios. `ae23-answer` and `input-boundaries` remain pending until U44's answer adapter exists; U45's direct tests already consume their next-state snapshots. T13 is covered by unit tests.
 
 ## T16. Where the plan's wording differs from Anki
 

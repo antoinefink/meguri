@@ -1,0 +1,27 @@
+# Authored, text-only F6 UI input. No private or reference collection content.
+recipe: filtered-study
+description: "Preview overlaps, suspended eligibility and literal Custom Study tags."
+now: "2030-01-15T10:00:00+01:00"
+learn_ahead_secs: 0
+decks:
+  - name: "Preview Source"
+    due: 2
+    suspended: 1
+    tags: ["filtered-ui"]
+    fields: ["Preview source {n}", "Preview answer {n}"]
+  - name: "Custom Source"
+    due: 1
+    tags: ["custom-ui"]
+    fields: ["Custom source {n}", "Custom answer {n}"]
+  - name: "Custom Source::Literal"
+    later: 1
+    tags: ["custom-ui", "exclude::tag*"]
+    fields: ["Literal star excluded", "Literal answer"]
+  - name: "Custom Source::Lookalike"
+    later: 1
+    tags: ["custom-ui", "exclude::tagX"]
+    fields: ["Wildcard lookalike retained", "Lookalike answer"]
+  - name: "Outside Source"
+    later: 1
+    tags: ["custom-ui"]
+    fields: ["Outside selected scope", "Outside answer"]

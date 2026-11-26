@@ -14,9 +14,9 @@ Terms: `now_ms` is the clock's instant in epoch milliseconds and `now_s` = `now_
 ## A1. Scope and inputs
 
 - **Inputs**: the card, the rating (Again 1, Hard 2, Good 3, Easy 4) and the time taken `m` in milliseconds (a non-negative integer; the scenario's `time_ms`, 0 when missing). The answer instant is `now_ms`; it is the review time the answer records.
-- **Preset**: the card's home preset, read with the bounds of `sched/presets#V3` (`sched/presets#V1`; the home deck is `did`, since a card in a filtered deck is refused, A12). When no preset has the deck's preset id, the answer uses the built-in defaults, not the default preset that `decks/deck-presets` P3 falls back to for a deck (golden `sched/data/missing-preset`). This file reads its answer time cap (`cap_answer_time_to_secs`, schema-11 `maxTaken`: 1 to 9999 s, any other stored value reads as the default 60 s) and its desired retention and FSRS parameters (`sched/fsrs-transitions` T2).
+- **Preset**: the card's home preset, read with the bounds of `sched/presets#V3` (`sched/presets#V1`; the home deck is `odid` while a card is on a filtered assignment, otherwise `did`). When no preset has the deck's preset id, the answer uses the built-in defaults, not the default preset that `decks/deck-presets` P3 falls back to for a deck (golden `sched/data/missing-preset`). This file reads its answer time cap (`cap_answer_time_to_secs`, schema-11 `maxTaken`: 1 to 9999 s, any other stored value reads as the default 60 s) and its desired retention and FSRS parameters (`sched/fsrs-transitions` T2).
 - **FSRS.** Meguri always answers with FSRS on (Goal Capsule; R702 turns the `fsrs` key on). Anki 26.09.3 writes a few values differently when `fsrs` is off (A9); scenarios that answer cards set `fsrs: true` so that Meguri can match them.
-- **Covered**: a card in a normal deck (`odid` 0) whose current state is new, learning, review or relearning, in any queue (a suspended or buried card can be answered through Grade Now, U48). Burying siblings, leeches and the load balancer are the files A10 names. A card in a filtered deck is refused (A12).
+- **Covered**: a card in a normal deck (`odid` 0) whose current state is new, learning, review or relearning, in any queue (a suspended or buried card can be answered through Grade Now, U48). Burying siblings, leeches and the load balancer are the files A10 names. A12 covers cards in filtered decks.
 - A card whose deck does not exist cannot be answered: the operation fails with `NotFound` and writes nothing.
 
 ## A2. What one answer writes
@@ -173,7 +173,7 @@ Meguri never answers with FSRS off. For reading goldens recorded with `fsrs: fal
 | a leeched chosen state: the `leech` tag, the suspend action and the result flags (R672, R673) | `sched/leeches` |
 | the load balancer's choice of day and its cache (R666 to R669) | `sched/load-balancer` |
 | which review-log rows Meguri writes and keeps (R683, R684) | `sched/revlog` |
-| cards in filtered decks | A12: refused |
+| cards in filtered decks | A12: rescheduling or preview |
 | decks stamped when no counter changes | A6: stamped, as Anki does |
 
 ## A11. Scenarios
@@ -194,7 +194,7 @@ Meguri never answers with FSRS off. For reading goldens recorded with `fsrs: fal
 
 ## A12. Cards in filtered decks
 
-Meguri cannot study filtered decks (R53, R706). A card whose `odid` is not 0 has no next states in Meguri: the next-state engine refuses it with `InFilteredDeck` (`sched/fsrs-transitions#T14`), and the answer operation refuses it with the same error and writes nothing. Review-log rows of type 3 are therefore never written (`sched/revlog#E1`). The reference supports filtered rescheduling/preview states. A preserved mixed-scope reference scenario may contain that path; it declares the unavailable finer capability under `conformance/answer-ops#H6` and does not run as a successful Meguri case. Neither the tag nor reference output changes the product refusal.
+Use `decks/filtered-study#F3` for rescheduling and F4 for preview. Both support a next-state read and an undoable answer. `sched/revlog#E1` covers the new log entries.
 
 ## A13. The answer operation (engine)
 

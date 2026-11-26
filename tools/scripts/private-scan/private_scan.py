@@ -835,6 +835,16 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "app/MeguriUITests/FilteredStudyTouchUITests.swift":
+        "aa2ec7c6b55cca107c77a59fbd3b096a445d0d40b217411d2312aed56ee3e64c",
+    "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
+        "61695e0b755bcd741efff9aa6d31f15daeba8907508ef9893ea2508cd6d50225",
+    "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
+        "847e05fc1456d929196a53a7deb4b401bf06e2441ebb67ba38ff3d4ce7be1fcc",
+    "core/crates/meguri-engine/src/decks/custom_study.rs":
+        "73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166",
+    "app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift":
+        "7365d1732a69f2cc3c08a7394d42727df98171af5278402d058c447c2191dc49",
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift": "cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6",
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "935861e65791369115fb3f0f901a97d0eed69cb673d50b210f24121af8c3179d",
     "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
@@ -961,7 +971,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285',
+        'ce52b837fd80fa41162ebc03cf51f1b1f004ef2c3defd5d6952d7fe003e519a9',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1186,7 +1196,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     "docs/process/verification-status.md":
-        "f6d11e917a2d9e74eba72039aa36e53c6b0e656901fc83425b33b7cbf587c21f",
+        "015f7fdb8a67bacf74442f6ea44dd43951035426064608b4a2defbe8dea41326",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1484,7 +1494,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '079593aab3e69f01f91cb900ca3e328ffe3dea3706933bc527ba9e47d64586b4',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '5b329638e20ef17b258809d3e68089eaa04f059652cd6cfc4c113462be76f6ee',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

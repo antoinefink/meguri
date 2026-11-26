@@ -37,6 +37,7 @@ pub mod error_types;
 pub mod events;
 pub mod excerpts;
 pub mod find_replace;
+pub mod filtered_study;
 pub mod fsrs_policy;
 pub mod image_occlusion;
 pub mod jobs;

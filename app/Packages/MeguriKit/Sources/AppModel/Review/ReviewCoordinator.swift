@@ -1277,7 +1277,7 @@ public nonisolated struct ReviewLeechNotice: Equatable, Sendable {
         return switch next.state {
         case .review(let state): state.lapses
         case .relearning(_, let review): review.lapses
-        case .new, .learning: nil
+        case .new, .learning, .preview: nil
         }
     }
     init?(notice: String?) {

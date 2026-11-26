@@ -28,6 +28,7 @@ impl QueueRestore {
     pub(crate) fn prepare(
         owner: &Arc<Mutex<HeldState>>,
         card: &meguri_model::card::Card,
+        chosen: meguri_sched::states::engine::State,
         buried: &[CardId],
         now: i64,
         boundary: i64,
@@ -35,7 +36,7 @@ impl QueueRestore {
         let held = owner.lock().unwrap();
         let mut next = held.queue.clone();
         let record = next
-            .answer(card.id, Requeue::from_card(card, boundary), buried, now)
+            .answer(card.id, Requeue::from_answer(card, chosen, boundary), buried, now)
             .map_err(|_| EngineError::InvalidArgument {
                 message: "NotAtHead".into(),
             })?;

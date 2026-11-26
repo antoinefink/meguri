@@ -26,6 +26,11 @@ pub struct ReviewState {
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
+    /// F4: no normal scheduling transition or memory update.
+    Preview {
+        scheduled_secs: u32,
+        finished: bool,
+    },
     New {
         position: u32,
     },
@@ -39,6 +44,7 @@ pub enum State {
 impl State {
     pub fn delay(self, until_next_day: u64) -> Delay {
         match self {
+            Self::Preview { scheduled_secs, .. } => Delay::Seconds(scheduled_secs),
             Self::New { .. } => Delay::Seconds(0),
             Self::Learning(l) | Self::Relearning { learning: l, .. } => step_delay(l.scheduled_secs, until_next_day),
             Self::Review(r) => Delay::Days(r.scheduled_days),
@@ -46,7 +52,7 @@ impl State {
     }
     pub fn memory_state(self) -> Option<MemoryState> {
         match self {
-            Self::New { .. } => None,
+            Self::Preview { .. } | Self::New { .. } => None,
             Self::Learning(l) => l.memory_state,
             Self::Review(r) | Self::Relearning { review: r, .. } => r.memory_state,
         }
@@ -76,6 +82,7 @@ pub struct SchedulingStates {
     pub good: AnswerState,
     pub easy: AnswerState,
 }
+#[derive(Clone, Copy)]
 pub struct StateInput<'a> {
     pub card: &'a Card,
     pub preset: &'a PresetView,
@@ -141,7 +148,11 @@ fn current(input: &StateInput<'_>) -> State {
             let today = input.today as i32;
             State::Review(ReviewState {
                 elapsed_days: (card.interval as i32)
-                    .wrapping_sub(card.due.min(today).wrapping_sub(today))
+                    .wrapping_sub((if card.original_deck_id.0 != 0 {
+                        card.due
+                    } else {
+                        card.due.min(today)
+                    }).wrapping_sub(today))
                     .max(0) as u32,
                 ..review
             })
@@ -321,9 +332,15 @@ pub fn next_states(
     input: &StateInput<'_>,
     chooser: Option<&mut dyn FuzzedDayChooser>,
 ) -> Result<SchedulingStates, StateError> {
-    if input.card.original_deck_id.0 != 0 {
-        return Err(StateError::InFilteredDeck);
+    // Stored filtered positions order the queue; only the home due schedules.
+    let mut effective = input.card.clone();
+    if effective.original_deck_id.0 != 0 && effective.original_due != 0 {
+        effective.due = effective.original_due;
     }
+    let input = &StateInput {
+        card: &effective,
+        ..*input
+    };
     let current = current(input);
     let model = cache.model(input.preset).map_err(|_| StateError::UnsupportedParams)?;
     let fsrs_memory = current.memory_state().map(|m| fsrs::MemoryState {
@@ -347,6 +364,7 @@ pub fn next_states(
     };
     let items = [&next.again, &next.hard, &next.good, &next.easy];
     let raw = match current {
+        State::Preview { .. } => unreachable!("preview bypasses FSRS"),
         State::New { .. } | State::Learning(_) => {
             let (learning, new) = match current {
                 State::Learning(l) => (l, false),
@@ -402,11 +420,7 @@ pub fn next_states(
             State::Review(r) | State::Relearning { review: r, .. } => (r.ease_factor * 1000.0).round() as u16,
             _ => input.card.ease_factor,
         };
-        let kind = match current {
-            State::Review(_) => 1,
-            State::Relearning { .. } => 2,
-            _ => 0,
-        };
+        let kind = revlog_kind(input.card, current, input.today);
         let difficulty = state
             .memory_state()
             .expect("FSRS answers always carry memory")
@@ -433,4 +447,17 @@ pub fn next_states(
         good,
         easy,
     })
+}
+
+/// F3/F4: early scheduled reviews have a factor; preview logs do not.
+pub fn revlog_kind(card: &Card, current: State, today: u32) -> u8 {
+    match current {
+        State::Preview { .. } => 3,
+        State::Review(_) => {
+            let due = if card.original_due != 0 { card.original_due } else { card.due };
+            if card.original_deck_id.0 != 0 && due > today as i32 { 3 } else { 1 }
+        }
+        State::Relearning { .. } => 2,
+        _ => 0,
+    }
 }

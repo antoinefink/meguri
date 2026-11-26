@@ -20,6 +20,7 @@ pub fn row(card: CardId, rating: Rating, chosen: &AnswerState, elapsed_ms: u32) 
         kind: match chosen.revlog.kind {
             1 => RevlogKind::Review,
             2 => RevlogKind::Relearning,
+            3 => RevlogKind::Filtered,
             _ => RevlogKind::Learning,
         },
     }

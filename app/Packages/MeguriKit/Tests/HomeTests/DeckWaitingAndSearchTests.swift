@@ -30,7 +30,7 @@ import Testing
     @Test func onlyARegularDeckWithNothingWaitingOffersAddNote() {
         let none = ReviewCounts(new: 0, learning: 0, review: 0)
         #expect(DeckWaiting(counts: none, filtered: false).offersAddNote)
-        // A filtered deck cannot take notes: it keeps its counts and Study.
+        // A filtered deck cannot take notes: its empty page offers Rebuild (F6).
         #expect(!DeckWaiting(counts: none, filtered: true).offersAddNote)
         for counts in [ReviewCounts(new: 1, learning: 0, review: 0), ReviewCounts(new: 0, learning: 1, review: 0),
                        ReviewCounts(new: 0, learning: 0, review: 1)] {

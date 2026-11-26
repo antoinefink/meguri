@@ -25,7 +25,12 @@ pub struct Requeue {
     pub mtime: EpochSecs,
 }
 impl Requeue {
-    pub fn from_card(card: &Card, boundary: i64) -> Option<Self> {
+    pub fn from_answer(card: &Card, chosen: crate::states::engine::State, boundary: i64) -> Option<Self> {
+        // Finishing preview restores the home queue. A home learning timestamp
+        // before rollover does not make the card a repeat of this session.
+        if matches!(chosen, crate::states::engine::State::Preview { finished: true, .. }) {
+            return None;
+        }
         (matches!(card.queue, CardQueue::Learning | CardQueue::Preview) && i64::from(card.due) < boundary).then_some(
             Self {
                 due: i64::from(card.due),

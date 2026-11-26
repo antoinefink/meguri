@@ -808,7 +808,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 - Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
 - After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
 - With no result and no create row, H6.3's one-line message shows.
-- Return or a click opens a result: its deck page, with the sidebar selection on that deck; a filtered deck shows R53's explanation (`decks/deck-list` H3). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
+- Return or a click opens a result: its deck page, with the sidebar selection on that deck (including the filtered deck page, `decks/filtered-study#F6`). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
 - Mac: after each edit the first result is highlighted, or the create row when nothing is listed; ↑ and ↓ move the highlight over all rows and wrap (H6.3). The highlight does not change the detail; Return opens the highlighted row. iPad: a tap opens a result; Return in the field opens the first.
 - ⌘F (Edit › Find…, N20.4), ⇧⌘O (a second key of Find…, with no menu item of its own) and "/" in the `decks.list` and `decks.page` contexts (H9.2; never while a text field or other view owns the key, N4) put the focus in the field, showing the sidebar first when it is hidden. In the tab layout the same keys present the deck list's Search (N14.2). During review Find… is disabled.
 - Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`) and New Deck… (`folder.badge.plus`). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
@@ -821,16 +821,23 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 - One menu per deck row: right-click on Mac, long press on touch. Its groups, in order:
 
-| Group | Item | Symbol | Mac key | Filtered deck |
+| Group | Item | Symbol | Mac command key | Decks |
 |---|---|---|---|---|
-| 1 | Study | `play` | ⌘R | absent |
-| 1 | Add Note | `square.and.pencil` | | absent |
-| 2 | Rename… | `pencil` | ⇧⌘R | shown |
-| 2 | New Subdeck… | `folder.badge.plus` | | absent |
-| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | absent |
-| 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
+| 1 | Study | `play` | ⌘R | both kinds |
+| 1 | Add Note | `square.and.pencil` | | normal |
+| 1 | Browse Cards | `magnifyingglass` | | both kinds where Browse is available |
+| 1 | Deck Statistics | `chart.bar.xaxis` | | both kinds where Statistics is available |
+| 2 | Custom Study… | `slider.horizontal.3` | | normal |
+| 2 | Create Filtered Deck… | `line.3.horizontal.decrease` | ⇧⌘F | normal |
+| 2 | Edit Filtered Deck… | `pencil` | ⌥⌘O | filtered |
+| 2 | Rebuild | `arrow.clockwise` | ⌥⌘R | filtered |
+| 2 | Empty | `tray` | | filtered |
+| 3 | Rename… | `pencil` | ⇧⌘R | both kinds |
+| 3 | New Subdeck… | `folder.badge.plus` | | normal |
+| 3 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | normal |
+| 4 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | both kinds |
 
-- A filtered deck's menu holds Rename… and Delete Deck (R53).
+- The normal deck page and finished state also offer Custom Study (`decks/filtered-study#F6`).
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -873,11 +880,15 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Edit | Undo <step name>, Redo <step name> | ⌘Z, ⇧⌘Z | titled with the core's undo step name ("Undo Rename Deck", "Undo Answer Card"), the review's existing pattern, until `review/reviewer-strings` S5's catalog keys exist (R173); plain "Undo" and "Redo", disabled, when nothing can be undone or redone. During review they use the review session's own restore (session-aware); outside review, the collection's undo history. On Mac a focused text input keeps its own undo. On iPad text focus is not detected outside sheets, so a sheet keeps the system's text undo |
 | Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
 | Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows in the main window, no sheet or panel owns the keys, and no review runs; focuses N20.1's field (tab layout: presents the Search). While it is disabled, a text view's own Find keeps ⌘F |
-| Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
+| Deck | Study | ⌘R | the shown normal or filtered deck has Study available (N14.3, H3) |
+| Deck | Custom Study… | | a normal deck is shown and a filtered-study action is available, including on the finished deck page |
+| Deck | Create Filtered Deck… | ⇧⌘F | a filtered-study action is available. In Browse, prefill the editor with its active card search. On a normal deck page, prefill the deck’s due-card search. Elsewhere open the editor with a blank search. |
+| Deck | Rebuild | ⌥⌘R | a filtered deck is shown and a filtered-study action is available |
+| Deck | Empty | | a filtered deck is shown and a filtered-study action is available |
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
+| Deck | Deck Options… or Edit Filtered Deck… | ⌥⌘O | a normal deck is shown and its preset editor can open, or a filtered deck is shown and a filtered-study action is available. The title names the editor that will open (N20.9). |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
-| Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
 | Note | Edit Note | ⌘E | in review, a card is presented, on either side, and nothing else owns the keys (N20.8); in Browse, N21.8 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
@@ -886,8 +897,8 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Card | Back to Decks | Esc | during review |
 
 - Edit keeps the system's text items intact: its Find submenu and every other item the system adds for text. Meguri's Find… is a separate item placed just before that group; while enabled it takes ⌘F, while disabled the system's Find ▸ Find… of a focused text view keeps it. ⇧⌘O is a hidden second key equivalent of Meguri's Find…, with no menu item; on iPad it is a key command with no discoverability title.
-- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck. Round 6 placed Card separators after Show Answer, Easy, Suspend Card and Back to Decks; N21.8 gives the newer Note, Format and Card grouping and ordering. A separator with nothing after it yet is left out.
-- The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Create Filtered Deck…, Empty and the options editor command. Round 6 placed Card separators after Show Answer, Easy, Suspend Card and Back to Decks; N21.8 gives the newer Note, Format and Card grouping and ordering. A separator with nothing after it yet is left out.
+- A filtered-study action is available in the foreground main window when the collection is ready for a deck write, outside review, with no sheet or conflicting operation. The selected-deck commands act on the Home deck page shown in the sidebar or tab layout. Create Filtered Deck… also works without a selected deck, including from Today and from Browse on the Mac. It captures the active Browse search when invoked, regardless of which cards are selected (`decks/filtered-study#F1`, F6).
 - Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2). The one exception is Find…: while enabled it takes ⌘F even when a text input has focus, as its row above says.
 - iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu's single keys (Show Answer, the four ratings, Back to Decks): they carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. Note › Edit Note ⌘E, Card › Bury Card ⌘J and Card › Suspend Card ⇧⌘J (N20.8, N21.8) are not single keys and keep their equivalents there. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
 - Built 2026-11-24 (U162; the implementer's reading, pending the coordinator and Antoine): File › Import Collection… is "Import…" (⇧⌘I, same enablement), since its picker now takes deck packages too (N17.2's built line); the table's "Import Collection…" label described the collection-only picker. Settings › Collection's row reads "Import…" as well.
@@ -937,7 +948,7 @@ The English text of the screens above. "New" marks text not used before this rou
 
 Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operation is `decks/decks` D8; its summary D8.5.
 
-- Entries: the deck menu's Delete Deck (N20.2, third group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
+- Entries: the deck menu's Delete Deck (N20.2, final group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
 - Delete Deck first reads D8.5's summary for the deck. With `cards` 0 the deck is deleted at once, with no question: an empty deck, and a filtered deck, whose cards return home (D9). With `cards` 1 or more Meguri asks first. After the user confirms, the summary is read again right before the delete; when it differs from the one the question showed and `cards` is 1 or more, Meguri asks again with the new counts instead of deleting. A delete that asked nothing reads it the same way, so a card added after a zero-card read is asked about. A new generation in between ends the delete with nothing written. Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the delete passes the counts of the last summary read before it as its confirmed losses: when that recheck has `cards` 1 or more it equals the confirmed question's, since a differing recheck with cards asks again; when it has `cards` 0 (nothing was asked, or the cards left after a question) its own counts are passed (`decks/decks` D8 step 6), so an arrival between that read and the commit that raises a count is no longer deleted without the core refusing: the core refuses with `LossesChanged` and the new counts, writing nothing. The check is by count: when one card leaves and another arrives, the count stays equal and the arriving card is deleted without having been shown (`decks/decks` D8 step 6, Comparison). Meguri then treats those counts as a fresh read: with `cards` 1 or more it shows the question again, in the same place, with the new message line; with `cards` 0 it deletes at once with the new counts. So a card that raises `cards` is always shown before it is deleted, but a deck that raises `decks` is shown only when the refusal's `cards` is 1 or more: when it is 0 (an empty subdeck added after a zero-card read, or a card leaving as an empty subdeck arrives), the subdeck is deleted without a question, as an empty subdeck present at a zero-card read would be. That refusal shows no `Couldn’t Delete` alert.
 - The question: the title `Delete “<name>”?` with the deck's last name component, and one message line from the subdecks (S = `decks` − 1, the deck's descendants) and C = `cards`:
 
@@ -989,7 +1000,7 @@ Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A; then `review.q
 
 Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the save input and the strings are `sched/deck-options` O17 and `decks/deck-options-strings` K10. Extended 2026-11-25 at the user's request: Display Order and New Preset join this native page; the other Advanced sections remain deferred.
 
-- Entries: the deck menu's Deck Options… (`gearshape`, group 2 after New Subdeck…, normal decks only; N20.2), Deck › Deck Options… (⌥⌘O, N20.4), the O key on the deck list and the deck page (`decks/deck-list` H9.2) and the finished state's Deck Options link (H5.2). Not offered during a review in this version: the Deck menu is disabled then (N20.4), and the review menu's item comes with the review menu.
+- On a normal deck, the row menu's Deck Options… (`gearshape`, group 3), Deck › Deck Options… (⌥⌘O), the O key in the deck list or page, and the finished state's Deck Options link open the preset form (N20.2, N20.4, H5.2 and H9.2). On a filtered deck, the row menu’s Edit Filtered Deck… in group 2, Deck › Edit Filtered Deck… (⌥⌘O) and O open the search definition (`decks/filtered-study#F1`). Deck menu commands are disabled during review. The review menu owns its separate card actions.
 - One grouped form:
   1. no header: **Preset**, a menu picker of the collection's presets, each listed as `decks/deck-options-strings` K6 gives it ("Default (used by 6 decks)"); the row shows the chosen preset's name. Footer: "Used by N decks. Changes apply to all of them.", or "Used by this deck only." when N is 1, with N the count the picker shows (`sched/deck-options` O6.1).
      **New Preset…** sits beside the picker, stacking below it when width requires. It opens a native name form (Name, Cancel, Create) with a short footer explaining built-in defaults and the later Save. Blank or whitespace-only input cannot be submitted. The core draft supplies the canonical name, selected staged preset and defaults (O6.3); no collection write happens before Save. Staged presets show a use count of zero.
@@ -1335,7 +1346,7 @@ Then the collection's error line, as before (not beside the deck list, N14.1).
 
 - A deck row's number counts every card waiting: new + learning + to review (the touch rows' one number, N13.2, which the iPad already showed, and Today's totals). It is hidden at zero, as before. On the Mac it is the row's badge; on the iPad the trailing number, unchanged.
 - Hovering a row shows its help tag: the deck's full path (" › " between the names) on the first line, the three counts on the second ("6 new · 23 learning · 382 to review", zeros included). The Mac, and the iPad with a pointer. The row's accessibility value uses the same three counts ("to review", in place of "due").
-- A click (a tap) opens the deck page, unchanged. A double-click (the Mac only: on the iPad a pointer's double-click cannot be told from a finger's double tap) or, while the deck list has focus with the row selected, Return start the deck's review, and so does S on the iPad; as `decks/deck-list` H3 and H9.2 say (built now: H12). On the Mac sidebar S is not built: the system list's type-select keeps the letter keys, a platform default (changed 2026-11-21). Exception (round 10, Mac): Return is taken by a key monitor of the main window, not by the list. Need: a row's click leaves keyboard focus with the row's own button rather than the list, so neither the list nor its primary action (`contextMenu(forSelectionType:primaryAction:)`, tried first) ever sees Return. It acts only on Return or Enter without Command, Option, Control or Shift (Caps Lock does not count), not on a repeat, in the main window with no sheet, and while no text input, sheet of the app's own or review has the keys (`SidebarReturnKey`). Verification: `SidebarReturnKeyTests` for each guard; `MacDeckListKeysTests` in the test VM for Return on a deck row and on Today, the double-click, and S in the search field. The first click of a double-click opens the page, as a click does; the second starts the review. A deck with nothing to study shows what H3 says (its finished state, or H5.4's empty view); a filtered deck shows R53's explanation.
+- A click (a tap) opens the deck page, unchanged. A double-click (the Mac only: on the iPad a pointer's double-click cannot be told from a finger's double tap) or, while the deck list has focus with the row selected, Return start the deck's review, and so does S on the iPad; as `decks/deck-list` H3 and H9.2 say (built now: H12). On the Mac sidebar S is not built: the system list's type-select keeps the letter keys, a platform default (changed 2026-11-21). Exception (round 10, Mac): Return is taken by a key monitor of the main window, not by the list. Need: a row's click leaves keyboard focus with the row's own button rather than the list, so neither the list nor its primary action (`contextMenu(forSelectionType:primaryAction:)`, tried first) ever sees Return. It acts only on Return or Enter without Command, Option, Control or Shift (Caps Lock does not count), not on a repeat, in the main window with no sheet, and while no text input, sheet of the app's own or review has the keys (`SidebarReturnKey`). Verification: `SidebarReturnKeyTests` for each guard; `MacDeckListKeysTests` in the test VM for Return on a deck row and on Today, the double-click, and S in the search field. The first click of a double-click opens the page, as a click does; the second starts the review. A deck with nothing to study shows what H3 says (its finished state, or H5.4's empty view). An empty filtered deck offers Rebuild (`decks/filtered-study#F6`).
 
 ### N24.5 iPad and the Duo opened (5A)
 

@@ -3,6 +3,9 @@ import MeguriCoreBindings
 @testable import CoreBridge
 
 @Suite struct DeckServiceTests {
+    @Test func noMatchesRefusalIsTypedAcrossTheBridge() {
+        #expect(CoreBridge.BridgeError(MeguriCoreBindings.CoreError.DeckRefused(refusal: .noMatches)) == .deckRefused(.noMatches))
+    }
     @Test func deckNameSnapshotPreservesSignedIDsGenerationSpellingAndOrder() {
         let raw = MeguriCoreBindings.DeckNameSnapshot(generation: .max, decks: [
             .init(id: .min, fullName: " E\u{301} :: :猫: ", filtered: true),

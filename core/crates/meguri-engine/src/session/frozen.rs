@@ -3,7 +3,7 @@ use crate::{EngineError, sched::answer::AnswerRequest};
 use meguri_model::{card::Card, clock::UtcOffset, ids::CardId, time::EpochMillis};
 use meguri_sched::{
     answer::Rating,
-    model::{card_sched::CardSched, deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
+    model::{deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
     queue::Kind,
     states::{
         engine::{AnswerState, ReviewState, RevlogPreview, State},
@@ -49,6 +49,7 @@ enum FrozenState {
     Learning(Learning),
     Review(Review),
     Relearning(Learning, Review),
+    Preview(u32, bool),
 }
 fn memory(m: Option<meguri_model::card_data::MemoryState>) -> Option<[u32; 2]> {
     m.map(|m| [m.stability.to_bits(), m.difficulty.to_bits()])
@@ -106,6 +107,7 @@ impl From<Review> for ReviewState {
 impl From<State> for FrozenState {
     fn from(s: State) -> Self {
         match s {
+            State::Preview { scheduled_secs, finished } => Self::Preview(scheduled_secs, finished),
             State::New { position } => Self::New(position),
             State::Learning(l) => Self::Learning(l.into()),
             State::Review(r) => Self::Review(r.into()),
@@ -116,6 +118,7 @@ impl From<State> for FrozenState {
 impl From<FrozenState> for State {
     fn from(s: FrozenState) -> Self {
         match s {
+            FrozenState::Preview(scheduled_secs, finished) => Self::Preview { scheduled_secs, finished },
             FrozenState::New(position) => Self::New { position },
             FrozenState::Learning(l) => Self::Learning(l.into()),
             FrozenState::Review(r) => Self::Review(r.into()),
@@ -240,6 +243,7 @@ pub(crate) struct Inputs {
     pub last_review: Option<i64>,
     pub short_term: bool,
     pub ahead: u32,
+    pub filtered: Option<meguri_model::proto::deck::FilteredDeck>,
 }
 /// Resolve scheduling inputs without constructing C12.2's semantic context.
 pub(crate) fn inputs(
@@ -258,20 +262,20 @@ pub(crate) fn inputs_without_revlogs(
     models: &mut FsrsCache,
     removed: &[i64],
 ) -> Result<Inputs, EngineError> {
-    let home = rows
-        .deck(CardSched::new(card).home_deck())?
-        .ok_or_else(|| error("missing home"))?;
+    let (home, filtered) = crate::sched::answer::membership(rows, card)?;
     let meguri_model::proto::deck::DeckKind::Normal(normal) = &home.kind.kind else {
         return Err(error("non-normal home"));
     };
     let preset = PresetView::for_config(rows, meguri_model::ids::DeckConfigId(normal.config_id))?;
-    models
-        .model(&preset)
-        .map_err(|_| crate::sched::memory::error(meguri_sched::memory::resolve::MemoryError::UnsupportedParams))?;
+    let preview = filtered.as_ref().is_some_and(|d| !d.reschedule);
+    if !preview {
+        models.model(&preset)
+            .map_err(|_| crate::sched::memory::error(meguri_sched::memory::resolve::MemoryError::UnsupportedParams))?;
+    }
     let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
     let mut history = Vec::new();
-    if (card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none())
-        || (!removed.is_empty() && card.data.last_review_secs.is_none())
+    if !preview && ((card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none())
+        || (!removed.is_empty() && card.data.last_review_secs.is_none()))
     {
         rows.visit_fsrs_histories(
             &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![card.id]),
@@ -281,8 +285,12 @@ pub(crate) fn inputs_without_revlogs(
             },
         )?;
     }
-    let resolved = meguri_sched::memory::resolve::on_the_fly(models, &preset, card, &history, boundary)
-        .map_err(crate::sched::memory::error)?;
+    let resolved = if preview {
+        card.data.memory_state
+    } else {
+        meguri_sched::memory::resolve::on_the_fly(models, &preset, card, &history, boundary)
+            .map_err(crate::sched::memory::error)?
+    };
     let last = match card.data.last_review_secs {
         Some(t) => Some(t),
         None if !removed.is_empty() => meguri_sched::memory::resolve::last_review_time(&history),
@@ -299,6 +307,7 @@ pub(crate) fn inputs_without_revlogs(
         last_review: last,
         short_term,
         ahead,
+        filtered,
     })
 }
 
@@ -317,7 +326,7 @@ pub(crate) fn context(rows: &impl ReadRows, card: &Card, inputs: &Inputs) -> Res
     let ahead = inputs.ahead;
     let cfg = SchedConfig::new(rows);
     let p = preset.fields();
-    let projection = serde_json::json!({
+    let mut projection = serde_json::json!({
         "home": home.id.0, "preset": normal.config_id, "home_dr": normal.desired_retention.map(f32::to_bits),
         "params": preset.parameters().iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
         "learning": p.learn_steps.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
@@ -330,6 +339,11 @@ pub(crate) fn context(rows: &impl ReadRows, card: &Card, inputs: &Inputs) -> Res
         "history_memory": if card.data.memory_state.is_none() { memory(resolved) } else { None },
         "history_last": if card.data.last_review_secs.is_none() { last } else { None },
     });
+    // Keep pre-existing normal-session contexts byte-compatible for recovery.
+    if let Some(deck) = &inputs.filtered {
+        projection["filtered"] = serde_json::json!((deck.reschedule, deck.preview_again_secs,
+            deck.preview_hard_secs, deck.preview_good_secs));
+    }
     Ok(Sha256::digest(serde_json::to_vec(&projection).map_err(error)?).into())
 }
 
@@ -375,4 +389,24 @@ pub(super) fn test_answer() -> FrozenAnswer {
         cache: None,
     };
     FrozenAnswer::capture(&r, Base::Row([1; 32]), [2; 32], UtcOffset::UTC, 1200)
+}
+
+#[cfg(test)]
+#[test]
+fn preview_journal_round_trip_retains_the_selected_delay_and_zero_factor() {
+    let mut answer = test_answer();
+    answer.current = FrozenState::Preview(0, false);
+    answer.chosen = FrozenState::Preview(60, false);
+    answer.days = false;
+    answer.delay = 60;
+    answer.left = 0;
+    answer.factor = 0;
+    answer.revlog = [-60, 0, 3, 0];
+    let bytes = serde_json::to_vec(&answer).unwrap();
+    let decoded: FrozenAnswer = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(decoded, answer);
+    let request = decoded.request([0; 32]).unwrap();
+    assert_eq!(request.current, State::Preview { scheduled_secs: 0, finished: false });
+    assert_eq!(request.chosen.state, State::Preview { scheduled_secs: 60, finished: false });
+    assert_eq!((request.chosen.revlog.kind, request.chosen.revlog.factor), (3, 0));
 }

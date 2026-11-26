@@ -136,6 +136,18 @@ impl Plan {
         &self.sql
     }
 
+    /// The compiler's FROM tables and joins, using aliases `c` and `n`.
+    /// Together with [`Self::predicate_sql`] and [`Self::params`], this
+    /// lets callers apply eligibility, ordering and limits in one query.
+    pub fn from_sql(&self) -> &'static str {
+        sql::from_clause(self.mode, self.rows)
+    }
+
+    /// The compiled WHERE expression, with the plan's numbered parameters.
+    pub fn predicate_sql(&self) -> &str {
+        &self.predicate
+    }
+
     /// The statement's parameters, `?1` first.
     pub fn params(&self) -> &[Param] {
         &self.params

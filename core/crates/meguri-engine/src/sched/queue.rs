@@ -350,27 +350,22 @@ fn head_states(
     cache: &mut meguri_sched::states::fsrs_glue::FsrsCache,
 ) -> Result<meguri_sched::states::engine::SchedulingStates, EngineError> {
     use meguri_sched::{
-        model::{card_sched::CardSched, deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
-        states::engine::{StateInput, next_states},
+        model::{deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
+        states::engine::StateInput,
     };
     let card = rows.card(id)?.ok_or_else(|| EngineError::InvalidArgument {
         message: "missing queue head".into(),
     })?;
-    let preset = PresetView::for_card(rows, &card)?.ok_or_else(|| EngineError::InvalidArgument {
-        message: "queue head has no normal home deck".into(),
-    })?;
-    let home = rows
-        .deck(CardSched::new(&card).home_deck())?
-        .ok_or_else(|| EngineError::InvalidArgument {
-            message: "missing home deck".into(),
-        })?;
+    let (home, filtered) = super::answer::membership(rows, &card)?;
     let normal = match &home.kind.kind {
-        meguri_model::proto::deck::DeckKind::Normal(n) => Some(n),
-        _ => None,
+        meguri_model::proto::deck::DeckKind::Normal(n) => n,
+        _ => return Err(EngineError::Unsupported { feature: "InFilteredDeck".into() }),
     };
-    let desired_retention = DeckSched::new(normal, &home.common).retention(preset.fields().desired_retention);
+    let preset = PresetView::for_config(rows, meguri_model::ids::DeckConfigId(normal.config_id))?;
+    let desired_retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
+    let preview = filtered.as_ref().is_some_and(|d| !d.reschedule);
     let mut history = Vec::new();
-    if card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none() {
+    if !preview && card.card_type != meguri_model::card::CardType::New && card.data.memory_state.is_none() {
         rows.visit_fsrs_histories(
             &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
             |_, found| -> Result<(), meguri_storage::StorageError> {
@@ -379,13 +374,18 @@ fn head_states(
             },
         )?;
     }
-    let memory_state = meguri_sched::memory::resolve::on_the_fly(cache, &preset, &card, &history, env.next_day_at)
-        .map_err(|e| EngineError::Unsupported { feature: e.to_string() })?;
+    let memory_state = if preview {
+        card.data.memory_state
+    } else {
+        meguri_sched::memory::resolve::on_the_fly(cache, &preset, &card, &history, env.next_day_at)
+            .map_err(|e| EngineError::Unsupported { feature: e.to_string() })?
+    };
     let last_review_time = match card.data.last_review_secs {
         Some(t) => Some(t),
         None => rows.fsrs_last_review_time(id)?,
     };
-    next_states(
+    meguri_sched::states::filtered::next_states(
+        rows,
         cache,
         &StateInput {
             card: &card,

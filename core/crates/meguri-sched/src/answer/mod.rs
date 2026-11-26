@@ -53,7 +53,11 @@ pub fn plan(
     answered_at: i64,
     elapsed_ms: u64,
 ) -> Result<AnswerPlan, InvalidAnswer> {
+    if let State::Preview { .. } = current {
+        return preview_plan(card, chosen, preset, answered_at, elapsed_ms);
+    }
     let current_type = match current {
+        State::Preview { .. } => return Err(InvalidAnswer),
         State::New { .. } => CardType::New,
         State::Learning(_) => CardType::Learning,
         State::Review(_) => CardType::Review,
@@ -62,7 +66,7 @@ pub fn plan(
     if current_type != card.card_type
         || matches!(chosen.state, State::New { .. })
         || chosen.state.memory_state().is_none()
-        || chosen.revlog.kind > 2
+        || chosen.revlog.kind > 3
     {
         return Err(InvalidAnswer);
     }
@@ -95,7 +99,7 @@ pub fn plan(
         State::Learning(_) => CardType::Learning,
         State::Review(_) => CardType::Review,
         State::Relearning { .. } => CardType::Relearning,
-        State::New { .. } => return Err(InvalidAnswer),
+        State::Preview { .. } | State::New { .. } => return Err(InvalidAnswer),
     };
     match chosen.delay {
         Delay::Days(days) => {
@@ -115,6 +119,15 @@ pub fn plan(
             out.queue = CardQueue::Learning;
         }
     }
+    if out.original_deck_id.0 != 0 {
+        if out.card_type == CardType::Review {
+            out.deck_id = out.original_deck_id;
+            out.original_deck_id = meguri_model::ids::DeckId(0);
+            out.original_due = 0;
+        } else {
+            out.original_due = out.due;
+        }
+    }
     let leech = review.is_some_and(|r| r.leeched);
     let suspended = leech && preset.leech_action() == LeechAction::Suspend;
     if suspended {
@@ -127,4 +140,28 @@ pub fn plan(
         leech,
         suspended,
     })
+}
+
+fn preview_plan(card: &Card, chosen: &AnswerState, preset: &PresetView, at: i64, elapsed: u64) -> Result<AnswerPlan, InvalidAnswer> {
+    let State::Preview { scheduled_secs, finished } = chosen.state else { return Err(InvalidAnswer); };
+    if card.original_deck_id.0 == 0 || finished != (scheduled_secs == 0)
+        || chosen.delay != Delay::Seconds(scheduled_secs) || chosen.revlog.kind != 3 || chosen.revlog.factor != 0 {
+        return Err(InvalidAnswer);
+    }
+    let mut out = card.clone();
+    if finished {
+        // F4's narrow day-zero exception is recoverable from the stored fields.
+        if card.card_type == CardType::Review && card.queue == CardQueue::Preview && card.original_due == 0 {
+            out.due = 0;
+        }
+        crate::model::card_sched::return_from_filtered(&mut out);
+    } else {
+        let seconds = fuzz::learning_delay(scheduled_secs, fuzz::seed(card.id.0 as u64, u64::from(card.reps)));
+        out.queue = CardQueue::Preview;
+        out.due = at.div_euclid(1000).wrapping_add(i64::from(seconds)) as i32;
+    }
+    out.mtime = EpochSecs(at.div_euclid(1000));
+    out.usn = Usn::PENDING;
+    Ok(AnswerPlan { card: out, elapsed_ms: elapsed.min(u64::from(preset.fields().cap_answer_time_to_secs) * 1000) as u32,
+        leech: false, suspended: false })
 }

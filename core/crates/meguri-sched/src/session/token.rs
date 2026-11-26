@@ -138,3 +138,16 @@ pub fn render_key(
     hash.update(inputs);
     hash.finalize().into()
 }
+
+/// Definition edits change the meaning of a still-identical borrowed card row.
+pub fn with_filtered_options(token: StateToken, deck: Option<&meguri_model::proto::deck::FilteredDeck>) -> StateToken {
+    let Some(deck) = deck else { return token; };
+    let mut hash = Sha256::new();
+    hash.update(b"meguri.session.filtered.v1\0");
+    hash.update(token);
+    hash.update([u8::from(deck.reschedule)]);
+    for seconds in [deck.preview_again_secs, deck.preview_hard_secs, deck.preview_good_secs] {
+        hash.update(seconds.to_le_bytes());
+    }
+    hash.finalize().into()
+}

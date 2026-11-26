@@ -14,7 +14,7 @@ The `revlog` table holds one row per review and per manual scheduling change, ke
 | 0 | learning | an answer of a new or learning card (`sched/answering#A5`) |
 | 1 | review | an answer of a review card |
 | 2 | relearning | an answer of a relearning card |
-| 3 | filtered (an early review in a filtered deck) | never: Meguri does not study filtered decks (R53, `sched/answering#A12`) |
+| 3 | filtered (an early review in a filtered deck) | preview answers (factor zero) and early rescheduled reviews (`decks/filtered-study#F3`, F4) |
 | 4 | manual | Set Due Date and Reset (U48, R682) |
 | 5 | rescheduled | never (R683) |
 

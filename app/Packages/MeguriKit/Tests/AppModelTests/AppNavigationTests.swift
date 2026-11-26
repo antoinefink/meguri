@@ -17,6 +17,23 @@ import AppModel
         var revealed = false
     }
 
+    @Test func studyFormsKeepTheirOriginAcrossLayoutsAndReplacementDismissesThem() {
+        let navigation = AppNavigation()
+        navigation.openDeckPage(japanese)
+        navigation.present(.filteredStudy)
+        navigation.adoptLaunchLayout(.compact)
+        #expect(navigation.sheet == .filteredStudy)
+        #expect(navigation.compactPath(.decks) == [.deckPage(japanese)])
+        #expect(!navigation.showsDeckOptions)
+        navigation.dismissSheet()
+        #expect(navigation.homeDeckPage == japanese)
+        navigation.present(.customStudy(japanese.rawValue))
+        navigation.adoptLaunchLayout(.sidebar)
+        #expect(navigation.sheet == .customStudy(japanese.rawValue))
+        navigation.collectionReplaced()
+        #expect(navigation.sheet == nil && navigation.selectedDeck == nil)
+    }
+
     // MARK: Structure (R17, R18)
 
     @Test func theCompactLayoutHasFourTabsAndNoteTypesIsNotOne() {
