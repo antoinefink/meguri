@@ -139,7 +139,7 @@ import XCTest
         // Reload through normal UI, with no fixture reinstallation or draft
         // reuse. This empty collection contains only our note's two cards, so
         // either card's Edit Note must reopen the same stored note.
-        let reopened = try openEditCurrent(app, bundle: bundle, imageSize: imageSize, savedNoteDeck: page)
+        let reopened = try openEditCurrent(app, bundle: bundle, imageSize: imageSize, viaToolbar: true)
         let reloadedCanvas = try readableCanvas(in: reopened, imageSize: imageSize, stage: "reopened")
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
         assertNativeImage(reloadedCanvas, in: reopened, stage: "reopened")
@@ -149,37 +149,36 @@ import XCTest
     }
 
     private func openEditCurrent(_ app: XCUIApplication, bundle: String, imageSize: CGSize,
-                                 savedNoteDeck: XCUIElement? = nil) throws -> XCUIElement {
+                                 viaToolbar: Bool = false) throws -> XCUIElement {
         try app.bringToFront(bundleIdentifier: bundle)
-        // App activation alone does not select the workspace's key window.
-        // A title-bar click restores it without revealing or rating the card.
         let main = app.windows["main"]
         XCTAssertTrue(main.waitForExistence(timeout: 10))
-        try prepareInput()
-        main.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
-            .withOffset(CGVector(dx: 0, dy: 12)).click()
         let reveal = element(main, "review.session.reveal")
-        if let savedNoteDeck {
-            let study = savedNoteDeck.buttons["home.deck.study"]
-            let readyForReview = { reveal.exists && reveal.isEnabled && reveal.isHittable }
-            let readyToStudy = {
-                savedNoteDeck.exists && study.exists && study.isEnabled && study.isHittable
-            }
-            XCTAssertTrue(wait { readyForReview() || readyToStudy() },
-                          "Save must return to a usable review or the saved note's deck")
-            if !readyForReview() {
-                // A deck page has no current review note. Start Study once,
-                // only after confirming that no card was answered or lost.
-                XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 2, learning: 0, review: 0))
-                try click(study)
-            }
+        let ready = wait { reveal.exists && reveal.isEnabled && reveal.isHittable }
+        if !ready { try attachReviewInputEvidence(bundle: bundle, stage: "io-review-unavailable") }
+        XCTAssertTrue(ready, "Edit must return to the same usable, unanswered review")
+        if viaToolbar {
+            // An independent production entry proves the saved masks survive
+            // a new editor load even if menu-bar registration regresses.
+            let actions = app.menuButtons["review.session.actions"]
+            let available = wait { actions.exists && actions.isEnabled && actions.isHittable }
+            if !available { try attachReviewInputEvidence(bundle: bundle, stage: "io-toolbar-unavailable") }
+            XCTAssertTrue(available)
+            try click(actions)
+            let edit = actions.menuItems["review.menu.editNote"]
+            let enabled = wait { edit.exists && edit.isEnabled }
+            if !enabled { try attachReviewInputEvidence(bundle: bundle, stage: "io-toolbar-edit-disabled") }
+            XCTAssertTrue(enabled)
+            try click(edit)
+        } else {
+            let note = app.menuBars.menuBarItems["Note"]
+            let command = note.menuItems.matching(NSPredicate(format: "title == %@", "Edit Note")).firstMatch
+            let enabled = wait { command.exists && command.isEnabled }
+            if !enabled { try attachReviewInputEvidence(bundle: bundle, stage: "io-menu-edit-disabled") }
+            XCTAssertTrue(enabled)
+            try click(note)
+            try click(command)
         }
-        XCTAssertTrue(wait { reveal.exists && reveal.isEnabled && reveal.isHittable })
-        let command = app.menuBars.menuBarItems["Note"].menuItems.matching(
-            NSPredicate(format: "title == %@", "Edit Note")).firstMatch
-        XCTAssertTrue(wait { command.exists && command.isEnabled })
-        try prepareInput()
-        app.typeKey("e", modifierFlags: .command)
         let window = app.windows["review.editCurrent.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
         // Edit loads media before our manual resize. Sample the live native

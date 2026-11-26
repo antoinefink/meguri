@@ -15,7 +15,9 @@ final class MacUndoResponder {
     private init() {
         let center = NotificationCenter.default
         for name in [Notification.Name.NSUndoManagerDidCloseUndoGroup, .NSUndoManagerDidUndoChange,
-                     .NSUndoManagerDidRedoChange, NSWindow.didBecomeKeyNotification] {
+                     .NSUndoManagerDidRedoChange, NSWindow.didBecomeKeyNotification,
+                     NSWindow.didResignKeyNotification, NSApplication.didBecomeActiveNotification,
+                     NSApplication.didResignActiveNotification] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { MacUndoResponder.shared.revision &+= 1 }
             })

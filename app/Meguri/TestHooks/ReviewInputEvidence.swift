@@ -6,32 +6,38 @@ import CoreBridge
 import SwiftUI
 
 extension TestHooks {
-    /// Only the authored review-editor recipe installs this probe. It reports
+    /// Only the authored review-editor and empty-collection journeys install this probe. It reports
     /// actual audio-controller queue and key-window facts, never field text or media names.
     /// Native queued repeat events exercise the production local monitors.
     struct ReviewInputEvidence: ViewModifier {
         @MainActor final class Source {
             weak var collection: ReviewCollection?
             weak var workspaceView: NSView?
+            var focusedContext: NativeCommandContext?
         }
         /// A view in the actual main scene identifies its window even without
         /// a review card. Reading AppKit identity needs no accessibility trust.
         struct WorkspaceWindow: NSViewRepresentable {
             let source: Source
+            let focusedContext: NativeCommandContext?
             func makeNSView(context: Context) -> NSView {
                 let view = NSView()
                 source.workspaceView = view
                 return view
             }
-            func updateNSView(_ view: NSView, context: Context) { source.workspaceView = view }
+            func updateNSView(_ view: NSView, context: Context) {
+                source.workspaceView = view
+                source.focusedContext = focusedContext
+            }
         }
         let collection: ReviewCollection?
         let enabled: Bool
         @State private var observer: NSObjectProtocol?
         @State private var source = Source()
+        @FocusedValue(\.nativeCommandContext) private var focusedContext
         func body(content: Content) -> some View {
             content.background {
-                if enabled { WorkspaceWindow(source: source) }
+                if enabled { WorkspaceWindow(source: source, focusedContext: focusedContext) }
             }.onAppear {
                 source.collection = collection
                 guard enabled, observer == nil, let bundle = Bundle.main.bundleIdentifier else { return }
@@ -88,6 +94,29 @@ extension TestHooks {
                         fields["collectionGeneration"] = source.collection.map { String($0.generation) } ?? "none"
                         fields["collectionReady"] = source.collection?.state == .ready ? "true" : "false"
                         fields["addWindowKey"] = NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"
+                        let context = source.focusedContext
+                        let review = source.collection?.review
+                        let flow = source.collection?.editNoteFlow
+                        fields["focusedHost"] = context.map { String(describing: $0.host) } ?? "none"
+                        fields["focusedCollectionMatches"] = String(context?.collection === source.collection)
+                        fields["registeredReviewInput"] = String(context?.reviewAvailability?.input == true)
+                        fields["registeredEditNote"] = String(context?.reviewAvailability?.editNote == true)
+                        fields["liveReviewInput"] = String(context?.reviewInputAvailable == true)
+                        fields["reviewPhase"] = review.map { String(describing: $0.phase) } ?? "none"
+                        fields["reviewPaused"] = String(review?.paused == true)
+                        fields["reviewEditingNote"] = String(review?.editingNote == true)
+                        fields["reviewCanEditNote"] = String(review?.canEditNote == true)
+                        fields["reviewCanActOnCard"] = String(review?.canActOnCard == true)
+                        fields["reviewCanRefresh"] = String(review?.canRefresh == true)
+                        fields["reviewCanFinish"] = String(review?.canFinish == true)
+                        fields["reviewIsActive"] = String(source.collection?.reviewIsActive == true)
+                        fields["editCanOpen"] = String(flow?.canOpen == true)
+                        fields["editPresented"] = String(flow?.isPresented == true)
+                        fields["editOpening"] = String(flow?.opening == true)
+                        fields["editSaving"] = String(flow?.saving == true)
+                        fields["editGuardingClose"] = String(flow?.guardingClose == true)
+                        fields["sheetPresented"] = String(source.collection?.navigation.sheet != nil)
+                        fields["keyWindowIdentifier"] = window?.identifier?.rawValue ?? "none"
                         let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
                         guard let data, let text = String(data: data, encoding: .utf8) else { return }
                         DistributedNotificationCenter.default().postNotificationName(

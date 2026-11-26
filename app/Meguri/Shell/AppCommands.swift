@@ -19,6 +19,35 @@ struct NativeCommandContext {
     /// The Statistics page, behind its flag (U296); nil while it cannot be reached.
     var statsPage: StatsPage?
 
+    /// Evaluate at the scene registration, where SwiftUI tracks the review and
+    /// flow reads. A focused value containing only model references can leave
+    /// Commands displaying the availability read while Edit Note held input.
+    struct ReviewAvailability: Equatable {
+        let input: Bool
+        let editNote: Bool
+        let reveal: Bool
+        let rate: Bool
+        let act: Bool
+        let finish: Bool
+    }
+    private(set) var reviewAvailability: ReviewAvailability? = nil
+
+    func observingReviewAvailability() -> Self {
+        var context = self
+        let review = review
+        #if os(macOS)
+        _ = MacUndoResponder.shared.firstResponder
+        let input = review.map { ReviewInputOwnership.nativeCommandFocusAvailable($0) } ?? false
+        #else
+        let input = reviewInputAvailable
+        #endif
+        context.reviewAvailability = ReviewAvailability(
+            input: input, editNote: collection.editNoteFlow.canOpen,
+            reveal: review?.canReveal == true, rate: review?.canRate == true,
+            act: review?.canActOnCard == true, finish: review?.canFinish == true)
+        return context
+    }
+
     var fileActionsAvailable: Bool {
         collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
             && !collection.entry.pickerPresented && !collection.intake.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
@@ -274,6 +303,11 @@ struct NativeCommandContext {
         return collection.review
     }
     var reviewInputAvailable: Bool {
+        #if os(macOS)
+        // AppKit focus is part of admission, and must also invalidate the
+        // registered availability when an auxiliary window returns the keys.
+        _ = MacUndoResponder.shared.firstResponder
+        #endif
         guard let review else { return false }
         return ReviewInputOwnership.admitsNativeCommand(review)
     }
@@ -544,7 +578,7 @@ struct AppCommands: Commands {
                 Task { await context.collection.openEditNote() }
             }
             .keyboardShortcut("e", modifiers: .command)
-            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen) && context?.canEditBrowseNote != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.editNote) && context?.canEditBrowseNote != true)
             Divider()
             browseItem(.addTags, key: "a", [.command, .shift])
             browseItem(.removeTags, key: "a", [.command, .option, .shift])
@@ -586,7 +620,7 @@ struct AppCommands: Commands {
                 context?.review?.reveal()
             }
             .keyboardShortcut(cardKey(.space))
-            .disabled(!cardEnabled(context?.review?.canReveal))
+            .disabled(!cardEnabled(context?.reviewAvailability?.reveal))
             Divider()
             rating("Again", .again, key: "1")
             rating("Hard", .hard, key: "2")
@@ -608,7 +642,7 @@ struct AppCommands: Commands {
                 }
             }
             .keyboardShortcut("j", modifiers: .command)
-            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.bury) != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.act) && context?.browseEnabled(.bury) != true)
             browseItem(.unbury)
             Button(reviewOrBrowse(.suspend, review: "Suspend Card")) {
                 if context?.review != nil {
@@ -619,7 +653,7 @@ struct AppCommands: Commands {
                 }
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])
-            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.suspend) != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.act) && context?.browseEnabled(.suspend) != true)
             browseItem(.unsuspend)
             Divider()
             browseItem(.setDueDate, key: "d", [.command, .shift])
@@ -630,7 +664,7 @@ struct AppCommands: Commands {
                 Task { await context.collection.finishReview() }
             }
             .keyboardShortcut(cardKey(.escape))
-            .disabled(!cardEnabled(context?.review?.canFinish))
+            .disabled(!cardEnabled(context?.reviewAvailability?.finish))
         }
     }
 
@@ -713,7 +747,7 @@ struct AppCommands: Commands {
     /// The Mac reads the card's input ownership; iPad only state SwiftUI observes.
     private func cardEnabled(_ available: Bool?) -> Bool {
         #if os(macOS)
-        context?.reviewInputAvailable == true && available == true
+        context?.reviewAvailability?.input == true && context?.reviewInputAvailable == true && available == true
         #else
         context?.review?.paused == false && available == true
         #endif
@@ -725,7 +759,7 @@ struct AppCommands: Commands {
             context?.review?.rate(rating)
         }
         .keyboardShortcut(cardKey(key))
-        .disabled(!cardEnabled(context?.review?.canRate))
+        .disabled(!cardEnabled(context?.reviewAvailability?.rate))
     }
 }
 

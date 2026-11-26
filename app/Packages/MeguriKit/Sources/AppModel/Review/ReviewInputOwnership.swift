@@ -36,12 +36,19 @@ public enum ReviewInputOwnership {
     /// Menu commands use exactly the card input admission boundary, including
     /// native focus, behavior dialogs, DOM editing and repeated key events.
     public static func admitsNativeCommand(_ model: ReviewCoordinator) -> Bool {
+        let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        return nativeCommandFocusAvailable(model) && !repeated
+    }
+
+    /// Persistent availability for scene registration. The current event's
+    /// repeat flag belongs to dispatch, and must never be stored in a scene's
+    /// focused value after that event has ended.
+    public static func nativeCommandFocusAvailable(_ model: ReviewCoordinator) -> Bool {
         guard let pair = model.pair, let pages = model.surface as? ReviewPages,
               pages.presenter.isAvailable else { return false }
-        let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
         // An open Edit Note form owns the keys like a sheet (N11.1).
         return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
-            paused: model.paused || model.editingNote, repeated: repeated)
+            paused: model.paused || model.editingNote, repeated: false)
     }
     #else
     /// The iPad menu bar's commands (N20.4) use the card host's admission:
