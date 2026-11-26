@@ -79,3 +79,5 @@ Planinterop reviewed the complete 25,175-byte public touch test. Its input helpe
 Planinterop reviewed all 25,615 bytes of the public touch test with actual caret-movement events and synthetic field diagnostics. Its verified SHA-256 is `22267f674a8fb719ccfc675caab34256567c1cc8b18264aafc7c39fe1a9d3e8f`.
 
 Planinterop reviewed the complete 27,617-byte touch test, including the native switch interaction and synthetic simulator diagnostics. Its verified SHA-256 is `b8d679d1313c00539c57989e0789dbca1a2540aa8fdd1a255da133e42b4cda2e`.
+
+Planinterop reviewed the complete 27,956-byte touch test. The simulator test waits for the exact field value after each edit. Its verified public SHA-256 is `aa2ec7c6b55cca107c77a59fbd3b096a445d0d40b217411d2312aed56ee3e64c`.

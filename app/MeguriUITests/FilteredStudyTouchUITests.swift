@@ -375,21 +375,23 @@ import XCTest
         let target = try visible(id, app: app)
         XCTAssertTrue(target.isEnabled, id)
         XCTAssertTrue([.textField, .textView, .searchField].contains(target.elementType), id)
-        func fieldText() -> String? {
-            guard let value = target.value else { return "" }
-            guard let value = value as? String else { return nil }
-            return value == target.placeholderValue ? "" : value
+        var fieldSnapshot: (any XCUIElementSnapshot)?
+        func fieldText() throws -> String {
+            let snapshot = try target.snapshot()
+            fieldSnapshot = snapshot
+            // Only an absent AX value means empty; preserve all native text.
+            guard let value = snapshot.value else { return "" }
+            if let text = value as? NSAttributedString { return text.string }
+            return try XCTUnwrap(value as? String,
+                "Unsupported native AX field value type \(String(reflecting: type(of: value))): " + diagnostics())
         }
         func diagnostics() -> String {
-            "\(id); observed=\(String(reflecting: target.value)); "
-                + "placeholder=\(String(reflecting: target.placeholderValue)); frame=\(target.frame)"
+            guard let snapshot = fieldSnapshot else { return id + "; field snapshot unavailable" }
+            return "\(id); observed=\(String(reflecting: snapshot.value)); "
+                + "placeholder=\(String(reflecting: snapshot.placeholderValue)); frame=\(snapshot.frame)"
         }
         target.tap()
-        guard let previous = fieldText() else {
-            attachState(app, "replace-unreadable-" + id)
-            XCTFail("Native field must expose text: " + diagnostics())
-            return
-        }
+        let previous = try fieldText()
         let count = previous.utf16.count
         if count > 0 {
             // Actual right-arrow events reach the end from any caret or
@@ -399,15 +401,15 @@ import XCTest
             }
             target.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count))
         }
-        guard fieldText() == "" else {
+        guard try wait({ try fieldText() == "" }) else {
             attachState(app, "replace-not-empty-" + id)
             XCTFail("Native field must be empty before replacement: " + diagnostics())
             return
         }
         target.typeText(text)
-        let final = fieldText()
-        if final != text { attachState(app, "replace-final-mismatch-" + id) }
-        XCTAssertEqual(final, text, "Native field must equal replacement: " + diagnostics())
+        let matched = try wait { try fieldText() == text }
+        if !matched { attachState(app, "replace-final-mismatch-" + id) }
+        XCTAssertTrue(matched, "Native field must equal replacement: " + diagnostics())
     }
 
     /// iOS does not preserve identifiers on SwiftUI Picker options. Select
@@ -460,9 +462,9 @@ import XCTest
         return HomeControls.hittable(matches) ?? matches.firstMatch
     }
 
-    private func wait(_ condition: @MainActor () -> Bool) -> Bool {
+    private func wait(_ condition: @MainActor () throws -> Bool) rethrows -> Bool {
         let deadline = Date().addingTimeInterval(15)
-        while !condition() {
+        while try !condition() {
             guard Date() < deadline else { return false }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
