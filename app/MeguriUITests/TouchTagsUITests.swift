@@ -4,7 +4,7 @@ import XCTest
 
 /// Production collection actions over the generated, public typical fixture.
 /// Run on both iPhone and iPad. MG discovers and stages typical-1 from this file.
-/// PNG attachments contain only the app, without test-driver annotations.
+/// PNG attachments contain no test-driver annotations.
 @MainActor
 final class TouchTagsUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -137,7 +137,8 @@ final class TouchTagsUITests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(data: app.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
+        let png = UIDevice.current.userInterfaceIdiom == .pad ? XCUIScreen.main.screenshot().pngRepresentation : app.screenshot().pngRepresentation
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
         attachment.name = "\(name).png"
         attachment.lifetime = .keepAlways
         add(attachment)

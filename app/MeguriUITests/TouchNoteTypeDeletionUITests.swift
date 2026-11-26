@@ -121,7 +121,8 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(data: app.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
+        let png = UIDevice.current.userInterfaceIdiom == .pad ? XCUIScreen.main.screenshot().pngRepresentation : app.screenshot().pngRepresentation
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
         attachment.name = name + ".png"
         attachment.lifetime = .keepAlways
         add(attachment)
