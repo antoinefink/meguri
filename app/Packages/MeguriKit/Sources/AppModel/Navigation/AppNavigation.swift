@@ -107,11 +107,21 @@ public final class AppNavigation {
 
     /// Production deck rows await the collection-owned save before opening a page.
     @ObservationIgnored public var deckSelectionAction: (@MainActor (DeckID) -> Void)?
-    @ObservationIgnored private(set) var intentRevision: UInt64 = 0
+    /// Visible feedback while the collection saves a deck selection. Restoration and
+    /// study continue to use the committed selection, never this pending intent.
+    public private(set) var pendingDeckPage: DeckID?
+    @ObservationIgnored private(set) var intentRevision: UInt64 = 0 {
+        didSet { pendingDeckPage = nil }
+    }
 
-    func beginDeckSelection() -> UInt64 {
+    func beginDeckSelection(deck: DeckID? = nil) -> UInt64 {
         intentRevision &+= 1
+        pendingDeckPage = deck
         return intentRevision
+    }
+
+    func finishDeckSelection(intent: UInt64) {
+        if intentRevision == intent { pendingDeckPage = nil }
     }
 
     public init() {}
@@ -168,6 +178,7 @@ public final class AppNavigation {
     /// The sidebar row of the current section, or of the deck whose page
     /// Home shows.
     public var sidebarSelection: SidebarItem {
+        if let pendingDeckPage { return .deck(pendingDeckPage) }
         if section == .home, let homeDeckPage {
             return .deck(homeDeckPage)
         }
@@ -181,8 +192,9 @@ public final class AppNavigation {
             deckSelectionAction(deck)
             return
         }
+        let displayed = sidebarSelection
         intentRevision &+= 1
-        guard item != sidebarSelection else { return }
+        guard item != displayed else { return }
         endReview()
         switch item {
         case let .section(section):
@@ -197,19 +209,20 @@ public final class AppNavigation {
 
     /// The detail column's stack: the current section's.
     public var detailPath: [Destination] {
-        get { path(section) }
-        set { setPath(newValue, for: section) }
+        get { pendingDeckPage == nil ? path(section) : [] }
+        set { if pendingDeckPage == nil { setPath(newValue, for: section) } }
     }
 
     // MARK: Tab layout (R18, R19, R23)
 
-    public var compactTab: CompactTab { section.tab }
+    public var compactTab: CompactTab { pendingDeckPage == nil ? section.tab : .decks }
 
     /// A tab's stack. The Decks tab holds the deck page Home shows above
     /// Home, the Settings tab Note Types above Settings.
     public func compactPath(_ tab: CompactTab) -> [Destination] {
         switch tab {
         case .decks:
+            if let pendingDeckPage { return [.deckPage(pendingDeckPage)] }
             return homeDeckPage.map { [.deckPage($0)] + path(.home) } ?? path(.home)
         case .settings:
             return settingsTabSection == .noteTypes ? [.noteTypes] + path(.noteTypes) : path(.settings)
@@ -220,7 +233,10 @@ public final class AppNavigation {
 
     /// What a tab's `NavigationStack` writes back: a push or a pop.
     public func setCompactPath(_ newPath: [Destination], for tab: CompactTab) {
-        if newPath != compactPath(tab) { intentRevision &+= 1 }
+        // SwiftUI may write back the displayed path. A pending deck path is
+        // feedback, not permission to commit its selection before the save.
+        guard newPath != compactPath(tab) else { return }
+        intentRevision &+= 1
         switch tab {
         case .decks:
             if case let .deckPage(deck)? = newPath.first {

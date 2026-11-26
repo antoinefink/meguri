@@ -122,6 +122,7 @@ extension TestHooks {
     /// `HomeSidebarPreview`'s decks, four note types, a few tags, one saved
     /// search, and counts for every row.
     @MainActor final class SampleBrowseBackend: BrowseBackend {
+        var beforeSearchSession: (@MainActor () async -> Void)?
         private let session: SampleSearchSession
         init(session: SampleSearchSession = SampleSearchSession(cards: 1_204, fails: false)) {
             self.session = session
@@ -251,7 +252,10 @@ extension TestHooks {
             }
         }
         func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {}
-        func openSearchSession() async throws -> any BrowseSearching { session }
+        func openSearchSession() async throws -> any BrowseSearching {
+            await beforeSearchSession?()
+            return session
+        }
         func columnSet(notetype: Int64?) async throws -> ColumnSetShown {
             ColumnSetShown(set: .standard, own: false, cards: ["noteFld", "template", "deck", "cardDue", "cardMod"],
                            notes: ["noteFld", "note", "template", "noteTags", "noteCrt"],

@@ -31,6 +31,9 @@ nonisolated public struct StatsDeckDirectory: Hashable, Sendable {
     /// Every deck in the deck list's order.
     private var order: [Int64] = []
     private var topLevel: [Int64] = []
+    /// Prepared with the directory's immutable tree snapshot, rather than sorted
+    /// again whenever the toolbar or a chart refresh observes the model.
+    public private(set) var menu: [MenuItem] = []
     /// The tree has been read at least once (a deck missing from an empty directory is unknown).
     public let isKnown: Bool
 
@@ -51,18 +54,13 @@ nonisolated public struct StatsDeckDirectory: Hashable, Sendable {
             for child in node.children { add(child, parent: deck) }
         }
         for node in nodes { add(node, parent: nil) }
-    }
-
-    public func deck(_ id: Int64) -> Deck? { decks[id] }
-
-    /// The deck pop-up's rows (S3.1): the deck tree indented in the deck list's order, filtered
-    /// decks last.
-    public var menu: [MenuItem] {
         let items = order.compactMap { decks[$0] }.map { MenuItem(id: $0.id, name: $0.name, depth: $0.depth, filtered: $0.filtered) }
-        return items.filter { !$0.filtered } + items.filter(\.filtered).map {
+        menu = items.filter { !$0.filtered } + items.filter(\.filtered).map {
             MenuItem(id: $0.id, name: decks[$0.id]?.fullName ?? $0.name, depth: 0, filtered: true)
         }
     }
+
+    public func deck(_ id: Int64) -> Deck? { decks[id] }
 
     /// The decks of a page scope: a deck with its subdecks, or every deck, filtered decks
     /// included (S3.1's subtitle).

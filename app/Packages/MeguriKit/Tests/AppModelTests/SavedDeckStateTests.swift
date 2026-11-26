@@ -5,6 +5,77 @@ import Testing
 
 @MainActor
 @Suite struct SavedDeckStateTests {
+    @Test func pendingDeckFeedbackIsSynchronousAndDoesNotChangeRestoration() async {
+        let (owner, store) = await makeOwner()
+        owner.navigation.openDeckPage(DeckID(4))
+        owner.navigation.select(.section(.browse))
+        let saved = owner.navigation.uiState
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let opening = owner.openDeckPage(deckID: 2)
+        // No yield: both native layouts can select and name the requested deck now.
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        #expect(owner.navigation.sidebarSelection == .deck(DeckID(2)))
+        #expect(owner.navigation.compactTab == .decks)
+        #expect(owner.navigation.compactPath(.decks) == [.deckPage(DeckID(2))])
+        owner.navigation.setCompactPath(owner.navigation.compactPath(.decks), for: .decks)
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        #expect(owner.navigation.uiState == saved)
+        await gate.waitUntilEntered()
+        gate.release()
+        #expect(await opening.value)
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.navigation.homeDeckPage == DeckID(2))
+    }
+
+    @Test func rapidABACompletionCannotEraseNewerPendingFeedbackOrReturnAfterLeaving() async {
+        let (owner, store) = await makeOwner()
+        let first = DeckStateGate(), last = DeckStateGate()
+        store.selectionGates = [first, last]
+        let a = owner.openDeckPage(deckID: 2)
+        await first.waitUntilEntered()
+        let b = owner.openDeckPage(deckID: 3)
+        let again = owner.openDeckPage(deckID: 2)
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        first.release()
+        #expect(!(await a.value))
+        #expect(!(await b.value))
+        await last.waitUntilEntered()
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        owner.navigation.select(.section(.stats))
+        #expect(owner.navigation.pendingDeckPage == nil)
+        last.release()
+        #expect(!(await again.value))
+        #expect(owner.navigation.section == .stats)
+        #expect(owner.navigation.homeDeckPage == nil)
+    }
+
+    @Test func loadedDeckRemainsVisibleWhenReturningFromAPendingSelection() async {
+        let (owner, store) = await makeOwner()
+        owner.navigation.openDeckPage(DeckID(2))
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let b = owner.openDeckPage(deckID: 3)
+        await gate.waitUntilEntered()
+        let a = owner.openDeckPage(deckID: 2)
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.navigation.sidebarSelection == .deck(DeckID(2)))
+        gate.release()
+        #expect(!(await b.value))
+        #expect(await a.value)
+        #expect(owner.navigation.homeDeckPage == DeckID(2))
+    }
+
+    @Test func treePublicationVersionIgnoresNavigationAndIncludesDisclosureWrites() async {
+        let (owner, _) = await makeOwner()
+        let version = owner.deckTreeVersion
+        owner.navigation.select(.section(.stats))
+        owner.navigation.select(.section(.home))
+        #expect(owner.deckTreeVersion == version)
+        await owner.setStudyExpanded(deckID: 2, expanded: false).value
+        #expect(owner.deckTreeVersion > version)
+    }
+
     @Test func deckNavigationAwaitsSaveAndSameDeckStillUsesCoreNoOp() async {
         let (owner, store) = await makeOwner()
         owner.navigation.openDeckPage(DeckID(4))

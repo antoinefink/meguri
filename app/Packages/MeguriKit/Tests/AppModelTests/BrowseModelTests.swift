@@ -401,6 +401,25 @@ import Testing
         core.resumeCounts(2) { _ in 0 }
     }
 
+    @Test func interruptedCountsResumeWithoutRereadingSidebarNames() async {
+        let (model, core) = await makeModel(holdCounts: true)
+        let names = core.sidebarNameReads
+        model.disappear()
+        await until { core.cancelledCounts == 1 }
+        model.appear()
+        await until { core.countCalls.count == 2 }
+        #expect(core.sidebarNameReads == names)
+        core.resumeCounts(1) { _ in 7 }
+        await until { model.counts[.deck(10)] == 7 }
+        core.resumeCounts(0) { _ in 0 }
+        // A real change still invalidates names, even after the interrupted read.
+        model.changesCommitted(Self.changes(tags: ["new-tag"]), seq: 1)
+        await until { core.sidebarNameReads > names }
+        model.disappear()
+        await until { core.cancelledCounts >= 1 }
+        for call in core.countCalls.indices { core.resumeCounts(call) { _ in 0 } }
+    }
+
     @Test func countsLeftUnfinishedWhenBrowseHidesAreReadAgainWhenItShows() async {
         let (model, core) = await makeModel(holdCounts: true)
         model.disappear()
@@ -852,8 +871,10 @@ import Testing
     func renameSavedSearch(_ old: String, to name: String) async throws { renames.append((old, name)) }
     var deletedSearches: [String] = []
     func deleteSavedSearch(_ name: String) async throws { deletedSearches.append(name) }
+    var sidebarNameReads = 0
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
-        switch section {
+        sidebarNameReads += 1
+        return switch section {
         case .savedSearches:
             FilterBuiltIn.allCases.map { .builtIn($0) } + [.savedSearch(name: "Hard Ones", text: "is:due -tag:x")] + extraSaved
         case .decks:

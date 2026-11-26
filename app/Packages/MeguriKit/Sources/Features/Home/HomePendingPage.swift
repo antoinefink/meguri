@@ -1,3 +1,4 @@
+import DesignSystem
 import SwiftUI
 
 /// Home while nothing is known about the decks and nothing is kept (N27.3): the page's own
@@ -7,13 +8,15 @@ import SwiftUI
 struct HomePendingPage: View {
     /// The grouped pages' background (Today on touch, a deck page); else the deck list's.
     let grouped: Bool
+    let label: Text
     /// How long the page stays empty before the indicator shows.
     var indicatorDelay: Duration = .milliseconds(500)
     @State private var showsIndicator: Bool
 
     /// `indicatorAtOnce`: as it is after the delay (the DTO preview's capture).
-    init(grouped: Bool, indicatorAtOnce: Bool = false) {
+    init(grouped: Bool, indicatorAtOnce: Bool = false, label: Text = Text("Loading Decks", bundle: .module)) {
         self.grouped = grouped
+        self.label = label
         _showsIndicator = State(initialValue: indicatorAtOnce)
     }
 
@@ -23,6 +26,7 @@ struct HomePendingPage: View {
                 if showsIndicator {
                     ProgressView()
                         .controlSize(.small)
+                        .accessibilityLabel(label)
                         .accessibilityIdentifier("home.collection.pending.progress")
                 }
             }

@@ -120,7 +120,7 @@ struct ShellFeatures {
 
     /// Real features share the app-owned collection; unbound standard remains
     /// available to isolated shell fixtures that replace every review slot.
-    static func standard(collection: ReviewCollection) -> ShellFeatures {
+    static func standard(collection: ReviewCollection, statsService: any StatsService = CoreStatsService()) -> ShellFeatures {
         collection.configureAddNotePresentation()
         var features = standard
         features.addPanel = { AnyView(AddNoteView(collection: collection)) }
@@ -140,7 +140,7 @@ struct ShellFeatures {
         collection.deckImportBrowseAvailable = features.availableSections.contains(.browse)
         let statsPage: StatsPage?
         if StatsRollout.enabled {
-            let host = StatsCollectionHost(collection: collection)
+            let host = StatsCollectionHost(collection: collection, service: statsService)
             statsPage = host.page
             features.statsHost = host
         } else {

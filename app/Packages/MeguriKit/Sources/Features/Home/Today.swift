@@ -108,7 +108,7 @@ public struct TodayView: View {
         if phase == .pending || collection.homeCountsHeld || !phase.showsDecks {
             // Not known yet, or kept from an earlier study day: nothing here would be true
             // yet, so the page waits for the read in its own background (N27.3).
-            HomePendingPage(grouped: true)
+            HomePendingPage(grouped: true, label: Text("Loading Today", bundle: .module))
                 .modifier(TodayTitle(enabled: besideDeckList))
         } else {
             let decks = collection.homeDecks

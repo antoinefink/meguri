@@ -27,7 +27,10 @@ public struct HomeView: View {
         Group {
             // N27.1: the welcome and "No Decks" only once they are known; until the first read
             // the last read (or the page's own background) holds the page.
-            if deckID == nil, showsToday, phase.showsDecks || phase == .pending {
+            if let deckID, collection.navigation.pendingDeckPage == DeckID(deckID),
+               collection.navigation.homeDeckPage != DeckID(deckID) {
+                HomePendingPage(grouped: true, label: Text("Loading Deck", bundle: .module))
+            } else if deckID == nil, showsToday, phase.showsDecks || phase == .pending {
                 TodayView(collection: collection)
             } else if showsRootDeckList, let query = activeSearch {
                 HomeDeckSearchResults(collection: collection, search: DeckSearchFocus.search(collection.navigation), query: query)
@@ -1162,6 +1165,7 @@ private struct HomeSidebarBranch: View {
             .accessibilityLabel(Text(verbatim: path))
             .accessibilityValue(countsValue)
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
+            .accessibilityAddTraits(collection?.navigation.sidebarSelection == .deck(DeckID(node.id)) ? .isSelected : [])
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
             HStack {

@@ -105,6 +105,7 @@ struct SidebarRootView: View {
 
     /// The deck page Home shows in the Home section, else the section's root.
     private var root: SectionDestinationView.Screen {
+        if let deck = navigation.pendingDeckPage { return .deckPage(deck) }
         // A section that is not offered now (no collection, N18.3) shows Today.
         guard features.sectionShown(navigation.section) else { return .root(.home) }
         if navigation.section == .home, let deck = navigation.homeDeckPage {

@@ -24,7 +24,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var content: some View {
-        if navigation.section == .browse, let browseSidebar = features.browseSidebar {
+        if navigation.pendingDeckPage == nil, navigation.section == .browse, let browseSidebar = features.browseSidebar {
             // N21.1: with Browse selected, the filters take the decks' place.
             browseSidebar(navigation, AnyView(sectionRows { BrowseSidebarTag.section($0) }))
         } else {

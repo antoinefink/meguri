@@ -20,12 +20,18 @@ public final class ReviewCollection: ChangeFanoutSink {
     public private(set) var generation: UInt64 = 0
     public private(set) var decks: [CountedDeckNode] = [] {
         // A write changes the tree's counts or names: Edit › Undo's step may have changed.
-        didSet { if decks != oldValue { undoOwner?.scheduleRefresh() } }
+        didSet {
+            deckTreeVersion &+= 1
+            if decks != oldValue { undoOwner?.scheduleRefresh() }
+        }
     }
     /// The generation `decks` was read for, once a read applied; nil while the tree of the open
     /// collection has not been read (a launch, a replacement). The Statistics page reads it so a
     /// deck it shows is never taken for deleted before the tree arrives (U296).
     public private(set) var deckTreeGeneration: UInt64?
+    /// Changes on every tree publication, including disclosure writes. Consumers can
+    /// observe its identity without comparing every node on each navigation event.
+    public private(set) var deckTreeVersion: UInt64 = 0
     /// Page content may belong to a deck intentionally absent from the tree.
     public struct DeckPageDetail: Sendable, Hashable {
         public let id: Int64
@@ -1629,8 +1635,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         if awaitingOpen {
             // A row of the kept list, or of the read one before the open ends (N27.4): the press waits for the read and opens the deck
             // only if the read tree has it; a later press or selection supersedes it.
-            let intent = navigation.beginDeckSelection()
+            let intent = navigation.beginDeckSelection(deck: DeckID(deckID))
             let task = Task { () -> Bool in
+                defer { navigation.finishDeckSelection(intent: intent) }
                 guard await awaitFirstRead(intent: intent), deck(deckID) != nil else { return false }
                 return await openDeckPage(deckID: deckID).value
             }
@@ -1648,12 +1655,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func openDeckPage(deckID: Int64, detail: DeckPageDetail?,
                               admission: @escaping @MainActor () -> Bool = { true },
                               didOpen: @escaping @MainActor () -> Void = {}) -> Task<Bool, Never> {
-        let intent = navigation.beginDeckSelection()
+        let intent = navigation.beginDeckSelection(deck: navigation.homeDeckPage == DeckID(deckID) && navigation.section == .home ? nil : DeckID(deckID))
         let selection = selectDeck(deckID: deckID, intent: intent, admission: admission)
         let expected = generation, revision = selectionRevision
         let task = Task {
+            defer { navigation.finishDeckSelection(intent: intent) }
             guard await selection.value, expected == generation, revision == selectionRevision,
                   canSaveDeckState, admission(), navigation.intentRevision == intent else { return false }
+            navigation.finishDeckSelection(intent: intent)
             if navigation.sidebarSelection != .deck(DeckID(deckID)) {
                 navigation.openDeckPage(DeckID(deckID))
             }
@@ -2852,6 +2861,23 @@ public final class ReviewCollection: ChangeFanoutSink {
             appGroupSnapshot: location.directory.appending(path: "meguri-widget-unavailable.json"), manualTransferDirectory: providerDirectory)
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
+    /// Synthetic navigation reads for native UI evidence. No collection is opened,
+    /// no SDK is attached, and no timer or artificial wait is added to production.
+    /// The hook supplies explicit gates and uses the ordinary collection/view paths.
+    @_spi(MeguriTestHooks) public func configureNavigationFixture(
+        generation: UInt64,
+        tree: @escaping @MainActor () async throws -> CountedDeckTree,
+        select: @escaping @MainActor (Int64) async throws -> UInt64,
+        browse: BrowseModel, noteTypes: NoteTypesModel
+    ) {
+        loadDeckTree = tree
+        saveSelectedDeck = select
+        browseOwner = browse
+        noteTypesOwner = noteTypes
+        receiveLifecycle(.ready(generation: generation))
+        refreshCounts()
+    }
+
     /// Captures only (`-MeguriSyncRender`): once the collection is open, the
     /// shell shows `fixture`'s synthetic status in place of the real one. The
     /// real coordinator keeps running unseen; nothing is synced or written.

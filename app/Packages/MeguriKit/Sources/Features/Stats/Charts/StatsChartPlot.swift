@@ -567,7 +567,7 @@ struct StatsChartPlot: View {
                     ProgressView(value: min(max(fraction, 0), 1))
                         .frame(maxWidth: 160)
                 } else {
-                    ProgressView()
+                    DelayedProgressView(Text("Loading Statistics", bundle: .module))
                 }
             }
             .controlSize(.small)
