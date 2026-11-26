@@ -29,7 +29,8 @@ fn answer_head(review: &ReviewService, session: SessionId, head: &Head, rating: 
 }
 fn home_review(h: &Harness, due: i32) -> Card {
     let id = h.cards[0];
-    h.collection.run(OpSpec::named("home review fixture", OpSource::Maintenance), |ctx| {
+    let last_review_secs = (h.clock.now_ms() / 1000) - 7 * 86400;
+    h.collection.run(OpSpec::named("home review fixture", OpSource::Maintenance), move |ctx| {
         let mut home = ctx.scope().deck(DeckId(1))?.unwrap();
         let mut kind = (*home.kind).clone();
         let DeckKind::Normal(n) = &mut kind.kind else { unreachable!() };
@@ -45,7 +46,7 @@ fn home_review(h: &Harness, due: i32) -> Card {
         card.reps = 8;
         card.lapses = 2;
         card.data.memory_state = Some(MemoryState { stability: 17.0, difficulty: 4.0 });
-        card.data.last_review_secs = Some((h.clock.now_ms() / 1000) - 7 * 86400);
+        card.data.last_review_secs = Some(last_review_secs);
         ctx.scope().put(&card)?;
         Ok(())
     }).unwrap();
@@ -287,7 +288,8 @@ fn changed_membership_or_definition_rejects_the_presented_answer_without_history
         let deck = borrow(&h, false, 60);
         let (session, head) = start(&h.review, deck);
         let shown = head.items[0].clone();
-        h.collection.run(OpSpec::named("external filtered operation", OpSource::UserUndoable), |ctx| {
+        let card_id = shown.card_id;
+        h.collection.run(OpSpec::named("external filtered operation", OpSource::UserUndoable), move |ctx| {
             if change == "definition" {
                 let mut row = ctx.scope().deck(deck)?.unwrap();
                 let mut kind = (*row.kind).clone();
@@ -296,7 +298,7 @@ fn changed_membership_or_definition_rejects_the_presented_answer_without_history
                 row.kind = ProtoBlob::new(kind);
                 ctx.scope().put(&row)?;
             } else {
-                let mut row = ctx.scope().card(shown.card_id)?.unwrap();
+                let mut row = ctx.scope().card(card_id)?.unwrap();
                 if change == "empty" {
                     meguri_sched::model::card_sched::return_from_filtered(&mut row);
                 } else {
