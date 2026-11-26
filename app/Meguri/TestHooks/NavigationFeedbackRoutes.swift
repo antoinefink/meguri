@@ -101,6 +101,16 @@ extension TestHooks {
                 await deckGate.wait()
                 if deckGate.fails { throw BridgeError.invalidArgument("Synthetic deck selection failure") }
                 return 1
+            }, deckEmpty: { id in
+                // Every modeled deck contains cards. No secondary page read may
+                // reach the deliberately nonexistent collection directory.
+                func contains(_ nodes: [CountedDeckNode]) -> Bool {
+                    nodes.contains { $0.id == id || contains($0.children) }
+                }
+                guard contains(StatsSampleService.decks) else {
+                    throw BridgeError.invalidArgument("Unknown synthetic deck")
+                }
+                return false
             }, browse: BrowseModel(backend: browseBackend, store: BrowseDeviceStore(defaults: nil)),
                noteTypes: NoteTypesModel(backend: noteBackend))
             StatsRollout.enabled = true

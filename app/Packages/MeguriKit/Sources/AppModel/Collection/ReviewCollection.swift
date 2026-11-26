@@ -57,6 +57,8 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         fileprivate let selection: UInt64
     }
     private var selectedDeckEmptiness: (request: DeckPageRefreshRequest, empty: Bool)?
+    /// Explicit synthetic owners have no Core host; their page read stays in the model.
+    @ObservationIgnored var loadFixtureDeckEmptiness: (@MainActor (Int64) async throws -> Bool)?
     /// Only the visible Home page queries storage; rows keep the normal count refresh.
     public var deckPageRefreshRequest: DeckPageRefreshRequest? {
         guard navigation.pendingDeckPage == nil, navigation.section == .home, canSaveDeckState, foreground,
@@ -2086,7 +2088,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             }
         } catch {
             if expected == generation, revision == deckTreeRevision, !closed {
-                self.error = "Couldn’t refresh decks. Try again."
+                if self.error != "Couldn’t select this deck. Try again." {
+                    self.error = "Couldn’t refresh decks. Try again."
+                }
                 // A first read that failed is known: Home says so instead of waiting (N27.1).
                 if deckTreeGeneration != generation {
                     deckTreeFailedGeneration = generation
@@ -2128,6 +2132,12 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         guard current() else { return }
         selectedDeckEmptiness = nil
         do {
+            if let loadFixtureDeckEmptiness {
+                let empty = try await loadFixtureDeckEmptiness(request.deckID)
+                guard current() else { return }
+                selectedDeckEmptiness = (request: request, empty: empty)
+                return
+            }
             let service = CoreDeckService()
             let before = try await service.allDeckNames()
             guard current(), before.generation == request.generation else { return }
@@ -2158,7 +2168,10 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         } catch {
             if current() {
                 selectedDeckEmptiness = nil
-                self.error = "Couldn’t refresh the deck. Try again."
+                // Keep the actionable selection failure until its save succeeds.
+                if self.error != "Couldn’t select this deck. Try again." {
+                    self.error = "Couldn’t refresh the deck. Try again."
+                }
             }
         }
     }
@@ -3167,10 +3180,12 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         generation: UInt64,
         tree: @escaping @MainActor () async throws -> CountedDeckTree,
         select: @escaping @MainActor (Int64) async throws -> UInt64,
+        deckEmpty: @escaping @MainActor (Int64) async throws -> Bool,
         browse: BrowseModel, noteTypes: NoteTypesModel
     ) {
         loadDeckTree = tree
         saveSelectedDeck = select
+        loadFixtureDeckEmptiness = deckEmpty
         browseOwner = browse
         noteTypesOwner = noteTypes
         // This explicit synthetic owner has no Core host. Production lifecycle

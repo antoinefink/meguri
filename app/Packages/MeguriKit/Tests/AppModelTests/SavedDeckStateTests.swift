@@ -152,6 +152,68 @@ import Testing
     }
 
     @Test(arguments: [false, true])
+    func selectionFailureSurvivesBackgroundRefreshFailureAndRetry(refreshFinishesFirst: Bool) async throws {
+        let (owner, store) = await makeOwner()
+        #expect(await owner.openDeckPage(deckID: 1).value)
+        let selection = DeckStateGate(), refresh = DeckStateGate()
+        store.selectionGates = [selection]
+        store.selectionFailures = [2]
+        owner.loadDeckTree = {
+            await refresh.hold()
+            throw BridgeError.internal("Synthetic background refresh failure")
+        }
+        let refreshing = Task { await owner.loadCounts() }
+        await refresh.waitUntilEntered()
+        let opening = owner.openDeckPage(deckID: 2)
+        await selection.waitUntilEntered()
+        if refreshFinishesFirst {
+            refresh.release()
+            await refreshing.value
+            #expect(owner.error == "Couldn’t refresh decks. Try again.")
+        }
+        selection.release()
+        #expect(!(await opening.value))
+        if !refreshFinishesFirst {
+            refresh.release()
+            await refreshing.value
+        }
+        #expect(owner.navigation.homeDeckPage == DeckID(1))
+        #expect(owner.navigation.sidebarSelection == .deck(DeckID(1)))
+        #expect(store.selected == 1)
+        #expect(owner.error == "Couldn’t select this deck. Try again.")
+
+        // Restoring A mounts its page again, starting a fresh detail refresh.
+        owner.loadFixtureDeckEmptiness = { _ in throw BridgeError.internal("Synthetic detail failure") }
+        let request = try #require(owner.deckPageRefreshRequest)
+        await owner.refreshDeckPage(request)
+        #expect(owner.error == "Couldn’t select this deck. Try again.")
+        #expect(owner.navigation.homeDeckPage == DeckID(1))
+        store.selectionFailures = []
+        #expect(await owner.openDeckPage(deckID: 2).value)
+        #expect(owner.navigation.homeDeckPage == DeckID(2))
+        #expect(store.selected == 2)
+        #expect(store.selectionAttempts == [1, 2, 2])
+        #expect(owner.error == nil)
+    }
+
+    @Test func syntheticDeckDetailsPublishEmptinessAndReportReadFailure() async throws {
+        let (owner, _) = await makeOwner()
+        #expect(await owner.openDeckPage(deckID: 1).value)
+        let request = try #require(owner.deckPageRefreshRequest)
+        owner.loadFixtureDeckEmptiness = { id in
+            #expect(id == 1)
+            return true
+        }
+        await owner.refreshDeckPage(request)
+        #expect(owner.emptyDeckPageID == 1)
+        #expect(owner.error == nil)
+        owner.loadFixtureDeckEmptiness = { _ in throw BridgeError.internal("Synthetic detail failure") }
+        await owner.refreshDeckPage(request)
+        #expect(owner.emptyDeckPageID == nil)
+        #expect(owner.error == "Couldn’t refresh the deck. Try again.")
+    }
+
+    @Test(arguments: [false, true])
     func abandonedSelectionFailureDoesNotReachHomeOrAnotherSection(showsAnotherSection: Bool) async {
         let (owner, store) = await makeOwner()
         let gate = DeckStateGate()

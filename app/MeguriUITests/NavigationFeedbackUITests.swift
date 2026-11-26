@@ -41,7 +41,7 @@ import XCTest
         try launchFeedback(holding: ["home"])
         // The first tree is genuinely unknown: neither No Decks nor the welcome flashes.
         try clickSection("browse")
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND label CONTAINS '1,204'"), element("browse.status.text")))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
         try clickSection("home")
         captureLoading("navigation-loading-today-and-deck-list", label: "Loading Today", title: "Today", section: "home")
         XCTAssertFalse(element("home.sidebar.guidance").exists)
@@ -80,7 +80,7 @@ import XCTest
         captureLoading("navigation-loading-browse", label: "Searching Browse", title: "Browse", section: "browse")
         XCTAssertEqual(progress("Searching Browse").identifier, "browse.navigation.progress")
         try command("release.browse")
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND label CONTAINS '1,204'"), element("browse.status.text")))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
     }
 
     func testNoteTypesListLoadingScreenshot() throws {
@@ -118,8 +118,14 @@ import XCTest
         XCTAssertTrue(knowledge.waitForExistence(timeout: 10))
         let loadedKnowledge = knowledge.label
         try clickSection("browse")
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND label CONTAINS '1,204'"), element("browse.status.text")))
-        let browseStatus = element("browse.status.text").label
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
+        let browseStatus = displayedText(element("browse.status.text"))
+        XCTAssertTrue(browseStatus.contains("1,204"))
+        let browseContent = element("browse.results.table").outlineRows.firstMatch.staticTexts
+            .matching(NSPredicate(format: "label != '' OR (value != nil AND value != '')")).firstMatch
+        XCTAssertTrue(browseContent.waitForExistence(timeout: 5))
+        let loadedBrowseContent = displayedText(browseContent)
+        XCTAssertFalse(loadedBrowseContent.isEmpty, "A loaded result cell witnesses Browse content")
         try clickSection("noteTypes")
         XCTAssertTrue(element("noteTypes.fields.table").waitForExistence(timeout: 10))
 
@@ -141,7 +147,10 @@ import XCTest
         XCTAssertEqual(knowledge.label, loadedKnowledge, "Kept chart remains during an unfinished refresh")
         assertNoProgress("Loading Statistics")
         try clickSection("browse")
-        XCTAssertEqual(element("browse.status.text").label, browseStatus)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
+        XCTAssertEqual(displayedText(element("browse.status.text")), browseStatus)
+        XCTAssertTrue(browseContent.exists)
+        XCTAssertEqual(displayedText(browseContent), loadedBrowseContent, "The loaded result cell remains on return")
         assertNoProgress("Searching Browse")
         try clickSection("noteTypes")
         XCTAssertTrue(element("noteTypes.fields.table").waitForExistence(timeout: 5))
@@ -221,7 +230,9 @@ import XCTest
         // A/B/A before either save finishes: selection follows each click;
         // a completion from B cannot replace A or pull us back after departure.
         try clickDeck(languages)
-        XCTAssertTrue(element("home.collection.pending").waitForExistence(timeout: 3))
+        XCTAssertTrue(progress("Loading Deck").waitForExistence(timeout: 3))
+        assertTitle("Languages")
+        assertSelected("home.sidebar.deck.\(languages)")
         try clickDeck(science)
         assertTitle("Science")
         try clickDeck(languages)
@@ -238,7 +249,9 @@ import XCTest
         // A loaded A, pending B, then A: no empty-page flash for loaded A.
         try command("hold.deck")
         try clickDeck(science)
-        XCTAssertTrue(element("home.collection.pending").waitForExistence(timeout: 3))
+        XCTAssertTrue(progress("Loading Deck").waitForExistence(timeout: 3))
+        assertTitle("Science")
+        assertSelected("home.sidebar.deck.\(science)")
         try clickDeck(languages)
         XCTAssertTrue(element("home.deck.page.\(languages)").waitForExistence(timeout: 3))
         XCTAssertFalse(progress("Loading Deck").exists)
@@ -263,7 +276,7 @@ import XCTest
         try clickSection("noteTypes")
         XCTAssertTrue(element("noteTypes.fields.table").waitForExistence(timeout: 10))
         try clickSection("browse")
-        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND label CONTAINS '1,204'"), element("browse.status.text")))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
         try clickSection("stats")
         try waitForState("filled=true")
         XCTAssertFalse(progress("Loading Statistics").exists)
@@ -302,6 +315,9 @@ import XCTest
 
     private func element(_ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+    private func displayedText(_ element: XCUIElement) -> String {
+        element.label.isEmpty ? (element.value as? String ?? "") : element.label
     }
     private func progress(_ label: String) -> XCUIElement {
         app.activityIndicators.matching(NSPredicate(format: "label == %@", label)).firstMatch
