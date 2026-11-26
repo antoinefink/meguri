@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import XCTest
 
@@ -20,35 +21,50 @@ final class BackupRestoreWindowUITests: XCTestCase {
         addTeardownBlock { @MainActor in app.terminate() }
 
         let anchor = "settings.backups.cancel"
-        XCTAssertTrue(element(app, anchor).waitForExistence(timeout: 10))
-        let windowQuery = app.windows.containing(.any, identifier: anchor)
-        XCTAssertTrue(wait { windowQuery.count == 1 })
-        // Bind before the confirmation's modal AX tree hides presenting controls.
-        let index = try XCTUnwrap(app.windows.allElementsBoundByIndex.firstIndex {
-            $0.descendants(matching: .any).matching(identifier: anchor).firstMatch.exists
-        })
-        let window = app.windows.element(boundBy: index)
+        // The .screen route also owns a Launcher main window. Keep the scene
+        // binding even when modal AX hides its descendants or reorders windows.
+        let window = app.windows["settings.backups.restoreWindow"]
+        let appeared = window.waitForExistence(timeout: 10)
+        do {
+            if appeared && !window.frame.isEmpty {
+                try app.bringToFront(bundleIdentifier: bundle)
+                // Activate this window through its titlebar, without selecting a row.
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+                    .withOffset(CGVector(dx: 0, dy: 12)).click()
+            }
+        } catch {
+            attachReadiness(window, app: app, focus: "Activation failed: \(error)")
+            throw error
+        }
+        // Attach before any readiness assertion, including the missing-window case.
+        attachReadiness(window, app: app, focus: appeared ? "Titlebar activation requested" : "Window did not appear")
+        XCTAssertTrue(appeared, "The production restore scene must exist")
+        let windowCancel = element(window, anchor)
+        XCTAssertTrue(wait {
+            window.title == "Restore from Backup" && !window.frame.isEmpty
+                && windowCancel.exists && windowCancel.isEnabled && windowCancel.isHittable
+        }, "The bound restore window must have its exact title and native Cancel affordance")
         let content = element(window, "settings.backups.restoreContent")
         let first = entry(window, "backup-2026-11-25-17.25.00.colpkg")
         let filename = "backup-2026-11-01-08.00.00.colpkg"
         let oldest = entry(window, filename)
         let apply = element(window, "settings.backups.apply")
-        var history: XCUIElement?
-
         XCTAssertTrue(wait {
-            // SwiftUI may expose Table as an outline, or merge restoreContent
-            // into it. Prefer its enclosing native scroll viewport when present.
-            history = (window.scrollViews.allElementsBoundByIndex + window.tables.allElementsBoundByIndex
-                + window.outlines.allElementsBoundByIndex).first {
+            first.exists && !first.frame.isEmpty
+                && apply.exists && apply.isEnabled && apply.isHittable
+        }, "The initial archive and Restore action must be ready")
+        // Resolve the expensive history queries once, after native readiness.
+        // Prefer the enclosing scroll viewport; SwiftUI may expose an outline
+        // instead of a Table, or merge restoreContent into it.
+        var history: XCUIElement?
+        for type in [XCUIElement.ElementType.scrollView, .table, .outline] {
+            history = window.descendants(matching: type).allElementsBoundByIndex.first {
                 self.entry($0, "backup-2026-11-25-17.25.00.colpkg").exists
                     && !$0.frame.isEmpty && $0.frame.intersection(window.frame).contains(first.frame)
             }
-            return window.title == "Restore from Backup"
-                && window.buttons[XCUIIdentifierCloseWindow].exists
-                && first.exists && !first.frame.isEmpty && history != nil
-                && apply.exists && apply.isEnabled && apply.isHittable
-        }, "Wait for the native window and its initial history viewport")
-        let viewport = try XCTUnwrap(history)
+            if history != nil { break }
+        }
+        let viewport = try XCTUnwrap(history, "The bound window must contain the initial history viewport")
         XCTAssertFalse(app.sheets.firstMatch.exists, "The restore window must have no attached sheet")
         // Contract: 240-point initial content. Allow native layout/titlebar slack,
         // while rejecting a window whose initial height grows with all 26 rows.
@@ -117,11 +133,41 @@ final class BackupRestoreWindowUITests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         cancel.click()
         XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: 12)).click()
         XCTAssertTrue(wait {
             oldest.exists && oldest.value as? String == "Selected" && apply.isEnabled
-                && self.element(window, anchor).isHittable
+                && windowCancel.exists && windowCancel.isEnabled && windowCancel.isHittable
         }, "Cancelling returns to the same selected archive")
         XCTAssertFalse(app.sheets.firstMatch.exists)
+        XCTAssertFalse(element(window, "settings.backups.progress").exists, "Cancellation must not start restoration")
+        window.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10), "Cmd-W must close the same bound restore window")
+        XCTAssertFalse(element(app, "settings.backups.progress").exists, "Closing must not start restoration")
+    }
+
+    private func attachReadiness(_ window: XCUIElement, app: XCUIApplication, focus: String) {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
+        var details = "Binding: app.windows[settings.backups.restoreWindow]\n"
+            + "Focus: \(focus); frontmost=\(frontmost); appState=\(app.state.rawValue)\n"
+            + "Window exists: \(window.exists)\n"
+        if window.exists {
+            details += "Identifier: \(window.identifier); title: \(window.title); frame: \(window.frame)\n"
+            for id in ["settings.backups.cancel", "settings.backups.apply", "settings.backups.restoreContent"] {
+                let control = element(window, id)
+                details += "\(id): exists=\(control.exists)"
+                if control.exists { details += "; frame=\(control.frame); enabled=\(control.isEnabled)" }
+                details += "\n"
+            }
+            // Only this public synthetic restore window, never the app or desktop.
+            details += window.debugDescription
+        }
+        let attachment = XCTAttachment(string: details)
+        attachment.name = "native-backups-mac-readiness-synthetic"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if window.exists && !window.frame.isEmpty { capture(window, "readiness") }
     }
 
     private func element(_ context: XCUIElement, _ identifier: String) -> XCUIElement {
