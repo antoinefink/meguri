@@ -18,6 +18,7 @@ struct ReviewTerminalContent: View {
     let refresh: () -> Void
     let continueReview: () -> Void
     let close: () -> Void
+    var customStudy: (() -> Void)? = nil
     @Environment(\.locale) private var locale
 
     @State private var finished = false
@@ -89,6 +90,12 @@ struct ReviewTerminalContent: View {
                 .focused($continueFocused)
                 .disabled(!canContinue)
                 .accessibilityIdentifier("review.session.continue")
+                .reviewStateTarget()
+        }
+        if !waiting, let customStudy {
+            Button(action: customStudy) { Text("Custom Study…", bundle: .module).reviewStateLabel() }
+                .disabled(!canFinish)
+                .accessibilityIdentifier("review.session.customStudy")
                 .reviewStateTarget()
         }
         Button(action: finish) { Text("Done", bundle: .module).reviewStateLabel() }

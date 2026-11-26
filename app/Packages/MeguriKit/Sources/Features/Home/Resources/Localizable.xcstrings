@@ -1324,6 +1324,616 @@
           }
         }
       }
+    },
+    "Create Filtered Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Filtered Deck"
+          }
+        }
+      }
+    },
+    "Edit Filtered Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Filtered Deck"
+          }
+        }
+      }
+    },
+    "Custom Study": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Study"
+          }
+        }
+      }
+    },
+    "Save and Build": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save and Build"
+          }
+        }
+      }
+    },
+    "Apply": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "First Search": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Search"
+          }
+        }
+      }
+    },
+    "Second Search": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Second Search"
+          }
+        }
+      }
+    },
+    "Use a second search": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a second search"
+          }
+        }
+      }
+    },
+    "Reschedule cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reschedule cards"
+          }
+        }
+      }
+    },
+    "Again (seconds)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Again (seconds)"
+          }
+        }
+      }
+    },
+    "Hard (seconds)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hard (seconds)"
+          }
+        }
+      }
+    },
+    "Good (seconds)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Good (seconds)"
+          }
+        }
+      }
+    },
+    "Preview preserves each card’s home schedule. A zero delay finishes the card; Easy always finishes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview preserves each card’s home schedule. A zero delay finishes the card; Easy always finishes."
+          }
+        }
+      }
+    },
+    "Oldest review first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oldest review first"
+          }
+        }
+      }
+    },
+    "Random": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random"
+          }
+        }
+      }
+    },
+    "Shortest interval first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shortest interval first"
+          }
+        }
+      }
+    },
+    "Longest interval first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Longest interval first"
+          }
+        }
+      }
+    },
+    "Most lapses first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Most lapses first"
+          }
+        }
+      }
+    },
+    "Oldest note first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oldest note first"
+          }
+        }
+      }
+    },
+    "Due first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due first"
+          }
+        }
+      }
+    },
+    "Newest note first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Newest note first"
+          }
+        }
+      }
+    },
+    "Lowest retrievability first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lowest retrievability first"
+          }
+        }
+      }
+    },
+    "Highest retrievability first": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Highest retrievability first"
+          }
+        }
+      }
+    },
+    "Relative overdueness": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relative overdueness"
+          }
+        }
+      }
+    },
+    "Unknown order": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown order"
+          }
+        }
+      }
+    },
+    "Card limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card limit"
+          }
+        }
+      }
+    },
+    "Order": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Order"
+          }
+        }
+      }
+    },
+    "Adjust today’s new limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust today’s new limit"
+          }
+        }
+      }
+    },
+    "Adjust today’s review limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust today’s review limit"
+          }
+        }
+      }
+    },
+    "Forgotten cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgotten cards"
+          }
+        }
+      }
+    },
+    "Review ahead": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review ahead"
+          }
+        }
+      }
+    },
+    "Preview recent new cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview recent new cards"
+          }
+        }
+      }
+    },
+    "Study by state or tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study by state or tags"
+          }
+        }
+      }
+    },
+    "New cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New cards"
+          }
+        }
+      }
+    },
+    "Due cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due cards"
+          }
+        }
+      }
+    },
+    "Previously introduced cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previously introduced cards"
+          }
+        }
+      }
+    },
+    "All cards (preview)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All cards (preview)"
+          }
+        }
+      }
+    },
+    "Available cards before daily limits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available cards before daily limits"
+          }
+        }
+      }
+    },
+    "Change in today’s limit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change in today’s limit"
+          }
+        }
+      }
+    },
+    "Days": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Days"
+          }
+        }
+      }
+    },
+    "Choose 1–30 days.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose 1–30 days."
+          }
+        }
+      }
+    },
+    "Positive changes allow more cards today. Negative changes reduce today’s allowance.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Positive changes allow more cards today. Negative changes reduce today’s allowance."
+          }
+        }
+      }
+    },
+    "Preview preserves each card’s home schedule.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview preserves each card’s home schedule."
+          }
+        }
+      }
+    },
+    "Card state": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card state"
+          }
+        }
+      }
+    },
+    "Include tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include tags"
+          }
+        }
+      }
+    },
+    "Exclude tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclude tags"
+          }
+        }
+      }
+    },
+    "Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags."
+          }
+        }
+      }
+    },
+    "Couldn’t read study settings. Try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t read study settings. Try again."
+          }
+        }
+      }
+    },
+    "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first."
+          }
+        }
+      }
+    },
+    "The change was saved. Refresh decks to continue.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The change was saved. Refresh decks to continue."
+          }
+        }
+      }
+    },
+    "Couldn’t Update Study Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Update Study Deck"
+          }
+        }
+      }
+    },
+    "Try again, or edit the search and card limits.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again, or edit the search and card limits."
+          }
+        }
+      }
+    },
+    "Edit Filtered Deck…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Filtered Deck…"
+          }
+        }
+      }
+    },
+    "Create Filtered Deck…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create Filtered Deck…"
+          }
+        }
+      }
+    },
+    "Custom Study…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Study…"
+          }
+        }
+      }
+    },
+    "Rebuild": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuild"
+          }
+        }
+      }
+    },
+    "Empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty"
+          }
+        }
+      }
+    },
+    "Browse Cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browse Cards"
+          }
+        }
+      }
+    },
+    "Deck Statistics": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Statistics"
+          }
+        }
+      }
+    },
+    "Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

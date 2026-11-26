@@ -403,6 +403,16 @@
           }
         }
       }
+    },
+    "Custom Study…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Study…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

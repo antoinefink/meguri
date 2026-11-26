@@ -23,6 +23,16 @@ private struct ReviewDestination: View {
             editNote: ReviewEditNote(flow: collection.editNoteFlow, open: { Task { await collection.openEditNote() } },
                 form: AnyView(EditNoteView(collection: collection))),
             showInBrowse: collection.reviewShowInBrowse,
+            customStudy: walk == nil && collection.deck(model.record.deckID)?.filtered == false ? {
+                let expected = collection.generation
+                Task {
+                    await collection.finishReview()
+                    guard expected == collection.generation, collection.review == nil,
+                          collection.navigation.section == .home, collection.navigation.sheet == nil,
+                          collection.navigation.homeDeckPage?.rawValue == model.record.deckID else { return }
+                    collection.filteredStudy.custom(model.record.deckID)
+                }
+            } : nil,
             visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
     }
 }
@@ -155,7 +165,8 @@ struct ShellFeatures {
                 }, editNoteType: { id in
                     collection.noteTypes.selection = id
                     navigation.select(.section(.noteTypes))
-                }, addMenu: AnyView(HomeAddMenu(collection: collection))))
+                }, addMenu: AnyView(HomeAddMenu(collection: collection, fromBrowse: true)))
+                    .modifier(FilteredStudyFeedback(model: collection.filteredStudy)))
             #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes, navigation: navigation))
             default: AnyView(HomeView(collection: collection))
@@ -171,6 +182,9 @@ struct ShellFeatures {
         features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
         #endif
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
+        collection.showDeckStatistics = statsPage.map { page in
+            { deck in page.selectDeck(deck); collection.navigation.select(.section(.stats)) }
+        }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         #if os(iOS)
         features.noteType = { id, _ in AnyView(NoteTypePage(model: collection.noteTypes, id: id)) }
@@ -201,6 +215,8 @@ struct ShellFeatures {
             switch route {
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .deckImport: AnyView(DeckImportSheet(model: collection.deckImport))
+            case .filteredStudy: AnyView(FilteredStudyForm(model: collection.filteredStudy))
+            case .customStudy: AnyView(CustomStudyForm(model: collection.filteredStudy))
             case .deckName: AnyView(DeckNameForm(model: collection.deckActions))
             case .newDeckOptionsPreset: AnyView(NewDeckOptionsPresetForm(model: collection.deckOptions))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))

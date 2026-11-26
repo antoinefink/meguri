@@ -19,7 +19,7 @@ struct NativeCommandContext {
     var statsPage: StatsPage?
 
     var fileActionsAvailable: Bool {
-        collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
+        collection.navigation.sheet == nil && !collection.filteredStudy.busy && !collection.deckActions.busy && !collection.manualTransfers.busy
             && !collection.entry.pickerPresented && !collection.intake.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
@@ -149,17 +149,26 @@ struct NativeCommandContext {
               collection.deck(deck) != nil || collection.deckPage(deck) != nil else { return nil }
         return deck
     }
-    /// N14.3: as the deck page, no Study while a regular deck has nothing waiting; never a filtered deck.
+    /// F6: both normal and filtered decks study through the same Core path.
     var canStudyShownDeck: Bool {
-        guard let deck = shownDeck, collection.deck(deck)?.filtered != true else { return false }
+        guard let deck = shownDeck else { return false }
         return collection.canStudy && collection.offersStudy(deckID: deck)
     }
     var canRenameShownDeck: Bool { shownDeck.map { collection.deckActions.canPresent(.rename($0), host: host) } ?? false }
     var canAddSubdeck: Bool { shownDeck.map { collection.deckActions.canPresent(.subdeck($0), host: host) } ?? false }
     var canOpenDeckOptions: Bool {
         guard host == .main, review == nil, collection.navigation.sheet == nil, let deck = shownDeck else { return false }
-        return collection.deckOptions.canOpen(deckID: deck)
+        return collection.deckOptions.canOpen(deckID: deck) || collection.filteredStudy.canEdit(deck)
     }
+    var canCreateFiltered: Bool { host == .main && collection.filteredStudy.canPresent }
+    func createFiltered() {
+        guard canCreateFiltered else { return }
+        if collection.navigation.section == .browse { collection.filteredStudy.createFromBrowse() }
+        else { collection.filteredStudy.create(deck: shownDeck) }
+    }
+    var canCustomStudy: Bool { shownDeck.map { collection.filteredStudy.canCustom($0) } ?? false }
+    var canManageFiltered: Bool { shownDeck.map { collection.filteredStudy.canEdit($0) } ?? false }
+
     /// N20.4, N20.7: the shown deck, filtered included, outside review, with no
     /// sheet, panel or text input owning ⌘⌫ (H9.2): a focused text view keeps
     /// it for deleting to the line's start.
@@ -465,6 +474,30 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(context?.canStudyShownDeck != true)
+            Button(StudyCommandText.custom) {
+                guard let context, context.canCustomStudy, let deck = context.shownDeck else { return }
+                context.collection.filteredStudy.custom(deck)
+            }
+            .disabled(context?.canCustomStudy != true)
+            .accessibilityIdentifier("home.commands.customStudy")
+            Button(StudyCommandText.create) { context?.createFiltered() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(context?.canCreateFiltered != true)
+                .accessibilityIdentifier("home.commands.createFilteredDeck")
+            Divider()
+            Button(StudyCommandText.rebuild) {
+                guard let context, context.canManageFiltered, let deck = context.shownDeck else { return }
+                context.collection.filteredStudy.rebuild(deck)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+            .disabled(context?.canManageFiltered != true)
+            .accessibilityIdentifier("home.commands.rebuildFilteredDeck")
+            Button(StudyCommandText.empty) {
+                guard let context, context.canManageFiltered, let deck = context.shownDeck else { return }
+                context.collection.filteredStudy.empty(deck)
+            }
+            .disabled(context?.canManageFiltered != true)
+            .accessibilityIdentifier("home.commands.emptyFilteredDeck")
             Divider()
             Button("Rename…") {
                 guard let context, let deck = context.shownDeck, context.canRenameShownDeck else { return }
@@ -478,7 +511,7 @@ struct AppCommands: Commands {
             }
             .disabled(context?.canAddSubdeck != true)
             // N20.9: the shown normal deck's options; disabled during review.
-            Button("Deck Options…") {
+            Button(context?.shownDeck.flatMap { context?.collection.deck($0)?.filtered } == true ? StudyCommandText.edit : String(localized: "Deck Options…")) {
                 guard let context, let deck = context.shownDeck, context.canOpenDeckOptions else { return }
                 context.collection.openDeckOptions(deckID: deck)
             }
