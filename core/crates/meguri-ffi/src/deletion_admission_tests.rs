@@ -3,7 +3,7 @@ use super::*;
 use crate::notetype_structure::{NotetypeRemoval, remove_notetype_on};
 use crate::tags::delete_tags_on;
 use meguri_engine::{
-    Collection, EngineError, Generation, notetypes, notes, tags,
+    Collection, EngineError, Generation, notes, notetypes, tags,
     undo::{UndoScope, UndoStatus},
 };
 use meguri_model::{
@@ -173,7 +173,11 @@ fn replacement_before_deletion_admission_preserves_b_with_the_same_tag_and_type(
 
     // These are the exact helpers called by the public scoped FFI starters,
     // after all Swift suspension points and before any job is registered.
-    stale(delete_tags_on(host.clone(), "Shared".into(), planned.0), planned, current);
+    stale(
+        delete_tags_on(host.clone(), "Shared".into(), planned.0),
+        planned,
+        current,
+    );
     assert_eq!(facts(&c, root.path()), before);
     stale(
         remove_notetype_on(host.clone(), removal(identities.0), planned.0),
