@@ -110,7 +110,7 @@ public final class ReviewPages: ReviewCardSurface {
     #if os(macOS)
     private var editedFocusUpdate: CardUpdate?
     // Offscreen tests supply window ownership without activating the app.
-    var editedCardWindowReady: (CardPlatformView) -> Bool? = ReviewInputOwnership.editedCardWindowReady
+    var editedCardWindowReady: @MainActor (CardPlatformView) -> Bool? = ReviewInputOwnership.editedCardWindowReady
     #endif
     var onMediaReady: (() -> Void)?
     /// The Study click's way to the first card (R1813): this surface marks the
