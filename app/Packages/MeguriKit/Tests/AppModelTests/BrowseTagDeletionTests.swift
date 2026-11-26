@@ -88,6 +88,62 @@ import Testing
         deletion.delete(target); await deletion.waitForCompletion()
         #expect(deletion.failed == nil && deletion.announcement?.count == 2)
     }
+
+    @Test func settingsLoadsAndDeletesWithoutEverOpeningBrowse() async {
+        let backend = TagDeletionBackend(), model = BrowseModel(backend: backend)
+        #expect(!model.opened && !model.tagsLoaded)
+        await model.refreshTags()
+        #expect(model.tagsLoaded && model.hasTag("brask::oddly"))
+        #expect(!model.opened && !model.results.hasRun && backend.reads.openCalls == 0)
+        backend.perform = { backend.reads.tagNodes = [] }
+        model.tagDeletion.delete(model.tagDeletion.target(["brask"]))
+        await model.tagDeletion.waitForCompletion()
+        #expect(backend.texts == ["brask"] && model.tagsLoaded && model.tags.isEmpty)
+        #expect(!model.opened && !model.results.hasRun && model.tagDeletion.failed == nil)
+    }
+
+    @Test func tagReadFailureAndOldReadNeverPublishAsAnEmptyReadyTree() async throws {
+        let backend = TagDeletionBackend(), model = BrowseModel(backend: backend)
+        backend.readTree = { throw BridgeError.unavailable(reason: "synthetic") }
+        await model.refreshTags()
+        #expect(model.tagsFailed && !model.tagsLoaded && !model.tagsReading)
+        var held: CheckedContinuation<[TagNode], Never>?
+        backend.readTree = { await withCheckedContinuation { held = $0 } }
+        let oldRead = Task { await model.refreshTags() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while held == nil, ContinuousClock.now < deadline { await Task.yield() }
+        let release = try #require(held)
+        let oldTree = backend.reads.tagNodes
+        model.collectionReplaced()
+        backend.readTree = { [] }
+        await model.refreshTags()
+        release.resume(returning: oldTree)
+        await oldRead.value
+        #expect(model.tagsLoaded && model.tags.isEmpty && !model.tagsFailed && !model.tagsReading)
+        #expect(!model.opened && !model.results.hasRun)
+    }
+
+    @Test func dispatchAndCompletionRecheckReadinessAndGeneration() async {
+        for duringSave in [true, false] {
+            let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+            var ready = true, generation: UInt64 = 0
+            deletion.available = { ready }
+            deletion.generation = { generation }
+            deletion.contains = { _ in true }
+            let target = deletion.target(["brask"])
+            var landed = false
+            deletion.finished = { _, _ in landed = true }
+            if duringSave { deletion.saveFirst = { ready = false; return true } }
+            else { backend.perform = { generation += 1 } }
+            deletion.delete(target)
+            await deletion.waitForCompletion()
+            #expect(!landed && deletion.announcement == nil && !deletion.busy)
+            #expect(backend.texts.count == (duringSave ? 0 : 1))
+            if duringSave { #expect(deletion.failed == target) }
+            else { #expect(deletion.failed == nil && !deletion.canDelete(target)) }
+        }
+    }
+
 }
 
 /// Only the tag job is scripted. Other Browse reads use the existing pure fake.
@@ -99,7 +155,7 @@ import Testing
     func deleteTags(text: String) async throws -> CountMutation {
         texts.append(text)
         try await perform()
-        return CountMutation(summary: MutationSummary(seq: UInt64(texts.count), generation: 1, undoName: "Remove Tag",
+        return CountMutation(summary: MutationSummary(seq: UInt64(texts.count), generation: 0, undoName: "Remove Tag",
             changes: ChangeSet(wholeCollection: false, source: .userUndoable,
                 cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
                 revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [],
@@ -116,7 +172,11 @@ import Testing
     func deleteSavedSearch(_ name: String) async throws {}
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] { [] }
     func notetypes() async throws -> [NotetypeName] { [] }
-    func tagTree() async throws -> [TagNode] { [] }
+    var readTree: (@MainActor () async throws -> [TagNode])?
+    func tagTree() async throws -> [TagNode] {
+        if let readTree { return try await readTree() }
+        return reads.tagNodes
+    }
     func flagNames() async throws -> [String] { [] }
     func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] { items.map { _ in 0 } }
     func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {}
@@ -159,6 +219,24 @@ extension ReviewCollectionStartupTests {
             let cards = try await notes.noteCards(noteId: first.id)
             let otherCards = try await notes.noteCards(noteId: second.id)
             let browse = owner.browse, undo = owner.collectionUndo
+            // Settings is the first tag surface: no opening defaults, result
+            // session or sidebar read has populated the model.
+            await browse.refreshTags()
+            await tagWait { browse.hasTag("Registry::only") }
+            #expect(!browse.opened && !browse.results.hasRun && browse.hasTag("Registry::only"))
+            let registry = browse.tagDeletion.target(["Registry"])
+            browse.tagDeletion.delete(registry)
+            #expect(browse.tagDeletion.busy && !undo.canUndo)
+            undo.undo() // A pending deletion must not undo the preceding note edit.
+            await browse.tagDeletion.waitForCompletion()
+            await tagWait { browse.tagsLoaded && !browse.hasTag("Registry") && undo.canUndo && undo.undoName == "Delete Tag" }
+            #expect(browse.tagDeletion.announcement?.count == 0 && browse.tagDeletion.failed == nil)
+            undo.undo(); await undo.waitForCompletion()
+            await tagWait { browse.hasTag("Registry::only") }
+            #expect(!undo.failed && !browse.opened && !browse.results.hasRun)
+            #expect(try await notes.readNote(id: first.id) == before)
+            #expect(try await notes.noteCards(noteId: first.id) == cards)
+
             owner.navigation.select(.section(.browse)); browse.appear()
             await tagWait { browse.opened && browse.hasTag("Ink::zz") }
             let query = FilterQuery(tokens: [.value([.tag("Ink")], negated: false)])
@@ -170,7 +248,7 @@ extension ReviewCollectionStartupTests {
             browse.tagDeletion.delete(browse.tagDeletion.target(["Ink::pen"]))
             await browse.tagDeletion.waitForCompletion()
             #expect(browse.tagDeletion.announcement?.count == 1)
-            await tagWait { !browse.hasTag("Ink::pen") && undo.undoName == "Delete Tag" && undo.canUndo }
+            await tagWait { browse.tagsLoaded && !browse.hasTag("Ink::pen") && undo.undoName == "Delete Tag" && undo.canUndo }
             #expect(browse.hasTag("Ink") && browse.hasTag("Ink::pencil") && browse.hasTag("inky"))
             #expect(try await notes.readNote(id: first.id).tags == ["Ink", "inky", "other::Ink"])
             #expect(try await notes.readNote(id: second.id) == sibling)
@@ -182,7 +260,7 @@ extension ReviewCollectionStartupTests {
             browse.tagDeletion.delete(browse.tagDeletion.target(["Ink"]))
             await browse.tagDeletion.waitForCompletion()
             #expect(browse.tagDeletion.announcement?.count == 2)
-            await tagWait { !browse.hasTag("Ink") && browse.results.list?.count == 0 && undo.canUndo && undo.undoName == "Delete Tag" }
+            await tagWait { browse.tagsLoaded && !browse.hasTag("Ink") && browse.results.list?.count == 0 && undo.canUndo && undo.undoName == "Delete Tag" }
             #expect(browse.query == query, "the active tag filter survives; its search now finds nothing")
             #expect(browse.hasTag("inky") && !browse.hasTag("Ink::zz"))
             #expect(try await notes.readNote(id: first.id).tags == ["inky", "other::Ink"])
@@ -197,7 +275,7 @@ extension ReviewCollectionStartupTests {
             browse.tagDeletion.delete(browse.tagDeletion.target(["Registry"]))
             await browse.tagDeletion.waitForCompletion()
             #expect(browse.tagDeletion.announcement?.count == 0)
-            await tagWait { !browse.hasTag("Registry") && undo.undoName == "Delete Tag" && undo.canUndo }
+            await tagWait { browse.tagsLoaded && !browse.hasTag("Registry") && undo.undoName == "Delete Tag" && undo.canUndo }
             undo.undo(); await undo.waitForCompletion()
             await tagWait { browse.hasTag("Registry::only") }
             #expect(try await notes.noteCards(noteId: first.id) == cards)

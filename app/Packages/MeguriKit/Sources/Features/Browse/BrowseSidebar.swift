@@ -448,11 +448,6 @@ public struct BrowseSidebar<Header: View>: View {
     fileprivate func tagRow(_ node: TagNode) -> some View {
         return row(.tag(node.fullName), label: node.name, identifier: "tag.\(Self.identifier(node.fullName))", icon: .symbol("tag"),
             help: node.fullName.replacingOccurrences(of: "::", with: " › "))
-            #if !os(macOS)
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([node.fullName]))
-            }
-            #endif
     }
 
     /// A tag's name as an identifier's last part (letters, digits, `_` and `-`).

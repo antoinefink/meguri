@@ -41,46 +41,6 @@
         }
       }
     },
-    "browse.tags.title": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tags"
-          }
-        }
-      }
-    },
-    "browse.tags.done": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Done"
-          }
-        }
-      }
-    },
-    "browse.tags.actions": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Actions for %@"
-          }
-        }
-      }
-    },
-    "browse.tags.empty": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No Tags"
-          }
-        }
-      }
-    },
     "browse.notetype.delete": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Delete Note Type…" } }

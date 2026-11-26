@@ -3,9 +3,9 @@ import XCTest
 
 /// Real native menus and tag jobs over the existing PUBLIC typical recipe.
 /// No sample route, injected mutation, new fixture or media is used.
+#if os(macOS)
 @MainActor
 final class BrowseTagDeletionUITests: XCTestCase {
-    #if os(macOS)
     func testSidebarDeleteLeafKeepsCardsAndUndoRestoresTag() throws {
         try deleteAndUndo(name: "es", mode: "Cards", appearance: "light")
     }
@@ -132,9 +132,5 @@ final class BrowseTagDeletionUITests: XCTestCase {
         }
         return condition()
     }
-    #else
-    func testMacNativeMenus() throws {
-        throw XCTSkip("The product shell currently exposes Browse only on macOS; compact rollout remains a shell unit")
-    }
-    #endif
 }
+#endif

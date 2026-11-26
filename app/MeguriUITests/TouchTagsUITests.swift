@@ -28,10 +28,10 @@ final class TouchTagsUITests: XCTestCase {
         let child = element(app, "tags.list.row.jlpt::n4")
         XCTAssertTrue(child.waitForExistence(timeout: 10))
         child.swipeLeft()
-        // A full native swipe may commit immediately; a shorter one exposes
-        // the same destructive action. Neither path asks for confirmation.
         let action = app.buttons["Delete Tag"].firstMatch
-        if action.exists { action.tap() }
+        XCTAssertTrue(action.waitForExistence(timeout: 10))
+        XCTAssertTrue(action.isEnabled && action.isHittable)
+        action.tap()
         XCTAssertTrue(child.waitForNonExistence(timeout: 10))
         XCTAssertFalse(app.alerts.firstMatch.exists)
         XCTAssertTrue(element(app, "tags.list.row.grammar").exists)
@@ -90,6 +90,12 @@ final class TouchTagsUITests: XCTestCase {
             "Both collection management entries are discoverable together")
         XCTAssertTrue(tags.waitForExistence(timeout: 10))
         XCTAssertTrue(tags.isHittable)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings.root.tags").count, 1)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings.root.noteTypes").count, 1,
+                       "Settings offers Note Types once")
+        XCTAssertFalse(app.tabBars.buttons["Note Types"].exists)
+        XCTAssertFalse(element(app, "shell.root.sidebar.browse").exists)
+        XCTAssertFalse(app.tabBars.buttons["Browse"].exists, "This journey never opens Browse")
         capture(app, sidebar ? "touch-tags-ipad-settings" : "touch-tags-tab-settings")
         tags.tap()
         XCTAssertTrue(element(app, "tags.list.content").waitForExistence(timeout: 10))
@@ -111,7 +117,7 @@ final class TouchTagsUITests: XCTestCase {
             throw XCTSkip("Synthetic fixtures require an isolated development test container")
         }
         let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1"),
+        app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory),
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
             extra: ["-MeguriSizeClass", sizeClass]).arguments
         app.launch()

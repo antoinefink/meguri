@@ -31,18 +31,13 @@ struct BrowseSearchField: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .modifier(BrowseTagDeletionFeedback(deletion: model.tagDeletion, active: !model.showingTags))
+            .modifier(BrowseTagDeletionFeedback(deletion: model.tagDeletion))
             .searchable(text: Binding(get: { model.query.text }, set: { model.editText($0) }),
                         editableTokens: tokens,
                         placement: Self.placement) { $token in
                 BrowseTokenView(model: model, token: token)
             }
             .searchSuggestions { BrowseSuggestionList(model: model) }
-            #if !os(macOS)
-            .sheet(isPresented: Binding(get: { model.showingTags }, set: { model.showingTags = $0 })) {
-                BrowseTagFilterSheet(model: model)
-            }
-            #endif
             .searchFocused($focused)
             .onSubmit(of: .search) { model.commitText() }
             .onChange(of: focused) { _, focused in model.setFieldFocused(focused) }
@@ -309,18 +304,6 @@ private struct BrowseSuggestionRow: View {
         // One element per row, named area.screen.element.id (R1964).
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("browse.search.suggestion.\(Self.compact(identifier))")
-        .contextMenu {
-            if case .value(.tag(let name)) = suggestion.row {
-                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([name]))
-            }
-        }
-        #if !os(macOS)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if case .value(.tag(let name)) = suggestion.row {
-                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([name]))
-            }
-        }
-        #endif
     }
 
     private var label: String {

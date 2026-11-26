@@ -61,6 +61,16 @@ public final class BrowseModel {
         }
     }
     private(set) var tagIdentities: Set<String> = []
+    public private(set) var tagsReading = false
+    public private(set) var tagsFailed = false
+    /// Shared by Browse and Settings; loading tags never opens Browse or runs a search.
+    public var tagsLoaded: Bool { tagsEpoch == epoch && tagsGeneration == generation() }
+    private var tagsEpoch: UInt64?
+    private var tagsGeneration: UInt64?
+    private var tagsRequested = false
+    private var tagsToken: UInt64 = 0
+    @ObservationIgnored private var tagsTask: Task<Void, Never>?
+    @ObservationIgnored public var generation: @MainActor () -> UInt64 = { 0 }
     /// Flags 1 to 7's shown names (F4).
     public private(set) var flagNames: [String] = []
     /// Each row's count in the current mode (T12.3 step 4); a row without
@@ -122,7 +132,6 @@ public final class BrowseModel {
     /// The results table (U270a): the query's rows in the mode.
     public let results: BrowseResults
     /// The commands on its rows (U275).
-    public var showingTags = false
     public let tagDeletion: BrowseTagDeletion
     public let commands: BrowseCommands
     /// The pane beside the table (U273).
@@ -244,11 +253,16 @@ public final class BrowseModel {
                 && commands.findReplaceSheet == nil && commands.findDuplicatesSheet == nil
         }
         tagDeletion.saveFirst = { [weak inspector] in await inspector?.flushForBackground() ?? true }
-        tagDeletion.contains = { [weak self] name in self?.hasTag(name) ?? false }
-        tagDeletion.finished = { [weak self] result, title in
+        tagDeletion.generation = { [weak self] in self?.generation() ?? 0 }
+        tagDeletion.contains = { [weak self] name in
+            guard let self else { return false }
+            return !self.tagsReading && !self.tagsFailed && self.hasTag(name)
+        }
+        tagDeletion.finished = { [weak self] _, _ in
             guard let self else { return }
-            if result.summary.undoName != nil { self.commands.stepRecorded(result.summary.seq, title) }
-            self.reload()
+            // Refresh even when the only tag surface is Settings.
+            if self.visible { self.reload() }
+            else { await self.refreshTags() }
         }
         commands.otherWorkBusy = { [weak tagDeletion] in tagDeletion?.busy ?? false }
     }
@@ -699,6 +713,10 @@ public final class BrowseModel {
         guard changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty || !changes.decks.isEmpty
             || !changes.tags.isEmpty || !changes.notetypes.isEmpty || names else { return }
         stale = true
+        if changes.wholeCollection || !changes.tags.isEmpty || !changes.notes.isEmpty {
+            invalidateTags()
+            if tagsRequested, !visible, ready() { readTags() }
+        }
         if visible, ready() { reload() }
     }
 
@@ -719,6 +737,7 @@ public final class BrowseModel {
         // A save on its way went with the old epoch: Save can be tried again.
         if savingSearch?.saving == true { savingSearch?.markFailed() }
         tagDeletion.reset()
+        invalidateTags()
         commands.reset()
         results.collectionReady()
         inspector.reset()
@@ -733,6 +752,7 @@ public final class BrowseModel {
             // A save of the run text dropped with the old epoch is made again.
             keepRunText()
         }
+        if tagsRequested, !visible, ready() { readTags() }
         if visible, ready() {
             if !opened { open() }
             takeHandedSearch()
@@ -745,13 +765,13 @@ public final class BrowseModel {
     public func collectionReplaced() {
         epoch &+= 1
         tagDeletion.reset()
+        invalidateTags()
         commands.reset()
         results.collectionReplaced()
         inspector.reset()
         countsTask?.cancel()
         opened = false
         openInFlight = false
-        showingTags = false
         mode = .cards
         unwrittenMode = nil
         replacements &+= 1
@@ -772,7 +792,47 @@ public final class BrowseModel {
         saveDevice()
     }
 
+    public func refreshTags() async {
+        await readTags()?.value
+    }
+
+    private func invalidateTags() {
+        tagsToken &+= 1
+        tagsTask?.cancel()
+        tagsTask = nil
+        tagsEpoch = nil; tagsGeneration = nil
+        tagsReading = false; tagsFailed = false
+    }
+
+    @discardableResult private func readTags() -> Task<Void, Never>? {
+        tagsRequested = true
+        guard ready() else { return nil }
+        tagsTask?.cancel()
+        tagsToken &+= 1
+        let token = tagsToken, epoch = epoch, generation = generation()
+        tagsReading = true
+        tagsTask = Task {
+            defer { if token == tagsToken { tagsReading = false; tagsTask = nil } }
+            guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                  ready(), !Task.isCancelled else { return }
+            do {
+                let tree = try await backend.tagTree()
+                guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                      ready(), !Task.isCancelled else { return }
+                tags = tree; tagExpansion = [:]
+                tagsEpoch = epoch; tagsGeneration = generation
+                tagsFailed = false
+            } catch {
+                guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                      ready(), !Task.isCancelled else { return }
+                tagsFailed = true
+            }
+        }
+        return tagsTask
+    }
+
     private func reload() {
+        readTags()
         stale = false
         readsPending = true
         namesToken &+= 1
@@ -781,12 +841,11 @@ public final class BrowseModel {
             async let saved = try? backend.values(.savedSearches)
             async let decks = try? backend.values(.decks)
             async let notetypes = try? backend.notetypes()
-            async let tags = try? backend.tagTree()
             async let flags = try? backend.flagNames()
-            let (savedRows, deckRows, notetypeList, tagTree, flagList) = await (saved, decks, notetypes, tags, flags)
+            let (savedRows, deckRows, notetypeList, flagList) = await (saved, decks, notetypes, flags)
             guard token == namesToken, self.epoch == epoch else { return }
             // A read that failed is tried again on the next appear or change.
-            if savedRows == nil || deckRows == nil || notetypeList == nil || tagTree == nil || flagList == nil { stale = true }
+            if savedRows == nil || deckRows == nil || notetypeList == nil || flagList == nil { stale = true }
             if let savedRows {
                 savedSearches = savedRows.compactMap {
                     if case .savedSearch(let name, let text) = $0 { SavedSearch(name: name, text: text) } else { nil }
@@ -805,7 +864,9 @@ public final class BrowseModel {
                 self.notetypes = notetypeList
                 readFields(notetypeList)
             }
-            if let tagTree { self.tags = tagTree; tagExpansion = [:] }
+            await tagsTask?.value
+            guard token == namesToken, self.epoch == epoch else { return }
+            if tagsFailed { stale = true }
             if let flagList { flagNames = flagList }
             // The names the field's menus and suggestions offer may have changed.
             refreshTokenOffers()

@@ -6,6 +6,7 @@ import Observation
 public nonisolated struct BrowseTagDeletionTarget: Sendable, Hashable {
     public let names: [String]
     fileprivate let epoch: UInt64
+    fileprivate let generation: UInt64
 }
 
 @Observable @MainActor
@@ -17,19 +18,22 @@ public final class BrowseTagDeletion {
     @ObservationIgnored private var epoch: UInt64 = 0
     @ObservationIgnored private var serial: UInt64 = 0
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored var generation: @MainActor () -> UInt64 = { 0 }
+    @ObservationIgnored var stepRecorded: @MainActor (UInt64, String) -> Void = { _, _ in }
+    @ObservationIgnored var refreshUndo: @MainActor () async -> Void = {}
     @ObservationIgnored var available: @MainActor () -> Bool = { false }
     @ObservationIgnored var contains: @MainActor (String) -> Bool = { _ in false }
     @ObservationIgnored var saveFirst: @MainActor () async -> Bool = { true }
-    @ObservationIgnored var finished: @MainActor (CountMutation, String) -> Void = { _, _ in }
+    @ObservationIgnored var finished: @MainActor (CountMutation, String) async -> Void = { _, _ in }
 
     init(backend: any BrowseBackend) { self.backend = backend }
 
     public func target(_ names: [String]) -> BrowseTagDeletionTarget {
-        BrowseTagDeletionTarget(names: names, epoch: epoch)
+        BrowseTagDeletionTarget(names: names, epoch: epoch, generation: generation())
     }
 
     public func canDelete(_ target: BrowseTagDeletionTarget) -> Bool {
-        target.epoch == epoch && !target.names.isEmpty && target.names.allSatisfy(contains) && available() && !busy
+        target.epoch == epoch && target.generation == generation() && !target.names.isEmpty && target.names.allSatisfy(contains) && available() && !busy
     }
 
     public func delete(_ target: BrowseTagDeletionTarget) {
@@ -39,22 +43,29 @@ public final class BrowseTagDeletion {
         announcement = nil
         task = Task {
             defer { if target.epoch == epoch { busy = false; task = nil } }
+            guard target.epoch == epoch, target.generation == generation(), available(), !Task.isCancelled else { return }
             // A global tag delete rewrites notes too: save the inspector's draft
             // first, just as the table's commands do, then recheck its collection.
             guard await saveFirst() else {
-                if target.epoch == epoch { failed = target }
+                if target.epoch == epoch, target.generation == generation() { failed = target }
                 return
             }
-            guard target.epoch == epoch, available(), target.names.allSatisfy(contains), !Task.isCancelled else { return }
+            guard target.epoch == epoch, target.generation == generation(), !Task.isCancelled else { return }
+            guard available(), target.names.allSatisfy(contains) else { failed = target; return }
             do {
                 let result = try await backend.deleteTags(text: target.names.joined(separator: " "))
-                guard target.epoch == epoch else { return }
+                guard target.epoch == epoch, target.generation == generation(),
+                      result.summary.generation == target.generation, available() else { return }
                 // A zero-note result can still remove registry rows and record Undo.
-                finished(result, target.names.count == 1 ? "Delete Tag" : "Delete Tags")
+                let title = target.names.count == 1 ? "Delete Tag" : "Delete Tags"
+                if result.summary.undoName != nil { stepRecorded(result.summary.seq, title) }
+                await finished(result, title)
+                await refreshUndo()
+                guard target.epoch == epoch, target.generation == generation(), available() else { return }
                 serial &+= 1
                 announcement = BrowseAnnouncement(kind: .tagsChanged, count: result.count, serial: serial)
             } catch {
-                guard target.epoch == epoch else { return }
+                guard target.epoch == epoch, target.generation == generation() else { return }
                 failed = target
             }
         }
@@ -76,7 +87,7 @@ extension BrowseModel {
     /// Exact tree identity only. Matching tags for deletion belongs to the core,
     /// including simple folding and the `::` boundary (T5).
     func hasTag(_ name: String) -> Bool {
-        tagIdentities.contains(name)
+        tagsLoaded && tagIdentities.contains(name)
     }
 
     static func tagNames(_ nodes: [TagNode]) -> [String] {

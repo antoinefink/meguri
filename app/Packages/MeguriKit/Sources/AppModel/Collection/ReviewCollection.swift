@@ -383,6 +383,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
     }
 
+    var browseMutationBusy: Bool { browseOwner?.tagDeletion.busy == true || browseOwner?.commands.busy == true }
     private var browseOwner: BrowseModel?
     /// Browse (U270): its query, sidebar rows and counts, above the layout
     /// switch, so leaving Browse and coming back keeps them (`browser/workspace` V1).
@@ -394,6 +395,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         if let browseOwner { return browseOwner }
         let value = BrowseModel(backend: CoreBrowseBackend(), store: BrowseDeviceStore(defaults: configuration.deviceDefaults))
         value.ready = { [weak self] in self?.browseReadable ?? false }
+        value.generation = { [weak self] in self?.generation ?? 0 }
+        value.tagDeletion.stepRecorded = { [weak self] seq, title in
+            self?.collectionUndo.name(step: seq, title, ordered: true)
+        }
+        value.tagDeletion.refreshUndo = { [weak self] in await self?.collectionUndo.refreshNow() }
         value.takeEntrySearch = { [weak self] in
             guard let self, !self.navigation.browseSearch.isEmpty else { return nil }
             defer { self.navigation.browseSearch = "" }
@@ -540,12 +546,12 @@ public final class ReviewCollection: ChangeFanoutSink {
         return layout == .sidebar || !decks.isEmpty
     }
     func collectionUndoFailed() { error = "Couldn’t undo or redo that change. Try again." }
-    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?) -> Bool {
+    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, ignoringUndoReservation: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld,
               !opening, !starting, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
-              review == nil, navigation.review == nil, undoOwner?.busy != true,
+              review == nil, navigation.review == nil, (ignoringUndoReservation || undoOwner?.busy != true),
               entryOwner?.busy != true, entryOwner?.pickerPresented != true, entryOwner?.preview == nil,
               exportOwner?.busy != true,
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
