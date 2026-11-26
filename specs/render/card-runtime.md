@@ -577,6 +577,8 @@ Both faces and previews typeset `\(…\)` inline and `\[…\]` display math afte
 
 AMS alignment declarations (`alignat`, `alignat*`, `alignedat`, `xalignat`, `xalignat*`, `xxalignat`), including macro-expanded uses and `alignedat` placement arguments, are capped at 64 alignment pairs per expression before column allocation. Exceeding the cap produces a normal TeX error and review continues. This is an application integration pinned to MathJax 4.1.3; upstream package bytes remain unmodified.
 
+Optional physics `IdentityMatrix` and `XMatrix` commands (including aliases, starred forms and macro-expanded calls) are capped at 64 per dimension before table construction. The guard binds at lazy command-map registration without eagerly loading physics; upstream number parsing and small-case behavior are preserved.
+
 ### C10.9 jQuery
 
 The upstream jQuery 3.7.1 release (MIT), unmodified, so `$.fn.jquery === "3.7.1"` and `$ === jQuery` (R514). It is obtained directly from `https://code.jquery.com/jquery-3.7.1.min.js`, 87,533 bytes, SHA-256 `fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a`. The prepared vendor bytes were checked against this official upstream download; no Anki asset supplies them (R1960). It is listed in `THIRD_PARTY_NOTICES.md`. A card that loads another jQuery replaces the globals, as it would in Anki.

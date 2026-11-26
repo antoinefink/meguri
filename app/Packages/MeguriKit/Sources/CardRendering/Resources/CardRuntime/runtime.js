@@ -25,6 +25,7 @@
   const parseJSON = JSON.parse;
   const StringCtor = String;
   const isSafeInteger = Number.isSafeInteger;
+  const parseInteger = parseInt;
   const ErrorCtor = Error;
   const URLCtor = URL;
   const CustomEventCtor = CustomEvent;
@@ -1224,6 +1225,55 @@
     };
   }
 
+  function limitMathPhysics(engine) {
+    // 4.1.3 has no loader.register hook. CommandMap's base constructor calls
+    // MapHandler.register before populating its entries. Install on that map
+    // immediately, but resolve method identities only when a command is parsed.
+    const maps = engine._.input.tex.MapHandler.MapHandler;
+    const register = maps.register;
+    maps.register = function (map) {
+      if (map.name === "Physics-matrix-macros") {
+        const parse = map.parse;
+        map.parse = function (input) {
+          const parser = input[0];
+          const name = input[1];
+          const methods = engine._.input.tex.physics.PhysicsMethods.default;
+          const method = this.parserFor(name);
+          if (method === methods.IdentityMatrix || method === methods.XMatrix) {
+            const position = parser.i;
+            try {
+              const command = "\\" + name;
+              let rows, columns;
+              let valid = true;
+              if (method === methods.IdentityMatrix) {
+                // IdentityMatrix accepts parseInt prefixes, unlike XMatrix.
+                rows = parseInteger(parser.GetArgument(command), 10);
+                columns = rows;
+              } else {
+                parser.GetStar();
+                parser.GetArgument(command); // Cell contents.
+                const rowText = parser.GetArgument(command);
+                const columnText = parser.GetArgument(command);
+                rows = parseInteger(rowText, 10);
+                columns = parseInteger(columnText, 10);
+                // Leave upstream's canonical-number validation unchanged.
+                valid = StringCtor(rows) === rowText && StringCtor(columns) === columnText;
+              }
+              if (valid && (rows > 64 || columns > 64)) {
+                const TeXError = engine._.input.tex.TexError.default;
+                throw new TeXError("MeguriMatrixLimit", "At most 64 rows and columns are allowed");
+              }
+            } finally {
+              parser.i = position;
+            }
+          }
+          return call(parse, this, input);
+        };
+      }
+      return call(register, this, map);
+    };
+  }
+
   function loadMath() {
     if (mathLoading) return mathLoading;
     mathStartupOwner = latest;
@@ -1247,6 +1297,7 @@
         ready: function () {
           const engine = win.MathJax;
           limitMathAlignments(engine);
+          limitMathPhysics(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
             mergeUserSettings() {}

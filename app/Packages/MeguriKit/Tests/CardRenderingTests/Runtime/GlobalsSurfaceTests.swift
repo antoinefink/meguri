@@ -468,6 +468,61 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func firstLazyPhysicsCommandIsAlreadyBounded() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                #expect(!harness.media.requests.contains { $0.path.hasSuffix("/physics.js") })
+                try await page.showPresentedAnswer(#"<div id='m'>\[\require{physics}\mqty{\xmat*{a}{2}{65}}\]</div>"#)
+                #expect(try await page.bool("document.querySelector('#m [data-mml-node=merror]') !== null && document.getElementById('qa').style.opacity === '1'"))
+                #expect(harness.diagnostics.contains {
+                    ($0["message"] as? String)?.contains("MeguriMatrixLimit") == true
+                }, "\(harness.diagnostics.map(\.body))")
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
+        @Test(arguments: ["identitymatrix", "imat", "xmatrix", "xmatrix*", "xmat", "xmat*", "zeromatrix", "zmat"], [false, true])
+        func physicsMatrixDimensionsAreBoundedBeforeAllocation(variant: String, throughMacro: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let identity = variant == "identitymatrix" || variant == "imat"
+                func side(rows: String, columns: String, requirePhysics: Bool = false) -> String {
+                    let dimensions = identity ? "{\(rows)}" : "{\(rows)}{\(columns)}"
+                    let cell = variant.hasPrefix("x") ? "{a}" : ""
+                    let command = "\\\(variant)\(cell)"
+                    let matrix = throughMacro
+                        ? "\\def\\cardmatrix#1{\(command)#1}\\cardmatrix{\(dimensions)}"
+                        : command + dimensions
+                    let load = requirePhysics ? "\\require{physics}" : ""
+                    return "<div id='m'>\\[\(load)\\mqty{\(matrix)}\\]</div>"
+                }
+                let physicsPath = "/_anki/mathjax/input/tex/extensions/physics.js"
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                #expect(!harness.media.requests.contains { $0.path == physicsPath })
+                try await page.showPresentedAnswer(side(rows: "2", columns: "3", requirePhysics: true))
+                #expect(harness.media.requests.contains { $0.path == physicsPath })
+                #expect(try await page.bool("MathJax.version === '4.1.3' && document.querySelector('#m svg path') !== null && !document.querySelector('#m [data-mml-node=merror]')"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+
+                // Only modest declarations one above the bound; never stress inputs.
+                for axis in 0..<(identity ? 1 : 2) {
+                    try await page.announce(card: 85, generation: Int64(axis + 2))
+                    try await page.showPresentedQuestion(side(rows: axis == 0 ? "65" : "2", columns: axis == 1 ? "65" : "3"))
+                    #expect(try await page.bool("document.querySelector('#m [data-mml-node=merror]') !== null && document.getElementById('qa').style.opacity === '1'"))
+                    #expect(harness.diagnostics.contains {
+                        $0["kind"] as? String == "math" && $0.card == 85 && $0.generation == Int64(axis + 2)
+                            && ($0["message"] as? String)?.contains("MeguriMatrixLimit") == true
+                    }, "\(harness.diagnostics.map(\.body))")
+                }
+                try await page.announce(card: 86, generation: 4)
+                // IdentityMatrix deliberately accepts parseInt prefixes.
+                try await page.showPresentedAnswer(side(rows: identity ? "02tail" : "2", columns: "3"))
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && !document.querySelector('#m [data-mml-node=merror]')"))
+                #expect(!harness.diagnostics.contains { $0.card == 86 })
+                #expect(harness.media.requests(for: physicsPath).count == 1)
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
         @Test func mathIgnoresSavedMenuSettingsWithoutChangingThem() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 let settings = #"{"enrich":true,"speech":true,"braille":true,"assistiveMml":false,"inTabOrder":true,"renderer":"CHTML"}"#
