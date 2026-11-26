@@ -2,6 +2,9 @@ import AppModel
 import CoreBridge
 import DesignSystem
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The Note Types section (`native-interface-contract` N22.1): the list of
 /// note types beside the selected one's detail, with Fields and Cards in the
@@ -413,11 +416,20 @@ struct SaveStatusView: View {
 struct SaveOutcomeAlerts: ViewModifier {
     @Bindable var model: NoteTypesModel
     @Environment(\.locale) private var locale
+    #if os(macOS)
+    @State private var appVisible = !NSApplication.shared.isHidden
+
+    // Save and deletion share these outcomes. Recheck the actual state in
+    // each binding too: a failure can arrive before didHide is delivered.
+    private var canPresent: Bool { appVisible && !NSApplication.shared.isHidden }
+    #else
+    private let canPresent = true
+    #endif
 
     func body(content: Content) -> some View {
         content
             .alert(Text("noteTypes.failed.title", bundle: .module), isPresented: Binding(
-                get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
+                get: { canPresent && model.failure != nil }, set: { if !$0, canPresent { model.failure = nil } })) {
                 Button(role: .cancel) { model.failure = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
             } message: {
                 if model.failure == .syncStopped {
@@ -429,11 +441,22 @@ struct SaveOutcomeAlerts: ViewModifier {
                 }
             }
             .alert(Text("noteTypes.notUploaded.title", bundle: .module), isPresented: Binding(
-                get: { model.notice != nil && model.failure == nil }, set: { if !$0 { model.notice = nil } })) {
+                get: { canPresent && model.notice != nil && model.failure == nil }, set: { if !$0, canPresent { model.notice = nil } })) {
                 Button(role: .cancel) { model.notice = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
             } message: {
                 Text(verbatim: NoteTypesStrings.notUploaded(device: NoteTypesStrings.device(locale: locale), locale: locale))
             }
+            #if os(macOS)
+            // Keep hidden outcomes pending, including when this view was
+            // first built hidden or returns after missing an unhide event.
+            .onAppear { appVisible = !NSApplication.shared.isHidden }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in
+                appVisible = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in
+                appVisible = !NSApplication.shared.isHidden
+            }
+            #endif
     }
 }
 

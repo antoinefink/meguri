@@ -41,6 +41,16 @@
         }
       }
     },
+    "browse.tag.failed.dismiss": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss"
+          }
+        }
+      }
+    },
     "browse.notetype.delete": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Delete Note Type…" } }
