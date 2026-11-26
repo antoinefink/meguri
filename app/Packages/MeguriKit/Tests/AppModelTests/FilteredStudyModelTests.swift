@@ -226,6 +226,113 @@ import Testing
         #expect(service.emptied.count + service.rebuilt.count == 1)
     }
 
+    @Test(arguments: [false, true], [false, true])
+    func committedMutationRefreshFailureRecoversWithoutReplaying(empty: Bool, resultUnavailable: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        if resultUnavailable { service.mutationError = .commitCompleted(sequence: 44, message: "Saved result unavailable") }
+        var reads = 0
+        owner.loadDeckTree = { reads += 1; throw BridgeError.internal("Refresh unavailable") }
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(reads == 1 && model.operationFailed && model.operationNeedsRefresh)
+        #expect(service.emptied == (empty ? [3] : []) && service.rebuilt == (empty ? [] : [3]))
+        // Exercise exactly the command used by the native alert, including
+        // duplicate presses and a second failed refresh.
+        model.refreshOperation(); model.refreshOperation(); await model.waitForOperation()
+        #expect(reads == 2 && model.operationFailed && model.operationNeedsRefresh)
+        model.operationFailed = false
+        // Dismissing the alert and choosing Empty/Rebuild again is also read-only.
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(reads == 3 && service.emptied.count + service.rebuilt.count == 1)
+        owner.loadDeckTree = { reads += 1; return Self.tree(generation: 11, review: 0) }
+        model.refreshOperation(); await model.waitForOperation()
+        #expect(owner.deck(3)?.counts.review == 0 && !model.operationFailed && !model.operationNeedsRefresh)
+        #expect(service.emptied.count + service.rebuilt.count == 1)
+        #expect(owner.navigation.sheet == nil && owner.navigation.homeDeckPage == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func precommitMutationFailureRemainsRetryable(empty: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        service.mutationError = .invalidArgument("Rejected before commit")
+        var reads = 0
+        owner.loadDeckTree = { reads += 1; return Self.tree(generation: 11, review: 0) }
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(model.operationFailed && !model.operationNeedsRefresh && reads == 0)
+        model.refreshOperation(); await model.waitForOperation()
+        #expect(reads == 0 && service.emptied.count + service.rebuilt.count == 1)
+        service.mutationError = nil
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(!model.operationFailed && !model.operationNeedsRefresh)
+        #expect(service.emptied.count + service.rebuilt.count == 2 && reads >= 1)
+    }
+
+    @Test(arguments: [false, true])
+    func unacceptedMutationRefreshIsAlsoRefreshOnly(empty: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        // A nonthrowing read from another generation was not a successful refresh.
+        owner.loadDeckTree = { Self.tree(generation: 12) }
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(model.operationFailed && model.operationNeedsRefresh)
+        owner.loadDeckTree = { Self.tree(generation: 11, review: 0) }
+        model.refreshOperation(); await model.waitForOperation()
+        #expect(!model.operationFailed && !model.operationNeedsRefresh && owner.deck(3)?.counts.review == 0)
+        #expect(service.emptied.count + service.rebuilt.count == 1)
+    }
+
+    @Test(arguments: ["navigation", "sheet", "notReady", "replacement", "invalidated"], [false, true])
+    func lateMutationRefreshFailureCannotPublishIntoAStaleRoute(change: String, empty: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        let gate = FilteredStudyGate()
+        owner.loadDeckTree = { await gate.hold(); throw BridgeError.internal("Refresh unavailable") }
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await gate.entered()
+        switch change {
+        case "navigation": owner.navigation.show(.settings)
+        case "sheet": owner.navigation.present(.collectionExport)
+        case "notReady": owner.receiveLifecycle(.opening)
+        case "replacement": owner.receiveLifecycle(.ready(generation: 12))
+        default: model.invalidate()
+        }
+        gate.release(); await model.waitForOperation()
+        #expect(!model.operationFailed && !model.operationNeedsRefresh)
+        #expect(service.emptied.count + service.rebuilt.count == 1)
+        if change == "navigation" || change == "sheet" {
+            owner.navigation.dismissSheet(); owner.navigation.show(.home)
+            owner.loadDeckTree = { Self.tree(generation: 11, review: 0) }
+            // The stale completion suppressed feedback, but retained the durable
+            // boundary: the next command refreshes instead of replaying the write.
+            if empty { model.empty(3) } else { model.rebuild(3) }
+            await model.waitForOperation()
+            #expect(service.emptied.count + service.rebuilt.count == 1 && owner.deck(3)?.counts.review == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func replacementClearsCommittedMutationRecoveryAndCannotReadTheNewCollection(empty: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), first = owner.filteredStudy
+        owner.loadDeckTree = { throw BridgeError.internal("Refresh unavailable") }
+        if empty { first.empty(3) } else { first.rebuild(3) }
+        await first.waitForOperation()
+        #expect(first.operationFailed && first.operationNeedsRefresh)
+        owner.receiveLifecycle(.ready(generation: 12))
+        var reads = 0
+        owner.loadDeckTree = { reads += 1; return Self.tree(generation: 12) }
+        let next = owner.filteredStudy
+        #expect(next !== first && !first.operationFailed && !first.operationNeedsRefresh)
+        first.refreshOperation(); await first.waitForOperation()
+        #expect(reads == 0 && service.emptied.count + service.rebuilt.count == 1)
+        await owner.loadCounts()
+        if empty { next.empty(3) } else { next.rebuild(3) }
+        await next.waitForOperation()
+        #expect(service.generations == [11, 12])
+        #expect(service.emptied.count + service.rebuilt.count == 2)
+    }
+
     @Test func dailyAdjustmentBoundsIncludeZeroAndRefuseAdjacentValuesInBothForms() async {
         let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
         model.custom(1); await model.waitForOperation()
@@ -417,8 +524,8 @@ import Testing
 // Lifecycle work uses the serialized real-service owner, in a disposable synthetic
 // collection, so a background transition never touches another suite’s SDK.
 extension ReviewCollectionStartupTests {
-    @Test(arguments: [false, true])
-    func browseFailureWhileHiddenOrResumingNeverPublishesAnAlert(resume: Bool) async throws {
+    @Test(arguments: ["browse", "empty", "rebuild"], [false, true])
+    func filteredStudyFailureWhileHiddenOrResumingNeverPublishesAnAlert(command: String, resume: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
@@ -436,16 +543,33 @@ extension ReviewCollectionStartupTests {
             if owner.policy != .ok { await owner.enableFsrs() }
             owner.navigation.dismissSheet()
             owner.deckImportBrowseAvailable = true
-            service.scopeGate = gate; service.scopeError = .internal("Scope read failed")
             let model = owner.filteredStudy
-            model.browseCards(1); await gate.entered()
+            if command == "browse" {
+                service.scopeGate = gate; service.scopeError = .internal("Scope read failed")
+                model.browseCards(1)
+            } else {
+                let generation = owner.generation
+                let tree = CountedDeckTree(generation: generation, nextChangeAt: Int64.max, nodes: [
+                    .init(id: 3, name: "Synthetic Filtered", filtered: true, studyCollapsed: false, browserCollapsed: false,
+                          counts: .init(new: 0, learning: 0, review: 4), children: [])
+                ])
+                owner.loadDeckTree = { tree }; await owner.loadCounts()
+                owner.loadDeckTree = { await gate.hold(); throw BridgeError.internal("Refresh unavailable") }
+                service.mutationError = .commitCompleted(sequence: 44, message: "Saved result unavailable")
+                if command == "empty" { model.empty(3) } else { model.rebuild(3) }
+            }
+            await gate.entered()
+            if command != "browse" {
+                let tree = CountedDeckTree(generation: owner.generation, nextChangeAt: Int64.max, nodes: owner.decks)
+                owner.loadDeckTree = { tree }
+            }
             owner.setForeground(false)
             if resume { owner.setForeground(true) }
             #expect(resume ? owner.resuming : !owner.foreground)
             gate.release(); await model.waitForOperation()
-            #expect(!model.operationFailed && owner.navigation.section != .browse)
+            #expect(!model.operationFailed && !model.operationNeedsRefresh && owner.navigation.section != .browse)
             await owner.waitForLifecycle()
-            #expect(!model.operationFailed, "The suppressed failure cannot appear after lifecycle completion")
+            #expect(!model.operationFailed && !model.operationNeedsRefresh, "The suppressed failure cannot appear after lifecycle completion")
             #expect(await owner.close())
         } catch {
             gate.release(); await owner.filteredStudy.waitForOperation()

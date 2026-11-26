@@ -208,9 +208,16 @@ public struct FilteredStudyFeedback: ViewModifier {
     @Bindable var model: FilteredStudyModel
     public init(model: FilteredStudyModel) { self.model = model }
     public func body(content: Content) -> some View {
-        content.alert(Text("Couldn’t Update Study Deck", bundle: .module), isPresented: $model.operationFailed) {
+        content.alert(Text(model.operationNeedsRefresh ? "Study Deck Updated" : "Couldn’t Update Study Deck", bundle: .module), isPresented: $model.operationFailed) {
+            if model.operationNeedsRefresh {
+                Button { model.refreshOperation() } label: { Text("Refresh Decks", bundle: .module) }
+            }
             Button(role: .cancel) {} label: { Text("OK", bundle: .module) }
-        } message: { Text("Try again, or edit the search and card limits.", bundle: .module) }
+        } message: {
+            Text(model.operationNeedsRefresh
+                 ? "The change was saved. Refresh decks to continue."
+                 : "Try again, or edit the search and card limits.", bundle: .module)
+        }
     }
 }
 

@@ -34,3 +34,5 @@ Planinterop reviewed all 292,739 bytes of the interface contract at `472bd637b`,
 ## Verification
 
 The collection writer and pending-answer projection now preserve the original deck and due date through a filtered answer. The Docker suite covered preview completion, rescheduling, overlapping searches and stale answers after a same-second rebuild. All 236 selected engine and search tests passed in `core-test/20261126T121534Z-38442`. The real collection-replacement test passed with test hooks in `core-test/20261126T115955Z-77161`. Rust lint, crate layering and the endpoint scan passed in `core-lint/20261126T122102Z-61502`. All six static checks passed in `static-checks/20261126T122201Z-64664`.
+
+The native operation alert now offers Refresh Decks after a committed change. Plancheck independently reviewed the entire 13,590-byte form. Its verified public SHA-256 is `4ded70a1d10bb62adf87d3342b98857a266c92a7a1c7508a8f4ba43f32a29419`.

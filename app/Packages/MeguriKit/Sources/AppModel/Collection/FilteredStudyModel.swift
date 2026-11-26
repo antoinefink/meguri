@@ -55,6 +55,7 @@ public final class FilteredStudyModel {
     public private(set) var loaded = false
     public private(set) var failure: Failure?
     public var operationFailed = false
+    public private(set) var operationNeedsRefresh = false
     public private(set) var editingDeck: Int64?
     public private(set) var sourceDeck: Int64?
     private weak var owner: ReviewCollection?
@@ -67,6 +68,7 @@ public final class FilteredStudyModel {
     private var emptyCandidate: FilteredStudyDefinition?
     private var savedDeck: Int64?
     private var writeCommitted = false
+    private var committedMutationGeneration: UInt64?
     private var task: Task<Void, Never>?
 
     public init(owner: ReviewCollection, service: any FilteredStudyService = CoreFilteredStudyService()) {
@@ -100,7 +102,7 @@ public final class FilteredStudyModel {
         guard canPresent, let owner, owner.deckImportBrowseAvailable else { return }
         revision &+= 1
         let expected = owner.generation, intent = owner.navigation.intentRevision, revision = revision
-        busy = true; operationFailed = false
+        busy = true; operationFailed = false; operationNeedsRefresh = false
         task = Task {
             defer { busy = false; task = nil }
             // Content can be absent while a read runs. Only the operation that
@@ -125,7 +127,7 @@ public final class FilteredStudyModel {
         guard canPresent, let owner else { return }
         // Freeze the whole active card query before the asynchronous serialization.
         let query = owner.browse.query, expected = owner.generation, intent = owner.navigation.intentRevision
-        busy = true
+        busy = true; operationFailed = false; operationNeedsRefresh = false
         task = Task {
             defer { busy = false; task = nil }
             do {
@@ -155,7 +157,8 @@ public final class FilteredStudyModel {
         revision &+= 1; generation = owner.generation
         editingDeck = deck; sourceDeck = source; failure = nil; loaded = false; savedDeck = nil
         writeCommitted = false
-        operationFailed = false; scopeDeck = nil; emptyCandidate = nil; self.route = route
+        operationFailed = false; operationNeedsRefresh = false
+        scopeDeck = nil; emptyCandidate = nil; self.route = route
         owner.navigation.present(route)
         intent = owner.navigation.intentRevision
     }
@@ -320,7 +323,12 @@ public final class FilteredStudyModel {
     public func empty(_ deck: Int64) { mutate(deck, empty: true) }
     private func mutate(_ deck: Int64, empty: Bool) {
         guard canEdit(deck), let owner else { return }
-        busy = true; operationFailed = false
+        // An acknowledged write must never be replayed as refresh recovery,
+        // even after the alert was dismissed or the foreground route changed.
+        if committedMutationGeneration != nil { refreshOperation(); return }
+        revision &+= 1
+        busy = true; operationFailed = false; operationNeedsRefresh = false
+        let revision = revision
         let expected = owner.generation, intent = owner.navigation.intentRevision
         task = Task {
             defer { busy = false; task = nil }
@@ -330,18 +338,52 @@ public final class FilteredStudyModel {
                 } catch BridgeError.commitCompleted {
                     // As with a saved definition, recover by reading committed state.
                 }
-                guard expected == owner.generation else { return }
+                guard revision == self.revision, expected == owner.generation else { return }
+                committedMutationGeneration = expected
                 owner.deckWriteFinished()
-                guard try await owner.refreshDeckNames(generation: expected) else { return }
-                if intent == owner.navigation.intentRevision { owner.refreshCounts() }
             } catch {
-                if expected == owner.generation, intent == owner.navigation.intentRevision,
-                   owner.navigation.sheet == nil, owner.foreground, !owner.resuming { operationFailed = true }
+                if operationCurrent(revision, generation: expected, intent: intent) { operationFailed = true }
+                return
             }
+            await publishMutation(revision, generation: expected, intent: intent)
+        }
+    }
+    private func operationCurrent(_ revision: UInt64, generation: UInt64, intent: UInt64) -> Bool {
+        guard let owner else { return false }
+        return self.revision == revision && !Task.isCancelled && owner.generation == generation &&
+            owner.navigation.intentRevision == intent && owner.navigation.sheet == nil &&
+            owner.foreground && !owner.resuming && owner.state == .ready
+    }
+    private func publishMutation(_ revision: UInt64, generation: UInt64, intent: UInt64) async {
+        guard let owner, committedMutationGeneration == generation,
+              operationCurrent(revision, generation: generation, intent: intent) else { return }
+        do {
+            let refreshed = try await owner.refreshDeckNames(generation: generation)
+            guard operationCurrent(revision, generation: generation, intent: intent) else { return }
+            if refreshed {
+                committedMutationGeneration = nil; operationNeedsRefresh = false
+                owner.refreshCounts()
+                return
+            }
+        } catch {
+            guard operationCurrent(revision, generation: generation, intent: intent) else { return }
+        }
+        operationNeedsRefresh = true; operationFailed = true
+    }
+    /// The native alert's recovery command reads only; it cannot Empty or Rebuild.
+    public func refreshOperation() {
+        guard !busy, let owner, let expected = committedMutationGeneration,
+              expected == owner.generation, owner.deckWriteAllowed(host: .main) else { return }
+        busy = true; operationFailed = false; operationNeedsRefresh = false
+        let revision = revision, intent = owner.navigation.intentRevision
+        task = Task {
+            defer { busy = false; task = nil }
+            await publishMutation(revision, generation: expected, intent: intent)
         }
     }
     func invalidate() {
         revision &+= 1; loaded = false; failure = nil; savedDeck = nil; writeCommitted = false; emptyCandidate = nil; operationFailed = false
+        committedMutationGeneration = nil; operationNeedsRefresh = false
         if let owner, route != nil, owner.navigation.sheet == route { owner.navigation.dismissSheet() }
         route = nil
     }
