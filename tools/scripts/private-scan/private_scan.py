@@ -845,6 +845,22 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
     "app/MeguriUITests/IOAddEditUITests.swift": "a32aa567e6c188acba98352f79984429346f9841f430b3f224b57ae020fed649",
+    "app/Packages/MeguriKit/Tests/CardRenderingTests/Runtime/GlobalsSurfaceTests.swift":
+        "0aa34a950507d4d64ff1d0589b24d15552aefea764eaa0487e3c1f820f8b6bc1",
+    # Complete public source review of the bundled card runtime.
+    "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
+        "46db3c1a161f4a069cb371b5a9af122473c4f7e6133d48afeed4edd54a444ced",
+    "docs/process/review-log/mathjax-20261126.md":
+        "4142c20ff8a990901f43c9c4af098ddf5e818d592fd91acf1a0c3bc458fdf89d",
+    "specs/render/card-runtime.md":
+        "3acd8972440e4d4ef0c1d6fd9e2d4a57554dd808b91b21c5de228b8a63ce0a7c",
+    # Complete-content review of the MathJax card runtime and synthetic review fixture.
+    'app/MeguriUITests/OfflineMathJaxUITests.swift':
+        'e02c0d415b4ac26e8f0ed32b9ca4fedcccadfb6724281e42596eb9fe0fdbe779',
+    'app/Packages/MeguriKit/Sources/CardRendering/CardRuntime.swift':
+        '0f261ab74b4de1a8ffda0a7913bc685b147192a1ead0f65d02f36bd1a029ae07',
+    'core/crates/meguri-testkit/fixtures/recipes/mathjax-review.yaml':
+        '674b5c6be5c81dbfd1ae9bb00dc0b552c21c625676f4c402e1756a834efa649b',
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
@@ -1569,6 +1585,15 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    # MathJax 4.1.3, independently reviewed in review-log/mathjax-20261126.md.
+    "1961b64ce7f1368d8d0bd92315cea7eaf461f88f1819920ca9cea9965504a11b": "49ea6cb9257bbee0a3979c48a774cd221550ac1c20c95549efe45fc99cc18050",
+    "468c7f5bdeee0c67c585345dfb77c459b66120b292339c9222abea9eba536341": "c1ae6e179a6d28bbd5c483fbacc744acc75e922d598281dc3390aab26126e163",
+    "7822621822e747930fc365130c4046c871e35a7f535114d53a3c6403fd15a202": "f102fa970da97f3cfa5adb8cd38ec6db24e3fe8571877bb1a89f512c1a3d788b",
+    "f51931829135ca96843fd18674a101988a03245e8769de1e22fa66ad44bc987c": "85b1b5288b673d699d07f2e9f846eaa2301fb276523c4ed0aae02b4a32a23872",
+    "5b89c51e66333c0b19fd0e17e5bed4ee75c1b87b32186892064cc6d21061a7cd": "e7dd538320c346b5d552a8a5a68d5ffc623c0c29114776ef785d4eca9ecca8e4",
+    "3cf1af26194336ce06b4225fd205c95bf0932b1b7f7633f4d634855a34c81d21": "7447710d9804aea68b4491e8fde752d69a905e0d27a8a39705c535f64cfa7fdc",
+    "d0a4f38d07f503a98f2bcbf2277cef2b23ed0f16bcd24f9014ce505e452ff502": "23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c",
+    "341a7ca1ad82c4ebb05584f97e284f857a3170be943dd0996a2d0ba353780522": "bba5be600b2f2fd0fb0faeeeecc32a852a2bda8bbf241b1823cc73f6d24d585e",
     # Complete-content PUBLIC review: independent non-author reviewer, 2026-11-21
     # (docs/process/review-log/selftest-six-20261121.md).
     "757fd5fb3da8ccfca681ebdc23701b14eb3a62c18056c970122d156377c7099e":

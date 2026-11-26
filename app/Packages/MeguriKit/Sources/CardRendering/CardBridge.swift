@@ -143,9 +143,10 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
         case "error":
             guard keys(["kind", "message", "line", "column", "source", "phase", "index"]) else { reject(.signalFields); return }
-            guard let kind = string("kind", max: 16), ["exception", "rejection", "hook"].contains(kind),
+            guard let kind = string("kind", max: 16), ["exception", "rejection", "hook", "math"].contains(kind),
                   string("message", max: 8_000) != nil, let phase = string("phase", max: 16),
-                  ["script", "later", "shown-hook", "update-hook"].contains(phase),
+                  ["script", "later", "shown-hook", "update-hook", "typeset"].contains(phase),
+                  (kind == "math") == (phase == "typeset"),
                   dictionary["source"] == nil || string("source", max: 4096) != nil,
                   ["line", "column"].allSatisfy({ dictionary[$0] == nil || dictionary[$0] is NSNull || (Self.integer(dictionary[$0]) ?? -1) >= 0 }),
                   (phase == "script" ? (Self.integer(dictionary["index"]) ?? 0) > 0 : dictionary["index"] == nil || dictionary["index"] is NSNull)

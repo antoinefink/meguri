@@ -11,3 +11,11 @@ Meguri includes the following third-party software. U16 will generate the depend
 - License: MIT.
 
 The complete, unmodified release notice is in [jquery-3.7.1-LICENSE.txt](specs/licenses/jquery-3.7.1-LICENSE.txt). Include it with the bundled library in shipped acknowledgements.
+
+### MathJax 4.1.3
+
+The card renderer ships the TeX-to-SVG engine, TeX extensions, assistive MathML
+and SVG glyph data for offline study. The bundled JavaScript files are unmodified
+members of the upstream npm packages `mathjax`, `@mathjax/mathjax-newcm-font`,
+and `@mathjax/mathjax-mhchem-font-extension`,
+all at version 4.1.3. See the [bundled credits and licenses](app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/mathjax/NOTICE.txt).

@@ -1,0 +1,61 @@
+# Authored synthetic study card. Each heading is published only after its
+# onShownHook verifies real SVG layout and assistive MathML, without merror.
+recipe: mathjax-review
+description: "Offline MathJax question and worked answer in the production reviewer."
+now: "2030-01-15T10:00:00+01:00"
+decks:
+  - name: "Offline Mathematics"
+    due: 1
+    fields:
+      - |
+        <style>
+        .math-study { font-size: 18px; line-height: 1.45; text-align: left; }
+        .math-study h3 { font-size: 1.15em; margin: .5em 0; }
+        .math-study p { margin: .7em 0; }
+        .math-study mjx-container[display="true"] { margin: .8em 0; }
+        </style>
+        <section id="math-question" class="math-study">
+          <h3 id="math-question-title"></h3>
+          <p>A reaction forms a product at a rate \(r(t)\), where time is measured in seconds:</p>
+          <p>\[r(t)=0.30e^{-t/20}\;\mathrm{mmol\,L^{-1}\,s^{-1}}\]</p>
+          <p>Starting with no product, what is its concentration after \(20\,\mathrm{s}\)?</p>
+        </section>
+        <script>
+        onShownHook.push(function () {
+          var root = document.getElementById('math-question');
+          var math = root.querySelectorAll('mjx-container');
+          if (math.length === 3 && !root.querySelector('[data-mml-node="merror"]') &&
+              Array.from(math).every(function (node) {
+                var svg = node.querySelector('svg');
+                return svg && svg.querySelector('path') && svg.getBoundingClientRect().height > 0 &&
+                    node.querySelector('mjx-assistive-mml math');
+              })) document.getElementById('math-question-title').textContent = 'Reaction yield';
+        });
+        </script>
+      - |
+        <section id="math-answer" class="math-study">
+          <h3 id="math-answer-title"></h3>
+          <p>Integrate the rate over the first 20 seconds:</p>
+          <p>\[\begin{aligned}
+          c(20)&=\int_0^{20}0.30e^{-t/20}\,dt\\
+          &=6(1-e^{-1})\\
+          &\approx3.79\;\mathrm{mmol\,L^{-1}}.
+          \end{aligned}\]</p>
+          <p id="math-answer-result"></p>
+        </section>
+        <script>
+        onShownHook.push(function () {
+          var root = document.getElementById('math-answer');
+          var math = root.querySelectorAll('mjx-container');
+          if (math.length === 1 && !root.querySelector('[data-mml-node="merror"]') &&
+              Array.from(math).every(function (node) {
+                var svg = node.querySelector('svg');
+                return svg && svg.querySelector('path') && svg.getBoundingClientRect().height > 0 &&
+                    node.querySelector('mjx-assistive-mml math');
+              })) {
+            document.getElementById('math-answer-title').textContent = 'Product concentration';
+            document.getElementById('math-answer-result').textContent = 'About 3.79 millimoles per litre.';
+          }
+        });
+        </script>
+    media: {images: 0, sounds: 0}

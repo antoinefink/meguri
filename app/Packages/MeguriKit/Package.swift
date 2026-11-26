@@ -69,6 +69,8 @@ let package = Package(
                 .copy("Resources/CardRuntime/interaction.js"),
                 .copy("Resources/CardRuntime/review-host.js"),
                 .copy("Resources/CardRuntime/vendor/jquery-3.7.1.min.js"),
+                // Preserve the allowed MathJax components and dynamic SVG glyph paths.
+                .copy("Resources/CardRuntime/vendor/mathjax"),
             ],
             swiftSettings: settings
         ),
