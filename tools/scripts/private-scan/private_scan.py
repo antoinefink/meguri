@@ -835,6 +835,16 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift": "cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6",
+    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "935861e65791369115fb3f0f901a97d0eed69cb673d50b210f24121af8c3179d",
+    "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
+    "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "45a381178815c391e3c2de3c62086fc3fdb1504d7d2f398216671137cb27cd45",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "8ffb2f13b36100a2f03c3a86f882a894df1a625a55bab5a164d2aec3937b2c87",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
+    "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
+    "app/MeguriUITests/IOAddEditUITests.swift": "a32aa567e6c188acba98352f79984429346f9841f430b3f224b57ae020fed649",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
@@ -935,7 +945,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '779ed4470a5cee15e0032580b31b6053ec425ea9c33865c87c6909936b0fca4f',
+        '222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1160,7 +1170,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
     "docs/process/verification-status.md":
-        "780084139e51592f33c755c81f3d2b4298e396178f98669454cf60deed55ca96",
+        "f6d11e917a2d9e74eba72039aa36e53c6b0e656901fc83425b33b7cbf587c21f",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1532,7 +1542,7 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "f2dd76f61515c6986bab071d1dacfab42282e8bf41c832a56311252d64c2d1a7",
+        "31540954e8eceb04a368a5c27c1e6406d9f1043e234710997f103cb18782dcf2",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
         "f4cfb32a6987d170f6b435e40cb8ca839ac1887c14b753ca97bfb0f1ca959a30",

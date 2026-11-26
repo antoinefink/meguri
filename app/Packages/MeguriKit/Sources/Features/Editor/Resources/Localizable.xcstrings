@@ -1,6 +1,83 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld masks make %lld cards": {
+      "comment": "macOS Option B image footer. Counts numbered non-label masks and distinct positive ordinals; grouped masks share one card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@masks@"
+          },
+          "substitutions": {
+            "masks": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg mask makes %#@cards@"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg masks make %#@cards@"
+                    }
+                  }
+                }
+              }
+            },
+            "cards": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg card"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg cards"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Tags:": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags:"
+          }
+        }
+      }
+    },
+    "Change Image…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change Image…"
+          }
+        }
+      }
+    },
+    "Couldn't Get Media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't Get Media" } } } },
+    "Getting Media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Getting Media" } } } },
+    "Getting Media…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Getting Media…" } } } },
+    "Tags" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tags" } } } },
     "“%@” is %@. Files this size don't sync to your other devices." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” is %@. Files this size don't sync to your other devices." } } } },
     "Add Anyway" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Anyway" } } } },
     "This File Won't Sync" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "This File Won't Sync" } } } },

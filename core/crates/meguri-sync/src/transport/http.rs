@@ -23,6 +23,74 @@ use crate::transport::{BoxFuture, RawBody, RawStream, SyncTransport, TransportRe
 /// Name lookup, TCP, TLS and a proxy tunnel together (T8).
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub(crate) struct EditorImageResponse {
+    pub bytes: Vec<u8>,
+    pub content_type: String,
+    pub encoding: String,
+}
+
+/// One explicitly selected HTTP(S) editor image. Keep this client separate
+/// from sync: GET, redirects and content decoding have different contracts.
+pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) -> Result<EditorImageResponse, SyncError> {
+    use crate::remote_media::failure;
+    let mut url = editor_image_url(written_url, None)?;
+    let client = reqwest::Client::builder()
+        .http1_only().no_proxy().retry(reqwest::retry::never())
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT).read_timeout(CONNECT_TIMEOUT)
+        .tls_version_min(reqwest::tls::Version::TLS_1_2)
+        .dns_resolver(Arc::new(SystemResolver))
+        .build().map_err(|e| failure(&chain(&e)))?;
+    for redirects in 0..=10 {
+        #[cfg(feature = "test-hooks")]
+        guard(url.as_str())?;
+        let mut response = client.get(url.clone())
+            .header("User-Agent", "Mozilla/5.0 (compatible; Meguri)")
+            .header("Accept-Encoding", "gzip, deflate")
+            .send().await.map_err(|e| failure(&chain(&e)))?;
+        let status = response.status().as_u16();
+        if matches!(status, 301 | 302 | 303 | 307 | 308)
+            && let Some(location) = response.headers().get("location")
+        {
+            if redirects == 10 { return Err(failure("The image URL redirected too many times.")); }
+            url = editor_image_url(location.to_str().map_err(|_| failure("Invalid image redirect."))?, Some(&url))?;
+            continue;
+        }
+        if status != 200 { return Err(SyncError::Status { code: status, reason: String::new() }); }
+        let header = |name| response.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+        let content_type = header("content-type");
+        let encoding = header("content-encoding").trim().to_ascii_lowercase();
+        // This is only an early refusal: absent or inaccurate lengths must
+        // still pass the per-chunk check below. Never reserve from the header.
+        if response.content_length().is_some_and(|length| length > maximum_bytes as u64) {
+            return Err(crate::remote_media::size_failure());
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| failure(&chain(&e)))? {
+            crate::remote_media::append_bounded(&mut bytes, &chunk, maximum_bytes)?;
+        }
+        return Ok(EditorImageResponse { bytes, content_type, encoding });
+    }
+    unreachable!("the redirect bound returns in the loop")
+}
+
+/// Validate both source and redirect before reqwest can turn URL userinfo
+/// into Basic authentication. Errors never include the supplied URL.
+fn editor_image_url(written: &str, base: Option<&url::Url>) -> Result<url::Url, SyncError> {
+    use crate::remote_media::failure;
+    let url = match base {
+        Some(base) => base.join(written),
+        None => url::Url::parse(written),
+    }.map_err(|_| failure("Invalid image URL."))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(failure("Only HTTP and HTTPS image URLs are supported."));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(failure("Image URLs with credentials are not supported."));
+    }
+    Ok(url)
+}
+
 /// One job's HTTP client: its proxy and (test builds) its pins and roots are
 /// fixed when the job starts.
 #[derive(Debug)]
@@ -400,6 +468,102 @@ fn chain(err: &(dyn StdError + 'static)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_image_urls_refuse_credentials_in_sources_and_redirects() {
+        let base = url::Url::parse("https://images.example.test/folder/image.png").unwrap();
+        let refused = crate::remote_media::failure("Image URLs with credentials are not supported.");
+        for written in [
+            "http://reader:sample@images.example.test/image.png",
+            "https://reader@images.example.test/image.png",
+            "https://:sample@images.example.test/image.png",
+            "https://reader:@images.example.test/image.png",
+            "https://%72eader:%73ample@images.example.test/image.png",
+        ] {
+            assert_eq!(editor_image_url(written, None), Err(refused.clone()));
+            assert_eq!(editor_image_url(written, Some(&base)), Err(refused.clone()));
+        }
+        assert_eq!(editor_image_url("//reader:sample@images.example.test/image.png", Some(&base)), Err(refused));
+    }
+
+    #[test]
+    fn editor_image_urls_keep_public_sources_and_redirects_without_authorization() {
+        let base = url::Url::parse("https://images.example.test/folder/image.png").unwrap();
+        for (written, parent, expected) in [
+            ("http://images.example.test/a/../image.png?q=public#view", None,
+             "http://images.example.test/image.png?q=public#view"),
+            ("https://images.example.test/a%40b.png", None, "https://images.example.test/a%40b.png"),
+            ("../next.png?q=public", Some(&base), "https://images.example.test/next.png?q=public"),
+            ("//cdn.example.test/image.png", Some(&base), "https://cdn.example.test/image.png"),
+            ("http://cdn.example.test/image.png", Some(&base), "http://cdn.example.test/image.png"),
+        ] {
+            let url = editor_image_url(written, parent).unwrap();
+            assert_eq!(url.as_str(), expected);
+            // Build only: these benign fixtures never contact their named hosts.
+            let request = reqwest::Client::new().get(url).build().unwrap();
+            assert!(!request.headers().contains_key("authorization"));
+        }
+        for written in ["file:///image.png", "ftp://images.example.test/image.png"] {
+            assert!(editor_image_url(written, None).is_err());
+            assert!(editor_image_url(written, Some(&base)).is_err());
+        }
+    }
+
+    /// Synthetic loopback responses only; accepts and request reads are bounded.
+    fn editor_response(response: Vec<u8>, limit: usize) -> Result<EditorImageResponse, SyncError> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/image", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock && meguri_engine::monotonic::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(e) => panic!("loopback accept: {e}"),
+                }
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                head.push(byte[0]);
+                assert!(head.len() < 16384);
+            }
+            // An oversized declared length can make the client close early.
+            let _ = stream.write_all(&response);
+        });
+        let result = crate::transport::runtime::block_on(&meguri_engine::ThreadRegistry::new(),
+            &meguri_engine::CancelToken::new(), get_editor_image(&url, limit));
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn editor_encoded_body_limit_covers_declared_unknown_and_chunked_lengths() {
+        for length in [8, 9] {
+            for framing in ["declared", "unknown", "chunked"] {
+                let body = "x".repeat(length);
+                let suffix = match framing {
+                    "declared" => format!("Content-Length: {length}\r\n\r\n{body}"),
+                    "unknown" => format!("\r\n{body}"),
+                    // Two individually small chunks exceed the total limit at 9.
+                    _ => format!("Transfer-Encoding: chunked\r\n\r\n4\r\nxxxx\r\n{:x}\r\n{}\r\n0\r\n\r\n", length - 4, &body[4..]),
+                };
+                let result = editor_response(format!("HTTP/1.1 200 OK\r\nConnection: close\r\n{suffix}").into_bytes(), 8);
+                if length == 8 { assert_eq!(result.unwrap().bytes, body.as_bytes(), "{framing}"); }
+                else { assert_eq!(result.err(), Some(crate::remote_media::size_failure()), "{framing}"); }
+            }
+        }
+        // With no body sent, this must refuse from the header, before reading.
+        let result = editor_response(b"HTTP/1.1 200 OK\r\nContent-Length: 900\r\n\r\n".to_vec(), 8);
+        assert_eq!(result.err(), Some(crate::remote_media::size_failure()));
+    }
 
     #[test]
     fn connect_failures_are_told_apart_by_their_cause() {

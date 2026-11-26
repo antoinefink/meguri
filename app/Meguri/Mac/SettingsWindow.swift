@@ -8,7 +8,9 @@ struct SettingsWindow: View {
     let collection: ReviewCollection
     let features: ShellFeatures
     let configuration: LaunchConfiguration
-    private var context: NativeCommandContext { .init(collection: collection, host: .settings) }
+    private var context: NativeCommandContext {
+        NativeCommandContext(collection: collection, host: .settings).observingReviewAvailability()
+    }
     var body: some View {
         // N15.7: as System Settings, a fixed width and a height the person can
         // change. The Settings scene's resizability (`contentSize`, its default)

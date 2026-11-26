@@ -1,4 +1,5 @@
 import AppModel
+import ImageOcclusion
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -155,6 +156,7 @@ struct MeguriApp: App {
             SidebarCommands()
             MainWindowCommands()
             AppCommands()
+            MaskEditorCommands()
             CloudSyncCommands(collection: collection)
         }
         SwiftUI.Settings {
@@ -176,6 +178,7 @@ struct MeguriApp: App {
             SidebarCommands()
             // N20.4: the iPad menu bar and the ⌘-held list have the Mac's menus.
             AppCommands()
+            MaskEditorCommands()
             CloudSyncCommands(collection: collection)
         }
         #endif

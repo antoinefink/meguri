@@ -210,7 +210,7 @@ enum TestHooks {
                 #endif
                 #if os(macOS)
                 .modifier(ReviewInputEvidence(collection: collection,
-                    enabled: session.options.fixture?.lastPathComponent == "review-editor-1"))
+                    enabled: ["review-editor-1", "EmptyCollection"].contains(session.options.fixture?.lastPathComponent ?? "")))
                 #endif
                 .modifier(AppearanceOverrides(options: session.options))
             }

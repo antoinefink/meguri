@@ -81,6 +81,8 @@ impl From<meguri_engine::OpResult<notetypes::Saved>> for NotetypeMutation {
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct NotetypeField {
     pub ord: u32,
+    /// IO role tag; logical positions are independent of names and ord gaps.
+    pub tag: Option<u32>,
     pub id: Option<i64>,
     pub name: String,
     pub sticky: bool,
@@ -101,6 +103,7 @@ impl From<&meguri_model::notetype::NotetypeField> for NotetypeField {
         let options = &field.config;
         Self {
             ord: field.ord,
+            tag: options.tag,
             id: options.id,
             name: field.name.clone(),
             sticky: options.sticky,
@@ -244,6 +247,22 @@ pub fn clone_notetype(id: i64, name: Option<String>) -> Result<NotetypeMutation,
 pub fn ensure_image_occlusion_notetype() -> Result<NotetypeMutation, CoreError> {
     callback::enter("ensure_image_occlusion_notetype");
     Ok(notetypes::ensure_image_occlusion(&runtime::host()?.collection()?)?.into())
+}
+
+/// U206's picker action belongs to the collection in which it was offered.
+#[uniffi::export]
+pub fn editor_ensure_image_occlusion_notetype(expected_generation: u64) -> Result<NotetypeMutation, CoreError> {
+    callback::enter("editor_ensure_image_occlusion_notetype");
+    let collection = runtime::host()?.collection()?;
+    let expected = meguri_engine::Generation(expected_generation);
+    if collection.generation() != expected {
+        return Err(meguri_engine::EngineError::StaleGeneration {
+            planned: expected,
+            current: collection.generation(),
+        }.into());
+    }
+    // The executor checks this same handle's generation again at admission.
+    Ok(notetypes::ensure_image_occlusion(&collection)?.into())
 }
 // Read intact records; only replace the explicitly requested member. save_in
 // compares the caller's aggregate base again on the writer before any write.

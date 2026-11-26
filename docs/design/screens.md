@@ -104,7 +104,7 @@ the others use the pairwise set (U252).
 |---|---|---|---|---|---|---|
 | Image occlusion editor | `imageOcclusion.editor` | U205, U206 | iphone, ipad, mac | empty, typical, overflow, error, loading | pairwise set | `toolbar`, `inspector` |
 
-- `imageOcclusion.editor`: Draw, group and edit masks over an image.
+- `imageOcclusion.editor`: Draw, group and edit masks over an image. In the Mac Add Note and Edit Note windows, the image is a field in the same form as Header, Back Extra, Comments and Tags (Option B, chosen 2026-11-26). Above the canvas are the drawing tools, fill colour, undo and redo, card mode, zoom and actions. Below it are the filename, mask and card counts, and Change Image. An empty Image field offers image sources. The canvas grows with the window. The window's existing title, note type, deck and bottom actions keep their positions.
 
 ## browse
 

@@ -35,6 +35,53 @@ import XCTest
     func testReplayOwnershipAndDarkLongScrollOverNativeButtons() throws { try replayAndScroll(appearance: "dark") }
     func testReplayOwnershipAndLightLongScrollOverNativeButtons() throws { try replayAndScroll(appearance: "light") }
 
+    func testEditNoteMenuReturnsAfterSaveAndRepeatedNativeWindowClose() throws {
+        let (app, bundle) = try launch()
+        defer { app.terminate() }
+        try study("Synthetic Long Audio", app: app, bundle: bundle)
+        let note = app.menuBars.menuBarItems["Note"]
+        let command = note.menuItems.matching(NSPredicate(format: "title == %@", "Edit Note")).firstMatch
+        let window = app.windows["review.editCurrent.window"]
+        let reveal = app.buttons["review.session.reveal"]
+        func requireMenu(_ stage: String) throws {
+            let ready = wait { command.exists && command.isEnabled && reveal.exists && reveal.isEnabled }
+            if !ready { try attachReviewInputEvidence(bundle: bundle, stage: stage) }
+            XCTAssertTrue(ready, "Note > Edit Note must return after \(stage)")
+            let state = try reviewInputEvidence(bundle: bundle)
+            XCTAssertEqual(state["focusedHost"], "main")
+            XCTAssertEqual(state["focusedCollectionMatches"], "true")
+            XCTAssertEqual(state["registeredReviewInput"], state["liveReviewInput"])
+            XCTAssertEqual(state["registeredEditNote"], state["editCanOpen"])
+        }
+
+        try requireMenu("initial-review")
+        note.click(); command.click()
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        // Edit opens with its first rich-text field focused.
+        let savedTitle = "Synthetic saved review command regression"
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText(savedTitle)
+        let save = window.buttons["review.editCurrent.done"]
+        XCTAssertTrue(wait { save.exists && save.isEnabled && save.isHittable })
+        save.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        XCTAssertTrue(window.waitForNonExistence(timeout: 15))
+
+        // No test focus repair: closing the real window must restore commands.
+        try requireMenu("save")
+        app.typeKey("e", modifierFlags: .command)
+        XCTAssertTrue(window.waitForExistence(timeout: 15), "Cmd-E must work again after Save")
+        XCTAssertTrue(wait { window.title == savedTitle }, "Reopening must show the saved first field as the window title")
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 15))
+        try requireMenu("unchanged-close")
+        note.click(); command.click()
+        XCTAssertTrue(window.waitForExistence(timeout: 15), "the native menu must open Edit Note repeatedly")
+        window.buttons["review.editCurrent.cancel"].click()
+        XCTAssertTrue(window.waitForNonExistence(timeout: 15))
+        try requireMenu("cancel")
+        XCTAssertFalse(element(app, "review.session.rate.good").exists, "editing never answers the card")
+    }
+
     private func replayAndScroll(appearance: String) throws {
         let (app, bundle) = try launch(appearance: appearance)
         defer { app.terminate() }

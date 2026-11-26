@@ -4,9 +4,175 @@ import CoreBridge
 import Foundation
 import Testing
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 extension WebKitSuites {
     @Suite(.timeLimit(.minutes(2))) struct ReviewPagesMediaTests {
+        #if os(macOS)
+        @Test(arguments: ["parked", "key-return", "native", "editing", "background", "reopen", "cancel", "resume-cancel", "identity", "ended"])
+        func coordinatorRestoresSavedEditAfterPauseAndResume(owner: String) async throws {
+            @MainActor final class State {
+                var committedUpdate: CardUpdate?
+                var replacementEditing = false
+                var ready: Bool?
+                var readinessChecks = 0
+            }
+            let state = State()
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair), host = SpikeWindow(pair.container)
+            defer { pages.close(); host.close() }
+            let client = HeadClient(item: Self.item(1))
+            pages.renderHead = { _, keys, _ in
+                keys.map { key in
+                    CardPayload(cardID: key == Self.item(1).renderKey ? 1 : 2,
+                        question: "<p>Question</p><input id=entry>", answer: "Answer")
+                }
+            }
+            let model = ReviewCoordinator(deckID: 1, surface: pages,
+                store: ReviewRecordStore(file: directory.appending(path: "session.json")),
+                clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client)
+            let committed = pair.onCommitted
+            pair.onCommitted = { update, token in
+                if state.replacementEditing { pair.onInteraction?("focus", ["editable": true]) }
+                committed?(update, token)
+                state.committedUpdate = update
+            }
+            await model.start()
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            try await CardBehaviorFixture.until("initial edit card committed") { state.committedUpdate == pair.current.update }
+            let old = pair.current.webView, window = try #require(old.window)
+            pair.ownsKeyboardFocus = true
+            try #require(window.makeFirstResponder(old))
+            try #require(model.beginEditingNote())
+            try await model.pause()
+            #expect(model.paused && model.editingNote && !pages.inputActive)
+            model.endEditingNote(saved: owner != "cancel")
+            #expect(model.paused && !model.editingNote && window.firstResponder === old)
+
+            // Model just OS/presenter readiness; the coordinator, page swap,
+            // commit and responder restoration all run their production paths.
+            state.ready = owner == "key-return" || owner == "reopen" ? nil : owner != "background"
+            pages.editedCardWindowReady = { [weak model, weak pages] _, _ in
+                state.readinessChecks += 1
+                #expect(model?.paused == false && model?.editingNote == false && pages?.inputActive == true)
+                return state.ready
+            }
+            let input = NSTextView()
+            pair.container.addSubview(input)
+            if owner == "native" { try #require(window.makeFirstResponder(input)) }
+            if owner == "identity" { client.item = Self.item(2) }
+            state.replacementEditing = owner == "editing"
+            if owner == "ended" { model.generationEnded() }
+            if owner == "resume-cancel" {
+                let gate = CardAudioControllerTests.Hold()
+                defer { gate.release() }
+                client.beforeHead = { await gate.wait() }
+                let resuming = Task { try await model.resume() }
+                try await Spike.deadline("edit resume head held", timeout: .seconds(3)) { await gate.reached() }
+                resuming.cancel(); gate.release()
+                do { try await resuming.value; Issue.record("Cancelled edit resume succeeded") }
+                catch is CancellationError {}
+                #expect(model.paused && state.readinessChecks == 0 && window.firstResponder === old)
+                client.beforeHead = nil
+            }
+            try await model.resume()
+            if owner == "ended" {
+                #expect(model.phase == .ended && state.readinessChecks == 0)
+                return
+            }
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            try await CardBehaviorFixture.until("resumed edit card committed") { state.committedUpdate == pair.current.update }
+            #expect(!model.paused && pages.inputActive && model.phase == .question)
+            if owner == "cancel" {
+                #expect(pair.current.webView === old && state.readinessChecks == 0)
+            } else {
+                #expect(pair.current.webView !== old && pair.idle.webView === old)
+                #expect(pair.container.subviews.last === pair.current.webView)
+                #expect(!old.acceptsFirstResponder)
+            }
+            if owner == "key-return" {
+                try #require(state.readinessChecks > 0)
+                #expect(window.firstResponder === old)
+                state.ready = true
+                pages.establishInitialFocus()
+            } else if owner == "reopen" {
+                try #require(model.beginEditingNote())
+                state.ready = true
+                model.endEditingNote(saved: false)
+            }
+            if owner == "parked" || owner == "key-return" {
+                #expect(state.readinessChecks > 0)
+                #expect(window.firstResponder === pair.current.webView)
+                #expect(pair.ownsKeyboardFocus)
+                #expect(try await pair.current.string("return document.activeElement.id;") != "entry")
+            } else if owner == "native" {
+                #expect(window.firstResponder === input)
+            } else {
+                #expect(window.firstResponder === old)
+            }
+            // Each request is consumed once, including a refusal: a later
+            // key return/attachment must leave the person's new input alone.
+            state.ready = true
+            try #require(window.makeFirstResponder(input))
+            let checks = state.readinessChecks
+            pages.establishInitialFocus(); pages.establishInitialFocus()
+            #expect(window.firstResponder === input && state.readinessChecks == checks)
+            if owner == "identity" || owner == "cancel" || owner == "resume-cancel" { #expect(checks == 0) }
+            #expect(await model.end())
+        }
+
+        @Test(arguments: [false, true])
+        func editedCardRefreshFocusesDisplayedPageAndPreservesOtherInput(answer: Bool) async throws {
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair), host = SpikeWindow(pair.container)
+            defer { pages.close(); host.close() }
+            let item = Self.item(1)
+            pages.renderHead = { _, _, _ in
+                [CardPayload(cardID: 1, question: "<p>Edited question</p><input id=entry>", answer: "<p>Edited answer</p><input id=entry>")]
+            }
+            try await pages.load()
+            try await pages.render(sessionID: 5, items: [item])
+            try await pages.present(item: item, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            let old = pair.current.webView
+            let window = try #require(old.window)
+            pair.ownsKeyboardFocus = true
+            #expect(window.makeFirstResponder(old))
+            pages.inputActive = false
+            pair.ownsKeyboardFocus = false
+            // Save refreshes through the production double buffer while the
+            // editor owns input; AppKit retains the old page's responder.
+            try await pages.present(item: item, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            if answer { try await pages.reveal(inputTime: ProcessInfo.processInfo.systemUptime) }
+            #expect(pair.current.webView !== old && pair.idle.webView === old)
+            #expect(pair.container.subviews.last === pair.current.webView)
+            #expect(window.firstResponder === old)
+            #expect(!old.acceptsFirstResponder)
+            #expect(ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(window.firstResponder === pair.current.webView)
+            #expect(window.firstResponder !== pair.idle.webView)
+            #expect(!old.acceptsFirstResponder, "the parked page stays ineligible for native input")
+            #expect(try await pair.current.string("return document.activeElement.id;") != "entry")
+            try await pair.current.run("document.getElementById('entry').focus(); document.getElementById('entry').value='retained';")
+            #expect(!ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(try await pair.current.string("return document.activeElement.value;") == "retained")
+            // A native field is never a repair target.
+            let input = NSTextView()
+            pair.container.addSubview(input)
+            #expect(window.makeFirstResponder(input))
+            #expect(!ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(window.firstResponder === input)
+            input.removeFromSuperview()
+        }
+        #endif
+
         @Test func coordinatorCapturesAudioBeforeRendering() async throws {
             let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: directory) }

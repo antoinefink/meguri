@@ -94,7 +94,10 @@ struct RootView: View {
                 }
             }
         }
-        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main, layout: layout, statsPage: features.statsPage) })
+        .focusedSceneValue(\.nativeCommandContext, collection.map {
+            NativeCommandContext(collection: $0, host: .main, layout: layout, statsPage: features.statsPage)
+                .observingReviewAvailability()
+        })
         .background {
             if let collection { FindSecondKey(context: NativeCommandContext(collection: collection, host: .main, layout: layout)) }
         }
