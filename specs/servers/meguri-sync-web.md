@@ -208,7 +208,7 @@ trigger a native collection download or alter stamps.
 
 ## W12. Browse the signed-in collection
 
-Browse opens the member’s published collection using the browser session and the W3 request rules. Every Browse operation uses W11’s expected-account check. The client verifies the response account and clears account-specific state when identity changes. The desktop page keeps the result list beside the note editor. Compact detail navigation restores the list and query on return. Show one row per generated card, including siblings. Show the selected card’s template, deck and exact card and note IDs in Card info.
+Browse opens the member’s published collection using the browser session and the W3 request rules. Every Browse operation uses W11’s expected-account check. The client verifies the response account and clears account-specific state when identity changes. With no card open, the result list uses the full page width. Opening a card or adding a note keeps the results as a narrow list beside the note editor on wide screens; narrower screens show the editor alone, and All cards restores the list, query and position on return. Show one row per generated card, including siblings. Show the selected card’s template, deck and exact card and note IDs in Card info.
 
 An empty query lists all cards within the chosen deck scope. A literal, case-insensitive query matches the text inside any note field. A named field limits matching to that field, and a deck filter limits the cards. A missing field has no match. A result shows the matched field name and an excerpt with the query text marked. Keep collection text inert in the account page. Paging must eventually deliver all matches in an unchanged collection even for sparse filters.
 

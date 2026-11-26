@@ -837,11 +837,11 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
-        "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
+        "22ff413d3fd71c2357e247c963ff32d5ca86bb58aa03f5a4a8b155fd5b8bd363",
     "server/web/tests/browser/browse-real.spec.ts":
-        "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797",
+        "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad",
     "server/web/src/browse.tsx":
-        "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a",
+        "2d5e21502ebb5c850d922a18b742fee33300bcdc6ff126d18ed833ba432bc711",
     "server/tests/browse.rs":
         "d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
@@ -1215,7 +1215,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/upstream-records.json':
         "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385",
     'server/web/src/style.css':
-        "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc",
+        "cb87d2475ac77d53db3fbe6ea2d0c51fb9e7dfcc4b858193007882e09a4d5ee8",
     'server/web/src/app.tsx':
         "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69",
     'server/web/tests/browser/accounts.spec.ts':
@@ -1305,6 +1305,8 @@ PUBLIC_ARTIFACTS = {
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "docs/plans/2026-11-25-1512-feat-online-browse-plan.md":
         "42ece08d046176f26f02f6e6f6e2d68f26f5029d9ddca6f5b7ff77f38b81d798",
+    "docs/plans/2026-11-26-0903-feat-browse-two-layouts-plan.md":
+        "49a6d391cfdac35a88d2e746391dc27f281102680afa1e1ceb47939ed8eedd04",
     "specs/servers/meguri-sync-web.md":
         "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
     "specs/servers/meguri-collection-mcp.md":
