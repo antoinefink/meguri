@@ -112,16 +112,16 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     await expect(rows()).toHaveCount(3);
     await page.getByLabel("Search note fields").fill("aprovechar"); await page.getByRole("button", { name: "Search", exact: true }).click(); await expect(rows()).toHaveCount(3);
     await expect(rows().first().locator("mark")).toHaveText("aprovechar");
-    await page.getByLabel("Field", { exact: true }).selectOption("Spanish"); await expect(rows()).toHaveCount(1); await expect(rows().first().locator("strong")).toHaveText("aprovechar");
+    await page.getByLabel("Field", { exact: true }).selectOption("Spanish"); await expect(rows()).toHaveCount(1); await expect(rows().first().locator(".browse-cell-title")).toHaveText("aprovechar");
     await page.getByLabel("Field", { exact: true }).selectOption(""); await expect(rows()).toHaveCount(3);
     const first = await round(admin.request, origin, host.key, 0, 3, 3); expect(first.chunk.notes).toHaveLength(3); expect(first.chunk.cards).toHaveLength(3);
     await rows().first().click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue(samples[0]![2]!);
-    await page.getByText("Card info", { exact: true }).click(); await expect(page.getByText("Forward", { exact: true })).toBeVisible();
+    await expect(page.getByText("Forward", { exact: true })).toBeVisible();
     await capture("browse-real-desktop");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByLabel("Example", { exact: true }).fill("Quiero aprovechar el viaje para ver a mi hermana."); await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByRole("status").filter({ hasText: /^Note \d+ saved\.$/ })).toBeVisible();
-    await page.getByRole("button", { name: "Back to results" }).click(); await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(rows().first()).toContainText("para ver");
+    await page.getByRole("button", { name: "All cards" }).click(); await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(rows().first()).toContainText("para ver");
     const edited = await round(admin.request, origin, host.key, first.min, 3, 3); expect(edited.chunk.notes).toHaveLength(1);
     expect(edited.chunk.notes[0]![6]).toBe("el viaje\x1f<b>trip</b>\x1fQuiero aprovechar el viaje para ver a mi hermana.");
     // AE4: retain the proposed web values when a device correction commits.
@@ -130,7 +130,7 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     const corrected = await round(admin.request, origin, host.key, edited.min, 3, 3, [device]);
     await page.getByRole("button", { name: "Save changes" }).click(); await expect(page.getByRole("alert")).toContainText("Your draft is still here"); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("My older browser draft");
     page.once("dialog", dialog => void dialog.accept()); await page.getByRole("button", { name: "Load server copy" }).click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("Device correction aprovechar");
-    await page.getByRole("button", { name: "Back to results" }).click();
+    await page.getByRole("button", { name: "All cards" }).click();
     // AE3: distinct generated siblings, cancellation, exact deletion and graves.
     await page.getByRole("button", { name: "Add note", exact: true }).click(); await page.getByLabel("Note type", { exact: true }).selectOption("20");
     await page.getByLabel("Spanish", { exact: true }).fill("hermanos"); await page.getByLabel("English", { exact: true }).fill("siblings"); await page.getByLabel("Example", { exact: true }).fill("Two cards");
@@ -138,15 +138,15 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     await page.getByLabel("Search note fields").fill("hermanos"); await page.getByRole("button", { name: "Search", exact: true }).click(); await expect(rows()).toHaveCount(2);
     const added = await round(admin.request, origin, host.key, corrected.min, 4, 5); const siblings = added.chunk.cards.filter(c => c[1] === added.chunk.notes.find(n => n[6].startsWith("hermanos"))?.[0]); expect(siblings).toHaveLength(2); expect(siblings[0]![0]).not.toBe(siblings[1]![0]);
     await rows().first().click(); await expect(page.getByText("2 cards share this note.")).toBeVisible(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
-    const confirmation = page.getByRole("region", { name: "Confirm note deletion" }); await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
-    await confirmation.getByRole("button", { name: "Cancel" }).click(); await page.getByRole("button", { name: "Back to results" }).click(); await expect(rows()).toHaveCount(2);
+    const confirmation = page.getByRole("dialog", { name: /^Delete “/ }); await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
+    await confirmation.getByRole("button", { name: "Cancel" }).click(); await page.getByRole("button", { name: "All cards" }).click(); await expect(rows()).toHaveCount(2);
     await rows().last().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
     await confirmation.scrollIntoViewIfNeeded();
     await expect(confirmation).toBeInViewport({ ratio: 1 });
     await expect(confirmation).toContainText("hermanos"); await expect(confirmation).toContainText("all 2 of its cards");
     await capture("browse-real-compact");
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-    await confirmation.getByRole("button", { name: "Confirm delete note" }).click(); await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible(); await expect(rows()).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Delete note", exact: true }).click(); await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible(); await expect(rows()).toHaveCount(0);
     const deleted = await round(admin.request, origin, host.key, added.min, 3, 3); expect(deleted.graves.cards.sort()).toEqual(siblings.map(c => c[0]).sort()); expect(deleted.graves.notes).toHaveLength(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(testInfo.attachments.filter(attachment => attachment.name.startsWith("browse-real-")).map(attachment => attachment.name))
