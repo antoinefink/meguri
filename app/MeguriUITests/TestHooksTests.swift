@@ -278,6 +278,7 @@ final class TestHooksTests: XCTestCase {
             "collection/deck-import/drop-target",
             "collection/deck-import/imported-without-result",
             "collection/deck-import/importing",
+            "collection/deck-import/importing-finishing",
             "collection/deck-import/live",
             "collection/deck-import/live-confirm",
             "collection/deck-import/live-refused",
