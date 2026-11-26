@@ -77,16 +77,58 @@ final class BackupRestoreWindowUITests: XCTestCase {
             !oldest.exists || oldest.frame.isEmpty
                 || !viewport.frame.intersection(window.frame).intersects(oldest.frame)
         }, "The final archive must initially be outside the visible history viewport")
-        capture(window, "compact-initial-history")
 
+        let initialViewport = viewport.frame.intersection(window.frame)
+        let firstCell = viewport.descendants(matching: .cell)
+            .containing(.staticText, identifier: "settings.backups.entry.backup-2026-11-25-17.25.00.colpkg").firstMatch
+        let oldestCell = viewport.descendants(matching: .cell)
+            .containing(.staticText, identifier: "settings.backups.entry." + filename).firstMatch
+        let scrollbars = viewport.descendants(matching: .scrollBar).allElementsBoundByIndex.filter {
+            $0.frame.height > $0.frame.width && $0.frame.intersects(initialViewport)
+        }
+        XCTAssertEqual(scrollbars.count, 1, "The same history viewport must own one native vertical scrollbar")
+        let scrollbar = try XCTUnwrap(scrollbars.first)
+        let thumbs = scrollbar.descendants(matching: .valueIndicator).allElementsBoundByIndex
+        XCTAssertEqual(thumbs.count, 1, "Drag the native scrollbar's own thumb")
+        let thumb = try XCTUnwrap(thumbs.first)
+        func attachHistory(_ state: String) {
+            self.attachHistory(window, viewport: viewport, firstCell: firstCell, oldest: oldest,
+                oldestCell: oldestCell, scrollbar: scrollbar, thumb: thumb, state: state)
+        }
+        attachHistory("compact-initial-history")
+        XCTAssertTrue(firstCell.exists && !firstCell.frame.isEmpty && initialViewport.contains(firstCell.frame),
+            "The initial archive data cell must fit completely within the viewport")
+        assertFooterSeparation(window, viewport: viewport, cell: firstCell)
+        let trackFrame = scrollbar.frame
+        let thumbFrame = thumb.frame
+        let windowFrame = window.frame
+        XCTAssertTrue(!trackFrame.isEmpty && initialViewport.contains(trackFrame)
+            && !thumbFrame.isEmpty && trackFrame.contains(thumbFrame),
+            "The same native vertical track must contain its visible thumb")
+        // ValueIndicator and ScrollView are passive, disabled AX objects. Anchor
+        // input to the key restore window using their actual screen-space frames.
+        let origin = window.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: thumbFrame.midX - windowFrame.minX,
+            dy: thumbFrame.midY - windowFrame.minY))
+        let end = origin.withOffset(CGVector(dx: trackFrame.midX - windowFrame.minX,
+            dy: trackFrame.maxY - thumbFrame.height / 2 - windowFrame.minY))
         try app.bringToFront(bundleIdentifier: bundle)
-        // Scroll the native table to its end, without resizing the window or
-        // relying on the AX tree to materialize offscreen rows synchronously.
-        viewport.scroll(byDeltaX: 0, deltaY: -viewport.frame.height * 26)
-        XCTAssertTrue(wait {
-            oldest.exists && !oldest.frame.isEmpty && oldest.isHittable
-                && viewport.frame.intersection(window.frame).contains(oldest.frame)
-        }, "The exact oldest archive must become visible and actionable")
+        // One native mouse drag, using only this thumb and its vertical track.
+        // Align the thumb's bottom with the track's bottom; AppKit clamps it.
+        start.click(forDuration: 0.1, thenDragTo: end)
+        let reachedOldest = wait {
+            let visible = viewport.frame.intersection(window.frame)
+            guard oldest.exists && oldestCell.exists else { return false }
+            let archiveFrame = oldest.frame
+            let cellFrame = oldestCell.frame
+            return !visible.isEmpty && !archiveFrame.isEmpty && !cellFrame.isEmpty
+                && visible.contains(archiveFrame) && visible.contains(cellFrame)
+                && oldest.isHittable
+        }
+        // continueAfterFailure is false: save the actual outcome before asserting.
+        attachHistory("after-native-scroll")
+        XCTAssertTrue(reachedOldest, "The exact oldest archive and its complete data cell must become visible and actionable")
+        assertFooterSeparation(window, viewport: viewport, cell: oldestCell)
         try app.bringToFront(bundleIdentifier: bundle)
         oldest.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         // Same filename-bound AX value as the functional journey. Native Table
@@ -156,9 +198,71 @@ final class BackupRestoreWindowUITests: XCTestCase {
         }, "Cancelling returns to the same selected archive")
         XCTAssertFalse(app.sheets.firstMatch.exists)
         XCTAssertFalse(element(window, "settings.backups.progress").exists, "Cancellation must not start restoration")
+        attachHistory("oldest-archive-cancelled")
+
+        // Escape cancels the same dated confirmation without changing selection.
+        try app.bringToFront(bundleIdentifier: bundle)
+        apply.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        let reopened = wait { confirmationTitle.exists && destructiveRestore.exists }
+        capture(window, "oldest-archive-escape-confirmation")
+        XCTAssertTrue(reopened, "The same selected archive must produce the same dated confirmation")
+        try app.bringToFront(bundleIdentifier: bundle)
+        window.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        let escaped = wait {
+            !confirmationTitle.exists && !destructiveRestore.exists && oldest.exists
+                && oldest.value as? String == "Selected" && apply.isEnabled && apply.isHittable
+                && windowCancel.exists && windowCancel.isEnabled && windowCancel.isHittable
+        }
+        attachHistory("oldest-archive-escape-cancelled")
+        XCTAssertTrue(escaped, "Escape must cancel confirmation and retain the exact selected archive")
+        XCTAssertFalse(element(window, "settings.backups.progress").exists, "Escape must not start restoration")
+        try app.bringToFront(bundleIdentifier: bundle)
         window.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 10), "Cmd-W must close the same bound restore window")
         XCTAssertFalse(element(app, "settings.backups.progress").exists, "Closing must not start restoration")
+    }
+
+    private func assertFooterSeparation(_ window: XCUIElement, viewport: XCUIElement, cell: XCUIElement) {
+        let windowFrame = window.frame
+        let viewportFrame = viewport.frame
+        let cellFrame = cell.frame
+        let visible = viewportFrame.intersection(windowFrame)
+        XCTAssertFalse(visible.isEmpty, "The live history viewport must intersect its restore window")
+        XCTAssertTrue(visible.contains(cellFrame), "The complete archive data cell must fit within the live viewport")
+        for id in ["settings.backups.cancel", "settings.backups.apply"] {
+            let button = element(window, id)
+            let buttonFrame = button.frame
+            XCTAssertTrue(button.exists && !buttonFrame.isEmpty && button.isEnabled && button.isHittable)
+            XCTAssertTrue(windowFrame.contains(buttonFrame), "The native action must remain inside its window")
+            XCTAssertLessThanOrEqual(viewportFrame.maxY, buttonFrame.minY, "History must end above \(id)")
+            XCTAssertLessThanOrEqual(cellFrame.maxY, buttonFrame.minY, "The complete archive must end above \(id)")
+            XCTAssertFalse(viewportFrame.intersects(buttonFrame) || cellFrame.intersects(buttonFrame),
+                "Neither the history viewport nor its complete data cell may overlap \(id)")
+        }
+    }
+
+    private func attachHistory(_ window: XCUIElement, viewport: XCUIElement, firstCell: XCUIElement,
+                               oldest: XCUIElement, oldestCell: XCUIElement, scrollbar: XCUIElement,
+                               thumb: XCUIElement, state: String) {
+        // Full native-window pixels and hierarchy retain synthetic drawing evidence.
+        capture(window, state)
+        func describe(_ name: String, _ control: XCUIElement) -> String {
+            guard control.exists else { return "\(name): exists=false\n" }
+            return "\(name): frame=\(control.frame); hittable=\(control.isHittable); "
+                + "enabled=\(control.isEnabled); value=\(String(describing: control.value))\n"
+        }
+        let details = "Binding: app.windows[settings.backups.restoreWindow]; state=\(state)\n"
+            + describe("window", window) + describe("viewport", viewport)
+            + "Visible viewport/window intersection: \(viewport.frame.intersection(window.frame))\n"
+            + describe("vertical scrollbar", scrollbar) + describe("thumb", thumb)
+            + describe("first data cell", firstCell) + describe("oldest", oldest)
+            + describe("oldest data cell", oldestCell)
+            + describe("Cancel", element(window, "settings.backups.cancel"))
+            + describe("Restore", element(window, "settings.backups.apply")) + window.debugDescription
+        let attachment = XCTAttachment(string: details)
+        attachment.name = "native-backups-mac-\(state)-geometry-synthetic"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func attachReadiness(_ window: XCUIElement, app: XCUIApplication, focus: String) {

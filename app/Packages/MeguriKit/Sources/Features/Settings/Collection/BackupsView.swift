@@ -355,6 +355,43 @@ struct BackupRestoreContent: View {
     }
     #endif
     private var restoreBody: some View {
+        restoreLayout
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.backups.restoreContent")
+            .navigationTitle(restoreTitle)
+            #if os(iOS)
+            .accessibilityLabel(Text("Restore from Backup", bundle: .module))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { cancelButton }
+                ToolbarItem(placement: .confirmationAction) { restoreButton }
+            }
+            #endif
+            .confirmationDialog(confirmationTitle, isPresented: $confirmation, titleVisibility: .visible) {
+                Button(role: .destructive) {
+                    if let entry = confirmedEntry { restore(entry.name) }
+                } label: { Text("Restore", bundle: .module) }
+                Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
+            } message: { Text(confirmationMessage, bundle: .module) }
+    }
+    @ViewBuilder private var restoreLayout: some View {
+        #if os(macOS)
+        // Allocate the footer outside the history. Native Table drawing must
+        // stop at its viewport even when more rows exist below the window.
+        VStack(spacing: 0) {
+            restoreContent
+                .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .clipped()
+            Divider()
+            HStack { Spacer(); cancelButton; restoreButton }
+                .padding()
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
+        #else
+        restoreContent
+        #endif
+    }
+    private var restoreContent: some View {
             VStack {
                 if presentation.work == .restore {
                     BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: cancel)
@@ -389,27 +426,6 @@ struct BackupRestoreContent: View {
                 }
                 if !showsListFailure { restoreNotices }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("settings.backups.restoreContent")
-            .navigationTitle(restoreTitle)
-            #if os(macOS)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack { Spacer(); cancelButton; restoreButton }.padding()
-            }
-            #else
-            .accessibilityLabel(Text("Restore from Backup", bundle: .module))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { cancelButton }
-                ToolbarItem(placement: .confirmationAction) { restoreButton }
-            }
-            #endif
-            .confirmationDialog(confirmationTitle, isPresented: $confirmation, titleVisibility: .visible) {
-                Button(role: .destructive) {
-                    if let entry = confirmedEntry { restore(entry.name) }
-                } label: { Text("Restore", bundle: .module) }
-                Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
-            } message: { Text(confirmationMessage, bundle: .module) }
     }
     private var restoreTitle: Text {
         #if os(iOS)
@@ -460,6 +476,8 @@ struct BackupRestoreContent: View {
         .contextMenu(forSelectionType: String.self) { names in
             if let name = names.first { Text(verbatim: name) }
         }
+        .frame(minHeight: 0, maxHeight: .infinity)
+        .clipped()
         #else
         List(selection: selection) {
             ForEach(presentation.entries, id: \.name) { entry in
