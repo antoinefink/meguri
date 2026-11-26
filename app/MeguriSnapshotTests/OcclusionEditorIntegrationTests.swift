@@ -163,7 +163,7 @@ import UniformTypeIdentifiers
     private func nativeCanvas(_ view: NSView?) -> NativeCanvasAccessibility.Container? {
         guard let view else { return nil }
         if let canvas = view as? NativeCanvasAccessibility.Container { return canvas }
-        return view.subviews.lazy.compactMap { nativeCanvas($0) }.first
+        return view.subviews.lazy.compactMap { self.nativeCanvas($0) }.first
     }
 
     private func mount(_ view: some View) -> NSWindow {

@@ -178,7 +178,7 @@ import XCTest
     /// unexpectedly absent. Only the real AX viewport is awaited; measured
     /// source pixels determine its letterboxing. Native-image absence fails the
     /// completed-state contract below, after the immediate input captures.
-    private struct DrawingSurface {
+    @MainActor private struct DrawingSurface {
         let viewport: XCUIElement
         let nativeImage: XCUIElement
         let imageSize: CGSize
