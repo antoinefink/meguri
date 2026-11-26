@@ -291,6 +291,16 @@ final class DriveScriptTests: XCTestCase {
         XCTAssertEqual(script.steps.map(\.action.kind), ["launch", "tap", "type", "swipe", "scroll", "wait", "wait", "snapshot", "resize", "foregroundCycle"])
     }
 
+    func testActivityWaitUsesLabelWithoutIdentifierAndRejectsMixedSelectors() throws {
+        let script = try parse(#"{"name":"loading","steps":[{"launch":{}},{"wait":{"activity":"Loading Deck"}},{"wait":{"activity":"Loading Decks","timeout":3}}]}"#)
+        XCTAssertEqual(script.steps[1].action, .waitActivity(label: "Loading Deck", timeout: 10))
+        XCTAssertEqual(script.steps[2].action, .waitActivity(label: "Loading Decks", timeout: 3))
+        for fields in [#""activity":"""#, #""activity":"Loading Deck","id":"home.collection""#,
+                       #""activity":"Loading Deck","gone":true"#, #""activity":"Loading Deck","timeout":0"#] {
+            XCTAssertThrowsError(try parse("{\"name\":\"x\",\"steps\":[{\"launch\":{}},{\"wait\":{\(fields)}}]}"))
+        }
+    }
+
     func testForegroundCycleRequiresLiteralTrueAndNoExtraKeys() throws {
         let json = #"{"name":"x","steps":[{"launch":{}},{"foregroundCycle":true}]}"#
         XCTAssertEqual(try parse(json).steps.last?.action, .foregroundCycle)

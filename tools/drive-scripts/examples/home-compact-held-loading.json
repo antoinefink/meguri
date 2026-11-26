@@ -1,17 +1,18 @@
 {
   "name": "home-compact-held-loading",
-  "description": "Capture production compact Home with a synthetic deck selection held, then its cold first tree read held. No collection is opened.",
+  "description": "Capture the cold production compact deck list first, then a selected detail with its synthetic save held for the fixture lifetime. No collection is opened.",
   "platforms": ["ios"],
   "steps": [
+    {"launch": {"route": "navigation/feedback-cold", "animations": false}},
+    {"wait": {"activity": "Loading Decks"}},
+    {"snapshot": "compact-cold-deck-list"},
     {"launch": {"route": "navigation/feedback", "animations": false}},
     {"wait": "home.deck.row.1700000000101"},
     {"tap": "home.deck.row.1700000000101"},
-    {"wait": "home.deck.title"},
-    {"wait": "home.collection.pending.progress"},
+    {"wait": {"activity": "Loading Deck"}},
     {"snapshot": "compact-deck-held-loading"},
-    {"launch": {"route": "shell/root/loading", "animations": false}},
-    {"wait": "home.collection.pending"},
-    {"wait": "home.collection.pending.progress"},
-    {"snapshot": "compact-cold-deck-list"}
+    {"do": "sleep:10"},
+    {"wait": {"activity": "Loading Deck"}},
+    {"snapshot": "compact-deck-still-held-loading"}
   ]
 }

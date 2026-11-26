@@ -277,8 +277,8 @@ extension TestHooks {
 
     /// A made-up collection's note types, in memory (sample content only).
     @MainActor final class SampleNoteTypesBackend: NoteTypesBackend {
-        var beforeList: (@MainActor () async -> Void)?
-        var beforeRecord: (@MainActor () async -> Void)?
+        var beforeList: (@MainActor () async throws -> Void)?
+        var beforeRecord: (@MainActor () async throws -> Void)?
         /// Only deletion snapshots consume the script; detail/header reads do
         /// not advance it. The last answer stays for a Cancel and fresh ask.
         var deletionCounts: [NotetypeRemovalCounts] = []
@@ -334,14 +334,14 @@ extension TestHooks {
         private let core = CoreNotetypeService()
 
         func list() async throws -> [NotetypeName] {
-            await beforeList?()
+            try await beforeList?()
             return Self.names.enumerated().map { NotetypeName(id: 1_700_000_100_001 + Int64($0.offset), name: $0.element.0) }
         }
         func noteCounts() async throws -> [Int64: UInt64] {
             Dictionary(uniqueKeysWithValues: Self.names.enumerated().map { (1_700_000_100_001 + Int64($0.offset), $0.element.1) })
         }
         func read(_ id: Int64) async throws -> NotetypeRecord {
-            await beforeRecord?()
+            try await beforeRecord?()
             let name = Self.names[safe: Int(id - 1_700_000_100_001)]?.0 ?? "Basic"
             let fields = id == Self.vocabulary ? Self.fields.map(\.0) : id == Self.cloze ? ["Text", "Back Extra"] : ["Front", "Back"]
             let templates: [(String, String, String)] = id == Self.vocabulary

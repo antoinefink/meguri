@@ -349,6 +349,9 @@ private let expectedBackupsRestorePresentation: InitialPresentation.Style = .she
         #if DEBUG && os(macOS)
         routes.append("card/replay-accessibility")
         #endif
+        #if os(iOS)
+        routes.append("navigation/feedback-cold")
+        #endif
         return routes.sorted().joined(separator: ", ")
     }()
 
@@ -526,6 +529,27 @@ private let expectedBackupsRestorePresentation: InitialPresentation.Style = .she
             return
         }
         #expect(!launch.probe, "an audit or a snapshot of the shell would include the probe")
+    }
+
+    @Test(arguments: [nil, "navigation/feedback", "navigation/feedback-cold", "sample/screen", "shell/root/loading"] as [String?])
+    func onlyTouchNavigationFixturesPresentTheirOwnShell(path: String?) throws {
+        var options = TestHooks.LaunchOptions()
+        if let path { options.route = try TestHooks.Route(path) }
+        let session = TestHooks.Session(options: options)
+        let navigation = AppNavigation()
+        var configuration = LaunchConfiguration()
+        configuration.initialPresentation = .screen { EmptyView() }
+        let root = TestHooks.Root(session: session, configuration: configuration, navigation: navigation) { EmptyView() }
+        #if os(iOS)
+        let expected = path == "navigation/feedback" || path == "navigation/feedback-cold"
+        #else
+        let expected = false
+        #endif
+        #expect((root.standaloneShellContent != nil) == expected)
+
+        configuration.initialPresentation = nil
+        let normalRoot = TestHooks.Root(session: session, configuration: configuration, navigation: navigation) { EmptyView() }
+        #expect(normalRoot.standaloneShellContent == nil)
     }
 
     @Test func handlersSeeTheOtherOverrides() throws {

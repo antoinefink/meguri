@@ -164,6 +164,83 @@ import XCTest
         try command("release.stats")
     }
 
+    func testPendingDeckDisablesPreviousDeckMenusAndCancelRestoresThem() throws {
+        defer { app?.terminate() }
+        try launchFeedback()
+        try clickDeck(languages)
+        XCTAssertTrue(element("home.deck.page.\(languages)").waitForExistence(timeout: 10))
+
+        // Read real NSMenu items, scoped to their menu: Export Deck also
+        // appears in Deck. In-window controls cannot witness these guards.
+        func menuItem(_ menu: String, _ title: String) throws -> XCUIElement {
+            try app.bringToFront(bundleIdentifier: bundle)
+            let barItem = app.menuBars.menuBarItems[menu]
+            barItem.click()
+            let item = barItem.menuItems.matching(NSPredicate(format: "title == %@", title)).firstMatch
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "\(menu) › \(title)")
+            return item
+        }
+        func dismissMenu() throws {
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey(.escape, modifierFlags: [])
+        }
+        func assertMenuEnabled(_ menu: String, _ title: String, _ enabled: Bool) throws {
+            let item = try menuItem(menu, title)
+            XCTAssertTrue(wait(NSPredicate(format: "exists == true AND enabled == %@", NSNumber(value: enabled)), item),
+                "\(menu) › \(title) enabled=\(enabled)")
+            let evidence = XCTAttachment(string: "\(menu) › \(item.title): enabled=\(item.isEnabled)")
+            evidence.name = "native-menu-\(menu)-\(title)-\(enabled)"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+            try dismissMenu()
+        }
+
+        try assertMenuEnabled("File", "Export Deck…", true)
+        try assertMenuEnabled("Deck", "Rename…", true)
+        try command("hold.deck")
+        try app.bringToFront(bundleIdentifier: bundle)
+        try clickDeck(science)
+        try waitForState("deck=2") // Languages saved; Science's save is now held.
+        try waitForState("pending=\(science)")
+        XCTAssertTrue(progress("Loading Deck").waitForExistence(timeout: 5))
+        assertTitle("Science")
+        assertSelected("home.sidebar.deck.\(science)")
+        XCTAssertFalse(element("home.deck.page.\(languages)").exists)
+        try assertMenuEnabled("File", "Export Deck…", false)
+        try assertMenuEnabled("Deck", "Rename…", false)
+        try assertMenuEnabled("View", "Browse", true)
+
+        let back = element("shell.navigation.pendingBack")
+        XCTAssertTrue(back.isEnabled && back.isHittable)
+        try app.bringToFront(bundleIdentifier: bundle)
+        back.click()
+        try waitForState("pending=0")
+        assertTitle("Languages")
+        assertSelected("home.sidebar.deck.\(languages)")
+        XCTAssertTrue(element("home.deck.page.\(languages)").waitForExistence(timeout: 5))
+        XCTAssertFalse(progress("Loading Deck").exists)
+        try assertMenuEnabled("File", "Export Deck…", true)
+        try assertMenuEnabled("Deck", "Rename…", true)
+
+        // Invoke the restored mutation entry, proving it targets Languages.
+        let rename = try menuItem("Deck", "Rename…")
+        try app.bringToFront(bundleIdentifier: bundle)
+        rename.click()
+        let name = element("home.deckName.name")
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND value == 'Languages'"), name))
+        let cancel = element("home.deckName.cancel")
+        XCTAssertTrue(cancel.isEnabled && cancel.isHittable)
+        try app.bringToFront(bundleIdentifier: bundle)
+        cancel.click()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+        try command("release.deck")
+        try command("settle.deck")
+        assertTitle("Languages")
+        assertSelected("home.sidebar.deck.\(languages)")
+        XCTAssertTrue(element("home.deck.page.\(languages)").exists)
+        XCTAssertFalse(element("home.deck.page.\(science)").exists)
+    }
+
     func testPendingDeckBackRestoresPreviousPageAndIgnoresCompletion() throws {
         defer { app?.terminate() }
         try launchFeedback()

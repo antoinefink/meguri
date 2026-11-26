@@ -154,6 +154,22 @@ enum TestHooks {
         @ViewBuilder let content: () -> Content
         @State private var collectionSheetPresented = true
 
+        /// These fixtures own their tab shell and navigation stacks. Present them
+        /// directly so RootView's screen stack cannot push away the whole shell.
+        var standaloneShellContent: AnyView? {
+            #if os(iOS)
+            guard configuration.initialPresentation?.style == .screen else { return nil }
+            switch session.options.route?.path {
+            case "navigation/feedback", "navigation/feedback-cold":
+                return configuration.initialPresentation?.content
+            default:
+                return nil
+            }
+            #else
+            return nil
+            #endif
+        }
+
         private var collectionSheetContent: AnyView? {
             guard configuration.initialPresentation?.style == .sheet else { return nil }
             switch session.options.route?.path {
@@ -177,7 +193,10 @@ enum TestHooks {
                 // hierarchy check or a screenshot needs, nothing scrolls
                 // under it, and the iPhone's overlaid sidebar leaves it be.
                 VStack(spacing: 0) {
-                    if let collectionSheetContent {
+                    if let standaloneShellContent {
+                        standaloneShellContent
+                            .modifier(LaunchEnvironment(configuration: configuration))
+                    } else if let collectionSheetContent {
                         // Audit the prepared collection sheet without unrelated,
                         // dimmed shell labels behind its native presentation.
                         ColorToken.backgroundPrimary.color

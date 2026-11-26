@@ -32,14 +32,7 @@ extension TestHooks {
     enum ShellRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("shell/root/typical") { _ in ShellLaunch(features: ShellSample.features(.typical), probe: false) }
-            #if os(iOS)
-            // Cold compact launch: production Home with its first synthetic tree read held.
-            registry.register("shell/root/loading") { context in
-                .screen { NavigationFeedbackWindow(configuration: context.configuration) }
-            }
-            #else
             registry.registerShell("shell/root/loading") { _ in ShellLaunch(features: ShellSample.features(.loading), probe: false) }
-            #endif
             registry.registerShell("shell/root/error") { _ in ShellLaunch(features: ShellSample.features(.error), probe: false) }
             registry.registerShell("shell/root/deck-page") { _ in
                 ShellLaunch(features: ShellSample.features(.scrolling)) { navigation in

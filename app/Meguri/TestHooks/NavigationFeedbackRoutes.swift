@@ -18,26 +18,43 @@ extension TestHooks {
                 .screen { NavigationFeedbackWindow(configuration: context.configuration, preparedHome: true) }
                 #endif
             }
+            #if os(iOS)
+            registry.register("navigation/feedback-cold") { context in
+                .screen { NavigationFeedbackWindow(configuration: context.configuration) }
+            }
+            #endif
         }
     }
 
     @MainActor @Observable final class NavigationReadGate {
-        private var held = true
-        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private(set) var held = true
+        private(set) var cancelled = false
+        private var waiters: [CheckedContinuation<Bool, Never>] = []
         private(set) var calls = 0
         var fails = false
 
-        func wait() async {
+        func wait() async throws(BridgeError) {
             calls += 1
-            guard held else { return }
-            await withCheckedContinuation { waiters.append($0) }
+            guard !cancelled, !Task.isCancelled else { throw .cancelled }
+            if held {
+                let released = await withCheckedContinuation { waiters.append($0) }
+                guard released else { throw .cancelled }
+            }
+            guard !cancelled, !Task.isCancelled else { throw .cancelled }
         }
-        func hold() { held = true }
+        func hold() { if !cancelled { held = true } }
         func release() {
+            guard !cancelled else { return }
             held = false
             let pending = waiters
             waiters = []
-            pending.forEach { $0.resume() }
+            pending.forEach { $0.resume(returning: true) }
+        }
+        func cancel() {
+            cancelled = true
+            let pending = waiters
+            waiters = []
+            pending.forEach { $0.resume(returning: false) }
         }
     }
 
@@ -46,7 +63,7 @@ extension TestHooks {
         private let sample = StatsSampleService(tierDelay: .zero)
         init(gate: NavigationReadGate) { self.gate = gate }
         func page(_ request: StatsPageRequest) async throws(BridgeError) -> StatsPageStream {
-            await gate.wait()
+            try await gate.wait()
             guard !Task.isCancelled else { throw .cancelled }
             return try await sample.page(request)
         }
@@ -58,7 +75,7 @@ extension TestHooks {
         func homeIdle() async throws(BridgeError) {}
     }
 
-    @MainActor private final class NavigationFeedbackFixture {
+    @MainActor final class NavigationFeedbackFixture {
         let configuration: LaunchConfiguration
         let navigation = AppNavigation()
         let collection: ReviewCollection
@@ -87,18 +104,18 @@ extension TestHooks {
             self.collection = collection
             let browseBackend = SampleBrowseBackend()
             let browseGate = browse
-            browseBackend.beforeSearchSession = { await browseGate.wait() }
+            browseBackend.beforeSearchSession = { try await browseGate.wait() }
             let noteBackend = SampleNoteTypesBackend()
             let listGate = list, recordGate = record
-            noteBackend.beforeList = { await listGate.wait() }
-            noteBackend.beforeRecord = { await recordGate.wait() }
+            noteBackend.beforeList = { try await listGate.wait() }
+            noteBackend.beforeRecord = { try await recordGate.wait() }
             let homeGate = home, deckGate = deck
             if preparedHome { homeGate.release() }
             collection.configureNavigationFixture(generation: 1, tree: {
-                await homeGate.wait()
+                try await homeGate.wait()
                 return CountedDeckTree(generation: 1, nextChangeAt: Int64.max, nodes: StatsSampleService.decks)
             }, select: { _ in
-                await deckGate.wait()
+                try await deckGate.wait()
                 if deckGate.fails { throw BridgeError.invalidArgument("Synthetic deck selection failure") }
                 return 1
             }, deckEmpty: { id in
@@ -141,6 +158,8 @@ extension TestHooks {
                                  "list=\(list.calls)", "record=\(record.calls)", "stats=\(stats.calls)",
                                  "filled=\(features.statsPage?.filled == true)", "section=\(navigation.section.rawValue)",
                                  "pending=\(navigation.pendingDeckPage?.rawValue ?? 0)",
+                                 "selected=\(navigation.selectedDeck?.rawValue ?? 0)",
+                                 "deckHeld=\(deck.held)", "deckCancelled=\(deck.cancelled)",
                                  "state=\(collection.state)", "homePhase=\(collection.homePhase)",
                                  "generation=\(collection.generation)", "treeGeneration=\(collection.deckTreeGeneration ?? 0)",
                                  "commandFailed=\(collection.error != nil)"]
@@ -153,12 +172,17 @@ extension TestHooks {
             #endif
         }
 
-        func stop() {
+        // SwiftUI disappearance includes navigation pushes. The @State owner keeps
+        // every gate alive until the fixture itself is destroyed. Teardown aborts
+        // held reads; it must never turn an unfinished save into a successful one.
+        isolated deinit { stop() }
+
+        private func stop() {
             #if os(macOS)
             if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
             observer = nil
             #endif
-            for gate in [home, deck, browse, list, record, stats] { gate.release() }
+            for gate in [home, deck, browse, list, record, stats] { gate.cancel() }
         }
     }
 
@@ -171,17 +195,16 @@ extension TestHooks {
             #if os(macOS)
             SidebarRootView(navigation: fixture.navigation, features: fixture.features, configuration: fixture.configuration)
                 .focusedSceneValue(\.nativeCommandContext, NativeCommandContext(collection: fixture.collection,
-                    host: .main, layout: .sidebar, statsPage: fixture.features.statsPage))
+                    host: .main, layout: .sidebar, statsPage: fixture.features.statsPage)
+                    .observingReviewAvailability())
                 .environment(\.shellLayout, .sidebar)
                 .modifier(LaunchEnvironment(configuration: fixture.configuration))
                 .onAppear { fixture.listen() }
-                .onDisappear { fixture.stop() }
             #else
             CompactRootView(navigation: fixture.navigation, features: fixture.features,
                 configuration: fixture.configuration, hasDecks: !fixture.collection.homeDecks.isEmpty, besideDetail: false)
                 .environment(\.shellLayout, .compact)
                 .modifier(LaunchEnvironment(configuration: fixture.configuration))
-                .onDisappear { fixture.stop() }
             #endif
         }
     }

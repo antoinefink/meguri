@@ -585,6 +585,9 @@ final class TestHooksTests: XCTestCase {
             routes.append("card/replay-accessibility")
         }
         #endif
+        #if os(iOS)
+        routes.append("navigation/feedback-cold")
+        #endif
         return routes.sorted().joined(separator: ", ")
     }
 
