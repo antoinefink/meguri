@@ -30,50 +30,90 @@ final class BackupsAccessibilityTests: XCTestCase {
                                                                   suppressions: suppressions)
                             targets += try TouchTargets.violations(in: app)
                         }
+                        // runAllVariants has already run a full audit and TouchTargets.
+                        // Either scan can scroll native lazy content away before this closure.
+                        @MainActor func verify(_ element: XCUIElement, detail: String,
+                                               reach: () throws -> Bool,
+                                               checks: (XCUIElement) throws -> Void) throws {
+                            let scrolled = try reach()
+                            let visible = try XCTUnwrap(element.exists ? element : nil,
+                                "Reached backup content disappeared before verification: \(detail)\n\(app.debugDescription)")
+                            try checks(visible)
+                            if scrolled { try audit(detail) }
+                        }
                         if surface == "settings" {
-                            let create = app.buttons["settings.backups.create"].firstMatch
-                            XCTAssertEqual(create.label, "Back Up Now")
-                            XCTAssertEqual(create.isEnabled, state != "loading" && state != "error")
-                            if state == "loading" {
-                                self.assertProgress("settings.backups.progress", label: "Creating Backup…", in: app)
-                                XCTAssertTrue(app.buttons["settings.backups.cancelOperation"].firstMatch.isEnabled)
+                            #if os(iOS)
+                            let settings = app.collectionViews["settings.backups.content"].firstMatch
+                            #else
+                            let settings: XCUIElement = app
+                            #endif
+                            var order = ["create"]
+                            if state == "loading" { order += ["progress", "cancelOperation"] }
+                            order += ["restore", "folder", "export", "mediaExplanation"]
+                            if state != "error" { order += ["limit.interval", "limit.daily", "limit.weekly", "limit.monthly"] }
+                            if state == "typical" || state == "overflow" { order += ["server", "serverExplanation"] }
+                            let neighbours = order.map {
+                                settings.descendants(matching: .any).matching(identifier: "settings.backups.\($0)").firstMatch
                             }
-                            let controls = ["restore", "folder", "export"]
-                            for name in controls {
-                                let control = app.buttons["settings.backups.\(name)"].firstMatch
-                                if try self.reach(control, in: app) { try audit(name) }
-                                let enabled = name == "folder" || (name == "restore" ? state != "loading" : state != "loading" && state != "error")
-                                XCTAssertEqual(control.isEnabled, enabled)
-                                if name == "folder" {
-                                    #if os(macOS)
-                                    XCTAssertEqual(control.label, "Show in Finder")
-                                    #else
-                                    XCTAssertEqual(control.label, "Show in Files")
-                                    #endif
+                            @MainActor func check(_ element: XCUIElement, _ detail: String, passive: Bool = false,
+                                                  checks: (XCUIElement) throws -> Void) throws {
+                                try verify(element, detail: detail, reach: {
+                                    let index = try XCTUnwrap(order.firstIndex(of: detail))
+                                    return try self.reach(element, in: app, scope: settings,
+                                                          preceding: Array(neighbours.prefix(index)), passive: passive)
+                                }, checks: checks)
+                            }
+                            try check(settings.buttons["settings.backups.create"].firstMatch, "create",
+                                      passive: state == "loading" || state == "error") { create in
+                                XCTAssertEqual(create.label, "Back Up Now")
+                                XCTAssertEqual(create.isEnabled, state != "loading" && state != "error")
+                            }
+                            if state == "loading" {
+                                let progress = settings.descendants(matching: .any).matching(identifier: "settings.backups.progress").firstMatch
+                                try check(progress, "progress", passive: true) { _ in
+                                    self.assertProgress("settings.backups.progress", label: "Creating Backup…", in: app)
+                                }
+                                try check(settings.buttons["settings.backups.cancelOperation"].firstMatch, "cancelOperation") { cancel in
+                                    XCTAssertEqual(cancel.label, "Cancel")
+                                    XCTAssertTrue(cancel.isEnabled)
                                 }
                             }
-                            let media = app.staticTexts["settings.backups.mediaExplanation"].firstMatch
-                            if try self.reach(media, in: app) { try audit("media explanation") }
-                            self.assertStaticText(media, contains: "Device backups contain only the collection")
+                            for name in ["restore", "folder", "export"] {
+                                try check(settings.buttons["settings.backups.\(name)"].firstMatch, name) { control in
+                                    let enabled = name == "folder" || (name == "restore" ? state != "loading" : state != "loading" && state != "error")
+                                    XCTAssertEqual(control.isEnabled, enabled)
+                                    if name == "folder" {
+                                        #if os(macOS)
+                                        XCTAssertEqual(control.label, "Show in Finder")
+                                        #else
+                                        XCTAssertEqual(control.label, "Show in Files")
+                                        #endif
+                                    }
+                                }
+                            }
+                            try check(settings.staticTexts["settings.backups.mediaExplanation"].firstMatch,
+                                      "mediaExplanation") { media in
+                                self.assertStaticText(media, contains: "Device backups contain only the collection")
+                            }
                             if state != "error" {
                                 for field in ["interval", "daily", "weekly", "monthly"] {
-                                    let input = app.textFields["settings.backups.limit.\(field)"].firstMatch
-                                    if try self.reach(input, in: app) { try audit("limit.\(field)") }
-                                    XCTAssertFalse(input.label.isEmpty)
-                                    XCTAssertEqual(input.isEnabled, state != "loading")
-                                    if state == "overflow" && (field == "interval" || field == "daily") {
-                                        XCTAssertEqual(input.value as? String, "4294967295")
+                                    try check(settings.textFields["settings.backups.limit.\(field)"].firstMatch, "limit.\(field)") { input in
+                                        XCTAssertFalse(input.label.isEmpty)
+                                        XCTAssertEqual(input.isEnabled, state != "loading")
+                                        if state == "overflow" && (field == "interval" || field == "daily") {
+                                            XCTAssertEqual(input.value as? String, "4294967295")
+                                        }
                                     }
                                 }
                             }
                             if state == "typical" || state == "overflow" {
-                                let link = app.descendants(matching: .any).matching(identifier: "settings.backups.server").firstMatch
-                                if try self.reach(link, in: app) { try audit("server disclosure") }
-                                XCTAssertEqual(link.label, "Server Backups in Browser…")
-                                let disclosure = app.staticTexts["settings.backups.serverExplanation"].firstMatch
-                                XCTAssertTrue(disclosure.exists, "Expected server backup explanation: \(disclosure.debugDescription)")
-                                self.assertStaticText(disclosure, contains: "Scheduled server backups include media")
-                                self.assertStaticText(disclosure, contains: "Restoring there replaces the server collection")
+                                let link = settings.descendants(matching: .any).matching(identifier: "settings.backups.server").firstMatch
+                                try check(link, "server") { XCTAssertEqual($0.label, "Server Backups in Browser…") }
+                                let disclosure = settings.staticTexts["settings.backups.serverExplanation"].firstMatch
+                                try check(disclosure, "serverExplanation", passive: true) {
+                                    self.assertStaticText($0, contains: "Scheduled server backups include media")
+                                    self.assertStaticText($0, contains: "Restoring there replaces the server collection")
+                                }
                             }
                         } else {
                             #if os(macOS)
@@ -97,41 +137,69 @@ final class BackupsAccessibilityTests: XCTestCase {
                             #else
                             let restoreScope: XCUIElement = app
                             #endif
-                            let apply = app.buttons["settings.backups.apply"].firstMatch
+                            let applyQuery = restoreScope.buttons["settings.backups.apply"].firstMatch
+                            let apply = try XCTUnwrap(applyQuery.exists ? applyQuery : nil, "Expected the native Restore action")
                             XCTAssertEqual(apply.label, "Restore…")
                             XCTAssertEqual(apply.isEnabled, state == "typical" || state == "overflow")
-                            XCTAssertEqual(app.buttons["settings.backups.cancel"].firstMatch.label, "Cancel")
-                            XCTAssertTrue(app.buttons["settings.backups.cancel"].firstMatch.isEnabled)
+                            let cancelQuery = restoreScope.buttons["settings.backups.cancel"].firstMatch
+                            let cancelAction = try XCTUnwrap(cancelQuery.exists ? cancelQuery : nil, "Expected the native Cancel action")
+                            XCTAssertEqual(cancelAction.label, "Cancel")
+                            XCTAssertTrue(cancelAction.isEnabled)
                             if state == "empty" || state == "error" {
-                                let emptyTitle = self.staticText("No Backups Yet", in: restoreScope)
-                                let emptyExplanation = self.staticText("Create a backup on this device, or check the configured backup folder.", in: restoreScope)
-                                let errorTitle = self.staticText("Unable to Load Backups", in: restoreScope)
-                                let errorExplanation = self.staticText("The backup could not be read or written. Check file access and free space, then try again.", in: restoreScope)
-                                XCTAssertEqual(emptyTitle.exists, state == "empty", "Expected empty heading only in empty state: \(restoreScope.debugDescription)")
-                                XCTAssertEqual(emptyExplanation.exists, state == "empty", "Expected empty explanation only in empty state: \(restoreScope.debugDescription)")
-                                XCTAssertEqual(errorTitle.exists, state == "error", "Expected failure heading only in error state: \(restoreScope.debugDescription)")
-                                XCTAssertEqual(errorExplanation.exists, state == "error", "Expected failure explanation only in error state: \(restoreScope.debugDescription)")
+                                #if os(iOS)
+                                let textScope = restoreScope.descendants(matching: .any).matching(identifier: "settings.backups.restoreContent").firstMatch
+                                #else
+                                let textScope = restoreScope
+                                #endif
+                                let emptyHeading = "No Backups Yet"
+                                let emptyDescription = "Create a backup on this device, or check the configured backup folder."
+                                let errorHeading = "Unable to Load Backups"
+                                let errorDescription = "The backup could not be read or written. Check file access and free space, then try again."
+                                let heading = state == "empty" ? emptyHeading : errorHeading
+                                let description = state == "empty" ? emptyDescription : errorDescription
+                                XCTAssertFalse(self.staticText(state == "empty" ? errorHeading : emptyHeading, in: textScope).exists)
+                                XCTAssertFalse(self.staticText(state == "empty" ? errorDescription : emptyDescription, in: textScope).exists)
                                 if state == "error" {
-                                    if try self.reach(errorTitle, in: app) { try audit("list failure heading") }
-                                    if try self.reach(errorExplanation, in: app) { try audit("list failure explanation") }
-                                    XCTAssertFalse(self.staticText("The backup was not restored. Try another backup or resolve the problem and try again.", in: restoreScope).exists)
+                                    XCTAssertFalse(self.staticText("The backup was not restored. Try another backup or resolve the problem and try again.", in: textScope).exists)
                                 }
-                                let retry = app.buttons["settings.backups.retry"].firstMatch
-                                if state == "error", try self.reach(retry, in: app) { try audit("list failure retry") }
-                                XCTAssertEqual(app.buttons.matching(identifier: "settings.backups.retry").count, 1)
-                                XCTAssertEqual(retry.label, "Try Again")
-                                XCTAssertTrue(retry.isEnabled)
+                                let title = self.staticText(heading, in: textScope)
+                                let explanation = self.staticText(description, in: textScope)
+                                let retry = textScope.buttons["settings.backups.retry"].firstMatch
+                                let order = [title, explanation, retry]
+                                for (index, item) in [(title, "list heading", state == "empty"),
+                                                      (explanation, "list explanation", state == "empty"),
+                                                      (retry, "list retry", false)].enumerated() {
+                                    let (element, detail, passive) = item
+                                    try verify(element, detail: detail, reach: {
+                                        try self.reach(element, in: app, scope: restoreScope, preceding: Array(order.prefix(index)), passive: passive)
+                                    }) { visible in
+                                        if detail == "list retry" {
+                                            XCTAssertEqual(app.buttons.matching(identifier: "settings.backups.retry").count, 1)
+                                            XCTAssertEqual(visible.label, "Try Again")
+                                            XCTAssertTrue(visible.isEnabled)
+                                        } else {
+                                            // Recheck the exact local text only after reaching this item.
+                                            let expected = detail == "list heading" ? heading : description
+                                            XCTAssertTrue(visible.label == expected || visible.value as? String == expected)
+                                        }
+                                    }
+                                }
                             } else if state == "loading" {
-                                self.assertProgress("settings.backups.loading", label: "Loading Backups…", in: app)
+                                let progress = restoreScope.descendants(matching: .any).matching(identifier: "settings.backups.loading").firstMatch
+                                try verify(progress, detail: "loading", reach: {
+                                    try self.reach(progress, in: app, scope: restoreScope, passive: true)
+                                }) { _ in
+                                    self.assertProgress("settings.backups.loading", label: "Loading Backups…", in: app)
+                                }
                             } else {
                                 let names = ["backup-2026-11-25-17.25.00.colpkg", "server-copy-2026-11-24-09.10.00.colpkg",
                                              "server-copy-2026-11-23-09.10.00.unverified.anki2", "backup-2026-11-22-08.00.00.colpkg"]
                                 for (index, name) in names.enumerated() {
-                                    let row = app.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
+                                    let row = restoreScope.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
                                     #if os(iOS)
                                     let scrolled = try self.reachHistoryEntry(index, names: names, in: app)
                                     #else
-                                    let scrolled = try self.reach(row, in: app)
+                                    let scrolled = try self.reach(row, in: app, scope: restoreScope)
                                     #endif
                                     guard row.exists else {
                                         XCTFail("Reached backup entry disappeared before its semantics were read: \(name)\n\(app.debugDescription)")
@@ -154,6 +222,9 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 // The real native confirmation discloses the selected older copy's
                                 // date and the provider's publication/media decision. No restore runs.
                                 try app.bringToFront(bundleIdentifier: self.bundle)
+                                XCTAssertTrue(apply.exists, "Restore action must remain available after history audits")
+                                XCTAssertEqual(apply.label, "Restore…")
+                                XCTAssertTrue(apply.isEnabled && apply.isHittable)
                                 apply.clickOrTap()
                                 var calendar = Calendar(identifier: .gregorian)
                                 calendar.timeZone = .gmt
@@ -297,16 +368,31 @@ final class BackupsAccessibilityTests: XCTestCase {
         let rows = names.map { name in
             history.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
         }
-        let target = rows[index]
+        return try reachTouch(rows[index], in: history, window: window,
+                              preceding: Array(rows.prefix(index)), passive: false, app: app)
+    }
+
+    /// Audits can finish at 100% with every lazy cell virtualized. Recover toward
+    /// earlier controls unless a preceding visible control proves the target is ahead.
+    private func reachTouch(_ element: XCUIElement, in scroll: XCUIElement, window: XCUIElement,
+                            preceding: [XCUIElement], passive: Bool, app: XCUIApplication,
+                            canScroll: Bool = true) throws -> Bool {
+        _ = try XCTUnwrap(scroll.exists ? scroll : nil, "Expected the native backup content container")
+        _ = try XCTUnwrap(window.exists ? window : nil, "Expected the window containing the backup content anchor")
         var scrolled = false
         for _ in 0..<24 {
-            let historyFrame = history.frame
-            let viewport = historyFrame.intersection(window.frame)
-            let frame = target.exists ? target.frame : .null
-            if !frame.isEmpty && viewport.contains(frame) && target.isHittable { return scrolled }
-            // An audit can leave even the next row above the viewport. Missing
-            // lazy cells have no AX frame: use only existing known neighbours.
-            let earlierVisible = rows.prefix(index).contains { row in
+            let scrollFrame = scroll.frame
+            let viewport = scrollFrame.intersection(window.frame)
+            guard !viewport.isEmpty else { break }
+            let frame = element.exists ? element.frame : .null
+            if !frame.isEmpty && viewport.contains(frame) && element.isHittable { return scrolled }
+            // Only newly checked passive content may exceed the window. Every
+            // original target still requires full visibility and a hit target.
+            let visible = passive && frame.height > window.frame.height
+                ? viewport.intersects(frame) : viewport.contains(frame)
+            if passive && !frame.isEmpty && visible { return scrolled }
+            guard canScroll else { break }
+            let earlierVisible = preceding.contains { row in
                 guard row.exists else { return false }
                 let frame = row.frame
                 return !frame.isEmpty && viewport.intersects(frame)
@@ -315,15 +401,13 @@ final class BackupsAccessibilityTests: XCTestCase {
             let move = frame.isEmpty
                 ? (earlierVisible ? -step : step)
                 : max(-step, min(step, viewport.midY - frame.midY))
-            // Centre the bounded drag in the actual history viewport so both
-            // endpoints stay inside it, including the larger move toward the top.
-            let start = history.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                dx: viewport.midX - historyFrame.minX, dy: viewport.midY - historyFrame.minY - move / 2))
+            let start = scroll.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: viewport.midX - scrollFrame.minX, dy: viewport.midY - scrollFrame.minY - move / 2))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
                         withVelocity: .slow, thenHoldForDuration: 0.2)
             scrolled = true
         }
-        XCTFail("Unreachable backup history entry: \(names[index])\n\(app.debugDescription)")
+        XCTFail("Unreachable backup content: \(element)\n\(app.debugDescription)")
         return scrolled
     }
     #endif
@@ -331,27 +415,48 @@ final class BackupsAccessibilityTests: XCTestCase {
     /// Lazy native Forms and Lists must bring every tested row into the viewport,
     /// including at AX5. A missing or unreachable row fails, never skips its audit.
     /// Returns whether scrolling changed the viewport and requires another audit.
-    private func reach(_ element: XCUIElement, in app: XCUIApplication) throws -> Bool {
-        let list = app.collectionViews.firstMatch
-        let scroll = list.exists ? list : app.scrollViews.firstMatch
+    private func reach(_ element: XCUIElement, in app: XCUIApplication, scope: XCUIElement? = nil,
+                       preceding: [XCUIElement] = [], passive: Bool = false) throws -> Bool {
+        let scope = scope ?? app
+        _ = try XCTUnwrap(scope.exists ? scope : nil, "Expected the native backup verification scope")
+        #if os(iOS)
+        if scope.elementType == .collectionView {
+            let window = app.windows.containing(.collectionView, identifier: "settings.backups.content").firstMatch
+            return try reachTouch(element, in: scope, window: window, preceding: preceding, passive: passive, app: app)
+        }
+        let identifier = "settings.backups.restoreContent"
+        let content = scope.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        let window = app.windows.containing(.any, identifier: identifier).firstMatch
+        // SwiftUI may assign restoreContent to the ScrollView itself or its
+        // enclosing native container. Never select the underlying iPad sidebar.
+        let namedScroll = scope.scrollViews.matching(identifier: identifier).firstMatch
+        let childScroll = content.scrollViews.firstMatch
+        let errorScroll = scope.scrollViews.containing(.any, identifier: "settings.backups.listFailure").firstMatch
+        let scroll = namedScroll.exists ? namedScroll : (childScroll.exists ? childScroll : errorScroll)
+        return try reachTouch(element, in: scroll.exists ? scroll : content, window: window,
+                              preceding: preceding, passive: passive, app: app, canScroll: scroll.exists)
+        #else
+        let list = scope.collectionViews.firstMatch
+        let scroll = list.exists ? list : scope.scrollViews.firstMatch
+        let window = scope.elementType == .window ? scope : app.windows.firstMatch
         var scrolled = false
         for _ in 0..<24 {
-            let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+            let viewport = (scroll.exists ? scroll.frame : window.frame).intersection(window.frame)
+            guard !viewport.isEmpty else { break }
             let frame = element.exists ? element.frame : .null
             if !frame.isEmpty && viewport.contains(frame) && element.isHittable { return scrolled }
-            let reach = viewport.height / 3
-            let move = frame.isNull ? -reach : max(-reach, min(reach, viewport.midY - frame.midY))
-            #if os(macOS)
+            let visible = passive && frame.height > window.frame.height
+                ? viewport.intersects(frame) : viewport.contains(frame)
+            if passive && !frame.isEmpty && visible { return scrolled }
+            guard scroll.exists else { break }
+            let step = viewport.height / 3
+            let move = frame.isEmpty ? -step : max(-step, min(step, viewport.midY - frame.midY))
             try app.bringToFront(bundleIdentifier: bundle)
             scroll.scroll(byDeltaX: 0, deltaY: move)
-            #else
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
-                        withVelocity: .slow, thenHoldForDuration: 0.2)
-            #endif
             scrolled = true
         }
         XCTFail("Unreachable backup content: \(element)\n\(app.debugDescription)")
         return scrolled
+        #endif
     }
 }
