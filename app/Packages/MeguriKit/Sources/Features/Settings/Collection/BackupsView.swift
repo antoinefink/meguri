@@ -287,7 +287,11 @@ struct BackupRestoreContent: View {
         // Reserve three rows before discovery too: opening a short history must
         // not first flash a large sheet. Real errors/work use the large detent.
         let rows = presentation.entries.isEmpty ? 3 : presentation.entries.count
-        return min(compactRowHeight * CGFloat(rows) + compactChromeHeight, compactRowHeight * 8)
+        // iPad needs taller native rows and more bottom room, even in compact sheets.
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let rowHeight = compactRowHeight * (isPad ? 52.0 / 44.0 : 1)
+        let chromeHeight = compactChromeHeight * (isPad ? 112.0 / 100.0 : 1)
+        return rowHeight * CGFloat(rows) + chromeHeight
     }
     #endif
     private var restoreBody: some View {
