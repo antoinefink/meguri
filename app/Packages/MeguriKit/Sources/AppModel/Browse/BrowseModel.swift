@@ -7,8 +7,8 @@ import Observation
 /// and counts (`browser/workspace` V6, T12.4). Held by `ReviewCollection`
 /// above the layout switch, so leaving Browse for Today, a deck or review
 /// and coming back finds it as it was (V1); a relaunch starts as T14 says.
-/// Every read here is pure: nothing writes the collection but a person's
-/// toggle of a tag's disclosure.
+/// Reads are pure; explicit tag, saved-search and row actions write through
+/// the core's mutation services.
 @Observable @MainActor
 public final class BrowseModel {
     /// A user saved search (`browser/config-keys` K7.1), in the sidebar's
@@ -26,6 +26,10 @@ public final class BrowseModel {
     public nonisolated enum Click: Sendable, Hashable {
         case plain, command, option
     }
+
+    /// W12 from the note type row menu; the collection owns the question.
+    @ObservationIgnored public var deleteNoteType: (@MainActor (Int64) -> Void)?
+    @ObservationIgnored public var canDeleteNoteType: @MainActor () -> Bool = { false }
 
     // MARK: State
 
@@ -50,8 +54,24 @@ public final class BrowseModel {
     @ObservationIgnored private var fieldsStale = true
     @ObservationIgnored private var fieldsTask: Task<Void, Never>?
     public private(set) var tags: [TagNode] = [] {
-        didSet { tagsRevision &+= 1; updateShownTags() }
+        didSet {
+            tagIdentities = Set(Self.tagNames(tags))
+            tagsRevision &+= 1
+            updateShownTags()
+        }
     }
+    private(set) var tagIdentities: Set<String> = []
+    public private(set) var tagsReading = false
+    public private(set) var tagsFailed = false
+    /// Shared by Browse and Settings; loading tags never opens Browse or runs a search.
+    public var tagsLoaded: Bool { tagsEpoch == epoch && tagsGeneration == generation() }
+    private var tagsEpoch: UInt64?
+    private var tagsGeneration: UInt64?
+    private var tagsCoreGeneration: UInt64?
+    private var tagsRequested = false
+    private var tagsToken: UInt64 = 0
+    @ObservationIgnored private var tagsTask: Task<Void, Never>?
+    @ObservationIgnored public var generation: @MainActor () -> UInt64 = { 0 }
     /// Flags 1 to 7's shown names (F4).
     public private(set) var flagNames: [String] = []
     /// Each row's count in the current mode (T12.3 step 4); a row without
@@ -113,6 +133,7 @@ public final class BrowseModel {
     /// The results table (U270a): the query's rows in the mode.
     public let results: BrowseResults
     /// The commands on its rows (U275).
+    public let tagDeletion: BrowseTagDeletion
     public let commands: BrowseCommands
     /// The pane beside the table (U273).
     public let inspector: BrowseInspector
@@ -189,6 +210,8 @@ public final class BrowseModel {
         let commands = BrowseCommands(results: results,
                                       sheetReads: sheetReads ?? (backend as? any BrowseSheetReads) ?? CoreBrowseSheetReads())
         self.commands = commands
+        let tagDeletion = BrowseTagDeletion(backend: backend)
+        self.tagDeletion = tagDeletion
         let device = store.load()
         let inspector = BrowseInspector(backend: inspectorBackend, results: results, commands: commands,
                                         device: device.inspector ?? BrowseInspectorDevice(),
@@ -225,6 +248,28 @@ public final class BrowseModel {
         }
         commands.notetypes = { [weak self] in self?.notetypes ?? [] }
         commands.duplicatesFound = { [weak self] found, field in self?.showDuplicates(found, field: field) }
+        tagDeletion.available = { [weak commands] in
+            guard let commands else { return false }
+            return commands.ready() && !commands.busy && commands.deleteQuestion == nil && commands.sheet == nil
+                && commands.findReplaceSheet == nil && commands.findDuplicatesSheet == nil
+        }
+        tagDeletion.saveFirst = { [weak inspector] in await inspector?.flushForBackground() ?? true }
+        tagDeletion.generation = { [weak self] in self?.generation() ?? 0 }
+        tagDeletion.expectedGeneration = { [weak self] in
+            guard let self, self.tagsLoaded else { return nil }
+            return self.tagsCoreGeneration
+        }
+        tagDeletion.contains = { [weak self] name in
+            guard let self else { return false }
+            return !self.tagsReading && !self.tagsFailed && self.hasTag(name)
+        }
+        tagDeletion.finished = { [weak self] _, _ in
+            guard let self else { return }
+            // Refresh even when the only tag surface is Settings.
+            if self.visible { self.reload() }
+            else { await self.refreshTags() }
+        }
+        commands.otherWorkBusy = { [weak tagDeletion] in tagDeletion?.busy ?? false }
     }
 
     // MARK: Find Duplicates' token (V10)
@@ -660,6 +705,11 @@ public final class BrowseModel {
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         if changes.wholeCollection || !changes.notetypes.isEmpty { fieldsStale = true }
         results.changesCommitted(changes, seq: seq)
+        // Registry deletion and its Undo change which notes a tag query finds.
+        // Keep the query (including a deleted value), but read its results again.
+        if changes.tags.contains(where: { $0.change == .removed || $0.change == .added }) {
+            results.runAgain()
+        }
         inspector.changesCommitted(changes, seq: seq)
         // The selection's counts (suspended, buried, note types) may have changed.
         if changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty { commands.rowsChanged() }
@@ -668,6 +718,10 @@ public final class BrowseModel {
         guard changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty || !changes.decks.isEmpty
             || !changes.tags.isEmpty || !changes.notetypes.isEmpty || names else { return }
         stale = true
+        if changes.wholeCollection || !changes.tags.isEmpty || !changes.notes.isEmpty {
+            invalidateTags()
+            if tagsRequested, !visible, ready() { readTags() }
+        }
         if visible, ready() { reload() }
     }
 
@@ -687,6 +741,8 @@ public final class BrowseModel {
         fieldsStale = true
         // A save on its way went with the old epoch: Save can be tried again.
         if savingSearch?.saving == true { savingSearch?.markFailed() }
+        tagDeletion.reset()
+        invalidateTags()
         commands.reset()
         results.collectionReady()
         inspector.reset()
@@ -701,6 +757,7 @@ public final class BrowseModel {
             // A save of the run text dropped with the old epoch is made again.
             keepRunText()
         }
+        if tagsRequested, !visible, ready() { readTags() }
         if visible, ready() {
             if !opened { open() }
             takeHandedSearch()
@@ -712,6 +769,8 @@ public final class BrowseModel {
     /// The collection was replaced: the next open is a first open (T14).
     public func collectionReplaced() {
         epoch &+= 1
+        tagDeletion.reset()
+        invalidateTags()
         commands.reset()
         results.collectionReplaced()
         inspector.reset()
@@ -738,7 +797,48 @@ public final class BrowseModel {
         saveDevice()
     }
 
+    public func refreshTags() async {
+        await readTags()?.value
+    }
+
+    private func invalidateTags() {
+        tagsToken &+= 1
+        tagsTask?.cancel()
+        tagsTask = nil
+        tagsEpoch = nil; tagsGeneration = nil; tagsCoreGeneration = nil
+        tagsReading = false; tagsFailed = false
+    }
+
+    @discardableResult private func readTags() -> Task<Void, Never>? {
+        tagsRequested = true
+        guard ready() else { return nil }
+        tagsTask?.cancel()
+        tagsToken &+= 1
+        let token = tagsToken, epoch = epoch, generation = generation()
+        tagsReading = true
+        tagsTask = Task {
+            defer { if token == tagsToken { tagsReading = false; tagsTask = nil } }
+            guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                  ready(), !Task.isCancelled else { return }
+            do {
+                let tree = try await backend.scopedTagTree()
+                guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                      ready(), !Task.isCancelled else { return }
+                tags = tree.value; tagExpansion = [:]
+                tagsEpoch = epoch; tagsGeneration = generation
+                tagsCoreGeneration = tree.generation
+                tagsFailed = false
+            } catch {
+                guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
+                      ready(), !Task.isCancelled else { return }
+                tagsFailed = true
+            }
+        }
+        return tagsTask
+    }
+
     private func reload() {
+        readTags()
         stale = false
         readsPending = true
         namesToken &+= 1
@@ -747,12 +847,11 @@ public final class BrowseModel {
             async let saved = try? backend.values(.savedSearches)
             async let decks = try? backend.values(.decks)
             async let notetypes = try? backend.notetypes()
-            async let tags = try? backend.tagTree()
             async let flags = try? backend.flagNames()
-            let (savedRows, deckRows, notetypeList, tagTree, flagList) = await (saved, decks, notetypes, tags, flags)
+            let (savedRows, deckRows, notetypeList, flagList) = await (saved, decks, notetypes, flags)
             guard token == namesToken, self.epoch == epoch else { return }
             // A read that failed is tried again on the next appear or change.
-            if savedRows == nil || deckRows == nil || notetypeList == nil || tagTree == nil || flagList == nil { stale = true }
+            if savedRows == nil || deckRows == nil || notetypeList == nil || flagList == nil { stale = true }
             if let savedRows {
                 savedSearches = savedRows.compactMap {
                     if case .savedSearch(let name, let text) = $0 { SavedSearch(name: name, text: text) } else { nil }
@@ -771,7 +870,9 @@ public final class BrowseModel {
                 self.notetypes = notetypeList
                 readFields(notetypeList)
             }
-            if let tagTree { self.tags = tagTree; tagExpansion = [:] }
+            await tagsTask?.value
+            guard token == namesToken, self.epoch == epoch else { return }
+            if tagsFailed { stale = true }
             if let flagList { flagNames = flagList }
             // The names the field's menus and suggestions offer may have changed.
             refreshTokenOffers()
@@ -922,9 +1023,11 @@ public final class BrowseModel {
     /// hold thousands of tags; a sidebar redraw must not walk it again).
     public func filteredTags(_ filter: BrowseSidebarFilter, rootMatched: Bool) -> [BrowseSidebarFilter.Node<TagNode>] {
         guard filter.isOn else { return [] }
+        // Cache hits must still subscribe the view to tree replacements.
+        let tree = tags
         let key = filter.text + (rootMatched ? "\u{0}root" : "")
         if let cache = filteredTagsCache, cache.text == key, cache.revision == tagsRevision { return cache.nodes }
-        let nodes = filter.tree(tags, label: \.name, children: \.children, rootMatched: rootMatched)
+        let nodes = filter.tree(tree, label: \.name, children: \.children, rootMatched: rootMatched)
         filteredTagsCache = (key, tagsRevision, nodes)
         return nodes
     }

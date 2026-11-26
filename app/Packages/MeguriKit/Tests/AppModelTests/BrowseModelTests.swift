@@ -1,6 +1,8 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Observation
+import Synchronization
 import Testing
 
 /// Browse's section shell (U270): the sidebar's clicks (`search/filter-tokens`
@@ -644,6 +646,57 @@ import Testing
     }
 
     // MARK: The sidebar's filter (S6)
+
+    @Test(arguments: [false, true])
+    func cachedFilteredTagsObserveDeletionAndRestoration(rootMatched: Bool) async {
+        let core = FakeBrowseBackend()
+        let model = BrowseModel(backend: core, store: BrowseDeviceStore(defaults: nil))
+        await model.refreshTags()
+        let original = core.tagNodes
+        let filter = BrowseSidebarFilter("odd")
+        // Prime outside tracking, then read the cache as the view does.
+        #expect(model.filteredTags(filter, rootMatched: rootMatched).first?.children.first?.item.fullName == "brask::oddly")
+        let changes = Mutex(0)
+        withObservationTracking {
+            _ = model.filteredTags(filter, rootMatched: rootMatched)
+        } onChange: { changes.withLock { $0 += 1 } }
+
+        core.tagNodes = [TagNode(name: "brask", fullName: "brask", collapsed: false, implicit: false, children: [])]
+        await model.refreshTags()
+        #expect(changes.withLock { $0 } == 1)
+        let deleted = model.filteredTags(filter, rootMatched: rootMatched)
+        #expect(deleted.map(\.item.fullName) == (rootMatched ? ["brask"] : []))
+        #expect(deleted.allSatisfy { $0.children.isEmpty })
+
+        // Subscribe again on the now-cached result, including an empty result.
+        withObservationTracking {
+            _ = model.filteredTags(filter, rootMatched: rootMatched)
+        } onChange: { changes.withLock { $0 += 1 } }
+        core.tagNodes = original
+        await model.refreshTags()
+        #expect(changes.withLock { $0 } == 2)
+        #expect(model.filteredTags(filter, rootMatched: rootMatched).first?.children.first?.item.fullName == "brask::oddly")
+    }
+
+    @Test func repeatedSidebarSelectionReadsObserveQueryChanges() {
+        let model = BrowseModel(backend: FakeBrowseBackend(), store: BrowseDeviceStore(defaults: nil))
+        // The query's row highlight is independent of the List's own selection.
+        #expect(!model.selectedRows.contains(.tag("brask")))
+        let changes = Mutex(0)
+        withObservationTracking {
+            _ = model.selectedRows.contains(.tag("brask"))
+        } onChange: { changes.withLock { $0 += 1 } }
+        model.activate(.tag("brask"))
+        #expect(changes.withLock { $0 } == 1)
+        #expect(model.selectedRows.contains(.tag("brask")))
+
+        withObservationTracking {
+            _ = model.selectedRows.contains(.tag("brask"))
+        } onChange: { changes.withLock { $0 += 1 } }
+        model.activate(.tag("brask"))
+        #expect(changes.withLock { $0 } == 2)
+        #expect(!model.selectedRows.contains(.tag("brask")))
+    }
 
     @Test func theFilterShowsMatchesAndTheirAncestorsExpanded() throws {
         struct Item { let name: String; var children: [Item] = [] }

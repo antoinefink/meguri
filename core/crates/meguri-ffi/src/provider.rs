@@ -9,6 +9,22 @@ mod tests;
 #[path = "provider_normal.rs"] mod normal;
 #[path = "provider_structure.rs"] mod structure;
 
+// Rust integration fixtures name the same opaque objects as the FFI exports.
+#[cfg(feature = "test-hooks")]
+pub use bootstrap::{ProviderBootstrapDirection, ProviderBootstrapJob, ProviderBootstrapOutcome};
+#[cfg(feature = "test-hooks")]
+pub use normal::{ProviderRoundRefusal, ProviderRoundStart};
+#[cfg(feature = "test-hooks")]
+pub use structure::{ProviderStructureJob, ProviderStructureOp, ProviderStructureOutcome,
+    ProviderStructureRefusal, ProviderStructureSaved, ProviderStructureStage, ProviderStructureStart,
+    ProviderStructureStep, ProviderStructureUpload, ProviderUploadPending};
+
+#[cfg(feature = "test-hooks")]
+pub(crate) fn owner_for_testing(host: Arc<meguri_host::CoreHost>) -> Result<Arc<ProviderOwner>, CoreError> {
+    let generation = host.cloud_connection_generation()?;
+    Ok(Arc::new(ProviderOwner { host, generation }))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderSelection { LocalOnly, ICloud, Meguri }
 impl From<ProviderSelection> for p::Selection {

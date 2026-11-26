@@ -34,10 +34,23 @@ fn start(
     + Send
     + 'static,
 ) -> Result<TagMutationJobStart, CoreError> {
-    let c = runtime::host()?.collection()?;
+    let host = runtime::host()?;
+    let c = host.collection()?;
+    start_on(host, c, work)
+}
+fn start_on(
+    host: Arc<meguri_host::CoreHost>,
+    c: meguri_engine::Collection,
+    work: impl FnOnce(
+        &meguri_engine::Collection,
+        &tags::RunOptions,
+    ) -> Result<meguri_engine::OpResult<usize>, meguri_engine::EngineError> + Send + 'static,
+) -> Result<TagMutationJobStart, CoreError> {
     let result = Arc::new(Mutex::new(None));
     let out = result.clone();
-    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+    let engine = host.engine().clone();
+    let handle = engine.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+        let _host = host; // Retain the admitted Host through the worker.
         j.cancel.check()?;
         let options = tags::RunOptions {
             cancel: Some(j.cancel.clone()),
@@ -260,6 +273,17 @@ pub fn start_reparent_tags(sources: Vec<String>, target: Option<String>) -> Resu
 pub fn start_delete_tags(text: String) -> Result<TagMutationJobStart, CoreError> {
     callback::enter("start_delete_tags");
     start(move |c, options| tags::delete(c, &text, options))
+}
+/// `generation` comes from the UI scope that offered these tag names.
+#[uniffi::export]
+pub fn start_delete_tags_for_generation(text: String, generation: u64) -> Result<TagMutationJobStart, CoreError> {
+    callback::enter("start_delete_tags_for_generation");
+    delete_tags_on(runtime::host()?, text, generation)
+}
+pub(crate) fn delete_tags_on(host: Arc<meguri_host::CoreHost>, text: String, generation: u64)
+    -> Result<TagMutationJobStart, CoreError> {
+    let collection = host.collection_for_generation(meguri_engine::Generation(generation))?;
+    start_on(host, collection, move |c, options| tags::delete(c, &text, options))
 }
 #[uniffi::export]
 pub fn start_clear_unused_tags() -> Result<TagMutationJobStart, CoreError> {

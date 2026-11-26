@@ -4,7 +4,7 @@ import Foundation
 import Testing
 
 /// A scripted core for the Note Types section.
-@MainActor private final class FakeNoteTypesBackend: NoteTypesBackend {
+@MainActor final class FakeNoteTypesBackend: NoteTypesBackend {
     var names = [NotetypeName(id: 7, name: "Sample"), NotetypeName(id: 8, name: "Vocabulary"), NotetypeName(id: 9, name: "basic")]
     var records: [Int64: NotetypeRecord] = [7: NoteTypeDraftTests.record()]
     var contentCounts = NotetypeFieldContentCounts(notes: 20, fields: [20, 12, 0])
@@ -36,9 +36,33 @@ import Testing
     }
     /// Each type count read waits this long first.
     var countsWait: Duration?
+    var removalCounts = NotetypeRemovalCounts(notes: 20, cards: 31)
+    var removalGeneration: UInt64 = 0
+    func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        let generation = removalGeneration
+        let names = try await list()
+        let counts = try await typeCounts(id)
+        guard removalGeneration == generation else {
+            throw BridgeError.staleGeneration(planned: generation, current: removalGeneration)
+        }
+        return .init(value: .init(names: names, counts: counts), generation: generation)
+    }
+    var beforeRemovalCounts: (@MainActor () async -> Void)?
+    var beforeRemoval: (@MainActor () async -> Void)?
+    var removalErrors: [any Error] = []
+    private(set) var removals: [NotetypeRemoval] = []
+    func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        removals.append(request)
+        progress(12, nil)
+        if let beforeRemoval { await beforeRemoval() }
+        if !removalErrors.isEmpty { throw removalErrors.removeFirst() }
+        names.removeAll { $0.id == request.notetypeId }
+        records[request.notetypeId] = nil
+    }
     func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts {
         if let countsWait { try? await Task.sleep(for: countsWait) }
-        return NotetypeRemovalCounts(notes: 20, cards: 31)
+        if let beforeRemovalCounts { await beforeRemovalCounts() }
+        return removalCounts
     }
     func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts { contentCounts }
     func summary(_ draft: NotetypeStructureDraft) async throws -> NotetypeDraftSummary {

@@ -349,6 +349,12 @@ pub fn test_bootstrap_collection(location: crate::collection::CollectionLocation
     .map_err(CoreError::from)
 }
 
+/// Wrap an integration fixture's original Host at its current generation.
+/// Not a UniFFI export; private owner fields and production admission stay intact.
+pub fn provider_owner_for_testing(host: Arc<meguri_host::CoreHost>) -> Result<Arc<crate::provider::ProviderOwner>, CoreError> {
+    crate::provider::owner_for_testing(host)
+}
+
 /// Rust writer-gate fixtures use the runtime owned by the real exports.
 /// This helper is not a UniFFI export and adds no generated measurement API.
 pub fn collection_for_testing() -> Result<meguri_engine::Collection, CoreError> {

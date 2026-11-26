@@ -59,7 +59,18 @@ public nonisolated enum NoteTypeSyncSaveResult: Sendable, Hashable {
     /// saved and nothing is pending.
     func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
                                progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void) async throws -> NoteTypeSyncSaveResult
+    /// W12 through MP7, preserving the accepted counts across the sync-first round.
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void) async throws -> NoteTypeSyncSaveResult
     /// Asks the running job to stop where MP7 allows: before the save
     /// nothing is saved; once saved, the upload is left pending.
     func cancelNotetypeStructureSave()
+}
+
+
+extension NoteTypesMeguriSync {
+    public func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                        progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void) async throws -> NoteTypeSyncSaveResult {
+        .notSaved
+    }
 }

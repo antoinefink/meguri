@@ -112,6 +112,26 @@ extension CoreMeguriRoundService {
             return try await Self.drive(started, onStage: onStage)
         }
     }
+    /// W12's accepted question: the same MP7 job, with the published removal op.
+    public func removeNotetypeStructure(
+        _ request: NotetypeRemoval, reachable: Bool,
+        onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
+    ) async throws -> MeguriStructureOutcome {
+        guard let expectedGeneration = request.expectedGeneration, expectedGeneration != 0 else {
+            throw BridgeError.invalidArgument("Note type removal requires a collection scope")
+        }
+        let drains = drains
+        let (connection, credentials) = try await admittedInputs()
+        let op = MeguriCoreBindings.ProviderStructureOp.remove(request: request.raw)
+        return try await owned(since: drains, busy: .refused(.busy)) {
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.providerStartStructureSaveForGeneration) {
+                try connection.startStructureSaveForGeneration(credentials: credentials, op: op,
+                    reachable: reachable, generation: expectedGeneration)
+            }
+            return try await Self.drive(started, onStage: onStage)
+        }
+    }
     /// One structure job at a time on this facade, registered so that
     /// `cancelAndDrain` and retirement stop and join it. `busy` is the
     /// answer while another one runs.
