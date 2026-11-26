@@ -33,16 +33,17 @@ private final class RedirectedExportAccess: CollectionExportDestinationAccess {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         return root
     }
-    @Test(arguments: [false, true])
-    func actualCoordinatedFoundationStagingAndPublication(replacing: Bool) async throws {
+    @Test(arguments: [false, true], [false, true])
+    func actualCoordinatedFoundationStagingAndPublication(replacing: Bool, deckPackage: Bool) async throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let destination = root.appendingPathComponent("user.colpkg")
+        let destination = root.appendingPathComponent(deckPackage ? "user.apkg" : "user.colpkg")
         if replacing { try "original".write(to: destination, atomically: false, encoding: .utf8) }
         let witness = StagedExportWitness()
         let publisher = StagedCollectionExportDestination()
         try await CoordinatedExportDestination().withDestination(destination) { actual in
-            try await publisher.save(to: actual, operation: CollectionExportOperation()) { staged in
+            try await publisher.save(to: actual, operation: CollectionExportOperation(), deckPackage: deckPackage) { staged in
+                #expect(staged.pathExtension == (deckPackage ? "apkg" : "colpkg"))
                 #expect(staged != actual && staged.deletingLastPathComponent() != root)
                 let files = FileManager()
                 let stageVolume = try files.attributesOfFileSystem(forPath: staged.deletingLastPathComponent().path)

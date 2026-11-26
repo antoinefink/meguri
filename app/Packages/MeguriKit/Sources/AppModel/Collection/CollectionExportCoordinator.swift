@@ -14,6 +14,15 @@ public final class CollectionExportCoordinator {
     public private(set) var destinationPresented = false
     /// Retained until native delegate completion; onDisappear never releases it.
     public private(set) var providerLease: CollectionExportReadLease?
+    public private(set) var deckID: Int64?
+    public private(set) var deckName: String?
+    public var deckOptions = DeckExportOptions()
+    private var deckGeneration: UInt64?
+    private let preferences: DeckExportPreferences
+    public var isDeckExport: Bool { deckID != nil }
+    public var showsDeckOptions: Bool { isDeckExport && !continuous && artifact == nil }
+    public var title: String { isDeckExport ? "Export Deck" : "Export Collection" }
+    public var identifierPrefix: String { isDeckExport ? "home.deckExport" : "settings.importExport" }
     private weak var owner: ReviewCollection?
     private let service: any CollectionExportService
     private let recordDiagnostic: FieldDiagnosticRecorder
@@ -27,7 +36,7 @@ public final class CollectionExportCoordinator {
     private var discarding = false
     private var finishingProvider = false
     public var busy: Bool { stage == .preparing || stage == .saving || stage == .discarding || discarding || finishingProvider || destinationPresented }
-    public var canPrepare: Bool { !busy && artifact == nil && owner?.exportAllowed == true }
+    public var canPrepare: Bool { !busy && artifact == nil && owner?.exportAllowed == true && (!isDeckExport || (!stale && deckGeneration == owner?.generation)) }
     public var canSave: Bool {
         guard let owner, let artifact else { return false }
         return !busy && providerLease == nil && !stale && !discardRequested && owner.generation == artifact.metadata.sourceGeneration
@@ -43,17 +52,18 @@ public final class CollectionExportCoordinator {
     }
     public var progressTitle: String {
         if stage == .discarding { return "Removing prepared export…" }
-        if stage == .saving { return "Saving collection…" }
+        if stage == .saving { return isDeckExport ? "Saving deck…" : "Saving collection…" }
         if case .named(let name)? = progress?.phase {
             if name.contains("Flushing") { return "Saving pending reviews…" }
             if name.contains("Verifying") { return "Checking completed export…" }
-            if name.contains("Capturing") { return "Capturing and writing collection…" }
+            if name.contains("Capturing") { return isDeckExport ? "Capturing and writing deck…" : "Capturing and writing collection…" }
         }
-        return "Preparing collection export…"
+        return isDeckExport ? "Preparing deck export…" : "Preparing collection export…"
     }
-    init(owner: ReviewCollection, service: any CollectionExportService,
+    init(owner: ReviewCollection, service: any CollectionExportService, defaults: UserDefaults? = nil,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in },
          finishLease: @escaping @Sendable (CollectionExportReadLease) async throws -> Void = { try await $0.finish() }) {
+        preferences = DeckExportPreferences(defaults: defaults)
         self.owner = owner; self.service = service; self.finishLease = finishLease
         self.recordDiagnostic = recordDiagnostic
     }
@@ -61,6 +71,28 @@ public final class CollectionExportCoordinator {
     public func present() {
         guard canPresent else { return }
         owner?.navigation.present(.collectionExport)
+    }
+
+    public func canPresentDeck(_ id: Int64) -> Bool {
+        guard let owner, canPresent, artifact == nil, providerLease == nil,
+              owner.navigation.sheet == nil, owner.review == nil, owner.navigation.review == nil,
+              !owner.deckActions.busy, !owner.manualTransfers.busy,
+              owner.manualTransfers.preview == nil, owner.manualTransfers.mediaPreview == nil,
+              !owner.entry.busy, !owner.entry.pickerPresented, !owner.intake.pickerPresented else { return false }
+        return owner.fullDeckName(id) != nil
+    }
+    public func presentDeck(_ id: Int64) {
+        guard canPresentDeck(id), let owner else { return }
+        deckID = id; deckName = owner.fullDeckName(id); deckGeneration = owner.generation
+        deckOptions = preferences.read()
+        continuous = false; stale = false; stage = .idle; message = nil; publicationUncertain = false
+        owner.navigation.present(.collectionExport)
+    }
+    /// Options are captured once; retries save the same immutable artifact.
+    public func exportDeck() {
+        guard showsDeckOptions, canPrepare else { return }
+        continuous = true
+        prepare()
     }
 
     // MARK: One continuous export (N17.3)
@@ -73,6 +105,8 @@ public final class CollectionExportCoordinator {
     /// Export Collection: prepare at once, with progress, then ask where to save.
     public func start() {
         guard canPresent else { return }
+        deckID = nil; deckName = nil; deckGeneration = nil
+        if artifact == nil { stale = false }
         continuous = true
         owner?.navigation.present(.collectionExport)
         guard artifact != nil || stage != .idle else { prepare(); return }
@@ -125,18 +159,21 @@ public final class CollectionExportCoordinator {
         guard canPrepare, let owner else { return }
         stale = false; message = nil; publicationUncertain = false; stage = .preparing; progress = nil
         let generation = owner.generation
+        let deck = deckID.map { DeckExportRequest(deckID: $0, options: deckOptions) }
         let operation = CollectionExportOperation(); self.operation = operation
         task = Task { [self] in
             do {
-                let output = try await service.prepare(operation: operation, progress: progressReceiver())
+                let output = try await service.prepare(deck: deck, operation: operation, progress: progressReceiver())
                 guard !stale, owner.generation == generation, output.metadata.sourceGeneration == generation else {
                     try? await output.discard(); throw BridgeError.staleGeneration(planned: generation, current: owner.generation)
                 }
                 artifact = output; stage = .ready
+                if let deck { preferences.write(deck.options) }
                 recordDiagnostic(.init(component: .collectionExport, operation: .prepare, stage: .preparation, outcome: .succeeded))
             } catch {
                 recordDiagnostic(.init(component: .collectionExport, operation: .prepare, stage: .preparation, outcome: .failed, failure: .other))
                 report(error, destination: false)
+                if isDeckExport, artifact == nil { continuous = false }
             }
             self.operation = nil; task = nil; progress = nil
             if continuous {
@@ -291,7 +328,7 @@ public final class CollectionExportCoordinator {
         owner?.navigation.dismissSheet()
     }
     func generationChanged() {
-        guard artifact != nil || stage == .preparing || destinationPresented else { return }
+        guard isDeckExport || artifact != nil || stage == .preparing || destinationPresented else { return }
         stale = true
         message = stage == .saved
             ? "The earlier collection was saved. Export again to save the current collection."
@@ -316,11 +353,15 @@ public final class CollectionExportCoordinator {
                   case .busy(let operation) = failure.cause {
             message = "Export is blocked by \(operation). Output is retained to protect any provider still reading it."
         } else {
-            message = "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
+            message = isDeckExport
+                ? "The deck could not be exported. Check that it still exists, and check available space and collection access, then try again."
+                : "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
         }
     }
     private func sourceRefusalMessage(_ cause: BridgeError) -> String? {
         switch cause {
+        case .invalidArgument(let reason) where reason == "deck export filename too long":
+            return "The deck name is too long for an export file. Shorten it and try again."
         case .exportSourceChanged:
             return "The media source changed during export. Start a fresh export after changes finish."
         case .exportSourceInvalid:

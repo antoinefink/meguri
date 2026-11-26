@@ -3,9 +3,8 @@ import CoreBridge
 import SwiftUI
 
 /// The deck's long-press and right-click menu (N20.2): Study and Add Note,
-/// then Rename…, New Subdeck… and Deck Options…, then Delete Deck. A filtered deck takes
-/// neither notes nor subdecks and is not studied yet, so it offers Rename…
-/// and Delete Deck.
+/// then Rename…, New Subdeck… and Deck Options…, then Export Deck… and Delete Deck.
+/// A filtered deck offers Rename…, Export Deck… and Delete Deck.
 struct DeckMenu: View {
     let collection: ReviewCollection
     let deck: CountedDeckNode
@@ -66,6 +65,12 @@ struct DeckMenu: View {
                 .accessibilityIdentifier("home.deckMenu.options.\(deck.id)")
             }
         }
+        Divider()
+        Button { collection.collectionExport.presentDeck(deck.id) } label: {
+            Label { Text("Export Deck…", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
+        }
+        .disabled(!collection.collectionExport.canPresentDeck(deck.id))
+        .accessibilityIdentifier("home.deckMenu.export.\(deck.id)")
         Divider()
         Button(role: .destructive) {
             collection.deckDeletion.delete(deckID: deck.id, anchor: .row(place: place))

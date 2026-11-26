@@ -99,6 +99,12 @@ public struct HomeView: View {
                 }
                 // N20.1: one Add menu beside sync; the tab layout's deck page keeps Add Note (N14.3).
                 if deckID != nil, shellLayout == .compact { addNoteButton } else { addMenu }
+                if let deckID, let deck = collection.deck(deckID) {
+                    Menu { DeckMenu(collection: collection, deck: deck) } label: {
+                        Label { Text("Deck Actions", bundle: .module) } icon: { Image(systemName: "ellipsis") }
+                    }
+                    .accessibilityIdentifier("home.deck.actions")
+                }
             }
             #endif
         }

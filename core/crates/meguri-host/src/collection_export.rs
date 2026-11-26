@@ -2,7 +2,7 @@
 use crate::{CoreHost, HostConfig};
 use meguri_engine::{CancelToken, Collection, EngineError};
 use meguri_package::{CollectionPackageWriteContext, Finalisation, LiveCollectionPackageWritten};
-use meguri_storage::{ReaderRole, atomic_file::Purpose};
+use meguri_storage::{ReadRows, ReaderRole, atomic_file::Purpose};
 use std::{
     fs,
     io::Write,
@@ -35,6 +35,7 @@ pub struct WrittenCollectionExport {
     pub protected_directories: Vec<PathBuf>,
     pub space: std::sync::Arc<dyn meguri_storage::space::SpaceProvider>,
     pub written: LiveCollectionPackageWritten,
+    pub suggested_name: String,
     source_validation: meguri_package::ExportSourceValidation,
 }
 
@@ -56,6 +57,28 @@ impl CoreHost {
         cancel: &CancelToken,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<WrittenCollectionExport, EngineError> {
+        self.write_package_export(collection, cancel, progress, None)
+    }
+
+    /// Selected-deck latest-format export, with the same owned output lifecycle.
+    pub fn write_deck_export(
+        &self,
+        collection: &Collection,
+        cancel: &CancelToken,
+        progress: &meguri_engine::ProgressSink,
+        deck_id: i64,
+        options: meguri_package::DeckExportOptions,
+    ) -> Result<WrittenCollectionExport, EngineError> {
+        self.write_package_export(collection, cancel, progress, Some((deck_id, options)))
+    }
+
+    fn write_package_export(
+        &self,
+        collection: &Collection,
+        cancel: &CancelToken,
+        progress: &meguri_engine::ProgressSink,
+        deck: Option<(i64, meguri_package::DeckExportOptions)>,
+    ) -> Result<WrittenCollectionExport, EngineError> {
         collection.open_evidence()?;
         cancel.check()?;
         let config = &self.export;
@@ -70,16 +93,33 @@ impl CoreHost {
         check_layout(&root, &protected)?;
         let directory = root.join("owned");
         // Read-only refusal, not a reservation: recheck ownership after preflight.
-        if directory.symlink_metadata().is_ok() && !ownership(&directory).is_ok_and(|(_, state)| state == "safe") {
+        if directory.symlink_metadata().is_ok() && !ownership(&directory).is_ok_and(|(_, state, _)| state == "safe") {
             return Err(EngineError::Busy { running_op: "a retained Files export; finish its provider operation before retrying (ownership cannot be proven after restart)".into() });
         }
         self.review().flush_for_background()?;
-        progress.set_phase(meguri_engine::ProgressPhase::Named(
-            "Capturing and writing collection and media",
-        ));
+        progress.set_phase(meguri_engine::ProgressPhase::Named(match deck {
+            Some((_, options)) if options.include_media => "Capturing and writing deck and media",
+            Some(_) => "Capturing and writing deck",
+            None => "Capturing and writing collection and media",
+        }));
         let operation = directory.join(format!("operation-{:016x}", config.random.next_u64()));
-        let path = operation.join("Meguri-Collection.colpkg");
         let reader = collection.reader(ReaderRole::Maintenance)?;
+        let suggested_name = if let Some((id, _)) = deck {
+            let snapshot = reader.snapshot()?;
+            let rows = snapshot.deck_rows()?;
+            let selected = rows.iter().find(|row| row.id.0 == id).ok_or_else(|| EngineError::InvalidArgument {
+                message: "The selected deck no longer exists".into(),
+            })?;
+            deck_export_name(&meguri_engine::decks::names::human_name(&selected.name))
+        } else {
+            "Meguri-Collection.colpkg".into()
+        };
+        // Refuse an unrepresentable basename before creating an ownership marker.
+        // Otherwise a failed create could strand a marker that recovery cannot read.
+        if suggested_name.len() > 255 {
+            return Err(EngineError::InvalidArgument { message: "deck export filename too long".into() });
+        }
+        let path = operation.join(&suggested_name);
         let is_cancelled = || cancel.is_cancelled();
         let context = CollectionPackageWriteContext {
             collection_directory: &config.collection_directory,
@@ -91,23 +131,29 @@ impl CoreHost {
             is_cancelled: &is_cancelled,
         };
         // The actual DB+WAL P10 budget precedes every output mutation, including recovery.
-        let mut plan = meguri_package::preflight_media_collection_export_from_live(&reader, &path, &context)
-            .map_err(package_error)?;
-        if let Ok((retained, _)) = ownership(&directory) {
-            plan.protect_retained_outputs(
-                &[
-                    directory.join(MARKER),
-                    directory.join(retained).join("Meguri-Collection.colpkg"),
-                ],
-                &is_cancelled,
-            )
-            .map_err(package_error)?;
+        enum Plan {
+            Collection(meguri_package::MediaCollectionExportPlan),
+            Deck(meguri_package::DeckExportPlan),
+        }
+        let mut plan = match deck {
+            Some((id, options)) => Plan::Deck(meguri_package::preflight_deck_export_from_live(&reader, &path, &context, id, options).map_err(package_error)?),
+            None => Plan::Collection(meguri_package::preflight_media_collection_export_from_live(&reader, &path, &context).map_err(package_error)?),
+        };
+        if let Ok((retained, _, filename)) = ownership(&directory) {
+            let paths = [
+                directory.join(MARKER),
+                directory.join(&retained).join(filename),
+            ];
+            match &mut plan {
+                Plan::Collection(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
+                Plan::Deck(plan) => plan.protect_retained_outputs(&paths, &is_cancelled),
+            }.map_err(package_error)?;
         }
         cancel.check()?;
         if directory.symlink_metadata().is_ok() {
             // Only a durable never-handed-off/completed marker permits recovery.
             // Unknown/old/provider-owned slots remain fenced, with a truthful refusal.
-            if ownership(&directory).is_ok_and(|(_, state)| state == "safe") {
+            if ownership(&directory).is_ok_and(|(_, state, _)| state == "safe") {
                 remove_collection_export(&directory, &protected)?;
             } else {
                 return Err(EngineError::Busy { running_op: "a retained Files export; finish its provider operation before retrying (ownership cannot be proven after restart)".into() });
@@ -125,13 +171,15 @@ impl CoreHost {
             }
         }
         let mut unfinished = Unfinished(&directory, &protected, false);
-        write_ownership(&directory, operation.file_name().unwrap().to_str().unwrap(), "safe")?;
+        write_ownership(&directory, operation.file_name().unwrap().to_str().unwrap(), "safe", &suggested_name)?;
         fs::create_dir(&operation).map_err(io)?;
         meguri_storage::atomic_file::sync_directory(&directory)?;
         meguri_storage::atomic_file::sync_directory(&root)?;
         meguri_storage::atomic_file::sync_directory(parent)?;
-        let completed = meguri_package::write_media_collection_export_from_live(&reader, &path, &context, plan)
-            .map_err(package_error)?;
+        let completed = match plan {
+            Plan::Collection(plan) => meguri_package::write_media_collection_export_from_live(&reader, &path, &context, plan),
+            Plan::Deck(plan) => meguri_package::write_deck_export_from_live(&reader, &path, &context, plan),
+        }.map_err(package_error)?;
         drop(reader);
         cancel.check()?;
         if !collection.is_current() {
@@ -146,11 +194,18 @@ impl CoreHost {
             directory,
             path,
             written: completed.written,
+            suggested_name,
             source_validation: completed.source_validation,
             protected_directories: protected,
             space: config.disk_space_provider.clone(),
         })
     }
+}
+fn deck_export_name(name: &str) -> String {
+    let name: String = name.chars().map(|c| {
+        if "\\/?<>:*|\"^".contains(c) || c.is_control() { '_' } else { c }
+    }).collect();
+    format!("{}.apkg", if name.is_empty() { "Meguri-Deck" } else { &name })
 }
 fn io(error: std::io::Error) -> EngineError {
     meguri_storage::StorageError::from(error).into()
@@ -217,20 +272,21 @@ fn check_layout(root: &Path, protected: &[PathBuf]) -> Result<(), EngineError> {
     Ok(())
 }
 const MARKER: &str = "ownership";
-fn ownership(directory: &Path) -> Result<(String, String), EngineError> {
+fn ownership(directory: &Path) -> Result<(String, String, String), EngineError> {
     // Reject redirected slots and markers; never recurse through aliases.
     if !directory.symlink_metadata().map_err(io)?.file_type().is_dir() {
         return Err(invalid());
     }
     let marker = directory.join(MARKER);
     let meta = marker.symlink_metadata().map_err(io)?;
-    if !meta.file_type().is_file() || meta.len() > 128 {
+    if !meta.file_type().is_file() || meta.len() > 4096 {
         return Err(invalid());
     }
     let content = fs::read_to_string(marker).map_err(io)?;
     let lines: Vec<_> = content.lines().collect();
-    if lines.len() != 3
-        || lines[0] != "meguri-export-v1"
+    if !matches!(lines.first(), Some(&"meguri-export-v1") | Some(&"meguri-export-v2"))
+        || (lines[0] == "meguri-export-v1" && lines.len() != 3)
+        || (lines[0] == "meguri-export-v2" && lines.len() != 4)
         || !["safe", "provider"].contains(&lines[1])
         || lines[2].len() != 26
         || !lines[2].starts_with("operation-")
@@ -238,19 +294,31 @@ fn ownership(directory: &Path) -> Result<(String, String), EngineError> {
     {
         return Err(invalid());
     }
-    Ok((lines[2].into(), lines[1].into()))
+    let filename = if lines[0] == "meguri-export-v1" { "Meguri-Collection.colpkg" } else { lines[3] };
+    if filename.is_empty() || Path::new(filename).file_name().and_then(|name| name.to_str()) != Some(filename)
+        || (filename != "Meguri-Collection.colpkg" && !filename.ends_with(".apkg"))
+        || filename.chars().any(char::is_control)
+    {
+        return Err(invalid());
+    }
+    Ok((lines[2].into(), lines[1].into(), filename.into()))
 }
-fn write_ownership(directory: &Path, operation: &str, state: &str) -> Result<(), EngineError> {
+fn write_ownership(directory: &Path, operation: &str, state: &str, filename: &str) -> Result<(), EngineError> {
     let mut file = meguri_storage::atomic_file::AtomicFile::new(&directory.join(MARKER), Purpose::Export)?;
+    let marker = if filename == "Meguri-Collection.colpkg" {
+        format!("meguri-export-v1\n{state}\n{operation}\n")
+    } else {
+        format!("meguri-export-v2\n{state}\n{operation}\n{filename}\n")
+    };
     file.file_mut()
-        .write_all(format!("meguri-export-v1\n{state}\n{operation}\n").as_bytes())
+        .write_all(marker.as_bytes())
         .map_err(io)?;
     file.publish(|_| Ok(())).map_err(Into::into)
 }
 /// Worker-only: durably fence recovery BEFORE exposing any native source URL.
 pub fn collection_export_provider_state(directory: &Path, active: bool) -> Result<(), EngineError> {
-    let (operation, _) = ownership(directory)?;
-    write_ownership(directory, &operation, if active { "provider" } else { "safe" })
+    let (operation, _, filename) = ownership(directory)?;
+    write_ownership(directory, &operation, if active { "provider" } else { "safe" }, &filename)
 }
 /// Worker-only cleanup with an in-memory proof retained across removal failures.
 /// A fresh remover must first recognize and validate the complete owned tree.
@@ -267,6 +335,7 @@ struct RemovalProof {
     _directory_handle: fs::File,
     _root_handle: fs::File,
     operation: String,
+    filename: String,
     phase: RemovalPhase,
 }
 #[derive(PartialEq, Eq)]
@@ -288,7 +357,7 @@ impl CollectionExportRemoval {
         let root = directory.parent().ok_or_else(invalid)?;
         check_layout(root, protected)?;
         if self.proof.is_none() {
-            let (operation, _) = ownership(directory)?;
+            let (operation, _, filename) = ownership(directory)?;
             let directory_id = directory_identity(directory)?;
             let root_id = directory_identity(root)?;
             let directory_handle = fs::File::open(directory).map_err(io)?;
@@ -314,12 +383,12 @@ impl CollectionExportRemoval {
                     }
                     for entry in fs::read_dir(&output).map_err(io)? {
                         let entry = entry.map_err(io)?;
-                        if entry.file_name() != "Meguri-Collection.colpkg" || !entry.file_type().map_err(io)?.is_file()
+                        if entry.file_name() != filename.as_str() || !entry.file_type().map_err(io)?.is_file()
                         {
                             return Err(invalid());
                         }
                     }
-                    let package = output.join("Meguri-Collection.colpkg");
+                    let package = output.join(&filename);
                     if package.symlink_metadata().is_ok() {
                         fs::remove_file(package).map_err(io)?;
                     }
@@ -336,6 +405,7 @@ impl CollectionExportRemoval {
                 _directory_handle: directory_handle,
                 _root_handle: root_handle,
                 operation,
+                filename,
                 phase: RemovalPhase::Marker,
             });
         }
@@ -361,7 +431,8 @@ impl CollectionExportRemoval {
             let marker = directory.join(MARKER);
             match marker.symlink_metadata() {
                 Ok(_) => {
-                    if ownership(directory)?.0 != proof.operation {
+                    let (operation, _, filename) = ownership(directory)?;
+                    if operation != proof.operation || filename != proof.filename {
                         return Err(invalid());
                     }
                     fs::remove_file(marker).map_err(io)?;
@@ -396,6 +467,26 @@ pub fn remove_collection_export(directory: &Path, protected: &[PathBuf]) -> Resu
 mod export_refusal_tests {
     use super::*;
     use meguri_package::CollectionPackageWriteError as PackageError;
+    #[test]
+    fn deck_names_and_owned_markers_remain_narrow_and_collection_compatible() {
+        assert_eq!(deck_export_name("Alpha::Beta/?"), "Alpha__Beta__.apkg");
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("owned");
+        fs::create_dir(&directory).unwrap();
+        let operation = "operation-0000000000000001";
+        for filename in ["Meguri-Collection.colpkg", "Alpha__Beta.apkg"] {
+            write_ownership(&directory, operation, "safe", filename).unwrap();
+            assert_eq!(ownership(&directory).unwrap(), (operation.into(), "safe".into(), filename.into()));
+            collection_export_provider_state(&directory, true).unwrap();
+            assert_eq!(ownership(&directory).unwrap().1, "provider");
+            collection_export_provider_state(&directory, false).unwrap();
+            assert_eq!(ownership(&directory).unwrap().2, filename);
+        }
+        for filename in ["../keep.apkg", "/keep.apkg", "keep.colpkg", "child/keep.apkg"] {
+            fs::write(directory.join(MARKER), format!("meguri-export-v2\nsafe\n{operation}\n{filename}\n")).unwrap();
+            assert!(ownership(&directory).is_err());
+        }
+    }
     #[test]
     fn package_refusals_preserve_only_known_source_reasons() {
         assert_eq!(

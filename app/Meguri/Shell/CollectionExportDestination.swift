@@ -30,8 +30,9 @@ private struct MacCollectionSavePanel: NSViewRepresentable {
         guard coordinator.destinationPresented, context.coordinator.panel == nil, let window = view.window else { return }
         let panel = NSSavePanel()
         context.coordinator.panel = panel
-        panel.allowedContentTypes = [UTType(importedAs: "com.antoinefink.meguri.collection-package")]
-        panel.nameFieldStringValue = coordinator.artifact?.metadata.suggestedName ?? "Meguri-Collection.colpkg"
+        panel.allowedContentTypes = [UTType(importedAs: coordinator.isDeckExport
+            ? "com.antoinefink.meguri.deck-package" : "com.antoinefink.meguri.collection-package")]
+        panel.nameFieldStringValue = coordinator.artifact?.metadata.suggestedName ?? (coordinator.isDeckExport ? "Meguri-Deck.apkg" : "Meguri-Collection.colpkg")
         panel.canCreateDirectories = true
         panel.beginSheetModal(for: window) { response in
             context.coordinator.panel = nil

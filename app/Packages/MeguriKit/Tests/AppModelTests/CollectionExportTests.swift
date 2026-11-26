@@ -8,8 +8,8 @@ private struct RefusingExportService: CollectionExportService {
     let cause: BridgeError
     var prepareReal = false
     var uncertain = false
-    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
-        if prepareReal { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+    func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        if prepareReal { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         if uncertain { throw ExportDestinationCompletionUncertain() }
         throw CollectionExportFailure(cause: cause, destination: URL(fileURLWithPath: "/synthetic/do-not-display"))
     }
@@ -22,8 +22,8 @@ private struct RefusingExportService: CollectionExportService {
 /// The real service, keeping the last preparation error for a failed expectation's text.
 private final class ObservedExportService: CollectionExportService {
     let lastError = Mutex<String?>(nil)
-    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
-        do { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+    func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        do { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         catch { lastError.withLock { $0 = String(describing: error) }; throw error }
     }
     func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {
@@ -402,9 +402,80 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let coordinator = owner.collectionExport
         #expect(!coordinator.canPrepare && coordinator.availabilityMessage != nil)
+        #expect(!coordinator.canPresentDeck(1))
+        coordinator.presentDeck(1)
+        #expect(owner.navigation.sheet == nil)
         coordinator.prepare(); #expect(coordinator.stage == .idle)
         coordinator.generationChanged()
         #expect(coordinator.stage == .idle && coordinator.artifact == nil)
         #expect(await owner.close())
+    }
+}
+
+
+extension ReviewCollectionStartupTests {
+    @Test func selectedDeckExportSavesAPKGRemembersChoicesAndLeavesCollectionExportUnchanged() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let suite = "DeckExportTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var configuration = LaunchConfiguration()
+        configuration.deviceDefaults = defaults
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+        try #require(owner.state == .ready)
+        let coordinator = owner.collectionExport
+        do {
+            coordinator.presentDeck(1)
+            #expect(coordinator.showsDeckOptions && coordinator.title == "Export Deck")
+            #expect(coordinator.deckOptions == DeckExportOptions())
+            coordinator.deckOptions = DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
+            coordinator.exportDeck()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented && coordinator.providerLease != nil, "\(coordinator.message ?? "missing deck save dialog")")
+            let artifact = try #require(coordinator.artifact)
+            #expect(artifact.metadata.suggestedName == "Default.apkg")
+            let saved = root.appending(path: "selected.apkg")
+            coordinator.save(to: saved); await coordinator.waitForCompletion()
+            #expect(files.fileExists(atPath: saved.path))
+            #expect(coordinator.stage == .idle && coordinator.artifact == nil && coordinator.providerLease == nil)
+            #expect(owner.navigation.sheet == nil)
+            coordinator.presentDeck(1)
+            #expect(coordinator.deckOptions == DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false))
+            await coordinator.cancel()
+            coordinator.start()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented)
+            #expect(!coordinator.isDeckExport)
+            #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            #expect(owner.navigation.sheet == nil && coordinator.providerLease == nil)
+            #expect(await owner.close())
+        } catch {
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            await coordinator.cancel(); await coordinator.discard(); _ = await owner.close(); throw error
+        }
+    }
+}
+
+@Suite @MainActor struct DeckExportPreferencesTests {
+    @Test func firstUseAndRememberedChoicesAreDeviceLocal() throws {
+        let suite = "DeckExportPreferencesTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = DeckExportPreferences(defaults: defaults)
+        #expect(preferences.read() == DeckExportOptions())
+        let changed = DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
+        preferences.write(changed)
+        #expect(DeckExportPreferences(defaults: defaults).read() == changed)
+        #expect(DeckExportPreferences(defaults: nil).read() == DeckExportOptions())
     }
 }

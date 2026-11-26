@@ -951,6 +951,99 @@ import notify
     }
     #endif
 
+    /// Real selected-deck export: production menus, options, writer and native destination.
+    /// Screenshots are kept in the xcresult; no scripted export service or DTO route.
+    func testSelectedDeckNativeExportOptionsAndSave() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development fixture hooks in the VM") }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            importSource: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/review.colpkg"),
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+        app.launch()
+        defer { app.terminate() }
+        let row = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@", "home.sidebar.deck.", "home.deck.row.")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
+        let deckID = try XCTUnwrap(row.identifier.split(separator: ".").last)
+        #if os(macOS)
+        try app.bringToFront(bundleIdentifier: bundle)
+        row.rightClick()
+        #else
+        row.press(forDuration: 1)
+        #endif
+        try click(element(app, "home.deckMenu.export.\(deckID)"), app, bundle)
+        let options = element(app, "home.deckExport.export")
+        XCTAssertTrue(options.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(element(app, "home.deckExport.deck").exists)
+        for option in ["scheduling", "presets", "media"] {
+            XCTAssertTrue(element(app, "home.deckExport.\(option)").exists)
+        }
+        capture(app, "deck-export-real-fixture-options")
+        // Cancel before preparation leaves the workspace usable.
+        try click(element(app, "home.deckExport.close"), app, bundle)
+        XCTAssertTrue(options.waitForNonExistence(timeout: 10))
+        // Select the deck, then use the selected-deck entry point.
+        try click(row, app, bundle)
+        XCTAssertTrue(element(app, "home.deck.page.\(deckID)").waitForExistence(timeout: 20), app.debugDescription)
+        #if os(macOS)
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.menuBars.menuBarItems["Deck"].click()
+        app.menuItems["Export Deck…"].click()
+        #else
+        try click(element(app, "home.deck.actions"), app, bundle)
+        try click(element(app, "home.deckMenu.export.\(deckID)"), app, bundle)
+        #endif
+        XCTAssertTrue(options.waitForExistence(timeout: 10), app.debugDescription)
+        for option in ["scheduling", "presets", "media"] {
+            try click(element(app, "home.deckExport.\(option)"), app, bundle)
+        }
+        capture(app, "deck-export-real-fixture-changed-options")
+        try click(options, app, bundle)
+        #if os(macOS)
+        let savePanel = app.sheets.matching(identifier: "save-panel").firstMatch
+        XCTAssertTrue(savePanel.waitForExistence(timeout: 30), app.debugDescription)
+        capture(app, "deck-export-real-fixture-save-panel")
+        let folder = FileManager.default.temporaryDirectory.appending(path: "DeckExport-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        let go = savePanel.sheets.matching(identifier: "GoToWindow").firstMatch
+        let path = go.textFields.matching(identifier: "PathTextField").firstMatch
+        XCTAssertTrue(path.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
+        try app.bringToFront(bundleIdentifier: bundle); path.typeText(folder.path)
+        try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(go.waitForNonExistence(timeout: 10))
+        try click(savePanel.buttons.matching(identifier: "OKButton").firstMatch, app, bundle)
+        #else
+        // The public import-source hook installs this local Files root only.
+        try selectNativeExportChild("DeckExport-\(UUID().uuidString)", create: true, app, bundle)
+        capturePicker(app)
+        capture(app, "deck-export-real-fixture-files-destination")
+        let save = app.buttons.matching(identifier: "DOCPicker.actionButton").firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        XCTAssertEqual(save.label, "Save")
+        try click(save, app, bundle)
+        #endif
+        XCTAssertTrue(element(app, "home.deckExport.content").waitForNonExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(element(app, "home.deckExport.retryCleanup").exists)
+        #if os(macOS)
+        let saved = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        XCTAssertEqual(saved.count, 1)
+        let package = try XCTUnwrap(saved.first)
+        XCTAssertEqual(package.pathExtension, "apkg")
+        XCTAssertGreaterThan(try Data(contentsOf: package).count, 0)
+        let attachment = XCTAttachment(contentsOfFile: package)
+        attachment.name = "selected-deck.apkg"; attachment.lifetime = .keepAlways; add(attachment)
+        #endif
+        capture(app, "deck-export-real-fixture-saved-workspace")
+    }
+
     private func exerciseNativeExport(_ app: XCUIApplication, _ bundle: String,
                                       destinationFolder: URL?, destinationFilename: String? = nil) throws -> URL {
         try openCollectionSettings(app, bundle)

@@ -26,6 +26,12 @@ private final class ExportAccessWitness: CollectionExportDestinationAccess {
     }
 }
 @Suite struct CollectionExportMappingTests {
+    @Test func deckOptionsPreserveEveryFlagAcrossTheBridge() {
+        let defaults = CoreBridge.DeckExportOptions()
+        #expect(!defaults.raw.includeScheduling && !defaults.raw.includePresets && defaults.raw.includeMedia)
+        let chosen = CoreBridge.DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
+        #expect(chosen.raw.includeScheduling && chosen.raw.includePresets && !chosen.raw.includeMedia)
+    }
     @Test func sourceRefusalsSurviveTheExistingTypedFailureReceipt() {
         let cases: [(MeguriCoreBindings.CoreError, BridgeError)] = [
             (.ExportSourceChanged, .exportSourceChanged),

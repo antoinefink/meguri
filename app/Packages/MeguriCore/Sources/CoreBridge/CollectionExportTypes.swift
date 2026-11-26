@@ -2,6 +2,24 @@ import Foundation
 import Synchronization
 internal import MeguriCoreBindings
 
+/// Single-deck, latest-format package options. These choices never enter collection config.
+public struct DeckExportOptions: Sendable, Equatable {
+    public var includeScheduling: Bool
+    public var includePresets: Bool
+    public var includeMedia: Bool
+    public init(includeScheduling: Bool = false, includePresets: Bool = false, includeMedia: Bool = true) {
+        self.includeScheduling = includeScheduling; self.includePresets = includePresets; self.includeMedia = includeMedia
+    }
+    var raw: MeguriCoreBindings.DeckExportOptions {
+        .init(includeScheduling: includeScheduling, includePresets: includePresets, includeMedia: includeMedia)
+    }
+}
+public struct DeckExportRequest: Sendable, Equatable {
+    public let deckID: Int64
+    public let options: DeckExportOptions
+    public init(deckID: Int64, options: DeckExportOptions) { self.deckID = deckID; self.options = options }
+}
+
 public struct CollectionExportMetadata: Sendable, Equatable {
     public let operationID: UInt64
     public let sourceGeneration: UInt64

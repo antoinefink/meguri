@@ -8,8 +8,14 @@ public struct CollectionExportSheet: View {
     @Bindable private var coordinator: CollectionExportCoordinator
     public init(coordinator: CollectionExportCoordinator) { self.coordinator = coordinator }
     public var body: some View {
-        CollectionExportContent(presentation: .init(coordinator), choose: coordinator.chooseDestination,
-            retry: coordinator.retryCompletion, close: { Task { await coordinator.cancel() } })
+        if coordinator.showsDeckOptions {
+            DeckExportOptionsForm(name: coordinator.deckName ?? "", options: $coordinator.deckOptions,
+                canExport: coordinator.canPrepare, message: coordinator.message,
+                export: coordinator.exportDeck, cancel: { Task { await coordinator.cancel() } })
+        } else {
+            CollectionExportContent(presentation: .init(coordinator), choose: coordinator.chooseDestination,
+                retry: coordinator.retryCompletion, close: { Task { await coordinator.cancel() } })
+        }
     }
 }
 struct CollectionExportPresentation {
@@ -17,6 +23,8 @@ struct CollectionExportPresentation {
         var completed: UInt64
         var total: UInt64
     }
+    var navigationTitle = "Export Collection"
+    var identifierPrefix = "settings.importExport"
     var busy = true
     var canCancel = true
     var saved = false
@@ -27,6 +35,7 @@ struct CollectionExportPresentation {
     var message: String?
     init() {}
     init(_ coordinator: CollectionExportCoordinator) {
+        navigationTitle = coordinator.title; identifierPrefix = coordinator.identifierPrefix
         busy = coordinator.busy || (coordinator.continuous && coordinator.stage == .idle)
         // Not while the system dialog or the save itself owns the file.
         canCancel = !coordinator.destinationPresented && coordinator.stage != .discarding && coordinator.stage != .saving
@@ -62,27 +71,27 @@ struct CollectionExportContent: View {
                         }
                         .accessibilityLabel(Text(LocalizedStringKey(presentation.title), bundle: .module))
                         .accessibilityValue(Text("In progress", bundle: .module))
-                        .accessibilityIdentifier("settings.importExport.progress")
+                        .accessibilityIdentifier("\(presentation.identifierPrefix).progress")
                     }
                 }
                 if let message = presentation.message {
                     Section {
                         Text(LocalizedStringKey(message), bundle: .module)
-                            .accessibilityIdentifier("settings.importExport.message")
+                            .accessibilityIdentifier("\(presentation.identifierPrefix).message")
                         if presentation.canChooseAgain {
                             Button(action: choose) { Text("Choose Another Location", bundle: .module) }
-                                .accessibilityIdentifier("settings.importExport.choose")
+                                .accessibilityIdentifier("\(presentation.identifierPrefix).choose")
                         }
                         if presentation.canRetryCompletion {
                             Button(action: retry) { Text("Retry Export Cleanup", bundle: .module) }
-                                .accessibilityIdentifier("settings.importExport.retryCleanup")
+                                .accessibilityIdentifier("\(presentation.identifierPrefix).retryCleanup")
                         }
                     }
                 }
             }
             .formStyle(.grouped)
-            .accessibilityIdentifier("settings.importExport.content")
-            .navigationTitle(Text("Export Collection", bundle: .module))
+            .accessibilityIdentifier("\(presentation.identifierPrefix).content")
+            .navigationTitle(Text(LocalizedStringKey(presentation.navigationTitle), bundle: .module))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -93,7 +102,7 @@ struct CollectionExportContent: View {
                            action: close)
                     .keyboardShortcut(.cancelAction)
                     .disabled(presentation.busy && !presentation.canCancel)
-                    .accessibilityIdentifier("settings.importExport.close")
+                    .accessibilityIdentifier("\(presentation.identifierPrefix).close")
                 }
             }
         }
