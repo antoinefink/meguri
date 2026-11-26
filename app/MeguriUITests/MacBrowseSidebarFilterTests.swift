@@ -63,32 +63,95 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         let (app, bundle) = try launch()
         try openBrowse(app, bundle)
         let whole = statusText(app)
-        let browse = element(app, "shell.root.sidebar.browse")
         let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
-        let lastFilter = list.outlineRows.element(boundBy: list.outlineRows.count - 1)
+        let browse = list.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch
+        let reviewID = "browse.sidebar.state.review"
+        let review = list.descendants(matching: .any).matching(identifier: reviewID).firstMatch
+        let reviewRow = list.outlineRows.containing(.any, identifier: reviewID).firstMatch
         let token = element(app, "browse.search.token.0")
+        let query = app.toolbars.searchFields.firstMatch
+        let originalQuery = query.value as? String
+        addTeardownBlock { @MainActor in
+            guard self.testRun?.hasSucceeded == false else { return }
+            let responder = self.element(app, "browse.debug.responder")
+            let evidence = XCTAttachment(string: """
+                Status: \(self.statusText(app)); query: \(String(describing: query.value))
+                Focus: \(responder.exists ? responder.debugDescription : "no responder readout")
+                Outline values and native selections:
+                \(list.debugDescription)
+                Window:
+                \(app.windows.firstMatch.debugDescription)
+                ""
+            )
+            evidence.name = "browse-keyboard-target-AX"
+            evidence.lifetime = .keepAlways
+            self.add(evidence)
+        }
 
-        // Jump to the last filter, past the shell's other section rows,
-        // without applying it (T9).
-        app.typeKey(.downArrow, modifierFlags: .command)
-        XCTAssertTrue(waitUntil { lastFilter.isSelected })
+        // Limit the native outline to the five known Card State children.
+        // This filters sidebar labels, not the collection query. A generic
+        // last row can be an empty/group row and is not a filter witness.
+        let search = try MacBrowseSidebar(app: app).searchField()
+        try click(app, search, bundle)
+        search.typeText("Card State")
+        XCTAssertTrue(waitUntil { search.value as? String == "Card State" && review.exists && review.isHittable })
+        // openBrowse clicked the PREVIOUS sidebar. Physically reselect Browse
+        // inside its replacement to give the current outline keyboard focus.
+        try click(app, browse, bundle)
+        XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") })
+        try arrowToReview(app, bundle, reviewRow)
         XCTAssertEqual(statusText(app), whole)
+        XCTAssertEqual(query.value as? String, originalQuery)
+        XCTAssertFalse(token.exists, "Arrow navigation selects a real filter without applying it")
 
-        browse.click()
+        // Positive control BEFORE testing a no-op: physical Space must apply
+        // this identified filter, then remove it, leaving its native key row.
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { token.exists && self.selected(app, reviewID) && self.statusText(app).contains(" of ") })
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { !token.exists && !self.selected(app, reviewID) && self.statusText(app) == whole })
+        XCTAssertTrue(reviewRow.isSelected, "The valid underlying keyboard target remains after toggling")
+
+        try click(app, browse, bundle)
         XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") })
         for key in [" ", XCUIKeyboardKey.return.rawValue] {
-            app.typeKey(key, modifierFlags: [])
-            XCTAssertFalse(token.exists, "\(key.debugDescription) must not activate the obsolete filter target")
-            XCTAssertEqual(statusText(app), whole)
-            XCTAssertTrue(listSelected(app, "shell.root.sidebar.browse"))
+            try self.key(app, key, bundle)
+            XCTAssertFalse(waitUntil(timeout: 0.8) {
+                token.exists || self.statusText(app) != whole || query.value as? String != originalQuery
+                    || !self.listSelected(app, "shell.root.sidebar.browse")
+            }, "\(key.debugDescription) must leave the query, status and Browse selection unchanged")
         }
 
         // A fresh arrow selection still activates normally, proving that the
         // preceding keys were sent to the sidebar rather than a text field.
+        try arrowToReview(app, bundle, reviewRow)
+        XCTAssertEqual(statusText(app), whole)
+        XCTAssertFalse(token.exists)
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { token.exists && self.selected(app, reviewID) && self.statusText(app).contains(" of ") })
+    }
+
+    /// At the bottom of the label-filtered outline, walk upward to an
+    /// identified actionable child. Never infer a filter from a row index.
+    private func arrowToReview(_ app: XCUIApplication, _ bundle: String, _ row: XCUIElement) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(.downArrow, modifierFlags: .command)
-        XCTAssertTrue(waitUntil { lastFilter.isSelected })
-        app.typeKey(" ", modifierFlags: [])
-        XCTAssertTrue(token.waitForExistence(timeout: 10))
+        for _ in 0..<5 {
+            try key(app, XCUIKeyboardKey.upArrow.rawValue, bundle)
+            if waitUntil(timeout: 1, { row.exists && row.isSelected }) { return }
+        }
+        XCTFail("Unmodified Up must reach the real browse.sidebar.state.review parent outline row")
+    }
+
+    private func click(_ app: XCUIApplication, _ target: XCUIElement, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        XCTAssertTrue(waitUntil(timeout: 5) { target.exists && target.isEnabled && target.isHittable })
+        target.click()
+    }
+
+    private func key(_ app: XCUIApplication, _ key: String, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(key, modifierFlags: [])
     }
 
     private func keyRemovesTheFilter(_ key: String, _ name: String) throws {
