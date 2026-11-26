@@ -58,8 +58,11 @@ public final class BackupCoordinator {
     public var canOpenRestore: Bool { host?.backupsAvailable == true && !busy && !activationUncertain }
     public var canEditLimits: Bool { canCreate && limits != nil && !savingLimits }
     public var canCancel: Bool { busy && !cancellationRequested && progress?.cancellable != false && host?.backupCancellationSafe != false }
+    public nonisolated static func isRestorable(_ entry: BackupEntry, rejectedNames: Set<String>) -> Bool {
+        entry.kind != .serverCopyUnverified && !rejectedNames.contains(entry.name)
+    }
     public var selectedEntry: BackupEntry? {
-        entries.first { $0.name == selectedName && $0.kind != .serverCopyUnverified && !rejectedNames.contains($0.name) }
+        entries.first { $0.name == selectedName && Self.isRestorable($0, rejectedNames: rejectedNames) }
     }
 
     public func refresh() async {
@@ -91,7 +94,7 @@ public final class BackupCoordinator {
 
     private func selectEligible() {
         if selectedEntry == nil {
-            selectedName = entries.first { $0.kind != .serverCopyUnverified && !rejectedNames.contains($0.name) }?.name
+            selectedName = entries.first { Self.isRestorable($0, rejectedNames: rejectedNames) }?.name
         }
     }
 

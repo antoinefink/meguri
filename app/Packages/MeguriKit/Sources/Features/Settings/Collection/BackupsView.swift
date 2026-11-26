@@ -44,7 +44,6 @@ public struct BackupsView: View {
     }
 }
 
-/// The production grouped form; immutable render values carry no host or service.
 struct BackupsContent: View {
     let presentation: BackupsPresentation
     let actions: BackupsActions
@@ -125,7 +124,7 @@ struct BackupsContent: View {
     }
 
     private func limit(_ title: LocalizedStringKey, field: BackupCoordinator.LimitField, value: UInt32) -> some View {
-        BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", value: value, minimum: field == .interval ? 5 : 0, unit: field == .interval ? "min" : nil, enabled: presentation.canEditLimits) { edited in
+        BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", field: field, value: value, enabled: presentation.canEditLimits) { edited in
             actions.editLimit(field, edited)
         }
     }
@@ -134,9 +133,10 @@ struct BackupsContent: View {
 private struct BackupLimitRow: View {
     let title: LocalizedStringKey
     let identifier: String
+    let field: BackupCoordinator.LimitField
     let value: UInt32
-    let minimum: UInt32
-    let unit: LocalizedStringKey?
+    private var minimum: UInt32 { field == .interval ? 5 : 0 }
+    private var unit: LocalizedStringKey? { field == .interval ? "min" : nil }
     let enabled: Bool
     let save: (UInt32) -> Void
     @State private var draft = BackupLimitDraft()
@@ -164,7 +164,7 @@ private struct BackupLimitRow: View {
     private var input: some View {
             TextField(text: $draft.text) { Text(title, bundle: .module) }
                 .labelsHidden()
-                .accessibilityLabel(minimum == 5 ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module))
+                .accessibilityLabel(field == .interval ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module))
                 .accessibilityIdentifier(identifier)
                 .multilineTextAlignment(.trailing)
                 #if os(iOS)
@@ -224,10 +224,26 @@ struct BackupRestoreContent: View {
     let refresh: () -> Void
     let cancel: () -> Void
     let restore: (String) -> Void
+    private let duplicateOrdinals: [BackupWallTime: [String: Int]]
     @Environment(\.locale) private var locale
     @State private var confirmation = false
     @State private var confirmedEntry: BackupEntry?
     @Environment(\.dynamicTypeSize) private var textSize
+    init(presentation: BackupsPresentation, selectedName: Binding<String?>,
+         refresh: @escaping () -> Void, cancel: @escaping () -> Void, restore: @escaping (String) -> Void) {
+        self.presentation = presentation
+        self._selectedName = selectedName
+        self.refresh = refresh; self.cancel = cancel; self.restore = restore
+        duplicateOrdinals = Dictionary(grouping: presentation.entries, by: \.wallTime)
+            .filter { $0.value.count > 1 }
+            .mapValues { entries in
+                var ordinals: [String: Int] = [:]
+                for (index, entry) in entries.enumerated() where ordinals[entry.name] == nil {
+                    ordinals[entry.name] = index + 1
+                }
+                return ordinals
+            }
+    }
     private var selectedEntry: BackupEntry? {
         presentation.entries.first { $0.name == selectedName && !unavailable($0) }
     }
@@ -366,8 +382,6 @@ struct BackupRestoreContent: View {
     private func entryLabel(_ entry: BackupEntry) -> some View {
         VStack(alignment: .leading) {
             Text(verbatim: BackupPresentation.timestamp(entry, locale: locale))
-            // Rare identical timestamps need a visible discriminator, not a
-            // repeated filename on every archive in the history.
             if let index = duplicateIndex(entry) {
                 Text("Archive \(index)", bundle: .module).foregroundStyle(.secondary)
             }
@@ -378,9 +392,7 @@ struct BackupRestoreContent: View {
         .help(entry.name)
     }
     private func duplicateIndex(_ entry: BackupEntry) -> Int? {
-        let sameTime = presentation.entries.filter { $0.wallTime == entry.wallTime }
-        guard sameTime.count > 1, let index = sameTime.firstIndex(where: { $0.name == entry.name }) else { return nil }
-        return index + 1
+        duplicateOrdinals[entry.wallTime]?[entry.name]
     }
     private func entryAccessibilityLabel(_ entry: BackupEntry) -> String {
         var parts = [BackupPresentation.timestamp(entry, locale: locale), BackupPresentation.size(entry.sizeBytes), entry.name]
@@ -410,7 +422,7 @@ struct BackupRestoreContent: View {
         }
     }
     private func unavailable(_ entry: BackupEntry) -> Bool {
-        entry.kind == .serverCopyUnverified || presentation.rejectedNames.contains(entry.name)
+        !BackupCoordinator.isRestorable(entry, rejectedNames: presentation.rejectedNames)
     }
     private var confirmationTitle: Text {
         let date = confirmedEntry.map { BackupPresentation.timestamp($0, locale: locale) } ?? ""

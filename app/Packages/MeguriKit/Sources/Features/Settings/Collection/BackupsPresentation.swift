@@ -2,8 +2,6 @@ import AppModel
 import CoreBridge
 import Foundation
 
-/// Only drawn values cross this internal seam. Production models keep their
-/// private setters; fixtures need neither a collection nor a maintenance service.
 struct BackupsPresentation {
     struct Receipt {
         let name: String

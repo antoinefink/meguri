@@ -64,7 +64,7 @@ public struct RestoredBackup: Sendable, Equatable {
     }
 }
 public enum BackupKind: Sendable, Equatable { case backup, serverCopy, serverCopyUnverified }
-public struct BackupWallTime: Sendable, Equatable {
+public struct BackupWallTime: Sendable, Hashable {
     public let year: UInt16
     public let month: UInt8
     public let day: UInt8
