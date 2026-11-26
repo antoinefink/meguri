@@ -59,3 +59,5 @@ The reviewers examined the complete merged files and approved these exact public
 | Planinterop | `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` | 166,524 | `5b329638e20ef17b258809d3e68089eaa04f059652cd6cfc4c113462be76f6ee` |
 
 Planinterop independently reviewed the complete 23,767-byte touch journey. The flagged comments describe the geometry of a native scrolling gesture. All inputs are synthetic and the file contains only public XCTest source. Its verified SHA-256 is `47644f411be5dda7625f6290ad20c6f5f60d79e70e5fe0980c545fe558430bc6`.
+
+After the upstream MCP media status changed, Plancheck reviewed the complete merged 72,424-byte verification register. It contains public test and integration metadata. Its verified SHA-256 is `ac341a60bbd004b30fb17fd4798d7d90d19b012b027d6b86ac4263ff63afd857`.
