@@ -84,3 +84,5 @@ Verification receipts: `core-test/20261126T104859Z-81496` (15 passed) and `ui-te
 The independent privacy reviewer reviewed all 291,418 bytes of the native interface contract and admitted the public document at SHA-256 `222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285`.
 
 The independent privacy reviewer read and admitted all 26,664 bytes of `app/MeguriUITests/IOAddEditUITests.swift` as public. SHA-256 `d9808ec46e45b931185ca72203231e024baeea1fb91c8888f5e92e359a21f8d5`.
+
+The independent privacy reviewer read and admitted all 71,606 bytes of `docs/process/verification-status.md` as public. SHA-256 `8ec51195b37d6f85427ee90efd068937676be625afa88f4980506c305519cf56`.

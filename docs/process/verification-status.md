@@ -2,6 +2,17 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+Image occlusion authoring passed 90 focused Swift tests
+(`swift-test/20261126T110431Z-54295`), nine Swift bridge tests
+(`swift-test/20261126T100308Z-54840`), and 15 Rust media tests
+(`core-test/20261126T104859Z-81496`). The iOS Simulator build passed
+(`build-app/20261126T110717Z-63965`). The Mac UI run verified that two
+drawn masks generated two review cards and that moving one mask left the
+other in place (`ui-test/20261126T105602Z-9766`). That run stopped at
+the second Edit Note menu action. The collection tests verified saved edits
+after reopening stock and custom note layouts. [PR #232](https://github.com/antoinefink/meguri/pull/232)
+contains the native screenshots and subsequent UI verification.
+
 The tag and note type deletion branch passed 44 focused Swift tests
 (`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed
