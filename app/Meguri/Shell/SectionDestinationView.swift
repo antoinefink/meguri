@@ -77,6 +77,7 @@ struct ShellFeatures {
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
     /// N22.7: a note type's page pushed over the Note Types list (iPad).
     var noteType: (Int64, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
+    var tags: () -> AnyView = { AnyView(EmptyView()) }
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     /// N17.2: Import opens the file picker on the presenting window, before any sheet.
     var collectionEntry: CollectionEntryCoordinator?
@@ -170,6 +171,7 @@ struct ShellFeatures {
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         #if os(iOS)
         features.noteType = { id, _ in AnyView(NoteTypePage(model: collection.noteTypes, id: id)) }
+        features.tags = { AnyView(CollectionTagsView(collection: collection)) }
         #endif
         features.deckOptions = { deck, navigation in
             AnyView(DeckOptionsPage(model: collection.deckOptions) { navigation.popDeckOptions(deck) })
@@ -241,6 +243,7 @@ struct SectionDestinationView: View {
         case deckPage(DeckID)
         case deckOptions(DeckID)
         case noteType(Int64)
+        case tags
         case settingsPage(SettingsPage)
 
         /// The screen a pushed destination shows.
@@ -249,6 +252,7 @@ struct SectionDestinationView: View {
             case let .deckPage(deck): self = .deckPage(deck)
             case let .deckOptions(deck): self = .deckOptions(deck)
             case .noteTypes: self = .root(.noteTypes)
+            case .tags: self = .tags
             case .noteType(let id): self = .noteType(id)
             case .settingsPage(let page): self = .settingsPage(page)
             }
@@ -265,6 +269,7 @@ struct SectionDestinationView: View {
         case let .deckPage(deck): features.deckPage(deck, navigation)
         case let .deckOptions(deck): features.deckOptions(deck, navigation)
         case let .noteType(id): features.noteType(id, navigation)
+        case .tags: features.tags()
         case let .settingsPage(page): features.settingsPage(page)
         }
     }
