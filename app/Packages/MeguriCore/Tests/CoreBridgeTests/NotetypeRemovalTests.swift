@@ -41,7 +41,7 @@ private final class RemovalTrackingFailure: Sendable {
 extension EventTests {
     @Test @MainActor func removalTrackingFailureCancelsAndDrainsUncommittedWork() async throws {
         try await CoreEventStream.shared.start()
-        let handle = try await MaintenanceLane.shared.call("test.startJob") {
+        let handle = try await MaintenanceLane.shared.call("test.startJob") { @Sendable in
             try testStartJob(durationMs: 60_000, reportsPerSecond: 100, failWith: nil)
         }
         let failure = BridgeError.invalidArgument("removal listener setup")
