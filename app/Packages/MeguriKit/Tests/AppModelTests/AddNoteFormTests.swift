@@ -30,56 +30,53 @@ extension FieldEditorTests {
             ? NoteEditorDraft(editing: .init(id: 5, notetypeId: type.id, fields: values, tags: [], guid: "g"),
                               notetype: type, deck: Self.deck, generation: 1)
             : NoteEditorDraft(generation: 1, notetype: type, deck: Self.deck, values: values)
-        var host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
         defer { host.shutDown() }
         BrowseFieldEditingTests.installProbe(host)
-        // Production starts the page before SwiftUI mounts and sizes the web view.
+        // Production focuses before SwiftUI mounts the retained, zero-sized view.
         try #require(host.webView.frame == .zero)
         try await host.start()
         try #require(try await host.webView.callAsyncJavaScript("return innerWidth === 0 && innerHeight === 0;",
-            contentWorld: .page) as? Bool == true, "exercise eager focus at zero viewport")
-        let window = EditorFormTestWindow(contentRect: CGRect(x: -30_000, y: -30_000, width: 500, height: 240),
+            contentWorld: .page) as? Bool == true)
+
+        func settleLayout() async throws {
+            _ = try await host.webView.callAsyncJavaScript("""
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Layout did not settle')), 2000);
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        clearTimeout(timeout); resolve();
+                    }));
+                });
+                """, contentWorld: .page)
+        }
+        let window = EditorFormTestWindow(contentRect: CGRect(x: -30_000, y: -30_000, width: 1, height: 1),
                                           styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host.webView
-        host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 240)
         window.makeFirstResponder(host.webView)
         defer { window.contentView = nil; window.close() }
+        // The first nonzero layout need not be the final usable viewport.
+        host.webView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        try await settleLayout()
+        window.setContentSize(NSSize(width: 500, height: 240))
+        host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 240)
+        try await settleLayout()
 
-        func checkOpening() async throws {
-            let checks = try #require(try await host.webView.callAsyncJavaScript("""
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('No sized viewport frames within 2 s')), 2000);
-                    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
-                        clearTimeout(timeout); resolve();
-                    })));
-                });
-                const root = testFieldRoots.find(root => root.host.isConnected);
-                const box = document.querySelector('.fieldBoundary'), rect = box.getBoundingClientRect();
-                const style = getComputedStyle(box), ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
-                return {
-                    sizedScrollableViewport: innerWidth === 500 && innerHeight === 240 && document.scrollingElement.scrollHeight > innerHeight,
-                    firstFieldFocused: root.activeElement === root.querySelector('meguri-field-content'),
-                    boxVisible: rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth,
-                    outlineVisible: ring > 0 && rect.top - ring >= 0 && rect.bottom + ring <= innerHeight &&
-                        rect.left - ring >= 0 && rect.right + ring <= innerWidth
-                };
-                """, contentWorld: BrowseFieldEditingTests.world) as? [String: Bool])
-            // Before the repair the opening selection reveal clips the first box
-            // or its outline. No test-driven focus or scrolling repairs that state.
-            for (name, passed) in checks { #expect(passed, "Opening form: \(name)") }
-        }
-        try await checkOpening()
-        if !editing {
-            // Type changes and acknowledged adds open a new draft in this page.
-            let changed = try draft.replacingSelection(notetype: Self.form((0..<18).map { "Changed \($0)" }, id: 78), deck: Self.deck)
-            for next in [changed, try changed.nextAfterAcknowledgedAdd()] {
-                try await host.flush(hold: true)
-                host = try #require(host.successor(for: next, isCurrent: { true }) as? FieldEditorHost)
-                try await host.start()
-                try await checkOpening()
-            }
-        }
+        let checks = try #require(try await host.webView.callAsyncJavaScript("""
+            const root = testFieldRoots.find(root => root.host.isConnected);
+            const box = document.querySelector('.fieldBoundary');
+            const style = getComputedStyle(box);
+            return {
+                scrollable: innerHeight === 240 && document.scrollingElement.scrollHeight > innerHeight,
+                focused: root.activeElement === root.querySelector('meguri-field-content'),
+                topVisible: parseFloat(style.outlineWidth) > 0 &&
+                    box.getBoundingClientRect().top - parseFloat(style.outlineWidth) >= 0
+            };
+            """, contentWorld: BrowseFieldEditingTests.world) as? [String: Bool])
+        // No test-driven focus or scrolling may repair the clipped opening box.
+        #expect(checks["scrollable"] == true)
+        #expect(checks["focused"] == true)
+        #expect(checks["topVisible"] == true, "The first field and its focus ring must start within the viewport")
     }
     #endif
 

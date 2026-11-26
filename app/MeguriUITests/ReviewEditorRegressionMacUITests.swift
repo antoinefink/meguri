@@ -147,6 +147,35 @@ import XCTest
         XCTAssertTrue(window.waitForNonExistence(timeout: 10))
     }
 
+    func testFreshManyFieldAddWindowCapturesTheOpeningField() throws {
+        let (app, _) = try launch()
+        defer { app.terminate() }
+        try selectDeck("Synthetic Many Fields", app: app)
+        app.typeKey("n", modifierFlags: .command)
+        let window = app.windows["editor.add.window"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let type = window.popUpButtons["editor.add.type"]
+        type.click(); app.menuItems["Synthetic Text and Audio, 14 Fields"].click()
+        let editor = window.descendants(matching: .any).matching(identifier: "editor.fields").firstMatch
+        let fields = editor.textViews
+        XCTAssertTrue(wait { fields.count == 14 && fields.element(boundBy: 0).isHittable })
+        fields.element(boundBy: 0).click(); app.typeText("Synthetic opening prompt")
+        app.typeKey(.tab, modifierFlags: []); app.typeText("Synthetic opening answer")
+        let add = window.buttons["editor.add.save"]
+        XCTAssertTrue(wait { add.isEnabled }); add.click()
+        XCTAssertTrue(element(app, "editor.add.result").waitForExistence(timeout: 10))
+        XCTAssertTrue(wait { !add.isEnabled })
+        // Add persists the type; a fresh window exercises eager startup focus.
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10))
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait { (type.value as? String ?? "").contains("Synthetic Text and Audio, 14 Fields") && fields.count == 14 })
+        capture(window, "add-note-fresh-many-field-native-window-synthetic")
+        XCTAssertTrue(fields.element(boundBy: 0).isHittable)
+        XCTAssertGreaterThanOrEqual(fields.element(boundBy: 0).frame.minY, editor.frame.minY)
+    }
+
     func testNewNoteReentryUsesTheSelectedDeckAndKeepsTheDirtyDraft() throws {
         let (app, _) = try launch()
         defer { app.terminate() }
