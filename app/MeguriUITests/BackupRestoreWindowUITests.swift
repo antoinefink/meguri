@@ -108,10 +108,17 @@ final class BackupRestoreWindowUITests: XCTestCase {
         let timestamp = formatter.string(from: date)
         XCTAssertTrue(oldest.label.contains(filename) && oldest.label.contains(timestamp))
         capture(window, "oldest-archive-selected")
+        let title = "Replace the current collection with the backup from \(timestamp)?"
+        let titlePredicate = NSPredicate(format: "label == %@ OR value == %@", title, title)
+        let restorePredicate = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@",
+            "Restore", "Restore", "settings.backups.apply")
+        let cancelPredicate = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@", "Cancel", "Cancel", anchor)
+        let confirmationTitle = app.staticTexts.matching(titlePredicate).firstMatch
+        let destructiveRestore = app.buttons.matching(restorePredicate).firstMatch
+        let confirmationContext = "Selected archive: \(filename); expected title: \(title)"
         try app.bringToFront(bundleIdentifier: bundle)
         apply.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
-        let title = "Replace the current collection with the backup from \(timestamp)?"
         let prompts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
             XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.menu.rawValue,
             XCUIElement.ElementType.sheet.rawValue, XCUIElement.ElementType.alert.rawValue,
@@ -120,19 +127,26 @@ final class BackupRestoreWindowUITests: XCTestCase {
         var prompt: XCUIElement?
         XCTAssertTrue(wait {
             prompt = prompts.allElementsBoundByIndex.first {
-                $0.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", title, title)).firstMatch.exists
-                    && $0.buttons["Restore"].exists
+                $0.staticTexts.matching(titlePredicate).firstMatch.exists
+                    && $0.buttons.matching(restorePredicate).firstMatch.exists
+                    && $0.buttons.matching(cancelPredicate).firstMatch.exists
                     && !self.element($0, anchor).exists
             }
             return prompt != nil
-        }, "The native confirmation must name the selected November 1 date and time")
+        }, "The native confirmation must contain its exact title, destructive Restore and Cancel. \(confirmationContext)")
         let confirmation = try XCTUnwrap(prompt)
-        let cancel = confirmation.buttons["Cancel"]
-        XCTAssertTrue(wait { cancel.exists && cancel.isEnabled && cancel.isHittable })
+        let cancel = confirmation.buttons.matching(cancelPredicate).firstMatch
+        XCTAssertTrue(wait {
+            confirmationTitle.exists && destructiveRestore.exists
+                && cancel.exists && cancel.isEnabled && cancel.isHittable
+        }, "The confirmation must be ready to cancel. \(confirmationContext)")
         capture(window, "oldest-archive-confirmation")
         try app.bringToFront(bundleIdentifier: bundle)
         cancel.click()
-        XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
+        // Native menus can reuse the prompt's AX index after dismissal.
+        XCTAssertTrue(wait { !confirmationTitle.exists && !destructiveRestore.exists },
+            "Cancel must dismiss the confirmation. \(confirmationContext); "
+                + "title remains=\(confirmationTitle.exists); destructive Restore remains=\(destructiveRestore.exists)")
         try app.bringToFront(bundleIdentifier: bundle)
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
             .withOffset(CGVector(dx: 0, dy: 12)).click()
