@@ -32,16 +32,18 @@ impl Overlay {
     pub fn pending(&self) -> &[AcceptedAnswer] {
         &self.pending
     }
+    #[allow(clippy::too_many_arguments)] // Selected state distinguishes finished preview from home learning.
     pub fn accept(
         &mut self,
         queue: &mut SessionQueue,
         sequence: u64,
         postimage: Card,
+        chosen: crate::states::engine::State,
         buried: &[CardId],
         now: i64,
         boundary: i64,
     ) -> Result<QueueAnswer, super::NotAtHead> {
-        let record = queue.answer(postimage.id, Requeue::from_card(&postimage, boundary), buried, now)?;
+        let record = queue.answer(postimage.id, Requeue::from_answer(&postimage, chosen, boundary), buried, now)?;
         let before = self.rows.insert(postimage.id, postimage.clone());
         self.pending.push(AcceptedAnswer {
             sequence,

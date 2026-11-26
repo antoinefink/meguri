@@ -8,6 +8,10 @@ use meguri_model::usn::Usn;
 
 use super::{Cell, Record, RowCells, RowError, RowImage, Table};
 
+/// Scheduling and temporary membership belong to an answer. Identity, template
+/// ordinal and flags retain their stored cells, including concurrent edits.
+pub const ANSWER_COLUMNS: [usize; 14] = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17];
+
 struct CardScalars {
     id: CardId,
     note_id: NoteId,

@@ -852,6 +852,7 @@ pub(crate) fn apply_in(
             crate::session::held::QueueRestore::prepare(
                 owner,
                 &plan.card,
+                request.chosen.state,
                 &buried,
                 request.answered_at.whole_secs().0,
                 request.next_day_at,

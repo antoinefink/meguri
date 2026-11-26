@@ -1350,7 +1350,7 @@ impl ReviewService {
         .map_err(invalid)?;
         let mut post_image = captured.image.clone();
         let written = planned.card.to_cells();
-        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+        for i in meguri_storage::rows::cards::ANSWER_COLUMNS {
             post_image[i] = written[i].clone();
         }
         // The next optimistic answer consumes stored codec rounding, exactly
@@ -1397,6 +1397,7 @@ impl ReviewService {
                 queue,
                 event,
                 post.clone(),
+                request.chosen.state,
                 &buried,
                 at.div_euclid(1000),
                 day.next_day_at,
@@ -2157,14 +2158,13 @@ fn presentation_card(
     {
         image = before;
     }
-    let stored = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
-    let card = overlay.row(id).cloned().unwrap_or(stored);
-    if overlay.row(id).is_some() {
+    if let Some(card) = overlay.row(id) {
         let post = card.to_cells();
-        for i in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17] {
+        for i in meguri_storage::rows::cards::ANSWER_COLUMNS {
             image[i] = post[i].clone();
         }
     }
+    let card = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
     Ok((image, card))
 }
 
@@ -2304,7 +2304,7 @@ fn project_item(
         predicted[index] = prediction_queue
             .predict(
                 id,
-                Requeue::from_card(&planned.card, boundary),
+                Requeue::from_answer(&planned.card, chosen.state, boundary),
                 &siblings,
                 at.div_euclid(1000),
             )
