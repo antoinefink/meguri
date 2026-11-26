@@ -13,3 +13,5 @@ An independent non-author checked each provenance file in full. The committed an
 The follow-up starts at `4430f2afe`. On the iPhone simulator, all four applicable cases passed (`ui-test/20261126T095103Z-27083`). At the largest text size the test reached the last paragraph and tapped Cancel. A separate case required a second confirmation when the counts changed.
 
 The landscape iPad production-list case passed with the 90-note, 180-card fixture (`ui-test/20261126T091639Z-11709`). This run also exposed XCTest's 128-character limit for identifier queries. The corrected tests match the entire warning by accessibility label. Full-screen captures from both production-list cases are attached to [PR #233](https://github.com/antoinefink/meguri/pull/233).
+
+All five corrected iPad cases passed in `ui-test/20261126T100308Z-10605`. The separate invalid-launch diagnostic exposed 29 older routes missing from both test expectations. The corrected expected route list matches the registry reported by the iPhone app.
