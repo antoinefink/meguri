@@ -1,3 +1,4 @@
+import CardRendering
 import CoreBridge
 import CoreGraphics
 import Darwin
@@ -71,14 +72,27 @@ import WebKit
             values: [Self.first, "<img src=\"x.png\">", "header", "extra", "comments"], tags: ["kept"])
         let next = try draft.nextAfterAcknowledgedAdd()
         #expect(next.values == ["", "", "header", "extra", "comments"] && next.tags == ["kept"])
-        let basic = try NoteEditorDraft(generation: 1, notetype: Self.type(tags: [nil, nil], stock: 1, id: 205),
-                                        deck: Self.deck, values: ["a", "b"])
+        let basicType = Self.type(tags: [nil, nil], stock: 1, id: 205)
+        try #require(basicType.id != type.id && basicType.fields.count == 2 && type.fields.count == 5)
+        let basic = try NoteEditorDraft(generation: 1, notetype: basicType, deck: Self.deck, values: ["a", "b"])
         let mapped = try basic.replacingSelection(notetype: type, deck: Self.deck)
         #expect(mapped.values == ["", "", "a", "b", ""])
         let reversed = Self.type(tags: [3, 2, 1, 0, 4])
         let remapped = try draft.replacingSelection(notetype: NotetypeRecord(id: 207, name: reversed.name,
             kind: reversed.kind, sortField: 0, css: "", base: [], fields: reversed.fields, templates: [], originalStockKind: 6), deck: Self.deck)
         #expect(remapped.values == ["header", "extra", "<img src=\"x.png\">", Self.first, "comments"])
+    }
+
+    @Test func basicToIOExpandsTheDraftAndDeckOnlyRebindingKeepsIt() throws {
+        let source = Self.type(tags: [nil, nil], stock: 1, names: ["Front", "Back"], id: 205)
+        let target = Self.type(names: ["Masks", "Image", "Header", "Extra", "Comments"], id: 206)
+        let basic = try NoteEditorDraft(generation: 1, notetype: source, deck: Self.deck, values: ["a", "b"])
+        let mapped = try basic.replacingSelection(notetype: target, deck: Self.deck)
+        #expect(mapped.notetype.id == target.id && mapped.fields.count == 5)
+        #expect(mapped.values == ["", "", "a", "b", ""])
+        let rebound = try mapped.replacingSelection(notetype: target,
+            deck: .init(id: 2, fullName: "Other", filtered: false))
+        #expect(rebound.values == mapped.values && rebound.deck.id == 2)
     }
 
     @Test func ioMappingPreservesHiddenRolesButMatchesEveryVisibleFieldByNameThenStoredOrder() throws {
@@ -232,7 +246,7 @@ extension FieldEditorTests {
 }
 
 extension ReviewCollectionStartupTests {
-    @Test @MainActor func occlusionNormalAddGeneratesCardsAndEditCurrentReopensExactMasksAndMetadata() async throws {
+    @Test(.timeLimit(.minutes(1))) @MainActor func occlusionNormalAddGeneratesCardsAndEditCurrentReopensExactMasksAndMetadata() async throws {
         let path = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
         let root = URL(filePath: String(cString: path)).appending(path: UUID().uuidString)
         free(path)
@@ -243,8 +257,9 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil), providerDirectory: root.appending(path: "transfers"))
-        let surface = ReviewCoordinatorTests.Surface()
-        owner.makeReviewSurface = { _ in surface }
+        // Warm-up and review each receive their own headless surface. It
+        // consumes real Core renders, without an unhosted WebKit page.
+        owner.makeReviewSurface = { _ in OcclusionReviewDisplay() }
         do {
             await owner.start(); await owner.startEmpty()
             try #require(owner.state == .ready)
@@ -308,7 +323,11 @@ extension ReviewCollectionStartupTests {
             #expect(await flow.requestClose())
             await owner.startStudy(deckID: draft.deck.id)
             let review = try #require(owner.review)
+            let surface = try #require(review.surface as? OcclusionReviewDisplay)
+            await review.settled()
             try #require(review.item?.noteId == added.id)
+            let card = try #require(review.item?.cardId)
+            #expect(surface.visible?.cardID == card && review.canEditNote)
             try #require(await owner.openEditNote())
             let edit = owner.editNoteFlow
             let editDraft = try #require(edit.draft), editHost = try #require(edit.runtime as? FieldEditorHost)
@@ -323,12 +342,24 @@ extension ReviewCollectionStartupTests {
             try await changed.setMode(.html, ord: roles.header)
             try #require(try await FieldEditorTests.replaceSource(changed, ord: roles.header, value: "Edited metadata"))
             changed.draft.setTags(["edited"])
-            #expect(await edit.save())
+            let refreshing = ReviewCoordinatorTests.CancellableGate()
+            defer { refreshing.release() }
+            let presentations = surface.presented.count
+            surface.onRender = { try await refreshing.wait() }
+            try #require(await edit.save())
+            await refreshing.requested()
+            #expect(!review.canEditNote && !edit.canOpen, "The saved card is still being refreshed")
             #expect(!editHost.acceptsHostInput)
             let saved = try await CoreNoteService().readNote(id: added.id)
             #expect(saved.fields[roles.occlusions] == OcclusionFieldFlowTests.first + "<br>" + OcclusionFieldFlowTests.label)
             #expect(saved.fields[roles.backExtra] == note.fields[roles.backExtra] && saved.tags == ["edited"])
             #expect(try await CoreNoteService().noteCards(noteId: added.id).count == 2, "Deleting a mask keeps the generated card")
+            surface.onRender = nil; refreshing.release()
+            await review.settled()
+            try #require(review.phase == .question && review.canEditNote)
+            #expect(review.item?.cardId == card && review.shownItem?.cardId == card)
+            #expect(surface.presented.count == presentations + 1 && surface.visible?.cardID == card)
+            #expect(surface.visible?.question.contains("Edited metadata") == true)
             try #require(await owner.openEditNote())
             #expect(edit.draft?.values == saved.fields && edit.draft?.tags == saved.tags)
             #expect(await edit.requestCancel())
@@ -345,5 +376,32 @@ extension ReviewCollectionStartupTests {
             owner.addNoteFlow.generationEnded(); owner.editNoteFlow.generationEnded()
             _ = await owner.close(); try? await CoreCollectionService().close(); throw error
         }
+    }
+}
+
+/// The model test confirms the actual refreshed HTML and render key. Native
+/// card-page display remains covered by the VM's authoring journeys.
+@MainActor private final class OcclusionReviewDisplay: ReviewCoordinatorTests.Surface {
+    private var cards: [ReviewRenderKey: RenderedCard] = [:]
+    private(set) var visible: RenderedCard?
+
+    override func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws {
+        #if os(macOS)
+        let platform: CardRenderPlatform = .mac
+        #else
+        let platform: CardRenderPlatform = .ios
+        #endif
+        let rendered = try await Core.renderSessionHead(sessionID: sessionID, keys: items.map(\.renderKey), platform: platform)
+        guard rendered.count == items.count else { throw BridgeError.internal("Incomplete occlusion review render") }
+        cards = Dictionary(uniqueKeysWithValues: zip(items.map(\.renderKey), rendered))
+        try await super.render(sessionID: sessionID, items: items)
+    }
+
+    override func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
+        guard let card = cards[item.renderKey], card.cardID == item.cardId else {
+            throw BridgeError.internal("Occlusion review has no matching render")
+        }
+        visible = card
+        try await super.present(item: item, inputTime: inputTime)
     }
 }

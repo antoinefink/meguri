@@ -108,7 +108,11 @@ enum MaskAlignment: String, CaseIterable {
         let fit = min(area.width / imageSize.width, area.height / imageSize.height)
         var width = imageSize.width * fit * displayScale, height = imageSize.height * fit * displayScale
         let reduction = min(1, sqrt(16_777_216 / (width * height)))
-        width = floor(width * reduction); height = floor(height * reduction)
+        // A very thin image still needs a pixel on each axis: zero makes
+        // reference-coordinate fractions undefined. Keep M1's area budget
+        // even when raising the short axis to one pixel.
+        width = min(16_777_216, max(1, floor(width * reduction)))
+        height = min(16_777_216, max(1, floor(height * reduction)))
         return .init(width: width / displayScale, height: height / displayScale)
     }
 

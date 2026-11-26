@@ -837,12 +837,12 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
     "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "cd2978f27435edc7c985f4ec8515b454a9c41a3783a439ce4e24971defec8b5e",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "1eca80f995b8201795c6faa14dfb3597b200a8961ba716411af7f1ba4c63db96",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "7dee01b2d53ea51fb5c2e44bd6b8eebbdd57abf23440ae1f1ac5dd58c80759a4",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "5bfb128d099517da9cf40767e606dc6d3fad01313ec18d3b9340e1866d919f18",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "7b61bc8c195060972701e5c3206d49a103d9b11e20ca7ff6ec4955dfd6f9e1c0",
-    "app/MeguriUITests/IOAddEditUITests.swift": "963ca87f70935f16f0d6795230d020433cec1567fdb569536f1bfe8af55e223f",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "c94356e618294a9266b4a71d4522ca8fe1228b065567d0f568c31c1901a122cc",
+    "app/MeguriUITests/IOAddEditUITests.swift": "71557f0bc50dfc2d76c2940a5f3634b10fec564486c6f77304711c418436ad30",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
         "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",

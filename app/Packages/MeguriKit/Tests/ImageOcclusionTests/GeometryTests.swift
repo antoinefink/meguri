@@ -29,6 +29,20 @@ import Testing
         #expect(viewport.zoom == 0.1)
     }
 
+    @Test(arguments: [false, true], [1.0, 2.0, 3.0])
+    func extremeAspectRatioKeepsBothPixelAxesPositive(portrait: Bool, scale: Double) {
+        for area in [CGSize(width: 800, height: 500), CGSize(width: 1_000_000_000, height: 1_000_000_000)] {
+            let size = MaskEditorSession.referenceSize(
+                imageSize: portrait ? .init(width: 1, height: 1_000_000_000) : .init(width: 1_000_000_000, height: 1),
+                area: area, displayScale: scale)
+            let pixels = CGSize(width: size.width * scale, height: size.height * scale)
+            #expect(pixels.width >= 1 && pixels.height >= 1)
+            #expect(pixels.width == floor(pixels.width) && pixels.height == floor(pixels.height))
+            #expect(pixels.width * pixels.height <= 16_777_216)
+            #expect(portrait ? pixels.width == 1 : pixels.height == 1)
+        }
+    }
+
     @Test func anglesSnapNormalizeAndGroupsCannotRotate() {
         #expect(OcclusionShape.snappedAngle(2.9) == 0)
         #expect(OcclusionShape.snappedAngle(357.1) == 0)

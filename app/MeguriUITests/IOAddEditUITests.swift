@@ -8,6 +8,9 @@ import XCTest
 /// without letterboxing; io.mask.1 / io.mask.2 expose each mask's drawn bounds
 /// (editor/image-occlusion-strings S7). Paste Image uses its native caption.
 @MainActor final class IOAddEditUITests: XCTestCase {
+    private var inputApplication: XCUIApplication?
+    private var inputBundleIdentifier = ""
+
     func testNativeImageOcclusionAddAndEditPersistsDraggedMasks() throws {
         // Must precede launch, synthetic input, and all clipboard access.
         guard CardSwapTimingGate.hypervisorPresent() == true else {
@@ -19,6 +22,8 @@ import XCTest
             throw XCTSkip("Requires disposable development collection hooks")
         }
         let app = XCUIApplication()
+        inputApplication = app
+        inputBundleIdentifier = bundle
         // The installer copies this public empty directory into the Dev
         // container. All collection/media writes belong to that installed copy.
         app.launchArguments = MeguriLaunch(
@@ -36,6 +41,7 @@ import XCTest
         XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 0, learning: 0, review: 0))
 
         // File > New Note, not a direct presentation hook.
+        try prepareInput()
         app.typeKey("n", modifierFlags: .command)
         let addWindow = app.windows["editor.add.window"]
         XCTAssertTrue(addWindow.waitForExistence(timeout: 15))
@@ -54,15 +60,15 @@ import XCTest
         XCTAssertTrue(pasteboard.setData(png, forType: .png))
         try click(paste)
         let addCanvas = element(addWindow, "io.editor.canvas")
-        try assertReadableCanvas(addCanvas, window: addWindow)
+        try assertReadableCanvas(addCanvas, window: addWindow, stage: "add")
 
         // O4.2 opens Rectangle. These are real mouse drags over the two
         // diagram labels, expressed as fractions of the fitted source image.
-        drag(addCanvas, from: CGVector(dx: 0.05, dy: 0.50), to: CGVector(dx: 0.31, dy: 0.62))
+        try drag(addCanvas, from: CGVector(dx: 0.05, dy: 0.50), to: CGVector(dx: 0.31, dy: 0.62))
         XCTAssertTrue(element(addWindow, "io.mask.1").waitForExistence(timeout: 10))
-        drag(addCanvas, from: CGVector(dx: 0.69, dy: 0.50), to: CGVector(dx: 0.95, dy: 0.62))
+        try drag(addCanvas, from: CGVector(dx: 0.69, dy: 0.50), to: CGVector(dx: 0.95, dy: 0.62))
         XCTAssertTrue(element(addWindow, "io.mask.2").waitForExistence(timeout: 10))
-        deselect(in: addCanvas, app: app)
+        try deselect(in: addCanvas, app: app)
         let original = try maskBounds(in: addWindow, canvas: addCanvas)
         assertBounds(original, equalTo: [
             CGRect(x: 0.05, y: 0.50, width: 0.26, height: 0.12),
@@ -82,15 +88,16 @@ import XCTest
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
         let editWindow = try openEditCurrent(app, bundle: bundle)
         let editCanvas = element(editWindow, "io.editor.canvas")
-        try assertReadableCanvas(editCanvas, window: editWindow)
+        try assertReadableCanvas(editCanvas, window: editWindow, stage: "edit")
         assertBounds(try maskBounds(in: editWindow, canvas: editCanvas), equalTo: original)
 
         // Edit opens Select. Drag the first mask's interior, away from handles.
         let first = element(editWindow, "io.mask.1")
+        try prepareInput()
         let start = first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.click(forDuration: 0.1, thenDragTo: start.withOffset(
             CGVector(dx: editCanvas.frame.width * 0.04, dy: editCanvas.frame.height * 0.14)))
-        deselect(in: editCanvas, app: app)
+        try deselect(in: editCanvas, app: app)
         XCTAssertTrue(wait {
             let frame = first.frame, image = editCanvas.frame
             return image.height > 0 && (frame.minY - image.minY) / image.height > original[0].minY + 0.10
@@ -107,7 +114,7 @@ import XCTest
         // reinstallation or draft reuse. Both coordinates and sizes must persist.
         let reopened = try openEditCurrent(app, bundle: bundle)
         let reloadedCanvas = element(reopened, "io.editor.canvas")
-        try assertReadableCanvas(reloadedCanvas, window: reopened)
+        try assertReadableCanvas(reloadedCanvas, window: reopened, stage: "reopened")
         assertBounds(try maskBounds(in: reopened, canvas: reloadedCanvas), equalTo: edited)
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
         try click(reopened.buttons["review.editCurrent.cancel"])
@@ -119,6 +126,7 @@ import XCTest
         let command = app.menuBars.menuBarItems["Note"].menuItems.matching(
             NSPredicate(format: "title == %@", "Edit Note")).firstMatch
         XCTAssertTrue(wait { command.exists && command.isEnabled })
+        try prepareInput()
         app.typeKey("e", modifierFlags: .command)
         let window = app.windows["review.editCurrent.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
@@ -135,31 +143,44 @@ import XCTest
         let frame = window.frame
         let title = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
             .withOffset(CGVector(dx: 0, dy: 12))
+        try prepareInput()
         title.click(forDuration: 0.1, thenDragTo: title.withOffset(CGVector(
             dx: workspace.minX + 30 - frame.minX, dy: workspace.minY + 30 - frame.minY)))
         let edge = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
             .withOffset(CGVector(dx: -2, dy: -2))
+        try prepareInput()
         edge.click(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(
             dx: 1040 - window.frame.width, dy: 720 - window.frame.height)))
         XCTAssertTrue(wait { window.frame.width >= 1000 && window.frame.height >= 680 },
                       "the complete native editor window must be large enough to read")
     }
 
-    private func assertReadableCanvas(_ canvas: XCUIElement, window: XCUIElement) throws {
-        XCTAssertTrue(canvas.waitForExistence(timeout: 20))
+    private func assertReadableCanvas(_ canvas: XCUIElement, window: XCUIElement, stage: String) throws {
+        let appeared = canvas.waitForExistence(timeout: 20)
+        // Keep the real editor window and its global AX frames even when the
+        // first geometry assertion stops this journey. No desktop/menu capture.
+        capture(window, named: "image-occlusion-\(stage)-authoring-surface-synthetic")
+        let hierarchy = XCTAttachment(string: window.debugDescription)
+        hierarchy.name = "image-occlusion-\(stage)-authoring-surface-ax"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        XCTAssertTrue(appeared)
         XCTAssertTrue(wait { canvas.frame.width >= 600 && canvas.frame.height >= 330 })
         XCTAssertTrue(window.frame.contains(canvas.frame), "capture includes the full image")
         XCTAssertEqual(canvas.frame.width / canvas.frame.height, 960.0 / 540.0, accuracy: 0.02,
                        "canvas AX bounds must follow the fitted image, excluding letterboxing")
     }
 
-    private func drag(_ canvas: XCUIElement, from: CGVector, to: CGVector) {
+    private func drag(_ canvas: XCUIElement, from: CGVector, to: CGVector) throws {
+        try prepareInput()
         canvas.coordinate(withNormalizedOffset: from).click(forDuration: 0.1,
             thenDragTo: canvas.coordinate(withNormalizedOffset: to))
     }
 
-    private func deselect(in canvas: XCUIElement, app: XCUIApplication) {
+    private func deselect(in canvas: XCUIElement, app: XCUIApplication) throws {
+        try prepareInput()
         app.typeKey("s", modifierFlags: [])
+        try prepareInput()
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).click()
     }
 
@@ -199,7 +220,13 @@ import XCTest
 
     private func click(_ target: XCUIElement) throws {
         XCTAssertTrue(wait { target.exists && target.isEnabled && target.isHittable })
+        try prepareInput()
         target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+    }
+
+    private func prepareInput() throws {
+        let app = try XCTUnwrap(inputApplication)
+        try app.bringToFront(bundleIdentifier: inputBundleIdentifier)
     }
 
     private func element(_ root: XCUIElement, _ identifier: String) -> XCUIElement {

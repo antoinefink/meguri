@@ -18,14 +18,16 @@ struct MaskCanvas: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // A real Image supplies the fitted image's native AX frame. It does
-            // not take pointer/touch input from the canvas gesture beneath it.
+            // Offset preserves the element's fitted size; position introduces
+            // a canvas-sized layout wrapper that AX can report as its frame.
+            // Native layout converts these canvas-local bounds to window/screen
+            // coordinates, including an enclosing scroll view's displacement.
             image.resizable()
                 .frame(width: viewport.imageRect.width, height: viewport.imageRect.height)
-                .accessibilityElement(children: .ignore)
+                .offset(x: viewport.imageRect.minX, y: viewport.imageRect.minY)
                 .accessibilityLabel(ioString("io.a11y.canvas"))
                 .accessibilityIdentifier("io.editor.canvas")
-                .position(x: viewport.imageRect.midX, y: viewport.imageRect.midY)
+                .accessibilityAddTraits(.isImage)
                 .allowsHitTesting(false)
             Canvas { context, _ in
                 context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
@@ -78,8 +80,9 @@ struct MaskCanvas: View {
         .accessibilityIdentifier("io.canvas")
     }
 
-    // These are layout-backed controls, rather than virtual accessibilityChildren
-    // whose position has no relationship to the Canvas's native screen frame.
+    // Each control keeps its own scaled bounds and canvas-local offset. SwiftUI
+    // resolves its native global AX frame from that layout, just like the image;
+    // viewport.screenRect supplies the same zoom and pan used by Canvas drawing.
     private var accessibleItems: some View {
         ZStack(alignment: .topLeading) {
             ForEach(session.displayed.accessibilityItems(in: viewport), id: \.identifier) { item in
@@ -89,6 +92,7 @@ struct MaskCanvas: View {
                 }
                 .buttonStyle(.plain)
                 .frame(width: item.frame.width, height: item.frame.height)
+                .offset(x: item.frame.minX, y: item.frame.minY)
                 .accessibilityElement(children: .ignore)
                 .accessibilityRespondsToUserInteraction(true)
                 .accessibilityLabel(itemLabel(item.ids, first: item.first))
@@ -122,13 +126,14 @@ struct MaskCanvas: View {
                     let delta = direction == .increment ? 5.0 : -5.0
                     session.commit(session.moved(dx: delta, dy: 0, finishing: true))
                 }
-                .position(x: item.frame.midX, y: item.frame.midY)
             }
             if let frame = viewport.polygonFrame(session.polygon) {
                 Button { if session.polygon.count >= 3 { session.closePolygon() } } label: {
                     Rectangle().fill(.clear).frame(width: frame.width, height: frame.height)
                 }
                 .buttonStyle(.plain)
+                .frame(width: frame.width, height: frame.height)
+                .offset(x: frame.minX, y: frame.minY)
                 .accessibilityLabel(String(format: ioString("io.a11y.polygon.unfinished"), Int64(session.polygon.count)))
                 .accessibilityIdentifier("io.polygon.unfinished")
                 .accessibilityActions {
@@ -136,7 +141,6 @@ struct MaskCanvas: View {
                         Button(ioString("io.command.closePolygon")) { session.closePolygon() }
                     }
                 }
-                .position(x: frame.midX, y: frame.midY)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

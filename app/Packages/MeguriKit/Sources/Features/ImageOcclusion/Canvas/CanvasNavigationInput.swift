@@ -21,13 +21,19 @@ struct CanvasNavigationInput: NSViewRepresentable {
         var ended: (() -> Void)?
         var panStarted: (() -> Void)?
         private var monitor: Any?
+        private var resignKeyObserver: NSObjectProtocol?
         private var space = false
         private var dragging = false
         override var isFlipped: Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow(); stop()
-            guard window != nil else { return }
+            guard let window else { return }
+            resignKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.clearPan() }
+            }
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify, .keyDown, .keyUp, .leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
                 guard let self else { return event }
                 return self.receive(event)
@@ -35,9 +41,15 @@ struct CanvasNavigationInput: NSViewRepresentable {
         }
         func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil; space = false; dragging = false
+            if let resignKeyObserver { NotificationCenter.default.removeObserver(resignKeyObserver) }
+            monitor = nil; resignKeyObserver = nil
+            clearPan()
         }
-        private func receive(_ event: NSEvent) -> NSEvent? {
+        private func clearPan() {
+            space = false
+            if dragging { dragging = false; ended?() }
+        }
+        func receive(_ event: NSEvent) -> NSEvent? {
             guard let window, window.isKeyWindow, event.window === window, !isHiddenOrHasHiddenAncestor else { return event }
             let p = convert(event.locationInWindow, from: nil)
             let inside = bounds.contains(p) && visibleRect.contains(p)
