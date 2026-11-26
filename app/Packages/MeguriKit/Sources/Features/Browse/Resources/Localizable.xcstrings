@@ -1,6 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "browse.notetype.delete": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete Note Type…" } }
+      }
+    },
     "browse.addTags.add": {
       "localizations": {
         "en": {

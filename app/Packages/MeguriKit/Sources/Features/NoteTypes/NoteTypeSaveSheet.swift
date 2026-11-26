@@ -20,7 +20,9 @@ public struct NoteTypeSaveSheet: View {
 
     public var body: some View {
         Group {
-            if let question = model.question {
+            if let question = model.deletionQuestion {
+                NoteTypeDeletionSheet(model: model, question: question)
+            } else if let question = model.question {
                 content(question)
             }
         }

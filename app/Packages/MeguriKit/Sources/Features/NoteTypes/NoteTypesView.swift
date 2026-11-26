@@ -390,15 +390,20 @@ struct SaveStatusView: View {
         case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)
         case .saving?, nil:
             // Before the first count, which can come after the status shows.
-            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
-                ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
+            if progress.removing {
+                NoteTypesStrings.deletionProgress(progress.completed, locale: locale)
+            } else {
+                progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
+                    ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
+            }
         }
     }
 
     /// The count at its end, with the largest total this job can have: its digits are monospaced.
     private var widestCount: String {
         let total = max(progress.total ?? 0, notes ?? 0, progress.completed)
-        return NoteTypesStrings.progress(completed: total, total: total, locale: locale)
+        return progress.removing ? NoteTypesStrings.deletionProgress(total, locale: locale)
+            : NoteTypesStrings.progress(completed: total, total: total, locale: locale)
     }
 }
 
@@ -492,6 +497,9 @@ private struct NoteTypeListColumn: View {
                 NoteTypeListRow(item: item, edited: model.isEdited(item.id))
                     .tag(item.id)
             }
+        }
+        .contextMenu(forSelectionType: Int64.self) { rows in
+            if rows.count == 1, let id = rows.first { NoteTypeDeletionMenu(model: model, id: id) }
         }
         // A content list beside the app's sidebar (N22.1): the window's own
         // background, as the filter field above it, with the system selection.

@@ -416,6 +416,18 @@ public final class ReviewCollection: ChangeFanoutSink {
             self.noteTypes.selection = id
             self.navigation.select(.section(.noteTypes))
         }
+        value.canDeleteNoteType = { [weak self] in self?.noteTypes.canRequestDeletion ?? false }
+        value.deleteNoteType = { [weak self] id in
+            guard let self else { return }
+            let generation = self.generation
+            Task { @MainActor in
+                guard await self.browse.inspector.flushForBackground() != false,
+                      self.generation == generation, self.noteTypes.canRequestDeletion else { return }
+                self.navigation.select(.section(.noteTypes))
+                self.noteTypes.appear()
+                self.noteTypes.delete(id)
+            }
+        }
         browseOwner = value
         return value
     }
@@ -451,6 +463,14 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         value.dismissQuestion = { [weak self] in
             if self?.navigation.sheet == .noteTypeSave { self?.navigation.dismissSheet() }
+        }
+        value.didDelete = { [weak self] id in
+            guard let self else { return }
+            // Touch returns to the actual list after deleting its open page.
+            let path = self.navigation.path(.noteTypes)
+            if let index = path.firstIndex(of: .noteType(id)) {
+                self.navigation.setPath(Array(path.prefix(index)), for: .noteTypes)
+            }
         }
         noteTypesOwner = value
         return value
@@ -2954,6 +2974,14 @@ private nonisolated struct LaunchCollectionClock: CollectionClock {
         running = sync
         defer { if running === sync { running = nil } }
         return try await sync.saveNotetypeStructure(draft, reachable: reachable, progress: progress)
+    }
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        guard let sync = owner?.sync else { return .notSaved }
+        running = sync
+        defer { if running === sync { running = nil } }
+        return try await sync.removeNotetypeStructure(request, reachable: reachable, progress: progress)
     }
     func cancelNotetypeStructureSave() { running?.cancelNotetypeStructureSave() }
 }

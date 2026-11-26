@@ -26,6 +26,22 @@ public enum NoteTypesStrings {
         return String(localized: "noteTypes.progress", defaultValue: "\(completedText) \(total) \(totalText)", bundle: .module, locale: locale)
     }
 
+    public static func deleteTitle(_ name: String, locale: Locale) -> String {
+        String(localized: "noteTypes.delete.title", defaultValue: "Delete “\(name)”?", bundle: .module, locale: locale)
+    }
+
+    public static func deleteLosses(_ counts: NotetypeRemovalCounts, locale: Locale) -> String {
+        guard counts.notes > 0 else { return text("noteTypes.delete.empty", locale: locale) }
+        let notesText = counts.notes.formatted(.number.locale(locale)), cardsText = counts.cards.formatted(.number.locale(locale))
+        let notes = Int(clamping: counts.notes), cards = Int(clamping: counts.cards)
+        return String(localized: "noteTypes.delete.losses", defaultValue: "\(notes) \(notesText) \(cards) \(cardsText)", bundle: .module, locale: locale)
+    }
+
+    public static func deletionProgress(_ completed: UInt64, locale: Locale) -> String {
+        let count = completed.formatted(.number.locale(locale))
+        return String(localized: "noteTypes.delete.progress", defaultValue: "Deleting \(count) cards…", bundle: .module, locale: locale)
+    }
+
     public static func saveTitle(_ name: String, locale: Locale) -> String {
         String(localized: "noteTypes.save.title", defaultValue: "\(name)", bundle: .module, locale: locale)
     }

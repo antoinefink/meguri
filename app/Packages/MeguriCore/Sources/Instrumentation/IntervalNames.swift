@@ -436,6 +436,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
+    public static let startNotetypeRemoval = BridgeCall("start_notetype_removal")
+    public static let notetypeRemovalJobResult = BridgeCall("NotetypeRemovalJob.result")
     public static let startNotetypeStructureSave = BridgeCall("start_notetype_structure_save")
     public static let notetypeStructureJobResult = BridgeCall("NotetypeStructureJob.result")
     public static let notetypeCheckFieldName = BridgeCall("notetype_check_field_name")
@@ -806,7 +808,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
-        startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
+        startNotetypeRemoval, notetypeRemovalJobResult, startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
         notetypeTemplateSyntax, notetypeStylingSyntax, renderNotetypeDraft, notetypeNoteIds,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,

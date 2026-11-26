@@ -27,6 +27,10 @@ public final class BrowseModel {
         case plain, command, option
     }
 
+    /// W12 from the note type row menu; the collection owns the question.
+    @ObservationIgnored public var deleteNoteType: (@MainActor (Int64) -> Void)?
+    @ObservationIgnored public var canDeleteNoteType: @MainActor () -> Bool = { false }
+
     // MARK: State
 
     /// What the search field holds (T1); the sidebar is a view of it.

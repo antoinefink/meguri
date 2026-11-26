@@ -5341,6 +5341,14 @@ extension SyncCoordinator: NoteTypesMeguriSync {
         }
     }
 
+    public func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                        progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        try await runMeguriStructure(progress: progress) { jobs, onStage in
+            try await jobs.removeNotetypeStructure(request, reachable: reachable, onStage: onStage)
+        }
+    }
+
     public func cancelNotetypeStructureSave() {
         meguriStructureCancelRequested = true
         meguriStructureJob?.cancel()

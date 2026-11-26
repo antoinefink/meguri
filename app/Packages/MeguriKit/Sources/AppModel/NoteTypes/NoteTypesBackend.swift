@@ -18,6 +18,8 @@ import Foundation
     func summary(_ draft: NotetypeStructureDraft) async throws -> NotetypeDraftSummary
     /// S1's op with the confirmed losses; `progress` gets (completed, total).
     func save(_ draft: NotetypeStructureDraft, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws
+    /// S12; progress counts cards, without a total.
+    func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws
     /// `notetypes/validation` V5.
     func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck
     /// `render/template-syntax` T11.1 per text.
@@ -36,6 +38,13 @@ import Foundation
     func cardText(css: String, rightToLeft: Bool) async throws -> CardTextRow?
     /// W10: one control's change on a styling (pure).
     func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited
+}
+
+extension NoteTypesBackend {
+    /// Read-only test backends cannot accidentally remove anything.
+    public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        throw BridgeError.invalidArgument("Note type removal is unavailable")
+    }
 }
 
 /// The section's backend over CoreBridge. A job whose task is cancelled
@@ -63,6 +72,14 @@ import Foundation
         }
         defer { reports.cancel() }
         // A save is never cancelled by leaving the section: it runs to its end (D5 step 5).
+        _ = try await job.value()
+    }
+    public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        let job = try await service.startNotetypeRemoval(request)
+        let reports = Task { @MainActor in
+            for await report in job.job.progress { progress(report.completed, nil) }
+        }
+        defer { reports.cancel() }
         _ = try await job.value()
     }
     public func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck {

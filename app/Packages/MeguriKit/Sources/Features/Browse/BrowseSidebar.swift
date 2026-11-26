@@ -102,6 +102,9 @@ public struct BrowseSidebar<Header: View>: View {
             case .notetype(let id):
                 Button { model.editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
                     .accessibilityIdentifier("browse.sidebar.notetype.edit")
+                Button(role: .destructive) { model.deleteNoteType?(id) } label: { Text("browse.notetype.delete", bundle: .module) }
+                    .disabled(model.notetypes.count < 2 || model.deleteNoteType == nil || !model.canDeleteNoteType())
+                    .accessibilityIdentifier("browse.sidebar.notetype.delete")
             default:
                 EmptyView()
             }
