@@ -959,18 +959,23 @@ import notify
         let bundle = try build.bundleIdentifier
         guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development fixture hooks in the VM") }
         let app = XCUIApplication()
+        #if os(iOS)
+        let importSource: URL? = build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/review.colpkg")
+        #else
+        let importSource: URL? = nil
+        #endif
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
-            importSource: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/review.colpkg"),
+            importSource: importSource,
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()
         defer { app.terminate() }
         // local-review seed 1: this parent owns the populated Cards child
         // (four synthetic notes/cards). Default may also be visible and empty.
         let deckID = "1884308400001"
-        let row = app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier == %@ OR identifier == %@", "home.sidebar.deck.\(deckID)", "home.deck.row.\(deckID)")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
+        let rows = deckRows(app, identifier: "home.deck.row.\(deckID)")
+        try waitForAdmission(rows, app, bundle)
+        let row = try XCTUnwrap(waitForHittable(rows), app.debugDescription)
         XCTAssertEqual(row.label, "Local Review")
         #if os(macOS)
         try app.bringToFront(bundleIdentifier: bundle)
@@ -994,8 +999,12 @@ import notify
         XCTAssertTrue(element(app, "home.deck.page.\(deckID)").waitForExistence(timeout: 20), app.debugDescription)
         #if os(macOS)
         try app.bringToFront(bundleIdentifier: bundle)
-        app.menuBars.menuBarItems["Deck"].click()
-        app.menuItems["Export Deck…"].click()
+        let deckMenu = app.menuBars.menuBarItems["Deck"]
+        deckMenu.click()
+        let export = deckMenu.menuItems.matching(NSPredicate(
+            format: "title == %@ OR label == %@", "Export Deck…", "Export Deck…")).firstMatch
+        XCTAssertTrue(export.waitForExistence(timeout: 10) && export.isEnabled)
+        try click(export, app, bundle)
         #else
         try click(element(app, "home.deck.actions"), app, bundle)
         try click(element(app, "home.deckMenu.export.\(deckID)"), app, bundle)
@@ -1020,9 +1029,14 @@ import notify
         XCTAssertTrue(path.waitForExistence(timeout: 10))
         try app.bringToFront(bundleIdentifier: bundle); path.typeKey("a", modifierFlags: .command)
         try app.bringToFront(bundleIdentifier: bundle); path.typeText(folder.path)
+        XCTAssertEqual(path.value as? String, folder.path, app.debugDescription)
         try app.bringToFront(bundleIdentifier: bundle); path.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(go.waitForNonExistence(timeout: 10))
-        try click(savePanel.buttons.matching(identifier: "OKButton").firstMatch, app, bundle)
+        let save = savePanel.buttons.matching(identifier: "OKButton").firstMatch
+        let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !go.exists && save.exists && save.isEnabled && save.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [saveReady], timeout: 10), .completed, app.debugDescription)
+        try click(save, app, bundle)
         #else
         // The public import-source hook installs this local Files root only.
         try selectNativeExportChild("DeckExport-\(UUID().uuidString)", create: true, app, bundle)
