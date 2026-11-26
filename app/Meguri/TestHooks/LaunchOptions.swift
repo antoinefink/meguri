@@ -110,6 +110,27 @@ extension TestHooks {
 
         /// Parses the launch arguments, without the executable path.
         init(arguments: [String], environment: [String: String] = [:], bundleIdentifier: String = "") throws(TestHookError) {
+            try self.init(arguments: arguments, environment: environment, bundleIdentifier: bundleIdentifier,
+                initialOwnedProviderSource: .localReview)
+        }
+
+        /// In-process tests own this temporary source. Parsing, preparation and
+        /// apply still share all production checks; CLI construction stays canonical-only.
+        init(arguments: [String], preparedOwnedProviderSourceForTests source: URL) throws(TestHookError) {
+            let temporary = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
+            guard source.isFileURL, source.pathComponents.starts(with: temporary.pathComponents),
+                  source.pathComponents.count > temporary.pathComponents.count,
+                  source.path(percentEncoded: false) == source.standardizedFileURL.path(percentEncoded: false),
+                  source.resolvingSymlinksInPath().standardizedFileURL == source.standardizedFileURL else {
+                throw TestHookError("Prepared owned provider test source must be temporary")
+            }
+            try self.init(arguments: arguments, environment: [:], bundleIdentifier: "",
+                initialOwnedProviderSource: .preparedForTests(source))
+        }
+
+        private init(arguments: [String], environment: [String: String], bundleIdentifier: String,
+                     initialOwnedProviderSource: OwnedProviderFixture.Source) throws(TestHookError) {
+            ownedProviderSource = initialOwnedProviderSource
             var values: [String: String] = [:]
             var index = arguments.startIndex
             while index < arguments.endIndex {

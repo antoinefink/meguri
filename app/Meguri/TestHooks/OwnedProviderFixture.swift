@@ -8,8 +8,11 @@ extension TestHooks {
     final class OwnedProviderFixture {
         enum Source: Equatable {
             case localReview, ownedSyncReview
+            /// In-process synthetic input; never selected by launch arguments or environment.
+            case preparedForTests(URL)
 
             var url: URL {
+                if case let .preparedForTests(url) = self { return url }
                 var checkout = URL(filePath: #filePath)
                 for _ in 0..<4 { checkout.deleteLastPathComponent() }
                 let recipe = self == .localReview ? "local-review-1" : "owned-sync-review-1"
