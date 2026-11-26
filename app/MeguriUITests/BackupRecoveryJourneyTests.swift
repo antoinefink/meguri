@@ -58,6 +58,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         #if os(macOS)
         let beforeWindowClose = entryNames(app)
         let restoreWindow = try captureWindow(app, anchor: historyAnchor)
+        try app.bringToFront(bundleIdentifier: bundle)
         restoreWindow.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(element(app, historyAnchor).waitForNonExistence(timeout: 10))
         // Settings regains focus: its File command must reopen the same scene.
@@ -239,10 +240,15 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let input = field(name, editor: editor)
         try act(input, app)
         #if os(macOS)
-        if replacing { app.typeKey("a", modifierFlags: .command) }
+        if replacing {
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("a", modifierFlags: .command)
+        }
         for character in content {
+            try app.bringToFront(bundleIdentifier: bundle)
             app.typeKey(String(character).lowercased(), modifierFlags: character.isUppercase ? .shift : [])
         }
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(.tab, modifierFlags: [])
         let nextMode = editor.descendants(matching: .any).matching(identifier:
             name == "Front" ? "editor.field.1.htmlToggle" : "editor.add.htmlToggle").firstMatch
@@ -267,8 +273,8 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func openBackups(_ app: XCUIApplication) throws {
         #if os(macOS)
-        try app.bringToFront(bundleIdentifier: bundle)
         if !element(app, "settings.root.content").exists {
+            try app.bringToFront(bundleIdentifier: bundle)
             app.windows["main"].typeKey(",", modifierFlags: .command)
         }
         XCTAssertTrue(element(app, "settings.root.content").waitForExistence(timeout: 20))
@@ -299,6 +305,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     private func closeSettings(_ app: XCUIApplication) throws {
         let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
         if settings.exists {
+            try app.bringToFront(bundleIdentifier: bundle)
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10))
         }
@@ -306,9 +313,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func fileCommand(_ title: String, _ app: XCUIApplication) throws {
         try closeSettings(app)
-        try app.bringToFront(bundleIdentifier: bundle)
         let main = app.windows["main"]
         XCTAssertTrue(main.waitForExistence(timeout: 20))
+        try app.bringToFront(bundleIdentifier: bundle)
         main.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)).click()
         try act(app.menuBars.menuBarItems["File"], app)
         let command = app.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@", title, title)).firstMatch
@@ -524,6 +531,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let window = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
         for _ in 0..<6 where !target.isHittable {
             #if os(macOS)
+            try app.bringToFront(bundleIdentifier: bundle)
             window.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -350)
             #else
             window.swipeUp()

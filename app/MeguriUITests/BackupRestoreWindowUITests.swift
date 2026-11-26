@@ -49,7 +49,7 @@ final class BackupRestoreWindowUITests: XCTestCase {
                 && apply.exists && apply.isEnabled && apply.isHittable
         }, "Wait for the native window and its initial history viewport")
         let viewport = try XCTUnwrap(history)
-        XCTAssertFalse(app.sheets.exists, "The restore window must have no attached sheet")
+        XCTAssertFalse(app.sheets.firstMatch.exists, "The restore window must have no attached sheet")
         // Contract: 240-point initial content. Allow native layout/titlebar slack,
         // while rejecting a window whose initial height grows with all 26 rows.
         XCTAssertTrue(wait {
@@ -71,6 +71,7 @@ final class BackupRestoreWindowUITests: XCTestCase {
             oldest.exists && !oldest.frame.isEmpty && oldest.isHittable
                 && viewport.frame.intersection(window.frame).contains(oldest.frame)
         }, "The exact oldest archive must become visible and actionable")
+        try app.bringToFront(bundleIdentifier: bundle)
         oldest.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         // Same filename-bound AX value as the functional journey. Native Table
         // can put isSelected on an ancestor instead of the identified entry.
@@ -91,6 +92,7 @@ final class BackupRestoreWindowUITests: XCTestCase {
         let timestamp = formatter.string(from: date)
         XCTAssertTrue(oldest.label.contains(filename) && oldest.label.contains(timestamp))
         capture(window, "oldest-archive-selected")
+        try app.bringToFront(bundleIdentifier: bundle)
         apply.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
         let title = "Replace the current collection with the backup from \(timestamp)?"
@@ -112,13 +114,14 @@ final class BackupRestoreWindowUITests: XCTestCase {
         let cancel = confirmation.buttons["Cancel"]
         XCTAssertTrue(wait { cancel.exists && cancel.isEnabled && cancel.isHittable })
         capture(window, "oldest-archive-confirmation")
+        try app.bringToFront(bundleIdentifier: bundle)
         cancel.click()
         XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
         XCTAssertTrue(wait {
             oldest.exists && oldest.value as? String == "Selected" && apply.isEnabled
                 && self.element(window, anchor).isHittable
         }, "Cancelling returns to the same selected archive")
-        XCTAssertFalse(app.sheets.exists)
+        XCTAssertFalse(app.sheets.firstMatch.exists)
     }
 
     private func element(_ context: XCUIElement, _ identifier: String) -> XCUIElement {

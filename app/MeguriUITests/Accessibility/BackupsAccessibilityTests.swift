@@ -3,12 +3,15 @@ import XCTest
 
 @MainActor
 final class BackupsAccessibilityTests: XCTestCase {
+    private var bundle = ""
+
     func testSettingsAndRestoreStatesPassAtEveryTextSizeAndAppearance() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("Requires public view fixtures") }
+        bundle = try build.bundleIdentifier
         #if os(macOS)
-        guard try build.bundleIdentifier.hasSuffix(".dev") else { throw XCTSkip("VM development build required") }
+        guard bundle.hasSuffix(".dev") else { throw XCTSkip("VM development build required") }
         #endif
         let suppressions = try AuditSuppressions.bundled()
         var results: [AccessibilityAudit.StateResult] = []
@@ -127,7 +130,8 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 }
                                 // The real native confirmation discloses the selected older copy's
                                 // date and the provider's publication/media decision. No restore runs.
-                                apply.tap()
+                                try app.bringToFront(bundleIdentifier: self.bundle)
+                                apply.clickOrTap()
                                 XCTAssertTrue(app.buttons["Restore"].firstMatch.waitForExistence(timeout: 5))
                                 let date = state == "overflow" ? "Nov 24, 2026" : "Nov 25, 2026"
                                 XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", date)).firstMatch.exists)
@@ -164,6 +168,7 @@ final class BackupsAccessibilityTests: XCTestCase {
             let reach = viewport.height / 3
             let move = frame.isNull ? -reach : max(-reach, min(reach, viewport.midY - frame.midY))
             #if os(macOS)
+            try app.bringToFront(bundleIdentifier: bundle)
             scroll.scroll(byDeltaX: 0, deltaY: move)
             #else
             let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
