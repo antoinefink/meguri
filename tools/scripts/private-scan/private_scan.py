@@ -1495,7 +1495,7 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
     'app/Packages/MeguriKit/Sources/DesignSystem/Components/Status/DelayedProgressView.swift': '3c412316533cc9498b80068f589391a1fbca6787b3205722daeac5011615ff14',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '6574faaf99d334524da053e7f85f663805ac3126f5289f9e8eb763a94e0ccfbc',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '79cb64c7ebf3408df4622bb728d57ad9d3a76df9cc2822075a70a9272d769589',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

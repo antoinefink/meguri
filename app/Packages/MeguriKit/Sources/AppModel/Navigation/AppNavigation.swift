@@ -124,6 +124,28 @@ public final class AppNavigation {
         if intentRevision == intent { pendingDeckPage = nil }
     }
 
+    /// Cancels only the collection request that still owns this feedback.
+    func cancelDeckSelection(intent: UInt64) {
+        guard intentRevision == intent else { return }
+        intentRevision &+= 1
+    }
+
+    /// Identity for native bindings, including repeated requests for the same deck.
+    public var pendingDeckSelectionID: UInt64? { pendingDeckPage == nil ? nil : intentRevision }
+
+    /// The independent transient stack used by split detail columns. Its native
+    /// Back dismisses feedback without changing the committed stack or selection.
+    public var pendingDetailPath: [Destination] {
+        get { pendingDeckPage.map { [.deckPage($0)] } ?? [] }
+        set {
+            guard pendingDeckPage != nil, newValue.isEmpty else { return }
+            intentRevision &+= 1
+        }
+    }
+
+    /// Selection feedback for deck lists, including the unfolded phone's Today row.
+    public var displayedHomeDeckPage: DeckID? { pendingDeckPage ?? homeDeckPage }
+
     public init() {}
 
     /// The navigation a relaunch starts with (R12, R13): the last section,
@@ -209,8 +231,8 @@ public final class AppNavigation {
 
     /// The detail column's stack: the current section's.
     public var detailPath: [Destination] {
-        get { pendingDeckPage == nil ? path(section) : [] }
-        set { if pendingDeckPage == nil { setPath(newValue, for: section) } }
+        get { path(section) }
+        set { setPath(newValue, for: section) }
     }
 
     // MARK: Tab layout (R18, R19, R23)
@@ -236,6 +258,9 @@ public final class AppNavigation {
         // SwiftUI may write back the displayed path. A pending deck path is
         // feedback, not permission to commit its selection before the save.
         guard newPath != compactPath(tab) else { return }
+        // While feedback owns Decks, only native Back can change its stack.
+        // An older nonempty path echoed by SwiftUI must never select a deck.
+        if tab == .decks, pendingDeckPage != nil, !newPath.isEmpty { return }
         intentRevision &+= 1
         switch tab {
         case .decks:
@@ -269,12 +294,17 @@ public final class AppNavigation {
     /// A tap on a tab. On the selected tab it pops the stack to its root, or,
     /// at the root, scrolls the root to the top (R19).
     public func selectTab(_ tab: CompactTab) {
+        let displayedTab = compactTab
+        let displayedPath = compactPath(tab)
         intentRevision &+= 1
-        guard tab == compactTab else {
+        guard tab == displayedTab else {
             show(tab == .settings ? settingsTabSection : tab.section)
             return
         }
-        if compactPath(tab).isEmpty {
+        // Pending feedback can make Decks visible while another section is
+        // committed. A repeat tap still selects that visible tab's root.
+        if section.tab != tab { show(tab == .settings ? settingsTabSection : tab.section) }
+        if displayedPath.isEmpty {
             scrollToTop(.section(tab.section))
         } else {
             setCompactPath([], for: tab)

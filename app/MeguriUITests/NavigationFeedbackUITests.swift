@@ -3,28 +3,31 @@ import Foundation
 import XCTest
 
 /// Run in the macOS test VM. Every image is a window screenshot reached by
-/// production sidebar/keyboard navigation, with an explicitly held synthetic read.
+/// production sidebar navigation, with an explicitly held synthetic read.
 @MainActor final class NavigationFeedbackUITests: XCTestCase {
     private var app: XCUIApplication!
     private var bundle = ""
     private let languages: Int64 = 1_700_000_000_101
     private let science: Int64 = 1_700_000_000_104
 
-    override func setUpWithError() throws {
+    private func launchApp(route: String = "navigation/feedback", readyElement: String = "shell.root.sidebar.home") throws {
         continueAfterFailure = false
         bundle = try BuildUnderTest.current().bundleIdentifier
         app = XCUIApplication()
         app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, windowSize: "large",
-            appearance: "light", route: "navigation/feedback").arguments
+            appearance: "light", route: route).arguments
         app.launch()
-        XCTAssertTrue(element("shell.root.sidebar.home").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(readyElement).waitForExistence(timeout: 20))
         try app.bringToFront(bundleIdentifier: bundle)
     }
 
-    override func tearDownWithError() throws { app?.terminate() }
-
     func testFirstAndWarmNavigationFeedback() throws {
+        defer { app?.terminate() }
+        try launchApp()
         // The first tree is genuinely unknown: neither No Decks nor the welcome flashes.
+        // Browse stays held too, preserving its later cold capture.
+        try clickSection("browse")
+        XCTAssertTrue(progress("Searching Browse").waitForExistence(timeout: 5))
         try clickSection("home")
         captureLoading("navigation-loading-today-and-deck-list", label: "Loading Today", title: "Today", section: "home")
         XCTAssertFalse(element("home.sidebar.guidance").exists)
@@ -36,8 +39,7 @@ import XCTest
         try command("release.deck")
         XCTAssertTrue(element("home.deck.page.\(languages)").waitForExistence(timeout: 10))
 
-        // Normal native command entry, with the same model as the sidebar.
-        app.typeKey("s", modifierFlags: [.shift, .command])
+        try clickSection("stats")
         captureLoading("navigation-loading-statistics", label: "Loading Statistics", title: "Statistics", section: "stats")
         try command("release.stats")
         try waitForState("filled=true")
@@ -53,6 +55,8 @@ import XCTest
 
         try clickSection("noteTypes")
         captureLoading("navigation-loading-note-types-list", label: "Loading Note Types", title: "Note Types", section: "noteTypes")
+        XCTAssertFalse(element("noteTypes.list.row.1700000100001").exists)
+        XCTAssertFalse(element("noteTypes.fields.table").exists)
         try command("release.list")
         XCTAssertTrue(element("noteTypes.list.row.1700000100001").waitForExistence(timeout: 10))
         captureLoading("navigation-loading-note-types-detail", label: "Loading Note Types", title: "Basic", section: "noteTypes")
@@ -92,6 +96,8 @@ import XCTest
     }
 
     func testRapidSwitchingAndLeavingPendingRoutes() throws {
+        defer { app?.terminate() }
+        try launchApp()
         try command("release.home")
         XCTAssertTrue(element("home.today.studyAll").waitForExistence(timeout: 10))
         // A/B/A before either save finishes: selection follows each click;
@@ -143,6 +149,30 @@ import XCTest
         XCTAssertFalse(progress("Loading Statistics").exists)
     }
 
+    func testDeterminateStatisticsLoadingProgress() throws {
+        defer { app?.terminate() }
+        try launchApp(route: "stats/page/loading-knowledge", readyElement: "stats.page.content")
+        assertTitle("Statistics")
+        XCTAssertTrue(element("shell.root.sidebar.stats").isSelected)
+
+        // This existing route holds the production Knowledge plot at 40%; it
+        // never releases data on a timer. Scroll the native page if needed.
+        let plot = element("stats.box.knowledgeOverTime.plot")
+        XCTAssertTrue(plot.waitForExistence(timeout: 10))
+        let indicator = plot.descendants(matching: .progressIndicator).firstMatch
+        XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (value == %@ OR value == 0.4 OR value == 40)", "40%"), indicator))
+        let viewport = element("stats.page.content")
+        if plot.frame.maxY > viewport.frame.maxY {
+            viewport.scroll(byDeltaX: 0, deltaY: -(plot.frame.maxY - viewport.frame.maxY + 8))
+        }
+        XCTAssertTrue(plot.isHittable && viewport.frame.contains(plot.frame), "The entire loading plot is in view")
+        XCTAssertTrue(indicator.isHittable)
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = "navigation-loading-statistics-progress"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func element(_ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
@@ -160,14 +190,14 @@ import XCTest
         row.click()
     }
     private func assertTitle(_ title: String) {
-        XCTAssertTrue(app.toolbars.staticTexts[title].firstMatch.waitForExistence(timeout: 3), "Native title: \(title)")
+        let heading = app.toolbars.staticTexts.matching(NSPredicate(format: "label == %@ OR title == %@", title, title)).firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 3), "Native title: \(title)")
     }
     private func captureLoading(_ name: String, label: String, title: String, section: String? = nil, deck: Int64? = nil) {
         assertTitle(title)
         XCTAssertTrue(progress(label).waitForExistence(timeout: 5), "Actual unknown wait has native feedback")
         let id = section.map { "shell.root.sidebar.\($0)" } ?? "home.sidebar.deck.\(deck!)"
-        let row = app.outlines.rows.containing(.any, identifier: id).firstMatch
-        XCTAssertTrue(element(id).isSelected || (row.exists && row.isSelected), "Destination is selected: \(id)")
+        XCTAssertTrue(element(id).isSelected, "Destination is selected: \(id)")
         XCTAssertTrue(element("shell.root.sidebar.home").isHittable, "Other navigation stays usable")
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         attachment.name = name

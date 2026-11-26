@@ -34,6 +34,8 @@ struct NativeCommandContext {
 
     func observingReviewAvailability() -> Self {
         var context = self
+        // Commands must be re-registered when visible feedback replaces a workspace.
+        _ = collection.navigation.pendingDeckPage
         let review = review
         #if os(macOS)
         _ = MacUndoResponder.shared.firstResponder
@@ -115,7 +117,7 @@ struct NativeCommandContext {
     }
     /// N21.8, T10: in Browse, Find… focuses Browse's search field.
     private var canFindInBrowse: Bool {
-        layout == .sidebar && collection.navigation.section == .browse && workspaceOwnsCommands
+        layout == .sidebar && collection.navigation.pendingDeckPage == nil && collection.navigation.section == .browse && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
 
@@ -173,7 +175,7 @@ struct NativeCommandContext {
     // Add re-entry uses the workspace selection even while its auxiliary
     // window is open. The flow owns validation and keeps the existing draft.
     private var selectedDeck: Int64? {
-        guard host == .main, collection.navigation.section == .home,
+        guard host == .main, collection.navigation.pendingDeckPage == nil, collection.navigation.section == .home,
               collection.review == nil, collection.navigation.review == nil,
               let deck = collection.navigation.homeDeckPage?.rawValue,
               collection.deck(deck) != nil || collection.deckPage(deck) != nil else { return nil }
@@ -201,7 +203,7 @@ struct NativeCommandContext {
     var canCreateFiltered: Bool { host == .main && collection.filteredStudy.canPresent }
     func createFiltered() {
         guard canCreateFiltered else { return }
-        if collection.navigation.section == .browse { collection.filteredStudy.createFromBrowse() }
+        if collection.navigation.pendingDeckPage == nil, collection.navigation.section == .browse { collection.filteredStudy.createFromBrowse() }
         else { collection.filteredStudy.create(deck: shownDeck) }
     }
     var canCustomStudy: Bool { shownDeck.map { collection.filteredStudy.canCustom($0) } ?? false }
@@ -252,7 +254,7 @@ struct NativeCommandContext {
 
     /// N25.11: View › Go to Section, while the page shows its sections.
     var canGoToSection: Bool {
-        canShowStatistics && collection.navigation.section == .stats && statsPage?.shown == true
+        canShowStatistics && collection.navigation.pendingDeckPage == nil && collection.navigation.section == .stats && statsPage?.shown == true
             && statsPage?.model.state == .content
     }
     func goToSection(_ section: StatsSectionID) {
@@ -263,7 +265,7 @@ struct NativeCommandContext {
     /// N21.8, V2.1: View › Cards and Notes (⌥⌘T) toggles Browse's mode
     /// while Browse is shown.
     var canToggleBrowseMode: Bool {
-        canShowBrowse && collection.navigation.section == .browse
+        canShowBrowse && collection.navigation.pendingDeckPage == nil && collection.navigation.section == .browse
     }
     func toggleBrowseMode() {
         guard canToggleBrowseMode else { return }
@@ -297,7 +299,7 @@ struct NativeCommandContext {
 
     /// D3: File › Save (⌘S) saves the shown note type's draft, as the toolbar's Save does.
     var noteTypeSaveShown: Bool {
-        host == .main && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
+        host == .main && collection.navigation.pendingDeckPage == nil && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
             && collection.review == nil && collection.navigation.review == nil
     }
     var canSaveNoteType: Bool {
@@ -363,7 +365,7 @@ struct NativeCommandContext {
             inputs.reviewStep = available ? CollectionUndoModel.stepName(redo ? review.redoStatus : review.undoStatus) : nil
         }
         // W13: while Note Types shows, its draft's own steps come before the collection's.
-        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.section == .noteTypes {
+        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.pendingDeckPage == nil, collection.navigation.section == .noteTypes {
             let draft = collection.noteTypes
             inputs.draftStep = (redo ? draft.redoStep : draft.undoStep)?.rawValue
         }

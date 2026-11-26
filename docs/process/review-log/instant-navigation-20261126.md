@@ -18,3 +18,7 @@ The same reviewer inspected the complete files below, including comments and lit
 |---|---:|---|
 | `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` | 167892 | 6574faaf99d334524da053e7f85f663805ac3126f5289f9e8eb763a94e0ccfbc |
 | `app/Packages/MeguriKit/Sources/DesignSystem/Components/Status/DelayedProgressView.swift` | 1008 | 3c412316533cc9498b80068f589391a1fbca6787b3205722daeac5011615ff14 |
+
+## Corrective review
+
+The independent source review identified pending-selection Back navigation and commands that could still target the prior deck. The fixer added coverage for both and for cancelled Browse reads. The independent privacy reviewer read the corrected `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` in full (169016 bytes), and the orchestrator verified SHA-256 `79cb64c7ebf3408df4622bb728d57ad9d3a76df9cc2822075a70a9272d769589`.

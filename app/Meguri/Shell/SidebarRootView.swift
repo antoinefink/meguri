@@ -41,8 +41,15 @@ struct SidebarRootView: View {
             Group {
                 if let review = navigation.review {
                     features.review(review, navigation)
+                } else if navigation.pendingDeckPage != nil {
+                    PendingDeckDetail(navigation: navigation, features: features)
                 } else {
-                    NavigationStack(path: $navigation.detailPath) {
+                    let selection = navigation.sidebarSelection
+                    NavigationStack(path: Binding(get: { navigation.detailPath }, set: { path in
+                        // A removed stack can echo its path during replacement.
+                        guard navigation.pendingDeckPage == nil, navigation.sidebarSelection == selection else { return }
+                        navigation.detailPath = path
+                    })) {
                         SectionDestinationView(screen: root, navigation: navigation, features: features)
                             #if !os(macOS)
                             // iPadOS draws only a column's own toolbar items: one on the
@@ -105,12 +112,33 @@ struct SidebarRootView: View {
 
     /// The deck page Home shows in the Home section, else the section's root.
     private var root: SectionDestinationView.Screen {
-        if let deck = navigation.pendingDeckPage { return .deckPage(deck) }
         // A section that is not offered now (no collection, N18.3) shows Today.
         guard features.sectionShown(navigation.section) else { return .root(.home) }
         if navigation.section == .home, let deck = navigation.homeDeckPage {
             return .deckPage(deck)
         }
         return .root(navigation.section)
+    }
+}
+
+/// Feedback has its own native Back affordance and never binds the underlying
+/// section's stack. The model retains that stack and its scroll positions.
+struct PendingDeckDetail: View {
+    let navigation: AppNavigation
+    let features: ShellFeatures
+
+    var body: some View {
+        let displayed = navigation.pendingDeckSelectionID
+        NavigationStack(path: Binding(get: { navigation.pendingDetailPath }, set: { path in
+            guard navigation.pendingDeckSelectionID == displayed else { return }
+            navigation.pendingDetailPath = path
+        })) {
+            Color.clear
+                .navigationDestination(for: Destination.self) { destination in
+                    SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                }
+        }
+        .id(displayed)
+        .environment(\.syncStatusItem, features.syncStatus?())
     }
 }

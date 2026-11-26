@@ -21,15 +21,17 @@ public final class ReviewCollection: ChangeFanoutSink {
     public private(set) var decks: [CountedDeckNode] = [] {
         // A write changes the tree's counts or names: Edit › Undo's step may have changed.
         didSet {
-            deckTreeVersion &+= 1
-            if decks != oldValue { undoOwner?.scheduleRefresh() }
+            if decks != oldValue {
+                deckTreeVersion &+= 1
+                undoOwner?.scheduleRefresh()
+            }
         }
     }
     /// The generation `decks` was read for, once a read applied; nil while the tree of the open
     /// collection has not been read (a launch, a replacement). The Statistics page reads it so a
     /// deck it shows is never taken for deleted before the tree arrives (U296).
     public private(set) var deckTreeGeneration: UInt64?
-    /// Changes on every tree publication, including disclosure writes. Consumers can
+    /// Changes when tree values change, including disclosure writes. Consumers can
     /// observe its identity without comparing every node on each navigation event.
     public private(set) var deckTreeVersion: UInt64 = 0
     /// Page content may belong to a deck intentionally absent from the tree.
@@ -57,7 +59,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var selectedDeckEmptiness: (request: DeckPageRefreshRequest, empty: Bool)?
     /// Only the visible Home page queries storage; rows keep the normal count refresh.
     public var deckPageRefreshRequest: DeckPageRefreshRequest? {
-        guard navigation.section == .home, canSaveDeckState, foreground,
+        guard navigation.pendingDeckPage == nil, navigation.section == .home, canSaveDeckState, foreground,
               lifecycle == .ready(generation: generation) else { return nil }
         let id: Int64
         if let destination = navigation.path(.home).last {
@@ -567,7 +569,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// layout's Search belongs to its deck list (N14.2).
     public func deckSearchAvailable(layout: ShellLayout) -> Bool {
         guard case .ready = state, review == nil, navigation.review == nil, navigation.sheet == nil,
-              navigation.section == .home else { return false }
+              navigation.section == .home || navigation.pendingDeckPage != nil else { return false }
         return layout == .sidebar || !decks.isEmpty
     }
     func collectionUndoFailed() { error = "Couldn’t undo or redo that change. Try again." }
@@ -667,6 +669,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     @ObservationIgnored var saveStudyCollapse: @MainActor ([Int64], Bool) async throws -> UInt64
     private var selectionRevision: UInt64 = 0
     private var selectionTask: Task<Bool, Never>?
+    private var deckSelectionIntent: UInt64?
+    private var firstReadSelectionIntent: UInt64?
     private var collapseRevision: UInt64 = 0
     private var collapseTask: Task<Void, Never>?
     private var pendingStudyCollapse: [Int64: (revision: UInt64, collapsed: Bool)] = [:]
@@ -1122,7 +1126,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
         let changed = generation != value
-        if changed { invalidateDeckActions(); exportOwner?.generationChanged() }
+        if changed {
+            invalidateDeckActions(keepingFirstReadSelection: firstReadSelectionIntent != nil)
+            exportOwner?.generationChanged()
+        }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         // The file this generation opened, which Home's snapshot names (N27.2).
         snapshotIdentity = CollectionFileIdentity.of(configuration.collectionLocation.collectionFile).map { (value, $0) }
@@ -1591,7 +1598,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 addFlowOwner?.generationEnded()
                 editFlowOwner?.generationEnded()
                 noteTypesOwner?.invalidate()
-                invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
+                invalidateDeckActions(keepingFirstReadSelection: firstReadSelectionIntent != nil); invalidateMedia(); exportOwner?.generationChanged()
             }
             generation = next
             // A new collection has its own history, even with the same deck tree,
@@ -1603,7 +1610,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 if !wasReady && foreground { Task { await day?.checkNow() } }
                 if renewed { browseOwner?.collectionReady() }
             }
-        case .opening, .upgrading: invalidateDeckActions(); state = .loading
+        case .opening, .upgrading: invalidateDeckActions(keepingFirstReadSelection: firstReadSelectionIntent != nil); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
         case .failed(let reason): invalidateDeckActions(); state = .failed(Self.explanation(reason))
         case .noCollection:
@@ -1619,7 +1626,13 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// press waits for the read and the open's end (N27.4).
     public var awaitingOpen: Bool { homePhase.unknown || (homePhase == .decks && opening) }
 
-    private func invalidateDeckActions() {
+    private func invalidateDeckActions(keepingFirstReadSelection: Bool = false) {
+        if let intent = deckSelectionIntent,
+           !keepingFirstReadSelection || firstReadSelectionIntent != intent {
+            navigation.cancelDeckSelection(intent: intent)
+            deckSelectionIntent = nil
+            firstReadSelectionIntent = nil
+        }
         undoOwner?.generationEnded()
         deckNamesOwner?.invalidate()
         deckOptionsOwner?.invalidate()
@@ -1636,6 +1649,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             // A row of the kept list, or of the read one before the open ends (N27.4): the press waits for the read and opens the deck
             // only if the read tree has it; a later press or selection supersedes it.
             let intent = navigation.beginDeckSelection(deck: DeckID(deckID))
+            deckSelectionIntent = intent
+            firstReadSelectionIntent = intent
             let task = Task { () -> Bool in
                 defer { navigation.finishDeckSelection(intent: intent) }
                 guard await awaitFirstRead(intent: intent), deck(deckID) != nil else { return false }
@@ -1656,6 +1671,8 @@ public final class ReviewCollection: ChangeFanoutSink {
                               admission: @escaping @MainActor () -> Bool = { true },
                               didOpen: @escaping @MainActor () -> Void = {}) -> Task<Bool, Never> {
         let intent = navigation.beginDeckSelection(deck: navigation.homeDeckPage == DeckID(deckID) && navigation.section == .home ? nil : DeckID(deckID))
+        deckSelectionIntent = intent
+        firstReadSelectionIntent = nil
         let selection = selectDeck(deckID: deckID, intent: intent, admission: admission)
         let expected = generation, revision = selectionRevision
         let task = Task {
@@ -1835,7 +1852,13 @@ public final class ReviewCollection: ChangeFanoutSink {
             if expected == generation, revision == deckTreeRevision, !closed {
                 self.error = "Couldn’t refresh decks. Try again."
                 // A first read that failed is known: Home says so instead of waiting (N27.1).
-                if deckTreeGeneration != generation { deckTreeFailedGeneration = generation }
+                if deckTreeGeneration != generation {
+                    deckTreeFailedGeneration = generation
+                    if let intent = firstReadSelectionIntent {
+                        navigation.cancelDeckSelection(intent: intent)
+                        firstReadSelectionIntent = nil
+                    }
+                }
             }
         }
     }

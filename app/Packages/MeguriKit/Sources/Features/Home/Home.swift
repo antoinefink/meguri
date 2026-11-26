@@ -27,8 +27,7 @@ public struct HomeView: View {
         Group {
             // N27.1: the welcome and "No Decks" only once they are known; until the first read
             // the last read (or the page's own background) holds the page.
-            if let deckID, collection.navigation.pendingDeckPage == DeckID(deckID),
-               collection.navigation.homeDeckPage != DeckID(deckID) {
+            if let deckID, collection.navigation.pendingDeckPage == DeckID(deckID) {
                 HomePendingPage(grouped: true, label: Text("Loading Deck", bundle: .module))
             } else if deckID == nil, showsToday, phase.showsDecks || phase == .pending {
                 TodayView(collection: collection)
@@ -106,6 +105,7 @@ public struct HomeView: View {
                     Menu { DeckMenu(collection: collection, deck: deck, deletionAnchor: .window) } label: {
                         Label { Text("Deck Actions", bundle: .module) } icon: { Image(systemName: "ellipsis") }
                     }
+                    .disabled(collection.navigation.pendingDeckPage != nil)
                     .accessibilityIdentifier("home.deck.actions")
                 }
             }
@@ -149,7 +149,7 @@ public struct HomeView: View {
         #endif
         // H9.2: O on a normal deck's page opens its Deck Options (N20.9).
         .onKeyPress(keys: [KeyEquivalent("o")], phases: .down) { press in
-            guard press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
+            guard collection.navigation.pendingDeckPage == nil, press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
                   (collection.deckOptions.canOpen(deckID: deckID) || collection.filteredStudy.canEdit(deckID)) else { return .ignored }
             #if os(macOS)
             guard homeKeyboardActive else { return .ignored }
@@ -168,13 +168,15 @@ public struct HomeView: View {
                 Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "plus") }
             }
             .help(Text("Add Note", bundle: .module))
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: deckID))
+            .disabled(collection.navigation.pendingDeckPage != nil || !collection.addNotePresentation.canPresent(presetDeck: deckID))
             .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
         }
     }
     #endif
     /// N14.2, N20.1: one Add menu. On a deck page New Note presets that deck.
-    private var addMenu: some View { HomeAddMenu(collection: collection, deckID: deckID) }
+    private var addMenu: some View {
+        HomeAddMenu(collection: collection, deckID: collection.navigation.pendingDeckPage == nil ? deckID : nil)
+    }
     private var searchLayout: ShellLayout {
         #if os(macOS)
         .sidebar
@@ -196,7 +198,7 @@ public struct HomeView: View {
         guard todayBesideDeckList else { return nil }
         let navigation = collection.navigation
         return HomeTodayRow(waiting: TodayDecks.totals(nodes: collection.homeDecks).waiting,
-            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage),
+            selection: DeckListSelection(homeDeckPage: navigation.displayedHomeDeckPage),
             countsHeld: collection.homeCountsHeld) { navigation.openHome() }
     }
     /// The list beside the detail leaves the previous session to the detail (N14.1).
@@ -248,7 +250,7 @@ public struct HomeView: View {
     }
     #if os(macOS)
     private var homeKeyboardActive: Bool {
-        isVisible && collection.navigation.section == .home &&
+        isVisible && collection.navigation.pendingDeckPage == nil && collection.navigation.section == .home &&
             collection.navigation.homeDeckPage?.rawValue == deckID &&
             collection.navigation.path(.home).isEmpty &&
             collection.review == nil && collection.navigation.review == nil &&

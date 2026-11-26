@@ -241,6 +241,7 @@ import Testing
         let queued = owner.openDeckPage(deckID: 3)
         store.generation = 2
         owner.receiveLifecycle(.ready(generation: 2))
+        #expect(owner.navigation.pendingDeckPage == nil)
         gate.release()
         #expect(!(await old.value))
         #expect(!(await queued.value))
@@ -378,6 +379,136 @@ import Testing
         navigation.select(.deck(DeckID(2)))
         #expect(requests == [DeckID(3), DeckID(2)])
         #expect(navigation.homeDeckPage == DeckID(2))
+    }
+
+    @Test func pendingSplitDetailBindingPreservesCommittedStackAndRejectsEchoes() async {
+        let (owner, store) = await makeOwner()
+        owner.navigation.openDeckPage(DeckID(4))
+        owner.navigation.push(.noteTypes)
+        let saved = owner.navigation.uiState
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let opening = owner.openDeckPage(deckID: 2)
+        #expect(owner.navigation.displayedHomeDeckPage == DeckID(2))
+        #expect(owner.navigation.detailPath == [.noteTypes])
+        #expect(owner.navigation.pendingDetailPath == [.deckPage(DeckID(2))])
+        // Both split layouts use this binding; native echoes cannot finish the save.
+        owner.navigation.pendingDetailPath = owner.navigation.pendingDetailPath
+        owner.navigation.detailPath = [.noteTypes]
+        owner.navigation.setCompactPath([.deckPage(DeckID(4)), .noteTypes], for: .decks)
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        #expect(owner.navigation.uiState == saved)
+        await gate.waitUntilEntered()
+        // The transient stack's own native Back reveals exactly the prior stack.
+        owner.navigation.pendingDetailPath = []
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.navigation.detailPath == [.noteTypes])
+        #expect(owner.navigation.displayedHomeDeckPage == DeckID(4))
+        gate.release()
+        #expect(!(await opening.value))
+        #expect(owner.navigation.uiState == saved)
+    }
+
+    @Test func compactReselectionWhilePendingFromBrowseReturnsToDecksRoot() async {
+        let (owner, store) = await makeOwner()
+        owner.navigation.openDeckPage(DeckID(4))
+        owner.navigation.show(.browse)
+        owner.navigation.push(.noteTypes)
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let opening = owner.openDeckPage(deckID: 2)
+        await gate.waitUntilEntered()
+        owner.navigation.selectTab(.decks)
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.navigation.compactTab == .decks)
+        #expect(owner.navigation.compactPath(.decks).isEmpty)
+        #expect(owner.navigation.path(.browse) == [.noteTypes])
+        gate.release()
+        #expect(!(await opening.value))
+        #expect(owner.navigation.section == .home)
+    }
+
+    @Test(arguments: [CollectionLifecycle.failed(.corrupt(detail: "synthetic failure")),
+        .exclusiveBusy(op: .checkDatabase, phase: .working, cancellable: false),
+        .opening, .noCollection, .ready(generation: 2)])
+    func invalidationRetiresHeldSaveFeedbackSynchronously(lifecycle: CollectionLifecycle) async {
+        let (owner, store) = await makeOwner()
+        owner.navigation.openDeckPage(DeckID(4))
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let opening = owner.openDeckPage(deckID: 2)
+        await gate.waitUntilEntered()
+        owner.receiveLifecycle(lifecycle)
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.navigation.homeDeckPage == DeckID(4))
+        if case .failed = lifecycle { #expect(!owner.homePhase.unknown) }
+        gate.release()
+        #expect(!(await opening.value))
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.error == nil)
+    }
+
+    @Test func invalidationCannotRetireANewerNavigationIntent() async {
+        let (owner, store) = await makeOwner()
+        let gate = DeckStateGate()
+        store.selectionGates = [gate]
+        let opening = owner.openDeckPage(deckID: 2)
+        await gate.waitUntilEntered()
+        owner.navigation.show(.stats)
+        let newer = owner.navigation.beginDeckSelection(deck: DeckID(3))
+        owner.receiveLifecycle(.noCollection)
+        #expect(owner.navigation.intentRevision == newer)
+        #expect(owner.navigation.pendingDeckPage == DeckID(3))
+        gate.release()
+        #expect(!(await opening.value))
+        #expect(owner.navigation.pendingDeckPage == DeckID(3))
+    }
+
+    @Test func firstReadPreselectionSurvivesOpeningButFailureRetiresItImmediately() async {
+        let owner = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
+        let opening = owner.openDeckPage(deckID: 2)
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        owner.receiveLifecycle(.opening)
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        owner.receiveLifecycle(.ready(generation: 1))
+        #expect(owner.navigation.pendingDeckPage == DeckID(2))
+        owner.receiveLifecycle(.failed(.corrupt(detail: "synthetic failure")))
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(!(await opening.value))
+        #expect(owner.navigation.homeDeckPage == nil)
+    }
+
+    @Test func firstReadFailureRetiresPreselectionWithoutShowingLoadedContent() async {
+        let owner = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
+        owner.loadDeckTree = { throw BridgeError.internal("synthetic failure") }
+        let opening = owner.openDeckPage(deckID: 2)
+        owner.receiveLifecycle(.ready(generation: 1))
+        await owner.loadCounts()
+        #expect(owner.navigation.pendingDeckPage == nil)
+        #expect(owner.homePhase == .readFailed)
+        #expect(!(await opening.value))
+        #expect(owner.navigation.homeDeckPage == nil)
+    }
+
+    @Test func unchangedTreeVersionStillTracksGenerationAndReadFailure() async {
+        let (owner, store) = await makeOwner()
+        let nodes = owner.decks, version = owner.deckTreeVersion
+        await owner.loadCounts()
+        #expect(owner.deckTreeVersion == version)
+        store.generation = 2
+        owner.receiveLifecycle(.ready(generation: 2))
+        owner.loadDeckTree = { throw BridgeError.internal("synthetic failure") }
+        await owner.loadCounts()
+        #expect(owner.deckTreeVersion == version)
+        #expect(owner.deckTreeGeneration == 1)
+        #expect(owner.homePhase == .readFailed)
+        owner.loadDeckTree = { try await store.load() }
+        await owner.loadCounts()
+        #expect(owner.decks == nodes)
+        #expect(owner.deckTreeVersion == version)
+        #expect(owner.deckTreeGeneration == 2)
+        #expect(owner.homePhase == .decks)
+        #expect(owner.deck(3)?.name == "C")
     }
 
     private func makeOwner() async -> (ReviewCollection, SavedDeckStore) {

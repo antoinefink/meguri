@@ -126,8 +126,8 @@ public final class BrowseModel {
     var epoch: UInt64 = 0
     private var namesToken: UInt64 = 0
     private var countsToken: UInt64 = 0
-    @ObservationIgnored private var namesTask: Task<Void, Never>?
-    @ObservationIgnored private var countsTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var namesTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var countsTask: Task<Void, Never>?
     @ObservationIgnored private var countsNeedRefresh = false
     @ObservationIgnored private var namesPending = false
     @ObservationIgnored var device: BrowseDeviceState
@@ -348,7 +348,7 @@ public final class BrowseModel {
         visible = false
         // V12: leaving Browse saves the note the inspector shows.
         inspector.browseLeft()
-        // Interrupted counts resume on the next appearance; names already read stay valid.
+        // Unfinished counts stay pending; names already read stay valid.
         if readsPending { countsNeedRefresh = true }
         countsTask?.cancel()
     }
@@ -845,6 +845,9 @@ public final class BrowseModel {
         readTags()
         stale = false
         readsPending = true
+        countsNeedRefresh = true
+        countsTask?.cancel()
+        countsToken &+= 1
         namesToken &+= 1
         let token = namesToken, epoch = epoch, backend = backend
         namesPending = true
@@ -884,6 +887,7 @@ public final class BrowseModel {
             refreshTokenOffers()
             if fieldFocused { refreshSuggestions() }
             // Hidden meanwhile: the counts are read when Browse shows again.
+            namesPending = false
             if visible { refreshCounts() } else { countsNeedRefresh = true }
         }
     }
@@ -921,6 +925,9 @@ public final class BrowseModel {
     private func refreshCounts() {
         // Pending until every read of it lands, whatever started it (a reload,
         // a mode change): leaving Browse meanwhile reads the counts again.
+        countsNeedRefresh = true
+        // The names read will start the counts with its complete snapshots.
+        guard !namesPending else { return }
         readsPending = true
         countsTask?.cancel()
         countsToken &+= 1
@@ -930,6 +937,9 @@ public final class BrowseModel {
         // the count request must not run in SidebarView's appearance transaction.
         let saved = savedSearches, decks = deckValues, types = notetypes, tags = tags
         countsTask = Task(priority: .utility) {
+            defer {
+                if token == countsToken, self.epoch == epoch, readsPending { countsNeedRefresh = true }
+            }
             let (rows, items, topTags) = await Task.detached(priority: .utility) {
                 let rows = Self.countedRows(savedSearches: saved, deckValues: decks, notetypes: types, tags: tags)
                 let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
@@ -954,12 +964,8 @@ public final class BrowseModel {
                 tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
             } else if !topTags.isEmpty {
                 // The refresh stays pending until the tags' note counts arrive too.
-                let notes: [UInt64?]
-                do { notes = try await backend.counts(.notes, topTags.map { .value(.tag($0)) }) } catch {
-                    if token == countsToken, self.epoch == epoch { stale = true }
-                    return
-                }
-                guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+                guard let notes = try? await backend.counts(.notes, topTags.map { .value(.tag($0)) }),
+                      !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
                 var byTag: [String: UInt64] = [:]
                 for (name, value) in zip(topTags, notes) {
                     if let value { byTag[name] = value }
@@ -969,14 +975,10 @@ public final class BrowseModel {
             // Then the values only the suggestions show, after the sidebar's own,
             // so their slower day searches never hold the sidebar back.
             let extra = Self.suggestedValues
-            let extraCounts: [UInt64?]
-            do { extraCounts = try await backend.counts(mode, extra.map { .value($0) }) } catch {
-                // Read again on the next appear or change; the sidebar's counts stay.
-                if token == countsToken, self.epoch == epoch { stale = true }
-                return
-            }
-            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+            guard let extraCounts = try? await backend.counts(mode, extra.map { .value($0) }),
+                  !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             readsPending = false
+            countsNeedRefresh = false
             var shown: [FilterValue: UInt64] = [:]
             for (value, count) in zip(extra, extraCounts) {
                 if let count { shown[value] = count }
