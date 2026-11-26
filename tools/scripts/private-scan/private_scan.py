@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
     "docs/process/review-log/mathjax-20261126.md":
         "e22fdf2a1a9cbc6909a764c28771ef9c6a0fe8eac383106b08e94bd7878dd042",
     "specs/render/card-runtime.md":
-        "67e70ed2ebb021946e6292211d70cab6a524e6c711765c230ab145d7079796bd",
+        "3acd8972440e4d4ef0c1d6fd9e2d4a57554dd808b91b21c5de228b8a63ce0a7c",
     # Complete-content review of the MathJax card runtime and synthetic review fixture.
     'app/MeguriUITests/OfflineMathJaxUITests.swift':
         'e02c0d415b4ac26e8f0ed32b9ca4fedcccadfb6724281e42596eb9fe0fdbe779',

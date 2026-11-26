@@ -575,17 +575,13 @@ Owner override (2026-11-26, supersedes the card-runtime no-op in R515/R563 and D
 
 Both faces and previews typeset `\(…\)` inline and `\[…\]` display math after side scripts/update hooks and before reveal/settled. Dollars remain ordinary text. Side replacement clears old MathItems. Startup/typesetting failures are reported without blocking review; ordinary cards fetch no MathJax assets. Once started the upstream template API is available, including `typeset`, `typesetPromise`, `typesetClear` and `startup.promise`. Before startup, `typeset` requests asynchronous typesetting, `typesetPromise` and `startup.promise` await the real runtime. Field editing and stored input stay literal.
 
-After startup, with no pending asynchronous typesetting, `typeset(elements)` uses the original synchronous API: already-loaded glyphs produce DOM before it returns, and synchronous exceptions are reported for the requesting side and rethrown. Calls made during startup or pending asynchronous typesetting use the existing side-scoped, eight-second bounded queue. SVG is selected explicitly at startup so optional font extensions such as `bbm` request their bundled SVG components.
+After startup, with no pending asynchronous typesetting, `typeset(elements)` uses the original synchronous API: already-loaded glyphs produce DOM before it returns, and synchronous exceptions are reported for the requesting side and rethrown. Calls made during startup or pending asynchronous typesetting use the existing side-scoped, eight-second bounded queue.
 
-AMS alignment declarations (`alignat`, `alignat*`, `alignedat`, `xalignat`, `xalignat*`, `xxalignat`), including macro-expanded uses and `alignedat` placement arguments, are capped at 64 alignment pairs per expression before column allocation. Exceeding the cap produces a normal TeX error and review continues. This is an application integration pinned to MathJax 4.1.3; upstream package bytes remain unmodified.
+Owner decision (2026-11-26). Meguri supports core TeX, AMS equations and mhchem chemistry. Standard AMS environments include aligned equations and piecewise cases. Meguri loads the SVG output, glyphs and assistive MathML that these features need from its bundle. Other optional TeX extensions are disabled, including extensions requested by a card template or a TeX command.
 
-Optional physics `IdentityMatrix` and `XMatrix` commands (including aliases, starred forms and macro-expanded calls) are capped at 64 per dimension before table construction. The guard binds at lazy command-map registration without eagerly loading physics; upstream number parsing and small-case behavior are preserved.
+If a formula needs an unsupported extension, show the original TeX and identify that formula as unsupported. Keep the rest of the card readable. Supported formulas on the same side still render. The reviewer can reveal the answer, rate the card and continue. Add another optional extension when a deck needs it and native tests cover it.
 
-The same physics guard caps diagonal and antidiagonal commands (including aliases and macro-expanded calls) at 64 entries before expansion. It counts with the upstream brace-aware comma reader and then rewinds, leaving ordinary parsing to the built-in method. Coverage uses normal small inputs only; the resource issue is inspected from source without a reproduction or stress workload.
-
-The optional `html` extension is bundled and autoloads for commands such as `\style`; ordinary math does not load it. MathJax 4.1.3's nested-style join checks the existing declaration at an index derived from the incoming declaration's length. This incidental upstream limitation remains unchanged: Meguri does not monkeypatch HTML extension internals or modify vendor bytes.
-
-The optional `empheq` extension is unsupported: its eager MathML subtree copying occurs before a small shared expansion guard can bound allocation. The loader refuses this extension through the existing math diagnostic path; review continues. The optional `cases` extension depends on `empheq` and is also unavailable. Standard AMS `\begin{cases}` remains available.
+Supported commands must keep review responsive. AMS accepts at most 64 alignment pairs per expression. Meguri may decline a formula that exceeds a rendering limit. The bundled upstream files stay unmodified.
 
 ### C10.9 jQuery
 
