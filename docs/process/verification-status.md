@@ -2,6 +2,14 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+Device backup and restore passed 37 focused Swift tests across six suites
+(`swift-test/20261126T102318Z-12557`). Four restore tests on a collection linked
+to Meguri Sync and 13 retention tests passed in the Rust core. The native
+journeys exercise cancellation, restoring an older backup and recovering the
+preceding collection from its safety copy. See the [backup verification
+record](review-log/backups-preview-evidence-20261126.md) for the per-platform
+results, screenshots and limits of coverage.
+
 The tag and note type deletion branch passed 44 focused Swift tests
 (`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed

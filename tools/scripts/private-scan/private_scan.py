@@ -939,7 +939,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '1cd45543eff1b9334032f6746bb8e795b11bc5f7e4550d443ebe7bb366eb6157',
+        '7156ed8b110f1d63d92d86e839d846af11cac625ac0752815694acda38a70d57',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1154,9 +1154,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/native-owned-provider-ui-20261118.md":
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
-    # Complete public-file review: owned_diagnostic_review, 2026-11-19.
+    # Complete public-file review: U163a checks reviewer, 2026-11-26.
     "docs/process/verification-status.md":
-        "5accd9f059712aa180d62515ab215d93e886faf911a4fbc3e2dbb93a662e8764",
+        "078604c0ea8b0dd0f821da5407fbea6b5325ba03f83cc809ac57d7e7b8a2f88e",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
