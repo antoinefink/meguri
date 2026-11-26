@@ -46,12 +46,17 @@ final class BrowseTagDeletionUITests: XCTestCase {
         search.click()
         search.typeText("Tags") // The localized section root for this en_US launch.
         XCTAssertTrue(waitUntil { search.value as? String == "Tags" })
-        // A matching root keeps the whole tag tree visible and expanded.
+        // A matching section root shows top-level tags; children must match themselves.
         let tag = sidebarTag(app, name: name)
         let grammarRow = sidebarTag(app, name: "grammar")
         XCTAssertTrue(tag.waitForExistence(timeout: 10) && tag.isHittable)
         XCTAssertTrue(grammarRow.waitForExistence(timeout: 10) && grammarRow.isHittable)
-        if let restoredChild { XCTAssertTrue(sidebarTag(app, name: restoredChild).waitForExistence(timeout: 10)) }
+        if let restoredChild {
+            filterSidebar(search, to: "n4")
+            let child = sidebarTag(app, name: restoredChild)
+            XCTAssertTrue(child.waitForExistence(timeout: 10) && child.isHittable)
+            XCTAssertTrue(tag.exists && tag.isHittable, "A matching child reveals its implicit parent")
+        }
         tag.click()
         XCTAssertTrue(waitUntil { self.status(app).contains(" of ") && self.firstCount(app) > 0 })
         let matching = firstCount(app)
@@ -69,7 +74,8 @@ final class BrowseTagDeletionUITests: XCTestCase {
         let menu = app.menus.containing(NSPredicate(format: "identifier == 'browse.sidebar.tag.delete' OR title == 'Delete Tag'")).firstMatch
         XCTAssertTrue(menu.exists, "The open native tag menu is captured as an element")
         captureMenu(menu, "tag-delete-\(name)-native-menu-\(appearance)")
-        action.click()
+        // AppKit's menu-item click can outlast the transient success toast.
+        action.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
         let toast = element(app, "browse.tag.deleted")
         XCTAssertTrue(toast.waitForExistence(timeout: 5))
@@ -79,8 +85,12 @@ final class BrowseTagDeletionUITests: XCTestCase {
         XCTAssertTrue(element(app, "browse.empty.noResults").waitForExistence(timeout: 15),
                       "The active tag query is rerun after deletion")
         XCTAssertTrue(waitUntil { !tag.exists }, "The registry tree reloads, including implicit parents")
-        if let restoredChild { XCTAssertFalse(sidebarTag(app, name: restoredChild).exists) }
-        XCTAssertTrue(grammarRow.exists, "Unrelated native tags survive deletion")
+        if let restoredChild {
+            XCTAssertFalse(sidebarTag(app, name: restoredChild).exists)
+            filterSidebar(search, to: "Tags")
+        }
+        XCTAssertTrue(grammarRow.waitForExistence(timeout: 10), "Unrelated native tags survive deletion")
+        XCTAssertFalse(tag.exists, "The deleted tag also stays absent under the matching section root")
         XCTAssertTrue(element(app, "browse.search.token.0").exists, "The active query stays available for editing")
         capture(app.windows.firstMatch, "tag-delete-\(name)-outcome-\(appearance)")
 
@@ -97,13 +107,26 @@ final class BrowseTagDeletionUITests: XCTestCase {
                 "tag-delete-\(name)-undo-menu-\(appearance)")
         undo.click()
         XCTAssertTrue(tag.waitForExistence(timeout: 15), "Undo restores the native tag row")
-        if let restoredChild { XCTAssertTrue(sidebarTag(app, name: restoredChild).waitForExistence(timeout: 15)) }
-        XCTAssertTrue(grammarRow.exists, "Undo preserves the unrelated tag")
+        if let restoredChild {
+            filterSidebar(search, to: "n4")
+            let child = sidebarTag(app, name: restoredChild)
+            XCTAssertTrue(child.waitForExistence(timeout: 15) && child.isHittable)
+            XCTAssertTrue(tag.exists && tag.isHittable, "Undo restores the implicit parent with its child")
+            filterSidebar(search, to: "Tags")
+        }
+        XCTAssertTrue(grammarRow.waitForExistence(timeout: 10), "Undo preserves the unrelated tag")
         XCTAssertTrue(tag.isHittable)
         tag.click()
         XCTAssertTrue(waitUntil { self.firstCount(app) == matching && self.status(app).contains(" of ") },
                       "Undo restores tags on the surviving notes: \(status(app))")
         capture(app.windows.firstMatch, "tag-delete-\(name)-undo-restored-\(appearance)")
+    }
+
+    private func filterSidebar(_ search: XCUIElement, to text: String) {
+        search.click()
+        search.typeKey("a", modifierFlags: .command)
+        search.typeText(text)
+        XCTAssertTrue(waitUntil { search.value as? String == text })
     }
 
     private func sidebarTag(_ app: XCUIApplication, name: String) -> XCUIElement {
