@@ -6,7 +6,7 @@ import XCTest
 /// recipe. Run only in the macOS test VM; screenshots are native elements.
 @MainActor
 final class NoteTypeDeletionUITests: XCTestCase {
-    // Public typical-1 fixture IDs, confirmed in native AX run 062201Z-18092.
+    // The three typical-1 fixture rows, confirmed in Mac VM run 064156Z.
     // The list's StaticText has a truncated value and no label on macOS.
     private let reverseID = "1884308400001"
     private let basicID = "1884308400000"
@@ -23,11 +23,10 @@ final class NoteTypeDeletionUITests: XCTestCase {
         let remaining = noteTypeRow(app, id: basicID)
         XCTAssertTrue(remaining.exists)
         XCTAssertTrue(noteTypeRow(app, id: clozeID).exists)
-        XCTAssertEqual(listRows(app).count, 5, "The current typical-1 recipe has five note types")
-        press(remaining, in: app)
-        assertHeading(app, "Meguri Basic")
-        press(target, in: app)
-        assertHeading(app, reverseName)
+        XCTAssertEqual(listRows(app).count, 3, "The typical-1 recipe has exactly three note types")
+        select(remaining, in: app, heading: "Meguri Basic")
+        select(target, in: app, heading: reverseName)
+        assertHeading(app, "90 notes · 180 cards")
         capture(app.windows.firstMatch, "note-type-delete-list-before")
 
         let action = try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete",
@@ -37,14 +36,22 @@ final class NoteTypeDeletionUITests: XCTestCase {
         capture(app.windows.firstMatch, "note-type-delete-native-confirmation-90-notes-180-cards")
         capture(element(app, "noteTypes.delete.counts"), "note-type-delete-counts-element")
 
-        // Return must never accept this destructive question.
+        // Return must never accept this destructive question. The native Mac
+        // sheet may route it to Cancel; reopen only after that dismissal.
         app.typeKey(.return, modifierFlags: [])
+        if element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 3) {
+            XCTAssertTrue(target.exists, "Return must preserve the target note type")
+            XCTAssertEqual(listRows(app).count, 3)
+            try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
+        }
+        // Fresh counts after a Return dismissal also prove that it did not
+        // delete notes or cards while leaving the type behind.
         assertCounts(app)
         XCTAssertTrue(element(app, identifier).exists)
         element(app, "noteTypes.delete.cancel").click()
         XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, identifier).exists, "Cancel keeps the type and its notes")
-        XCTAssertEqual(listRows(app).count, 5)
+        XCTAssertEqual(listRows(app).count, 3)
         capture(app.windows.firstMatch, "note-type-delete-cancelled")
 
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
@@ -54,22 +61,21 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertTrue(element(app, identifier).waitForNonExistence(timeout: 30))
         XCTAssertTrue(remaining.exists)
         XCTAssertTrue(noteTypeRow(app, id: clozeID).exists)
-        XCTAssertEqual(listRows(app).count, 4)
+        XCTAssertEqual(listRows(app).count, 2)
         // The freshly selected remaining type has its real detail, not the
         // removed type's fields or a stranded selection.
         assertHeading(app, "Meguri Basic")
         XCTAssertTrue(element(app, "noteTypes.fields.table").waitForExistence(timeout: 10))
         capture(app.windows.firstMatch, "note-type-delete-remaining-type-selected")
 
-        press(remaining, in: app)
         app.menuBars.menuBarItems["Edit"].click()
         let undo = try menuAction(app, identifier: "", title: "Undo Remove Note Type",
                                   captureName: "note-type-delete-native-undo-menu")
         undo.click()
         XCTAssertTrue(element(app, identifier).waitForExistence(timeout: 30))
-        XCTAssertEqual(listRows(app).count, 5)
-        press(target, in: app)
-        assertHeading(app, reverseName)
+        XCTAssertEqual(listRows(app).count, 3)
+        select(target, in: app, heading: reverseName)
+        assertHeading(app, "90 notes · 180 cards")
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app) // Undo restored both notes and their cards.
         capture(app.windows.firstMatch, "note-type-delete-undo-restored-counts")
@@ -99,15 +105,20 @@ final class NoteTypeDeletionUITests: XCTestCase {
         capture(app.windows.firstMatch, "browse-note-type-delete-confirmation")
         element(app, "noteTypes.delete.cancel").click()
         XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
-        XCTAssertTrue(row.waitForExistence(timeout: 10), "Cancel keeps the actual Browse sidebar row")
-        // Reopen to read fresh counts after Cancel, then leave without a write.
-        try openDeleteMenu(app, row: row, identifier: "browse.sidebar.notetype.delete", title: "Delete Note Type…").click()
+        // Browse's delete action navigates to Note Types before presenting
+        // the question. Cancel leaves the user in that workspace.
+        let target = noteTypeRow(app, id: reverseID)
+        XCTAssertTrue(target.waitForExistence(timeout: 10), "Cancel keeps the target in Note Types")
+        XCTAssertEqual(listRows(app).count, 3)
+        select(target, in: app, heading: reverseName)
+        assertHeading(app, "90 notes · 180 cards")
+        // Reopen here to read fresh counts after Cancel, then leave without a write.
+        try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app)
         element(app, "noteTypes.delete.cancel").click()
         XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
-        element(app, "shell.root.sidebar.noteTypes").click()
         XCTAssertTrue(noteTypeRow(app, id: reverseID).waitForExistence(timeout: 10))
-        XCTAssertEqual(listRows(app).count, 5)
+        XCTAssertEqual(listRows(app).count, 3)
     }
 
     private func launch() throws -> (XCUIApplication, String) {
@@ -148,6 +159,14 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertTrue(heading.waitForExistence(timeout: 20), "Expected full heading \(expected): \(toolbar.debugDescription)")
     }
 
+    private func select(_ row: XCUIElement, in app: XCUIApplication, heading: String) {
+        press(row, in: app)
+        // Selection belongs to the native outline row, not its truncated text.
+        let selected = app.outlineRows.containing(.any, identifier: row.identifier).firstMatch
+        XCTAssertTrue(waitUntil { selected.exists && selected.isSelected }, "Expected selected note type \(row.identifier)")
+        assertHeading(app, heading)
+    }
+
     private func listRows(_ app: XCUIApplication) -> XCUIElementQuery {
         app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH 'noteTypes.list.row.'"))
     }
@@ -180,13 +199,14 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertTrue(action.isEnabled && action.isHittable, "Menu action: \(action.debugDescription)")
         // Capture the open native menu containing this action, never an arbitrary
         // first menu, window or menu-bar proxy.
-        let owners = app.menus.containing(match).allElementsBoundByIndex.filter {
-            $0.menuItems.matching(match).firstMatch.isHittable
+        if let captureName {
+            let owners = app.menus.containing(match).allElementsBoundByIndex.filter {
+                $0.menuItems.matching(match).firstMatch.isHittable
+            }
+            XCTAssertEqual(owners.count, 1, "One open menu owns \(title): \(app.menus.debugDescription)")
+            capture(try XCTUnwrap(owners.first), captureName)
         }
-        XCTAssertEqual(owners.count, 1, "One open menu owns \(title): \(app.menus.debugDescription)")
-        let menu = try XCTUnwrap(owners.first)
-        if let captureName { capture(menu, captureName) }
-        return menu.menuItems.matching(match).firstMatch
+        return action
     }
 
     private func press(_ row: XCUIElement, in app: XCUIApplication, right: Bool = false) {
