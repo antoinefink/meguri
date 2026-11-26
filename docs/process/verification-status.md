@@ -2,6 +2,14 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+Filtered decks and Custom Study passed 239 focused Rust tests, 152 Swift
+tests and both end-to-end Mac journeys. The Mac journeys compared stored
+home schedules before and after a timed preview and relaunch. The iOS
+simulator app and UI test bundle also built successfully. The
+[feature review log](review-log/filtered-study-20261126.md) records the
+receipts. [PR #237](https://github.com/antoinefink/meguri/pull/237) carries
+the native screenshots and device-specific verification results.
+
 The tag and note type deletion branch passed 44 focused Swift tests
 (`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed
