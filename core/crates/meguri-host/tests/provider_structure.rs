@@ -19,6 +19,8 @@ use meguri_sync::{Method, policy::Acceptance, provider::{MeguriReadiness, Meguri
 use serde_json::json;
 use std::sync::Arc;
 
+#[path = "provider_notetype_removal.rs"] mod note_type_removal;
+
 fn ready(host: &CoreHost) -> bool { matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Ready) }
 fn record(host: &CoreHost) -> bool { host.provider_authority().snapshot().unwrap().meguri_structure.is_some() }
 fn notes(host: &CoreHost) -> usize {

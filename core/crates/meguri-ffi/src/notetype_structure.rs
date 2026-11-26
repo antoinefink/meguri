@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use meguri_engine::notetypes::remove::{self, RemoveNotetype};
+use meguri_engine::notetypes::remove::RemoveNotetype;
 use meguri_engine::notetypes::restore::{self, RestoreNotetype};
 use meguri_engine::notetypes::structure::{
     self, ConfirmedLosses, DraftChange, DraftField, DraftSummary, DraftTemplate, FieldOptions, Losses,
@@ -518,7 +518,7 @@ pub fn start_notetype_removal_for_generation(request: NotetypeRemoval, generatio
 }
 pub(crate) fn remove_notetype_on(host: Arc<meguri_host::CoreHost>, request: NotetypeRemoval, generation: u64)
     -> Result<NotetypeRemovalJobStart, CoreError> {
-    let collection = host.collection_for_generation(meguri_engine::Generation(generation))?;
+    host.collection_for_generation(meguri_engine::Generation(generation))?;
     let input = RemoveNotetype {
         notetype: NotetypeId(request.notetype_id),
         confirmed_notes: request.confirmed_notes,
@@ -528,8 +528,8 @@ pub(crate) fn remove_notetype_on(host: Arc<meguri_host::CoreHost>, request: Note
     let out = result.clone();
     let engine = host.engine().clone();
     let handle = engine.start_job(meguri_engine::JobKind::BulkOp, move |job| {
-        let _host = host;
-        let removed = remove::remove(&collection, input, job.cancel.clone(), job.progress.clone())?;
+        let removed = host.remove_notetype_locally_for_generation(meguri_engine::Generation(generation), input,
+            job.cancel.clone(), job.progress.clone())?;
         *out.lock().unwrap() = Some(NotetypeRemoved {
             summary: MutationSummary::of(&removed),
             id: removed.value.id.0,
