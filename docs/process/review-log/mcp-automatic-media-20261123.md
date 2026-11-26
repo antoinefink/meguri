@@ -37,5 +37,10 @@ which identifies URL validation. The specific rejected URL property is unknown.
 
 The staged POST succeeded with the same PNG. Exact lookup of the created note
 returned an image reference whose filename contained the SHA-256 of the local
-PNG. Checking discovery in a new conversation after refreshing the custom
-connection and checking native playback remain open.
+PNG.
+
+After refreshing the custom connection, check the tool description in a new
+conversation and retry a direct PNG attachment with `files` and `file_fields`.
+Record the outcome here. On success, read the note by ID and compare the image
+reference to the original PNG's SHA-256. On failure, record the tool error and
+the server's fixed diagnostic code. Native playback also remains open.
