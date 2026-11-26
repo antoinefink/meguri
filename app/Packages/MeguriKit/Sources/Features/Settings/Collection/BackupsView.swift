@@ -230,6 +230,7 @@ struct BackupRestoreContent: View {
     @State private var confirmedEntry: BackupEntry?
     @Environment(\.dynamicTypeSize) private var textSize
     #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     // Native single-line rows plus inline navigation and grouped-list insets.
     // These are scaled point estimates, independent of the presenting viewport.
     @ScaledMetric(relativeTo: .body) private var compactRowHeight: CGFloat = 44
@@ -323,12 +324,13 @@ struct BackupRestoreContent: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.backups.restoreContent")
-            .navigationTitle(Text("Restore from Backup", bundle: .module))
+            .navigationTitle(restoreTitle)
             #if os(macOS)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack { Spacer(); cancelButton; restoreButton }.padding()
             }
             #else
+            .accessibilityLabel(Text("Restore from Backup", bundle: .module))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { cancelButton }
@@ -341,6 +343,12 @@ struct BackupRestoreContent: View {
                 } label: { Text("Restore", bundle: .module) }
                 Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
             } message: { Text(confirmationMessage, bundle: .module) }
+    }
+    private var restoreTitle: Text {
+        #if os(iOS)
+        if horizontalSizeClass == .compact { return Text("Backups", bundle: .module) }
+        #endif
+        return Text("Restore from Backup", bundle: .module)
     }
     private var cancelButton: some View {
         Button(action: cancel) { Text("Cancel", bundle: .module) }

@@ -568,6 +568,14 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertEqual(names.count, 3, "This stage exercises three real, ordinary eligible archives")
         let rows = names.map { element(app, entryPrefix + $0) }
         let window = try captureWindow(app, anchor: historyAnchor)
+        if UIDevice.current.userInterfaceIdiom == .phone, window.frame.height > window.frame.width {
+            let navigation = app.navigationBars.containing(.button, identifier: historyAnchor).firstMatch
+            let title = navigation.staticTexts["Backups"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 10), "The compact phone must show the complete Backups inline title")
+            XCTAssertEqual(title.label, "Backups")
+            XCTAssertFalse(title.frame.isEmpty)
+            XCTAssertTrue(navigation.frame.contains(title.frame))
+        }
         let sheet = app.sheets.containing(.any, identifier: historyAnchor).firstMatch
         // SwiftUI may omit the sheet node. Its existing content identifier is
         // still scoped to the presented picker, excluding background windows.
