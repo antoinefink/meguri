@@ -34,3 +34,9 @@ The native deck pane now presents the chosen deck directly. The screen tests exe
 The synthetic fixture now avoids running backup lifecycle observers when no real collection is open. The reviewer approved the complete 184525-byte collection source at SHA-256 `e6714ebda67d5e160bf89ddb01523fef557b90403e4eaffefdd87cae49dd3c52`. The combined branch passed all 169 focused Swift tests again (`swift-test/20261126T203600Z-84780`).
 
 The selection failure can no longer be overwritten by a failed automatic deck-detail refresh. Both completion orders have regression coverage. The reviewer approved the complete 185389-byte collection source at SHA-256 `4063b0e5bce8fd2ecc2d072a1e2fb607c465d6c07b6e0eee9566fb1d643ddfbf`.
+
+## Native verification
+
+The focused Swift suites passed all 171 tests in `swift-test/20261126T204904Z-10283`. All 11 Mac navigation scenarios passed in `ui-test/20261126T205303Z-15139`. They cover rapid switching, Back during a pending save, failure and retry, warm content, and the seven loading states attached to PR #245. The iPhone run `drive/20261126T205731Z-23900` passed all 11 steps on `c69ce52e7`. It displayed the selected deck name and the native activity indicator while the write was held, with the tab bar and Back button available. The PR includes the two compact screenshots.
+
+The independent source reviewer reported no remaining material findings in `cleanroom/20261126T205844Z-28927`. The dedicated app-hosted command test could not start in `mac-hosted-test/20261126T204616Z-1648`: the unchanged occlusion editor snapshot test failed Swift actor-isolation compilation. The navigation UI suite also exercises pending command availability through the native menus. The PR description carries the expanded suite and timing results.
