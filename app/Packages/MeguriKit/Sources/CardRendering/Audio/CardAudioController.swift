@@ -99,7 +99,12 @@ public final class CardAudioController {
         public let playingIntent: Bool
         public let returnedSamples: Int
         public let lastFinitePosition: TimeInterval?
+        /// Logical manual replay requests, independent of an audio device.
+        public let replayRequests: UInt64
+        public let replaySides: [CardRenderSide]
     }
+    private var replayRequests: UInt64 = 0
+    private var replaySides: [CardRenderSide] = []
     private var readinessStage: Readiness.Stage = .idle
     private var readinessLoadingPending = false
     private var readinessReturnedSamples = 0
@@ -112,7 +117,8 @@ public final class CardAudioController {
             loadingTaskStored: loading != nil, loadingPending: readinessLoadingPending,
             observerRegistered: onPlaybackObservation != nil, observerTaskStored: playbackObservation != nil,
             transportOwnerCurrent: native.ownerCurrent, playingIntent: native.playingIntent,
-            returnedSamples: readinessReturnedSamples, lastFinitePosition: readinessLastFinitePosition)
+            returnedSamples: readinessReturnedSamples, lastFinitePosition: readinessLastFinitePosition,
+            replayRequests: replayRequests, replaySides: replaySides)
     }
     private func resetReadiness() {
         readinessStage = .idle; readinessLoadingPending = false
@@ -228,6 +234,8 @@ public final class CardAudioController {
         if update.side == .answer, payload.audioPolicy.replayQuestion {
             queue = entries(payload, update: update, side: .question) + entries(payload, update: update, side: .answer)
         } else { queue = entries(payload, update: update, side: update.side) }
+        replayRequests &+= 1
+        replaySides = queue.map(\.side)
         advance()
     }
 

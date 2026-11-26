@@ -20,7 +20,36 @@ struct ReviewTerminalContent: View {
     let close: () -> Void
     @Environment(\.locale) private var locale
 
+    @State private var finished = false
+    @FocusState private var continueFocused: Bool
+    #if !os(macOS)
+    @FocusState private var keyboardFocused: Bool
+    #endif
+    private var showsDone: Bool { !waiting || continueAvailable }
+    private func finish() {
+        guard canFinish, showsDone, !finished else { return }
+        finished = true
+        close()
+    }
+
     var body: some View {
+        content
+            #if os(macOS)
+            .background(ReviewTerminalKeyboard(enabled: canFinish && showsDone,
+                continueFocused: continueFocused, done: finish))
+            #else
+            .focusable()
+            .focused($keyboardFocused)
+            .onAppear { keyboardFocused = true }
+            .onKeyPress(keys: [.space, .return, KeyEquivalent("\u{3}")], phases: [.down, .repeat]) { press in
+                guard press.modifiers.isEmpty, canFinish, showsDone else { return .ignored }
+                if press.key == .space, press.phase == .down, continueFocused { return .ignored }
+                if press.phase == .down { finish() }
+                return .handled
+            }
+            #endif
+    }
+    @ViewBuilder private var content: some View {
         if waiting && !continueAvailable {
             ReviewStateMessage(title: Text("Waiting for Learning", bundle: .module),
                 message: Text("Your next learning card is not ready yet.", bundle: .module)) {
@@ -57,11 +86,12 @@ struct ReviewTerminalContent: View {
     @ViewBuilder private var actions: some View {
         if continueAvailable {
             Button(action: continueReview) { Text("review.congrats.continue", bundle: .module).reviewStateLabel() }
+                .focused($continueFocused)
                 .disabled(!canContinue)
                 .accessibilityIdentifier("review.session.continue")
                 .reviewStateTarget()
         }
-        Button(action: close) { Text("Done", bundle: .module).reviewStateLabel() }
+        Button(action: finish) { Text("Done", bundle: .module).reviewStateLabel() }
             .disabled(!canFinish)
             .accessibilityIdentifier("review.session.done")
             .reviewStateTarget()

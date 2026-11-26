@@ -151,6 +151,7 @@ pub struct NotetypeRecord {
     pub name: String,
     pub kind: i32,
     pub original_stock_kind: i32,
+    /// Logical positions in the ordered fields, independent of stored ords.
     pub cloze_fields: Vec<u32>,
     pub sort_field: u32,
     pub css: String,
@@ -199,9 +200,9 @@ impl From<&meguri_model::notetype::Notetype> for NotetypeRecord {
                     let parsed = meguri_template::ParsedTemplate::parse(&template.config.q_format);
                     if parsed.structure_error().is_some() { return Vec::new(); }
                     let names = parsed.cloze_references();
-                    n.fields.iter().filter(|field| names.iter().any(|name|
+                    n.fields.iter().enumerate().filter(|(_, field)| names.iter().any(|name|
                         meguri_text::fold::compare_folded(name, &field.name).is_eq()
-                    )).map(|field| field.ord).collect()
+                    )).map(|(position, _)| position as u32).collect()
                 }).unwrap_or_default()
             } else { Vec::new() },
             sort_field: n.config.sort_field_idx,
@@ -212,6 +213,7 @@ impl From<&meguri_model::notetype::Notetype> for NotetypeRecord {
         }
     }
 }
+
 #[uniffi::export]
 pub fn add_notetype(request: AddNotetypeRequest) -> Result<NotetypeMutation, CoreError> {
     callback::enter("add_notetype");
@@ -351,4 +353,24 @@ pub fn set_notetype_template_options(request: NotetypeTemplateOptions) -> Result
     row.config.browser_font_name = request.browser_font_name;
     row.config.browser_font_size = request.browser_font_size;
     Ok(notetypes::save(&c, d, SaveOptions::default())?.into())
+}
+
+#[cfg(test)]
+mod ordinal_tests {
+    use super::NotetypeRecord;
+    use meguri_engine::notetypes::StockKind;
+    use meguri_model::rng::SeededRandom;
+
+    #[test]
+    fn sparse_definitions_keep_raw_ordinals_but_cloze_fields_are_positions() {
+        let mut notetype = StockKind::Cloze.notetype(&SeededRandom::new(7));
+        notetype.fields[0].ord = 7;
+        notetype.fields[1].ord = 19;
+        notetype.templates[0].ord = 23;
+        notetype.templates[0].config.q_format = format!("{{{{cloze:{}}}}}", notetype.fields[1].name);
+        let record = NotetypeRecord::from(&notetype);
+        assert_eq!(record.fields.iter().map(|field| field.ord).collect::<Vec<_>>(), [7, 19]);
+        assert_eq!(record.templates[0].ord, 23);
+        assert_eq!(record.cloze_fields, [1]);
+    }
 }

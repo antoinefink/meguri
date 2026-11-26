@@ -9,6 +9,22 @@ import UIKit
 
 @MainActor
 @Suite struct ReviewNativeFocusTests {
+    #if os(macOS)
+    @Test func replayAllowsNativeControlsButLeavesLocalTextInputsAlone() {
+        let card = NSView()
+        let button = NSButton(title: "Show Answer", target: nil, action: nil)
+        let field = NSTextField()
+        let fieldEditor = NSTextView()
+        let fieldChild = NSView()
+        field.addSubview(fieldChild)
+        #expect(ReviewInputOwnership.replayResponder(card, in: card))
+        #expect(ReviewInputOwnership.replayResponder(button, in: card))
+        for input in [field as NSView, fieldEditor, fieldChild] {
+            #expect(!ReviewInputOwnership.replayResponder(input, in: card))
+        }
+        #expect(!ReviewInputOwnership.replayFocused(in: card), "detached pages have no active review window")
+    }
+    #endif
     @Test func detachedContainmentKeepsNativeControlsOutsideCard() {
         #if os(macOS)
         let root = NSView()

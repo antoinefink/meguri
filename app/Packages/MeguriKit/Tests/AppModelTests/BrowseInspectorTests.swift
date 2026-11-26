@@ -95,6 +95,163 @@ import Testing
 
     // MARK: Saving (V12, W2, W4)
 
+    @Test(arguments: [[UInt32(0), 4, 12], [UInt32(7), 15, 90]])
+    func sparseStoredOrdinalsSaveTheLogicalPositionAndKeepTheRawFingerprint(_ ords: [UInt32]) async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = ords
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "later field")
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        let patch = try #require(fixture.backend.saves.first)
+        #expect(patch.fields == [1: "later field"] && patch.notetype.fields.map(\.ord) == ords)
+        let raw = try #require(patch.raw)
+        #expect(raw.fields.map(\.ord) == [1] && raw.fields.map(\.html) == ["later field"])
+        #expect(raw.fieldLayout.map(\.ord) == ords)
+        #expect(raw.fieldLayout.map(\.id) == [0, 1, 2] && raw.fieldLayout.map(\.name) == ["Front", "Back", "Extra"])
+        #expect(runtime.draft.values == ["front 10", "later field", ""])
+        // A foreign change still reloads by position without disturbing a
+        // committed edit, even though there is no stored ordinal zero.
+        fixture.backend.notes[10] = .init(id: 10, notetypeId: 42, fields: ["front 10", "later field", "external"], tags: [], guid: "g10")
+        fixture.model.changesCommitted(Self.noteUpdated(10), seq: 900)
+        try await pollUntil { fixture.page.reloads.contains([2]) }
+        #expect(runtime.draft.values == ["front 10", "later field", "external"])
+    }
+
+    @Test func aStalePatchRemapsToTheNewLogicalPositionWithItsRawLayout() async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = [7, 15, 90]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(2, "edited extra")
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        fixture.backend.onSave = { _ in
+            fixture.backend.fieldOrder = [2, 0, 1]
+            fixture.backend.fieldOrds = [9, 25, 61]
+        }
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        let patch = try #require(fixture.backend.saves.first)
+        #expect(fixture.backend.saveCalls == 2 && patch.fields == [0: "edited extra"])
+        let raw = try #require(patch.raw)
+        #expect(raw.fieldLayout.map(\.ord) == [9, 25, 61] && raw.fieldLayout.map(\.id) == [2, 0, 1])
+        #expect(raw.fields.map(\.ord) == [0])
+    }
+
+    @Test(arguments: [BridgeError.commitCompleted(sequence: 101, message: "synthetic"),
+                      BridgeError.mediaCommitPending(sequence: 101, message: "synthetic")])
+    func remappedPostCommitAcknowledgesOnlyTheSentRevision(_ error: BridgeError) async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = [7, 15, 90]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(2, "first edit")
+        fixture.backend.failNext = .unavailable(reason: "synthetic")
+        let failed = await fixture.inspector.flushForBackground()
+        #expect(!failed && fixture.inspector.note?.saveFailure == .notSaved)
+
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        fixture.backend.onSave = { _ in
+            guard fixture.backend.saveCalls == 2 else { return }
+            fixture.backend.fieldOrder = [2, 0, 1]
+            fixture.backend.fieldOrds = [9, 25, 61]
+            fixture.backend.notes[10] = .init(id: 10, notetypeId: 42, fields: ["", "front 10", "back 10"], tags: [], guid: "g10")
+        }
+        fixture.backend.postCommitError = error
+        var reply: CheckedContinuation<Void, Never>?
+        defer { reply?.resume() }
+        fixture.backend.afterSave = { _ in
+            await withCheckedContinuation { reply = $0 }
+        }
+        let saving = Task { await fixture.inspector.flushForBackground() }
+        try await pollUntil { reply != nil }
+        // Input arriving after the durable write belongs to a later revision.
+        try await runtime.type(2, "later edit")
+        reply?.resume(); reply = nil
+        let saved = await saving.value
+        #expect(saved && fixture.inspector.note?.saveFailure == nil)
+        #expect(fixture.backend.saveCalls == 3 && fixture.backend.saves.count == 1)
+        #expect(fixture.backend.saves.first?.fields == [0: "first edit"])
+        #expect(fixture.backend.saves.first?.notetype.fields.map(\.ord) == [9, 25, 61])
+        #expect(runtime.draft.committedPatch()?.fields == [2: "later edit"])
+        #expect(fixture.steps.isEmpty, "a post-commit error supplies no mutation summary to record")
+        try await pollUntil { fixture.backend.noteReads[10, default: 0] >= 3 && !runtime.held }
+        #expect(runtime.draft.values[2] == "later edit", "the requested reload preserves the later input")
+
+        fixture.backend.afterSave = nil
+        fixture.backend.onSave = nil
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        let laterSaved = await fixture.inspector.flushForBackground()
+        #expect(laterSaved && fixture.backend.saves.count == 2)
+        #expect(fixture.backend.saves.last?.fields == [0: "later edit"])
+        #expect(fixture.steps.count == 1, "the real result keeps normal undo bookkeeping")
+        try await pollUntil { fixture.inspector.note?.draft.notetype.fields.first?.id == 2 }
+        #expect(fixture.inspector.note?.draft.values == ["later edit", "front 10", "back 10"])
+        let calls = fixture.backend.saveCalls
+        let unchanged = await fixture.inspector.flushForBackground()
+        #expect(unchanged && fixture.backend.saveCalls == calls, "acknowledged input is never resubmitted")
+    }
+
+    @Test(arguments: [BridgeError.commitCompleted(sequence: 101, message: "synthetic"),
+                      BridgeError.mediaCommitPending(sequence: 101, message: "synthetic")])
+    func initialPostCommitClearsAnEarlierSaveFailure(_ error: BridgeError) async throws {
+        let fixture = try await Fixture()
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "durable edit")
+        fixture.backend.failNext = .unavailable(reason: "synthetic")
+        let failed = await fixture.inspector.flushForBackground()
+        #expect(!failed && fixture.inspector.note?.saveFailure == .notSaved)
+        fixture.backend.postCommitError = error
+        let saved = await fixture.inspector.flushForBackground()
+        #expect(saved && fixture.inspector.note?.saveFailure == nil)
+        try await pollUntil { fixture.backend.noteReads[10, default: 0] >= 2 && !runtime.held }
+        #expect(!runtime.draft.hasChanges && runtime.draft.values[1] == "durable edit")
+        let calls = fixture.backend.saveCalls
+        _ = await fixture.inspector.flushForBackground()
+        #expect(fixture.backend.saveCalls == calls)
+    }
+
+    @Test func malformedCountsAndOrdinalsShowReadableDiagnosticsWithoutOpeningAFieldPage() async throws {
+        for ords in [[UInt32(7), 7, 90], [UInt32(15), 7, 90]] {
+            let fixture = try await Fixture()
+            fixture.backend.fieldOrds = ords
+            fixture.select([0])
+            try await pollUntil { fixture.inspector.note != nil }
+            #expect(fixture.inspector.note?.error == "This note type has duplicate or unordered field ordinals. Run Check Database before editing it.")
+            #expect(fixture.page.opened.isEmpty && fixture.backend.saves.isEmpty)
+        }
+        for values in [["short"], ["too", "many", "stored", "values"]] {
+            let fixture = try await Fixture()
+            fixture.backend.fieldOrds = [7, 15, 90]
+            fixture.backend.notes[10] = .init(id: 10, notetypeId: 42, fields: values, tags: [], guid: "g10")
+            fixture.select([0])
+            try await pollUntil { fixture.inspector.note != nil }
+            #expect(fixture.inspector.note?.error == "The note’s field count (\(values.count)) does not match its note type (3). Run Check Database before editing it.")
+            #expect(fixture.page.opened.isEmpty && fixture.backend.saves.isEmpty)
+        }
+    }
+
+    @Test func aStalePatchCannotResendIntoImageOcclusionFields() async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = [7, 15, 90]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "keep my draft")
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        fixture.backend.onSave = { _ in fixture.backend.originalStockKind = 6 }
+        runtime.blur()
+        try await pollUntil { fixture.inspector.note?.saveFailure == .notSaved }
+        #expect(fixture.backend.saveCalls == 1 && fixture.backend.saves.isEmpty)
+        #expect(runtime.draft.values[1] == "keep my draft")
+    }
+
     @Test func losingTheFocusSavesTheChangedFieldsAsOneEditNoteStep() async throws {
         let fixture = try await Fixture()
         fixture.select([0])
@@ -404,6 +561,11 @@ import Testing
     var saveCalls = 0
     var failNext: BridgeError?
     var onSave: ((NoteFieldPatch) -> Void)?
+    var afterSave: ((NoteFieldPatch) async -> Void)?
+    var postCommitError: BridgeError?
+    var fieldOrds: [UInt32] = [0, 1, 2]
+    var fieldOrder = [0, 1, 2]
+    var originalStockKind: Int32 = 0
     private(set) var lastSeq: UInt64 = 100
 
     func releaseReads() {
@@ -419,11 +581,12 @@ import Testing
         return note
     }
     func notetype(_ id: Int64) async throws -> NotetypeRecord {
-        let fields = ["Front", "Back", "Extra"].enumerated().map { index, name in
-            NotetypeField(ord: UInt32(index), id: Int64(index), name: name, sticky: false, rtl: false, fontName: "", fontSize: 20,
+        let fields = fieldOrder.enumerated().map { position, index in
+            NotetypeField(ord: fieldOrds[position], id: Int64(index), name: ["Front", "Back", "Extra"][index], sticky: false, rtl: false, fontName: "", fontSize: 20,
                           description: "", plainText: false, collapsed: false, excludeFromSearch: false)
         }
-        return NotetypeRecord(id: id, name: "Three", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [])
+        return NotetypeRecord(id: id, name: "Three", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [],
+                              originalStockKind: originalStockKind)
     }
     func cards(ofNote id: Int64) async throws -> [NoteCard] {
         cards[id] ?? [NoteCard(id: id / 10, ord: 0, deckId: 1, originalDeckId: 0)]
@@ -436,7 +599,15 @@ import Testing
         onSave?(patch)
         if let error = failNext { failNext = nil; throw error }
         saves.append(patch)
+        if let stored = notes[patch.id] {
+            var fields = stored.fields
+            for (position, html) in patch.fields { fields[position] = html }
+            notes[patch.id] = .init(id: stored.id, notetypeId: stored.notetypeId, fields: fields,
+                                  tags: patch.tags ?? stored.tags, guid: stored.guid)
+        }
         lastSeq += 1
+        await afterSave?(patch)
+        if let error = postCommitError { postCommitError = nil; throw error }
         return NoteMutation(summary: MutationSummary(seq: lastSeq, generation: 1, undoName: "Update Note",
                                                      changes: BrowseInspectorTests.noteUpdated(patch.id), pastCancelPoint: false),
                             id: patch.id, cards: [], written: true)

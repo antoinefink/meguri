@@ -64,26 +64,14 @@ public struct EditNoteView: View {
     /// label column, above the fields; neither can be changed here.
     @ViewBuilder private var facts: some View {
         if let subtitle = flow.subtitle {
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.xSmall, verticalSpacing: Spacing.xSmall) {
-                GridRow {
-                    factLabel(Text("Note type:", bundle: .module))
-                    Text(verbatim: subtitle.notetype).foregroundStyle(.secondary)
-                }
-                GridRow {
-                    factLabel(Text("Deck:", bundle: .module))
-                    Text(verbatim: subtitle.deck).foregroundStyle(.secondary)
-                }
+            NoteFormSelectionRows {
+                Text(verbatim: subtitle.notetype).foregroundStyle(.secondary)
+            } deck: {
+                Text(verbatim: subtitle.deck).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // The page's inset (16 pt) and its column gap (8 pt), so both columns line up.
-            .padding(Spacing.medium)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("review.editCurrent.subtitle")
         }
-    }
-    /// The page's label column (`FieldEditor/page.html`): 140 pt, trailing.
-    private func factLabel(_ text: Text) -> some View {
-        text.frame(width: 140, alignment: .trailing)
     }
     #endif
 

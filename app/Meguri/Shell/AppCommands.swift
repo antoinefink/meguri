@@ -50,7 +50,7 @@ struct NativeCommandContext {
 
     /// The Add menu's New Note: on a deck page it presets that deck.
     private var newNoteDeck: Int64? {
-        guard let deck = shownDeck, collection.deck(deck)?.filtered != true else { return nil }
+        guard let deck = selectedDeck, collection.deck(deck)?.filtered != true else { return nil }
         return deck
     }
     var canNewNote: Bool { host == .main && collection.addNotePresentation.canPresent(presetDeck: newNoteDeck) }
@@ -64,6 +64,17 @@ struct NativeCommandContext {
         collection.deckActions.present(.create, host: host)
     }
 
+    /// Add's separate native window does not make the main workspace modal.
+    /// Its own focused field still owns all editing commands.
+    private var workspaceOwnsCommands: Bool {
+        #if os(macOS)
+        if case .add = collection.navigation.sheet {
+            return NSApp.keyWindow?.identifier?.rawValue != "editor.add.window"
+        }
+        #endif
+        return collection.navigation.sheet == nil
+    }
+
     // MARK: Edit
 
     var canFind: Bool { host == .main && (canFindInBrowse || DeckSearchFocus.available(collection, layout: layout)) }
@@ -74,7 +85,7 @@ struct NativeCommandContext {
     }
     /// N21.8, T10: in Browse, Find… focuses Browse's search field.
     private var canFindInBrowse: Bool {
-        layout == .sidebar && collection.navigation.section == .browse && collection.navigation.sheet == nil
+        layout == .sidebar && collection.navigation.section == .browse && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
 
@@ -127,7 +138,12 @@ struct NativeCommandContext {
 
     /// The deck the workspace shows: the sidebar's selection, or the deck page.
     var shownDeck: Int64? {
-        guard host == .main, fileActionsAvailable, collection.navigation.section == .home,
+        fileActionsAvailable ? selectedDeck : nil
+    }
+    // Add re-entry uses the workspace selection even while its auxiliary
+    // window is open. The flow owns validation and keeps the existing draft.
+    private var selectedDeck: Int64? {
+        guard host == .main, collection.navigation.section == .home,
               collection.review == nil, collection.navigation.review == nil,
               let deck = collection.navigation.homeDeckPage?.rawValue,
               collection.deck(deck) != nil || collection.deckPage(deck) != nil else { return nil }
@@ -168,7 +184,7 @@ struct NativeCommandContext {
     /// while review presents a card, when Card › Show in Browse takes the
     /// key, and while a sheet holds the window.
     var canShowBrowse: Bool {
-        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showBrowse() {
@@ -179,7 +195,7 @@ struct NativeCommandContext {
     /// N25.11: View › Statistics (⇧⌘S) selects the Statistics row, with the page's kept deck
     /// and period (S13), under the guards of View › Browse.
     var canShowStatistics: Bool {
-        statsPage != nil && host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        statsPage != nil && host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showStatistics() {
@@ -224,7 +240,7 @@ struct NativeCommandContext {
     /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review,
     /// with no sheet over the window, and once a collection exists.
     var canShowNoteTypes: Bool {
-        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showNoteTypes() {
@@ -346,6 +362,12 @@ struct AppCommands: Commands {
                 .disabled(context?.canNewDeck != true)
         }
         CommandGroup(replacing: .saveItem) {
+            #if os(macOS)
+            // Replacing this group also removes the system's Close command.
+            // Use the key window's normal close path, including its delegate guard.
+            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: .command)
+            #endif
             Button(LocalizedStringKey(context?.noteTypeSaveAsks == true ? "Save…" : "Save")) { context?.saveNoteType() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(context?.canSaveNoteType != true)

@@ -182,6 +182,7 @@ public struct NotetypeRecord: Sendable, Hashable {
     public let name: String
     public let kind: Int32
     public let originalStockKind: Int32
+    /// Logical field positions; definitions retain their raw stored ordinals.
     public let clozeFields: [UInt32]
     public let sortField: UInt32
     public let css: String

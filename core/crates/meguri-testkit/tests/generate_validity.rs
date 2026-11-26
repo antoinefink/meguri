@@ -1370,6 +1370,57 @@ fn worst_case_one_deck_all_due() {
 // --------------------------------------------------------------- recipes
 
 #[test]
+fn review_editor_many_fields_keep_logical_positions_with_sparse_numbers() {
+    let recipe = Recipe::named("review-editor").unwrap();
+    let spec = recipe
+        .decks
+        .iter()
+        .find(|d| d.notetype.as_deref() == Some("many-fields"))
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    generate_recipe(&recipe, 1, dir.path()).unwrap();
+    let path = collection(dir.path());
+    let notes: Vec<_> = all_notes(&path)
+        .into_iter()
+        .filter(|n| n.field_values().next() == Some(spec.fields[0].as_str()))
+        .collect();
+    assert_eq!(notes.len(), 1);
+    let note = &notes[0];
+    let collection = open(&path);
+    let nt = collection.writer().notetype(note.notetype_id).unwrap().unwrap();
+    assert_eq!(nt.fields.len(), 14);
+    assert!(nt.fields[0].ord > 0);
+    assert!(nt.fields.windows(2).all(|pair| pair[1].ord > pair[0].ord + 1));
+    let names: Vec<_> = nt.fields.iter().map(|f| f.name.as_str()).collect();
+    let expected_names: Vec<_> = ["Front".to_owned(), "Back".to_owned()]
+        .into_iter()
+        .chain((3..=14).map(|n| format!("Field {n}")))
+        .collect();
+    assert_eq!(names, expected_names);
+    for (position, template) in nt.templates.iter().enumerate() {
+        assert_eq!(
+            template.config.q_format,
+            format!("<div class=\"mg-front\">{{{{Front}}}}</div>\n<div class=\"mg-label\">side {}</div>", position + 1)
+        );
+        assert!(template.config.a_format.contains("<div class=\"mg-back\">{{Back}}</div>"));
+    }
+    let values: Vec<_> = note.field_values().collect();
+    assert_eq!(values.len(), spec.fields.len());
+    assert_eq!(names[11], "Field 12");
+    assert_eq!(values[11], spec.fields[11]);
+    for (position, (value, expected)) in values.iter().zip(&spec.fields).enumerate() {
+        if position == 1 {
+            let media = value.strip_prefix(expected.as_str()).unwrap();
+            assert!(media.starts_with(" [sound:") && media.ends_with(']'));
+            assert_eq!(meguri_text::media_refs::local_references(media).len(), 1);
+        } else {
+            assert_eq!(*value, expected, "logical field {position}");
+        }
+    }
+    assert_eq!(all_cards(&path).iter().filter(|c| c.note_id == note.id).count(), 2);
+}
+
+#[test]
 fn recipe_learn_ahead_only_changes_the_collection_setting() {
     let held = Recipe::named("local-review").unwrap();
     assert_eq!(held.learn_ahead_secs, 0, "F9.2 public learning must remain held");
@@ -1411,7 +1462,7 @@ fn recipe_learn_ahead_only_changes_the_collection_setting() {
     );
     for name in Recipe::names().unwrap() {
         let expected = match name.as_str() {
-            "owned-sync-review" | "local-review" => 0,
+            "owned-sync-review" | "local-review" | "review-editor" => 0,
             _ => 1200,
         };
         assert_eq!(Recipe::named(&name).unwrap().learn_ahead_secs, expected, "{name}");

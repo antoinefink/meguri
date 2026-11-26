@@ -18,7 +18,7 @@
 //! decks:                              # parents of `A::B` are made when missing
 //!   - name: "Languages::日本語"
 //!     preset: Light                   # optional, default Default
-//!     notetype: basic                 # basic | reversed | cloze | broken
+//!     notetype: basic                 # basic | reversed | cloze | broken | many-fields (14 fields, 2 cards)
 //!     new: 20                         # cards per state, all optional
 //!     learning: 3                     # due now
 //!     due: 45                         # review cards due today or earlier
@@ -32,6 +32,8 @@
 //!
 //! Cards of a `reversed` note share their state, so its counts are even.
 //! `broken` is a note type whose back template names a field it lacks.
+//! `many-fields` has imported-style gaps in stored field numbers; logical
+//! field positions still run from 0 to 13 (`notetypes/records` N1).
 //! `missing` references name files that are not written.
 
 use std::path::{Path, PathBuf};
@@ -147,14 +149,16 @@ enum RecipeType {
     Reversed,
     Cloze,
     Broken,
+    ManyFields,
 }
 
 impl RecipeType {
-    const ALL: [RecipeType; 4] = [
+    const ALL: [RecipeType; 5] = [
         RecipeType::Basic,
         RecipeType::Reversed,
         RecipeType::Cloze,
         RecipeType::Broken,
+        RecipeType::ManyFields,
     ];
 
     fn parse(name: Option<&str>) -> Result<RecipeType, GenError> {
@@ -163,6 +167,7 @@ impl RecipeType {
             "reversed" => Ok(RecipeType::Reversed),
             "cloze" => Ok(RecipeType::Cloze),
             "broken" => Ok(RecipeType::Broken),
+            "many-fields" => Ok(RecipeType::ManyFields),
             other => Err(GenError::Recipe(format!("unknown note type {other:?}"))),
         }
     }
@@ -173,23 +178,25 @@ impl RecipeType {
             RecipeType::Reversed => "Meguri Basic and Reverse",
             RecipeType::Cloze => "Meguri Cloze",
             RecipeType::Broken => "Meguri Broken Template",
+            RecipeType::ManyFields => "Synthetic Text and Audio, 14 Fields",
         }
     }
 
     fn cards_per_note(self) -> u32 {
-        if self == RecipeType::Reversed { 2 } else { 1 }
+        if matches!(self, RecipeType::Reversed | RecipeType::ManyFields) { 2 } else { 1 }
     }
 
     fn shape(self) -> NotetypeShape {
         let (kind, templates) = match self {
             RecipeType::Cloze => ("cloze", 1),
-            RecipeType::Reversed => ("normal", 2),
+            RecipeType::Reversed | RecipeType::ManyFields => ("normal", 2),
             _ => ("normal", 1),
         };
+        let fields = if self == RecipeType::ManyFields { 14 } else { 2 };
         NotetypeShape {
             kind: kind.to_owned(),
             stock_kind: 0,
-            fields: 2,
+            fields,
             templates,
             notes: 0,
             cards: 0,
@@ -197,8 +204,8 @@ impl RecipeType {
             template_bytes: vec![[0, 0]; templates as usize],
             script_bytes: 0,
             cards_per_note: Histogram::linear(1, 1, 1),
-            field_bytes: vec![Histogram::linear(0, 0, 1); 2],
-            media_refs: vec![[0, 0]; 2],
+            field_bytes: vec![Histogram::linear(0, 0, 1); fields as usize],
+            media_refs: vec![[0, 0]; fields as usize],
             refs_per_note: Histogram::linear(0, 0, 1),
         }
     }
@@ -423,6 +430,14 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         }
         let id = NotetypeId(ids.notetypes.claim(timeline.crt_ms() + types.len() as i64));
         let mut record = notetype(id, kind.name(), &kind.shape(), None, &timeline, &mut structure);
+        if *kind == RecipeType::ManyFields {
+            // N1: stored numbers order the fields; positions index note values,
+            // the sort field and template requirements. Raw scopes keep these
+            // gaps, as a supported imported collection can (no local save).
+            for field in &mut record.fields {
+                field.ord = 2 * (field.ord + 1);
+            }
+        }
         if *kind == RecipeType::Broken {
             let names = field_names(Kind::Normal, 2);
             let (front, _) = base_templates(Kind::Normal, &names, 0);
@@ -591,7 +606,7 @@ fn recipe_note(
     let created = note_id.0;
 
     // Field text and tags are NFC (F6.6), as Anki would save them.
-    let mut values: Vec<String> = (0..2)
+    let mut values: Vec<String> = (0..n.kind.shape().fields as usize)
         .map(|f| match n.spec.fields.get(f) {
             Some(template) => meguri_text::normalize::nfc(&template.replace("{n}", &n.number.to_string())).into_owned(),
             None => words(6 + rng.below(20) as usize, rng),

@@ -22,8 +22,17 @@ struct ReviewCardHost {
     var obscuredTop: CGFloat = 0
 
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
+        guard model.phase == .question || model.phase == .answer else { return false }
+        let focused: Bool
+        #if os(macOS)
+        focused = !command && !shift && input.lowercased() == "r"
+            ? ReviewInputOwnership.replayFocused(in: pair.current.webView)
+            : ReviewInputOwnership.cardFocused(in: pair.current.webView)
+        #else
+        focused = ReviewInputOwnership.cardFocused(in: pair.current.webView)
+        #endif
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
-              ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
+              ReviewInputOwnership.admits(cardFocused: focused,
                   // An open Edit Note form owns the keys like a sheet (N11.1, E2).
                   editing: model.surface.editing, paused: model.paused || model.editingNote, repeated: repeated) else { return false }
         if command {
@@ -34,6 +43,10 @@ struct ReviewCardHost {
         case " ", "\r", "\n":
             if model.phase == .question { model.reveal() }
             else if model.phase == .answer { model.rate(.good) }
+            return true
+        case "r", "R":
+            guard !shift else { return false }
+            pair.replay()
             return true
         case "1": model.rate(.again); return true
         case "2": model.rate(.hard); return true
@@ -58,9 +71,12 @@ extension ReviewCardHost: NSViewControllerRepresentable {
     final class Coordinator {
         var monitor: Any?
         var focusObserver: NSObjectProtocol?
+        var menuTrackingDepth = 0
+        var menuObservers: [NSObjectProtocol] = []
         isolated deinit {
             if let monitor { NSEvent.removeMonitor(monitor) }
             if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }
+            for observer in menuObservers { NotificationCenter.default.removeObserver(observer) }
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -84,11 +100,23 @@ extension ReviewCardHost: NSViewControllerRepresentable {
                 if pair.ownsKeyboardFocus != owned { pair.ownsKeyboardFocus = owned }
             }
         }
-        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak host] event in
+        let owner = context.coordinator
+        for (name, tracking) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+            owner.menuObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak owner] _ in
+                MainActor.assumeIsolated {
+                    guard let owner else { return }
+                    owner.menuTrackingDepth = tracking ? owner.menuTrackingDepth + 1 : max(0, owner.menuTrackingDepth - 1)
+                }
+            })
+        }
+        owner.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak host, weak owner] event in
             guard let host, host.view.window != nil, event.window === host.view.window,
-                  ReviewInputOwnership.cardFocused(in: pair.current.webView) else { return event }
+                  owner?.menuTrackingDepth == 0 else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.isDisjoint(with: [.option, .control]) else { return event }
+            let replay = event.charactersIgnoringModifiers?.lowercased() == "r"
+            if replay, !flags.subtracting(.capsLock).isEmpty { return event }
+            guard replay || ReviewInputOwnership.cardFocused(in: pair.current.webView) else { return event }
             return key(event.charactersIgnoringModifiers ?? "", command: flags.contains(.command),
                        shift: flags.contains(.shift), repeated: event.isARepeat) ? nil : event
         }
@@ -98,6 +126,8 @@ extension ReviewCardHost: NSViewControllerRepresentable {
     static func dismantleNSViewController(_ host: Host, coordinator: Coordinator) {
         if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor); coordinator.monitor = nil }
         if let observer = coordinator.focusObserver { NotificationCenter.default.removeObserver(observer); coordinator.focusObserver = nil }
+        for observer in coordinator.menuObservers { NotificationCenter.default.removeObserver(observer) }
+        coordinator.menuObservers.removeAll()
     }
     private func attach(to host: Host) {
         // Expose WebKit through the same direct container boundary as the behavior host.
@@ -165,9 +195,10 @@ extension ReviewCardHost: UIViewControllerRepresentable {
             focusChanged?()
         }
         override var keyCommands: [UIKeyCommand]? {
-            [" ", "\r", "1", "2", "3", "4", "e", "-", "@", UIKeyCommand.inputEscape].map {
+            [" ", "\r", "1", "2", "3", "4", "r", "e", "-", "@", UIKeyCommand.inputEscape].map {
                 let command = UIKeyCommand(input: $0, modifierFlags: [], action: #selector(pressed(_:)))
                 command.wantsPriorityOverSystemBehavior = false
+                if $0 == "r" { command.repeatBehavior = .nonRepeatable }
                 return command
             } + [UIKeyCommand(input: "z", modifierFlags: .command, action: #selector(pressed(_:))),
                  UIKeyCommand(input: "z", modifierFlags: [.command, .shift], action: #selector(pressed(_:)))]

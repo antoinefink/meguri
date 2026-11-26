@@ -3,13 +3,12 @@ import AppKit
 import AppModel
 import SwiftUI
 
-/// The existing window's Close command and close button first close Add via
-/// its guard. All other window delegate behavior remains with SwiftUI.
+/// Closing the review window cancels Edit first, then continues that close.
+/// Add owns its separate window. Collection shutdown owns the quit guards.
 struct AddNoteWindowGuard: NSViewRepresentable {
-    let navigation: AppNavigation
     /// Edit Note's panel during a review: ⌘W and the close button act as its Cancel (E7).
     let editNote: EditNoteFlow?
-    func makeCoordinator() -> Coordinator { Coordinator(navigation: navigation, editNote: editNote) }
+    func makeCoordinator() -> Coordinator { Coordinator(editNote: editNote) }
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
         view.changedWindow = { [weak coordinator = context.coordinator] in coordinator?.install(on: $0) }
@@ -26,13 +25,14 @@ struct AddNoteWindowGuard: NSViewRepresentable {
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); changedWindow?(window) }
     }
     final class Coordinator: NSObject, NSWindowDelegate {
-        let navigation: AppNavigation
         weak var editNote: EditNoteFlow?
+        private var awaitingEditClose = false
+        private var continuingClose = false
         private weak var window: NSWindow?
         // NSObject's nonisolated selector introspection only reads this weak
         // reference. Installation and all window callbacks stay on MainActor.
         nonisolated(unsafe) private weak var previous: (any NSWindowDelegate)?
-        init(navigation: AppNavigation, editNote: EditNoteFlow?) { self.navigation = navigation; self.editNote = editNote }
+        init(editNote: EditNoteFlow?) { self.editNote = editNote }
         func install(on window: NSWindow?) {
             guard let window, window.delegate !== self else { return }
             restore()
@@ -43,12 +43,18 @@ struct AddNoteWindowGuard: NSViewRepresentable {
             window = nil; previous = nil
         }
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if continuingClose { return previous?.windowShouldClose?(sender) ?? true }
+            guard !awaitingEditClose else { return false }
             if let editNote, editNote.isPresented {
-                Task { await editNote.requestCancel() }
-                return false
-            }
-            if case .add = navigation.sheet {
-                navigation.dismissSheet()
+                awaitingEditClose = true
+                Task {
+                    let cancelled = await editNote.requestCancel()
+                    awaitingEditClose = false
+                    guard cancelled, window === sender else { return }
+                    continuingClose = true
+                    defer { continuingClose = false }
+                    sender.performClose(nil)
+                }
                 return false
             }
             return previous?.windowShouldClose?(sender) ?? true

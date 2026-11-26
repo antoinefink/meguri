@@ -208,6 +208,10 @@ enum TestHooks {
                 .background(SizeClassOverride(sizeClass: session.options.sizeClass))
                 .environment(\.layoutFollowsForcedSizeClass, session.options.sizeClass != nil)
                 #endif
+                #if os(macOS)
+                .modifier(ReviewInputEvidence(collection: collection,
+                    enabled: session.options.fixture?.lastPathComponent == "review-editor-1"))
+                #endif
                 .modifier(AppearanceOverrides(options: session.options))
             }
         }

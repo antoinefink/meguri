@@ -16,7 +16,7 @@ public struct AddNoteView: View {
     public var body: some View {
         presentation
             .onChange(of: flow.isPresented) { _, presented in
-                if !presented { collection.navigation.dismissSheet() }
+                if !presented, case .add = collection.navigation.sheet { collection.navigation.dismissSheet() }
             }
             .onChange(of: flow.refusal) { _, state in
                 if let state, let key = statusKey(state) {
@@ -37,7 +37,7 @@ public struct AddNoteView: View {
         NoteFormChrome(title: Text("Add Note", bundle: .module), subtitle: confirmationText,
                        subtitleIdentifier: "editor.add.result", identifier: "editor.add",
                        host: flow.runtime as? FieldEditorHost, decisions: AddNoteDecisions(flow: flow),
-                       attemptClose: close) {
+                       attemptClose: close, window: true) {
             closeButton
         } confirm: {
             addButton
@@ -72,6 +72,12 @@ public struct AddNoteView: View {
         let host = flow.runtime as? FieldEditorHost
         let draft = flow.draft
         VStack(alignment: .leading) {
+            #if os(macOS)
+            if let confirmationText {
+                Text(verbatim: confirmationText).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("editor.add.result")
+            }
+            #endif
             if let error = host?.error, flow.error == nil { failure(error) }
             if let error = draft?.fieldCheckError, flow.error == nil { failure(error) }
             if flow.opening || flow.saving || flow.guardingClose {
@@ -138,11 +144,22 @@ public struct AddNoteView: View {
             .disabled(!flow.canAdd || (flow.runtime as? FieldEditorHost)?.editable != true)
             .accessibilityIdentifier("editor.add.save")
     }
+    private var closeRole: ButtonRole {
+        #if os(macOS)
+        .cancel
+        #else
+        .close
+        #endif
+    }
     private var closeButton: some View {
-        Button(role: .close, action: close) {
+        Button(role: closeRole, action: close) {
+            #if os(macOS)
+            Text("Cancel", bundle: .module)
+            #else
             Label { Text("Close", bundle: .module) } icon: { Image(systemName: "xmark") }
+                .labelStyle(.iconOnly)
+            #endif
         }
-        .labelStyle(.iconOnly)
         .keyboardShortcut(.cancelAction)
         .disabled(flow.opening || collection.addNotePresentation.opening)
         .accessibilityIdentifier("editor.add.close")
@@ -168,9 +185,7 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     let host: FieldEditorHost?
     let decisions: Decisions
     let attemptClose: () -> Void
-    /// Mac: Edit Note is its own window (N20.8, F1): the window's title names
-    /// the note, the form sits on the window background, and Cancel beside
-    /// Save at the bottom trailing corner. Add keeps its panel's header.
+    /// Mac: both forms use their own native window and the same bottom row.
     var window = false
     @ViewBuilder let cancel: () -> Cancel
     @ViewBuilder let confirm: () -> Confirm
@@ -267,7 +282,8 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     #endif
 }
 
-/// The form's first group: Deck, then Type, each a menu on its current value.
+/// Selection above the fields: Deck then Type on touch; the shared Edit
+/// columns on Mac, with native pickers instead of read-only values.
 /// The fields under it scroll in their own view, so this group keeps the
 /// height of its two rows and never scrolls.
 private struct AddNoteSelectionForm: View {
@@ -291,6 +307,22 @@ private struct AddNoteSelectionForm: View {
     private var busy: Bool { flow.opening || flow.saving || flow.guardingClose || flow.exclusiveOperation != nil }
 
     var body: some View {
+        #if os(macOS)
+        NoteFormSelectionRows {
+            Picker(selection: Binding(get: { draft.notetype.id }, set: { id in Task { await flow.selectNotetype(id) } })) {
+                ForEach(notetypes, id: \.id) { Text(verbatim: $0.name).tag($0.id) }
+            } label: { Text("Type", bundle: .module) }
+            .labelsHidden()
+            .accessibilityIdentifier("editor.add.type")
+        } deck: {
+            Picker(selection: Binding(get: { draft.deck.id }, set: { id in Task { await flow.selectDeck(id) } })) {
+                ForEach(decks, id: \.id) { Text(verbatim: $0.fullName).tag($0.id) }
+            } label: { Text("Deck", bundle: .module) }
+            .labelsHidden()
+            .accessibilityIdentifier("editor.add.deck")
+        }
+        .disabled(busy)
+        #else
         Form {
             Section {
                 Picker(selection: Binding(get: { draft.deck.id }, set: { id in Task { await flow.selectDeck(id) } })) {
@@ -312,6 +344,7 @@ private struct AddNoteSelectionForm: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top = $0 }
         // Until the rows report their place the form takes its share of the sheet.
         .frame(height: bottom.map { max(0, $0 - top) })
+        #endif
     }
 }
 

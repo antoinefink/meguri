@@ -697,8 +697,6 @@ public struct ReviewAnswerBar: View {
             }
             .frame(width: ContentWidth.answerButton)
         }
-        .frame(minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
         .disabled(!enabled || phase != .answer)
         .accessibilityLabel(Text("\(Text(title, bundle: .module)), \(interval)"))
         .accessibilityIdentifier("review.session.rate.\(ReviewCoordinator.name(value))")
@@ -706,9 +704,13 @@ public struct ReviewAnswerBar: View {
     private var macRatings: some View {
         HStack {
             macRating(.again, "Again", states?.again.label, again: true).buttonStyle(.bordered)
+                .answerAreaBacking().frame(minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
             macRating(.hard, "Hard", states?.hard.label).buttonStyle(.bordered)
+                .answerAreaBacking().frame(minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
             macRating(.good, "Good", states?.good.label, prominent: true).buttonStyle(.borderedProminent)
+                .answerAreaBacking().frame(minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
             macRating(.easy, "Easy", states?.easy.label).buttonStyle(.bordered)
+                .answerAreaBacking().frame(minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
         }
     }
     private var macBar: some View {
@@ -719,6 +721,7 @@ public struct ReviewAnswerBar: View {
             if phase == .question {
                 Button(action: reveal) { Text("Show Answer", bundle: .module) }
                     .buttonStyle(.borderedProminent)
+                    .answerAreaBacking()
                     .frame(minHeight: ControlMetrics.minimumTarget)
                     .contentShape(Rectangle())
                     .disabled(!enabled)
@@ -847,7 +850,6 @@ public struct ReviewAnswerBar: View {
     }
 }
 
-#if !os(macOS)
 extension View {
     /// N16.9: the card passes under the answer buttons. Each button stands on
     /// the card page's own colour, clipped to its rounded rectangle, under its
@@ -861,6 +863,7 @@ extension View {
     }
 }
 
+#if !os(macOS)
 /// One child, centred, as wide as one of two equal columns in the row.
 private struct CentredHalfRow: Layout {
     let spacing: CGFloat

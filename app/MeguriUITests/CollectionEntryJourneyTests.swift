@@ -235,7 +235,14 @@ import notify
         XCTAssertTrue(emptyDeckAdd.isEnabled)
         try click(emptyDeckAdd, app, bundle)
 
+        #if os(macOS)
+        let addWindow = app.windows["editor.add.window"]
+        XCTAssertTrue(addWindow.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.windows.matching(identifier: "editor.add.window").count, 1)
+        let editor = addWindow.descendants(matching: .any)["editor.add"].firstMatch
+        #else
         let editor = element(app, "editor.add")
+        #endif
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         let fields = editor.descendants(matching: .any)["editor.fields"].firstMatch
         XCTAssertTrue(fields.waitForExistence(timeout: 10))
@@ -248,30 +255,60 @@ import notify
         XCTAssertTrue(emptyAdd.waitForExistence(timeout: 10))
         XCTAssertFalse(emptyAdd.isEnabled, "Add stays disabled until the first field has content")
         XCTAssertFalse(element(app, "editor.add.fieldStatus").exists)
+        func matchesNativeAX(_ actual: String?, expected: String) -> Bool {
+            guard let actual else { return false }
+            return actual.utf8.elementsEqual(expected.utf8)
+                || actual.utf8.elementsEqual((expected + "\n").utf8)
+        }
+        func describeValue(_ value: String?) -> String {
+            value?.debugDescription ?? "<unavailable>"
+        }
         for (name, content) in [("Front", front), ("Back", back)] {
+            #if os(macOS)
+            app.activate()
+            #endif
             // Production declares a named multiline textbox. Require its
             // native AX input, rather than the field's header.
             let inputs = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name))
             let input = try XCTUnwrap(waitForHittable(inputs), "Expected an actionable \(name) multiline text view")
             XCTAssertEqual(inputs.count, 1)
             XCTAssertTrue(input.isEnabled)
+            #if os(macOS)
+            // Keep native focus and send each hardware key once.
+            input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            for character in content {
+                app.typeKey(String(character).lowercased(), modifierFlags: character.isUppercase ? .shift : [])
+            }
+            // Focused WebKit AX may include an uncommitted inline prediction.
+            // Complete ordinary editing before judging the field's value.
+            let beforeBlur = input.value as? String
+            app.typeKey(.tab, modifierFlags: [])
+            // The native mode control follows bridge focus messages, processed
+            // in sequence after the preceding field's blur commit is accepted.
+            let modeAfterTab = editor.descendants(matching: .any).matching(identifier:
+                name == "Front" ? "editor.field.1.htmlToggle" : "editor.add.htmlToggle").firstMatch
+            let committed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                modeAfterTab.exists && (name == "Front" ? modeAfterTab.isEnabled : !modeAfterTab.isEnabled)
+            }, object: nil)
+            let commitResult = XCTWaiter().wait(for: [committed], timeout: 20)
+            let afterBlur = fields.descendants(matching: .textView)
+                .matching(NSPredicate(format: "label == %@", name)).firstMatch.value as? String
+            let evidence = "expected \(describeValue(content)); before blur \(describeValue(beforeBlur)); after blur \(describeValue(afterBlur))"
+            XCTAssertEqual(commitResult, .completed, "\(name) Tab must finish the editor's blur commit: \(evidence)")
+            XCTAssertTrue(matchesNativeAX(afterBlur, expected: content),
+                "Completed native editing must leave the exact \(name) value: \(evidence)")
+            #else
             try click(input, app, bundle)
             try app.bringToFront(bundleIdentifier: bundle)
             input.typeText(content)
-            // Require the live native AX String, allowing exactly one terminal LF.
-            var characterCount = -1
-            var exactWithTerminalLF = false
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                guard input.exists, let value = input.value as? String else {
-                    characterCount = -1; exactWithTerminalLF = false
-                    return false
-                }
-                characterCount = min(value.count, 128)
-                exactWithTerminalLF = value == content + "\n"
-                return value == content || exactWithTerminalLF
+                input.exists && matchesNativeAX(input.value as? String, expected: content)
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
-                "Native typing must reach \(name); AX String character count (capped at 128)=\(characterCount), exactWithTerminalLF=\(exactWithTerminalLF)")
+                "Native typing must reach the exact \(name) value")
+            XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
+                "Native typing must leave the exact \(name) value: expected \(describeValue(content)); actual \(describeValue(input.value as? String))")
+            #endif
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -279,8 +316,18 @@ import notify
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [addReady], timeout: 20), .completed,
             "The real field-change events must make Add actionable")
+        // Recheck both fields after completed editing and the form's live updates.
+        for (name, content) in [("Front", front), ("Back", back)] {
+            let input = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name)).firstMatch
+            XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
+                "\(name) must remain exact before saving: expected \(describeValue(content)); actual \(describeValue(input.value as? String))")
+        }
         XCTAssertEqual(add.label, "Add")
+        #if os(macOS)
+        add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        #else
         try click(add, app, bundle)
+        #endif
         // N17.1: the confirmation names the deck; the sheet stays open on a cleared form.
         #if os(macOS)
         XCTAssertTrue(waitForText(element(app, "editor.add.result"), "Added to Default"))
@@ -294,7 +341,11 @@ import notify
             app.debugDescription)
         XCTAssertTrue(closeEditor.isEnabled)
         // The ordinary Close runs the held-flush guard on the post-save draft.
+        #if os(macOS)
+        closeEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        #else
         try click(closeEditor, app, bundle)
+        #endif
         XCTAssertTrue(editor.waitForNonExistence(timeout: 20))
         let addedToDeck = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             deckPage.exists && HomeControls.deckCounts(app) == [1, 0, 0] && !emptyAddButtons.firstMatch.exists

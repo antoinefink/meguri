@@ -63,7 +63,8 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
         closing = true
         window.close()
         if Self.current === self { Self.current = nil }
-        parent?.makeKeyAndOrderFront(nil)
+        // Main's close guard may have already continued its asynchronous close.
+        if let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -91,8 +92,8 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
     }
 }
 
-/// ⌘W closes this window as its close button does (the app's File menu has
-/// no Close item): the flow is asked first, so a change asks to be kept.
+/// Keep ⌘W scoped to this native editor: its close button and File command
+/// use the same guard, so a change asks to be kept.
 private final class CloseKeyWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
