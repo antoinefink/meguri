@@ -946,7 +946,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '4648791dd5bda9b607bed8bcfa8d64d5b889a99bebfa5ae73633bfb74d82661a',
+        '6223ffaf566d137f08ff2298c76f79ad55c20301c18e891ca6002a4d5397ee32',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1464,7 +1464,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',
-    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': 'df592f926c48854fea0c9593e0d9b9ccb400549d3d5aa80ccac9032088bfc949',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': 'a415cafb4db36dbff634513940cb928c3b4eed86302c0cd69f8b687e4e728880',
     'app/Packages/MeguriKit/Tests/AppModelTests/BackupCoordinatorTests.swift': 'ed138732feef5aa63eec03f8c0c5f47b7b47af618f028955e191b12c9b8bb89a',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',

@@ -434,6 +434,7 @@ struct BackupRestoreContent: View {
     @State private var confirmedEntry: BackupEntry?
     @Environment(\.dynamicTypeSize) private var textSize
     #if os(iOS)
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     // Native single-line rows plus inline navigation and grouped-list insets.
     // These are scaled point estimates, independent of the presenting viewport.
@@ -585,12 +586,8 @@ struct BackupRestoreContent: View {
     }
     @ViewBuilder private func listFailureContent(_ error: MaintenanceError) -> some View {
         let title = Text("Unable to Load Backups", bundle: .module).backupMacLightTextStyle()
-        #if os(macOS)
         let failure = BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false,
                                         ioMessage: "Check access to the backup folder and try again.")
-        #else
-        let failure = BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
-        #endif
         let message = failure
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("settings.backups.listFailure")
@@ -684,21 +681,18 @@ struct BackupRestoreContent: View {
         List(selection: selection) {
             ForEach(presentation.entries, id: \.name) { entry in
                 Group {
-                    if textSize.isAccessibilitySize {
-                        VStack(alignment: .leading) {
-                            entryLabel(entry)
-                            Text(verbatim: BackupPresentation.size(entry.sizeBytes))
-                                .foregroundStyle(unavailable(entry) ? .secondary : .primary)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
+                    if colorSchemeContrast == .increased && selectedName == entry.name {
                         HStack(alignment: .firstTextBaseline) {
-                            entryLabel(entry)
-                            Spacer()
-                            Text(verbatim: BackupPresentation.size(entry.sizeBytes))
-                                .foregroundStyle(unavailable(entry) ? .secondary : .primary)
+                            touchEntryContent(entry)
+                            Image(systemName: "checkmark")
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .fixedSize()
+                                .accessibilityHidden(true)
+                                .allowsHitTesting(false)
                         }
+                    } else {
+                        touchEntryContent(entry)
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
@@ -717,6 +711,26 @@ struct BackupRestoreContent: View {
         }
         #endif
     }
+    #if os(iOS)
+    @ViewBuilder private func touchEntryContent(_ entry: BackupEntry) -> some View {
+        if textSize.isAccessibilitySize {
+            VStack(alignment: .leading) {
+                entryLabel(entry)
+                Text(verbatim: BackupPresentation.size(entry.sizeBytes))
+                    .foregroundStyle(unavailable(entry) ? .secondary : .primary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .firstTextBaseline) {
+                entryLabel(entry)
+                Spacer()
+                Text(verbatim: BackupPresentation.size(entry.sizeBytes))
+                    .foregroundStyle(unavailable(entry) ? .secondary : .primary)
+            }
+        }
+    }
+    #endif
     private func entryLabel(_ entry: BackupEntry) -> some View {
         let isUnavailable = unavailable(entry)
         #if os(macOS)

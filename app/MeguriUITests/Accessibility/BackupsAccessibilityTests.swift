@@ -154,11 +154,10 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 let emptyHeading = "No Backups Yet"
                                 let emptyDescription = "Create a backup on this device, or check the configured backup folder."
                                 let errorHeading = "Unable to Load Backups"
-                                #if os(macOS)
                                 let errorDescription = "Check access to the backup folder and try again."
+                                #if os(macOS)
                                 let passiveText = true
                                 #else
-                                let errorDescription = "The backup could not be read or written. Check file access and free space, then try again."
                                 let passiveText = state == "empty"
                                 #endif
                                 let heading = state == "empty" ? emptyHeading : errorHeading
