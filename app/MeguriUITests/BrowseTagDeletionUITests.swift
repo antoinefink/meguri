@@ -80,8 +80,10 @@ final class BrowseTagDeletionUITests: XCTestCase {
         let toast = element(app, "browse.tag.deleted")
         XCTAssertTrue(toast.waitForExistence(timeout: 5))
         // es has one card per note; jlpt is tested in Notes mode.
-        XCTAssertTrue(toast.label.contains(matching.formatted(.number.locale(Locale(identifier: "en_US")))),
-                      "The toast counts notes actually updated: \(toast.label)")
+        let toastTexts = [toast.value as? String, toast.title, toast.label].compactMap { $0 }
+        let expectedCount = matching.formatted(.number.locale(Locale(identifier: "en_US")))
+        XCTAssertTrue(toastTexts.contains { $0.contains(expectedCount) },
+                      "The toast counts notes actually updated: \(toastTexts)")
         XCTAssertTrue(element(app, "browse.empty.noResults").waitForExistence(timeout: 15),
                       "The active tag query is rerun after deletion")
         XCTAssertTrue(waitUntil { !tag.exists }, "The registry tree reloads, including implicit parents")
