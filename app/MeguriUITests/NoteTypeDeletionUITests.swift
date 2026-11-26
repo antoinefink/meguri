@@ -34,7 +34,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
                                         title: "Delete…", captureName: "note-type-delete-native-row-menu")
         action.click()
         assertCounts(app)
-        capture(confirmation(app), "noteTypes.delete.sheet")
+        captureConfirmation(app, "note-type-delete-list-confirmation")
 
         // The native alert's default Return is Cancel, never Delete.
         app.typeKey(.return, modifierFlags: [])
@@ -46,6 +46,13 @@ final class NoteTypeDeletionUITests: XCTestCase {
         // delete notes or cards while leaving the type behind.
         assertCounts(app)
         XCTAssertTrue(element(app, identifier).exists)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, identifier).exists, "Escape keeps the type and its notes")
+        XCTAssertEqual(listRows(app).count, 3)
+
+        try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
+        assertCounts(app) // Escape preserved the notes and cards too.
         confirmation(app).buttons["Cancel"].click()
         XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, identifier).exists, "Cancel keeps the type and its notes")
@@ -99,7 +106,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
                                         title: "Delete Note Type…", captureName: "browse-note-type-native-delete-menu")
         action.click()
         assertCounts(app)
-        capture(confirmation(app), "browse-note-type-delete-confirmation")
+        captureConfirmation(app, "browse-note-type-delete-confirmation")
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         // Browse's delete action navigates to Note Types before presenting
@@ -241,6 +248,12 @@ final class NoteTypeDeletionUITests: XCTestCase {
         }
         XCTAssertTrue(waitUntil { visible() }, "Require a visible, hittable row before interaction: \(scroll.debugDescription)")
         if right { row.rightClick() } else { row.click() }
+    }
+
+    private func captureConfirmation(_ app: XCUIApplication, _ name: String) {
+        // PR evidence includes the presenting workspace and its attached alert.
+        capture(app.windows["main"], name + "-window")
+        capture(confirmation(app), name + "-alert")
     }
 
     private func capture(_ element: XCUIElement, _ name: String) {

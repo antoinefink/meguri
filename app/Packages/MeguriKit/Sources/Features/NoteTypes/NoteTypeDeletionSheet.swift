@@ -237,9 +237,9 @@ private struct DeletionAlertHost: NSViewRepresentable {
             confirm.hasDestructiveAction = true
             confirm.keyEquivalent = ""
             confirm.isEnabled = presentation.canConfirm
-            // The default cell handles Return; Cancel also owns Escape.
-            alert.window.defaultButtonCell = cancel.cell as? NSButtonCell
-            cancel.keyEquivalent = "\u{1b}"
+            // Keep the first Cancel button as AppKit's Return default.
+            // NSAlert supplies Escape cancellation for its Cancel button.
+            cancel.keyEquivalent = "\r"
             self.alert = alert
             shown = question
             alert.beginSheetModal(for: window) { [weak self] response in
