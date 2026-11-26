@@ -1,6 +1,8 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Couldn't Get Media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't Get Media" } } } },
+    "Getting Media" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Getting Media" } } } },
     "Getting Media…" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Getting Media…" } } } },
     "Tags" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tags" } } } },
     "“%@” is %@. Files this size don't sync to your other devices." : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” is %@. Files this size don't sync to your other devices." } } } },

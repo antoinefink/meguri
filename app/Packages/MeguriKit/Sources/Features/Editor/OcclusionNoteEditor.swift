@@ -94,6 +94,11 @@ public struct OcclusionNoteEditor: View {
             Button { session.replacing = true } label: { Text(verbatim: IONoteText.confirmChange) }
             Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
         } message: { Text(verbatim: IONoteText.changeMessage) }
+        .alert(Text("Couldn't Get Media", bundle: .module), isPresented: Binding(
+            get: { session.fetchFailure != nil }, set: { if !$0 { session.fetchFailure = nil } }
+        )) {
+            Button { session.fetchFailure = nil } label: { Text("OK", bundle: .module) }
+        } message: { Text(verbatim: session.fetchFailure ?? "") }
         .alert(Text("This File Won't Sync", bundle: .module), isPresented: Binding(
             get: { session.sizeWarning != nil }, set: { if !$0 { session.answerSize(false) } }
         )) {
@@ -106,13 +111,8 @@ public struct OcclusionNoteEditor: View {
         #if os(iOS)
         .onChange(of: photo) { _, item in
             guard let item, let ticket = session.reserveSource(host: host) else { return }
-            Task {
-                do {
-                    let data = try await item.loadTransferable(type: Data.self)
-                    session.receiveBitmap(data, ticket: ticket, host: host, photo: true)
-                } catch { session.sourceFailed(error.localizedDescription, ticket: ticket, host: host) }
-                photo = nil
-            }
+            session.loadBitmap(ticket: ticket, host: host) { try await item.loadTransferable(type: Data.self) }
+            photo = nil
         }
         .sheet(isPresented: $camera) {
             OcclusionCamera { data in
@@ -180,7 +180,10 @@ public struct OcclusionNoteEditor: View {
             if let error = session.error { Text(verbatim: error).accessibilityIdentifier("io.picker.error") }
             if session.busy {
                 Group {
-                    if session.gettingMedia { ProgressView { Text("Getting Media…", bundle: .module) } }
+                    if session.gettingMedia {
+                        ProgressView { Text("Getting Media…", bundle: .module) }
+                            .accessibilityLabel(Text("Getting Media", bundle: .module))
+                    }
                     else { ProgressView() }
                 }.accessibilityIdentifier("io.picker.busy")
                 Button { session.cancel(); session.replacing = false } label: { Text("Cancel", bundle: .module) }

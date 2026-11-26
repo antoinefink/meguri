@@ -9,11 +9,13 @@ import UniformTypeIdentifiers
 /// draft or Browse row. Media is written through the generation-bound importer.
 @Observable @MainActor
 final class OcclusionImageSession {
+    private nonisolated struct FetchFailure: Error { let cause: String }
     private(set) var image: OcclusionImageInput?
     private(set) var loadedField: String?
     private(set) var busy = false
     private(set) var gettingMedia = false
     var error: String?
+    var fetchFailure: String?
     var replacing = false
     var startsNewMasks = false
     var sizeWarning: String?
@@ -21,56 +23,95 @@ final class OcclusionImageSession {
     private var sizeAnswer: CheckedContinuation<Bool, Never>?
     private var task: Task<Void, Never>?
     private var request = UUID()
+    private var sourceRequest: ImageSourceRequest?
+    private var providerProgress: Progress?
+    private var providerCandidates: [(NSItemProvider, String)] = []
     var completion: Task<Void, Never>? { task }
 
     func reserveSource(host: FieldEditorHost) -> UUID? {
         guard host.acceptsHostInput, !busy else { return nil }
         cancel(); busy = true; error = nil
+        let source = ImageSourceRequest()
+        sourceRequest = source
+        watchDraft(host, source: source)
         return request
     }
     func receiveBitmap(_ data: Data?, ticket: UUID, host: FieldEditorHost, photo: Bool = false) {
-        guard request == ticket, host.acceptsHostInput else { return }
+        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
         busy = false
         if let data { chooseBitmap(data, host: host, photo: photo) }
         else { replacing = false }
     }
     func receiveFile(_ url: URL?, ticket: UUID, host: FieldEditorHost) {
-        guard request == ticket, host.acceptsHostInput else { return }
+        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
         busy = false
         if let url { chooseFile(url, host: host) } else { replacing = false }
     }
+    func loadBitmap(ticket: UUID, host: FieldEditorHost,
+                    load: @escaping @Sendable () async throws -> Data?) {
+        guard request == ticket, sourceRequest?.isCancelled == false else { return }
+        task = Task {
+            do {
+                let bytes = try await load()
+                guard request == ticket, !Task.isCancelled else { return }
+                task = nil
+                receiveBitmap(bytes, ticket: ticket, host: host, photo: true)
+            } catch {
+                guard request == ticket, !Task.isCancelled else { return }
+                task = nil
+                sourceFailed(error.localizedDescription, ticket: ticket, host: host)
+            }
+        }
+    }
     func sourceFailed(_ message: String, ticket: UUID, host: FieldEditorHost) {
-        guard request == ticket, host.ownsDraft else { return }
+        guard request == ticket, sourceRequest?.isCancelled == false, host.ownsDraft else { return }
         busy = false; error = message
     }
 
     func chooseProvider(_ providers: [NSItemProvider], host: FieldEditorHost) -> Bool {
-        guard let provider = providers.first, let ticket = reserveSource(host: host) else { return false }
-        // Exactly one item. File URLs precede bitmap representations, even
-        // when the source supplies both (Finder's bitmap can be its icon).
-        let type = [UTType.fileURL.identifier, UTType.url.identifier, UTType.png.identifier].first {
-            provider.hasItemConformingToTypeIdentifier($0)
-        } ?? provider.registeredTypeIdentifiers.first { UTType($0)?.conforms(to: .image) == true }
-        guard let type else { busy = false; return false }
-        provider.loadDataRepresentation(forTypeIdentifier: type) { data, error in
-            Task { @MainActor in
-                guard self.request == ticket, host.acceptsHostInput else { return }
-                self.busy = false
-                if let error { self.error = error.localizedDescription; return }
-                guard let data else { self.error = IONoteText.noPasteImage; return }
-                if type == UTType.fileURL.identifier || type == UTType.url.identifier {
-                    guard let url = URL(dataRepresentation: data, relativeTo: nil) else {
-                        self.error = "This image URL can’t be opened. Choose a local image file."; return
-                    }
-                    if url.isFileURL { self.chooseFile(url, host: host) }
-                    else { self.chooseRemoteURL(url, host: host) }
-                } else { self.chooseBitmap(data, host: host) }
+        // The first usable item, with file URL, eligible web URL, then bitmap
+        // precedence within each item. An unrelated URL must not hide pixels.
+        let candidates = providers.flatMap { provider in
+            let images = provider.registeredTypeIdentifiers.filter {
+                UTType($0)?.conforms(to: .image) == true && $0 != UTType.png.identifier
             }
+            return ([UTType.fileURL.identifier, UTType.url.identifier, UTType.png.identifier] + images)
+                .filter { provider.hasItemConformingToTypeIdentifier($0) }.map { (provider, $0) }
         }
+        guard !candidates.isEmpty, let ticket = reserveSource(host: host) else { return false }
+        providerCandidates = candidates
+        loadProvider(at: 0, ticket: ticket, host: host)
         return true
     }
 
+    private func loadProvider(at index: Int,
+                              ticket: UUID, host: FieldEditorHost) {
+        guard index < providerCandidates.count else { busy = false; error = IONoteText.noPasteImage; return }
+        let (provider, type) = providerCandidates[index]
+        providerProgress = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+            Task { @MainActor in
+                guard self.request == ticket, self.sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
+                self.providerProgress = nil
+                guard let data else {
+                    self.loadProvider(at: index + 1, ticket: ticket, host: host); return
+                }
+                if type == UTType.fileURL.identifier || type == UTType.url.identifier {
+                    guard let url = URL(dataRepresentation: data, relativeTo: nil),
+                          url.isFileURL || Self.isRemoteImageURL(url) else {
+                        self.loadProvider(at: index + 1, ticket: ticket, host: host); return
+                    }
+                    self.busy = false
+                    if url.isFileURL { self.chooseFile(url, host: host) }
+                    else { self.chooseRemoteURL(url, host: host) }
+                } else { self.busy = false; self.chooseBitmap(data, host: host) }
+            }
+        }
+    }
+
     func cancel() {
+        sourceRequest?.cancel(); sourceRequest = nil
+        providerProgress?.cancel(); providerProgress = nil
+        providerCandidates = []
         request = UUID(); task?.cancel(); task = nil; busy = false; gettingMedia = false
         answerSize(false)
     }
@@ -99,7 +140,7 @@ final class OcclusionImageSession {
             guard snapshot.generation == host.draft.generation else { return }
             let bytes = try await Task.detached { try MediaFolder.read(name, in: snapshot.root) }.value
             let decoded = try await Task.detached {
-                OcclusionImageInput(name: name, bytes: bytes, pixels: try OcclusionImageInput.decode(bytes))
+                OcclusionImageInput(name: name, bytes: bytes, pixels: try await OcclusionImageInput.decode(bytes))
             }.value
             guard request == expected, host.draft.values[roles.image] == field, host.ownsDraft else { return }
             image = decoded; loadedField = field
@@ -122,13 +163,13 @@ final class OcclusionImageSession {
         }
         begin(host: host, name: url.lastPathComponent) { asPNG in
             let bytes = try OcclusionImageInput.readFile(url)
-            return try OcclusionImageInput.prepare(bytes, name: url.lastPathComponent, asPNG: asPNG)
+            return try await OcclusionImageInput.prepare(bytes, name: url.lastPathComponent, asPNG: asPNG)
         }
     }
     func chooseBitmap(_ data: Data, host: FieldEditorHost, photo: Bool = false) {
         let maximum = photo ? host.occlusionPhotoMaximumDimension : nil
         begin(host: host, name: "Image") { asPNG in
-            try OcclusionImageInput.prepare(data, name: nil, asPNG: asPNG, maximumDimension: maximum)
+            try await OcclusionImageInput.prepare(data, name: nil, asPNG: asPNG, maximumDimension: maximum)
         }
     }
     static func isRemoteImageURL(_ url: URL) -> Bool {
@@ -137,22 +178,33 @@ final class OcclusionImageSession {
     }
     func chooseRemoteURL(_ url: URL, host: FieldEditorHost) {
         guard host.acceptsHostInput, !busy else { return }
-        guard Self.isRemoteImageURL(url), let fetch = host.fetchOcclusionImage else {
+        guard Self.isRemoteImageURL(url) else {
             error = "This image URL can’t be opened. Choose a local image file."; return
         }
-        begin(host: host, name: url.absoluteString) { asPNG in
-            let fetched = try await fetch(url)
+        let source = ImageSourceRequest()
+        begin(host: host, name: url.absoluteString, source: source) { asPNG in
+            let fetched: FetchedEditorImage
+            do { fetched = try await source.fetch(url) }
+            catch {
+                try Task.checkCancellation()
+                if let bridge = error as? BridgeError, case .unavailable(let reason) = bridge {
+                    throw FetchFailure(cause: reason)
+                }
+                throw FetchFailure(cause: error.localizedDescription)
+            }
             try Task.checkCancellation()
-            return try OcclusionImageInput.prepare(fetched.bytes, name: fetched.name, asPNG: asPNG)
+            return try await OcclusionImageInput.prepare(fetched.bytes, name: fetched.name, asPNG: asPNG)
         }
         gettingMedia = true
     }
     private func begin(host: FieldEditorHost, name: String,
+                       source: ImageSourceRequest = ImageSourceRequest(),
                        prepare: @escaping @Sendable (Bool) async throws -> OcclusionImageInput) {
         guard host.acceptsHostInput, !busy, let roles = host.draft.occlusionRoles else { return }
-        cancel(); busy = true; error = nil
+        cancel(); busy = true; error = nil; fetchFailure = nil; sourceRequest = source
+        watchDraft(host, source: source)
         let expected = request, original = host.draft.values[roles.image]
-        let current = { self.request == expected && host.acceptsHostInput && host.draft.values[roles.image] == original }
+        let current = { self.request == expected && !source.isCancelled && host.acceptsHostInput && host.draft.values[roles.image] == original }
         task = Task {
             defer { if request == expected { busy = false; gettingMedia = false; task = nil } }
             do {
@@ -170,9 +222,9 @@ final class OcclusionImageSession {
                 }
                 // Core enforces generation at writer admission, even if the
                 // collection changes while this call is queued.
-                let stored = try await CoreMediaService(expectedGeneration: host.draft.generation)
-                    .addMedia(name: prepared.name, bytes: Array(prepared.bytes))
+                let stored = try await source.add(name: prepared.name, bytes: prepared.bytes, generation: host.draft.generation)
                 guard current(), !Task.isCancelled else { return }
+                sourceRequest = nil
                 let field = OcclusionImageField.html(name: stored)
                 host.setHostField(field, at: roles.image)
                 loadedField = field
@@ -180,7 +232,25 @@ final class OcclusionImageSession {
                 replacing = false
             } catch {
                 guard current(), !Task.isCancelled else { return }
-                self.error = IONoteText.unreadableImage(name)
+                if let failure = error as? FetchFailure {
+                    fetchFailure = name + "\n" + failure.cause
+                } else { self.error = IONoteText.unreadableImage(name) }
+            }
+        }
+    }
+
+    private func watchDraft(_ host: FieldEditorHost, source: ImageSourceRequest) {
+        // Observation invalidates synchronously, before a changed draft can
+        // admit an already queued writer. UI completion checks alone are late.
+        withObservationTracking {
+            _ = host.acceptsHostInput
+            _ = host.draft.notetype
+            _ = host.draft.values
+        } onChange: { [weak self] in
+            source.cancel()
+            Task { @MainActor [weak self] in
+                guard self?.sourceRequest === source else { return }
+                self?.cancel()
             }
         }
     }

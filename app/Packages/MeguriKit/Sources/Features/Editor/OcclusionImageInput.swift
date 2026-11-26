@@ -13,7 +13,12 @@ nonisolated struct OcclusionImageInput: Sendable {
     let pixels: CGImage
     var size: CGSize { CGSize(width: CGFloat(pixels.width), height: CGFloat(pixels.height)) }
 
-    static func decode(_ bytes: Data) throws -> CGImage {
+    static func decode(_ bytes: Data) async throws -> CGImage {
+        if let image = try? decodeBitmap(bytes) { return image }
+        return try await OcclusionSVGDecoder.decode(bytes)
+    }
+
+    static func decodeBitmap(_ bytes: Data) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
@@ -26,8 +31,8 @@ nonisolated struct OcclusionImageInput: Sendable {
         return pixels
     }
 
-    static func prepare(_ bytes: Data, name: String?, asPNG: Bool, maximumDimension: Int? = nil) throws -> Self {
-        var pixels = try decode(bytes)
+    static func prepare(_ bytes: Data, name: String?, asPNG: Bool, maximumDimension: Int? = nil) async throws -> Self {
+        var pixels = try await decode(bytes)
         if let name, OcclusionImageField.isUsableName(name) {
             return Self(name: name, bytes: bytes, pixels: pixels)
         }

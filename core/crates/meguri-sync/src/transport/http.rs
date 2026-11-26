@@ -23,6 +23,56 @@ use crate::transport::{BoxFuture, RawBody, RawStream, SyncTransport, TransportRe
 /// Name lookup, TCP, TLS and a proxy tunnel together (T8).
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub(crate) struct EditorImageResponse {
+    pub bytes: Vec<u8>,
+    pub content_type: String,
+    pub encoding: String,
+}
+
+/// One explicitly selected HTTP(S) editor image. Keep this client separate
+/// from sync: GET, redirects and content decoding have different contracts.
+pub(crate) async fn get_editor_image(written_url: &str) -> Result<EditorImageResponse, SyncError> {
+    use crate::remote_media::failure;
+    let mut url = url::Url::parse(written_url).map_err(|e| failure(&e.to_string()))?;
+    let client = reqwest::Client::builder()
+        .http1_only().no_proxy().retry(reqwest::retry::never())
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT).read_timeout(CONNECT_TIMEOUT)
+        .tls_version_min(reqwest::tls::Version::TLS_1_2)
+        .dns_resolver(Arc::new(SystemResolver))
+        .build().map_err(|e| failure(&chain(&e)))?;
+    for redirects in 0..=10 {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(failure("Only HTTP and HTTPS image URLs are supported."));
+        }
+        #[cfg(feature = "test-hooks")]
+        guard(url.as_str())?;
+        let mut response = client.get(url.clone())
+            .header("User-Agent", "Mozilla/5.0 (compatible; Meguri)")
+            .header("Accept-Encoding", "gzip, deflate")
+            .send().await.map_err(|e| failure(&chain(&e)))?;
+        let status = response.status().as_u16();
+        if matches!(status, 301 | 302 | 303 | 307 | 308)
+            && let Some(location) = response.headers().get("location")
+        {
+            if redirects == 10 { return Err(failure("The image URL redirected too many times.")); }
+            url = url.join(location.to_str().map_err(|e| failure(&e.to_string()))?)
+                .map_err(|e| failure(&e.to_string()))?;
+            continue;
+        }
+        if status != 200 { return Err(SyncError::Status { code: status, reason: String::new() }); }
+        let header = |name| response.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+        let content_type = header("content-type");
+        let encoding = header("content-encoding").trim().to_ascii_lowercase();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| failure(&chain(&e)))? {
+            bytes.extend_from_slice(&chunk);
+        }
+        return Ok(EditorImageResponse { bytes, content_type, encoding });
+    }
+    unreachable!("the redirect bound returns in the loop")
+}
+
 /// One job's HTTP client: its proxy and (test builds) its pins and roots are
 /// fixed when the job starts.
 #[derive(Debug)]

@@ -835,8 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
     "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "cd2978f27435edc7c985f4ec8515b454a9c41a3783a439ce4e24971defec8b5e",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "a0fd291247903570ddd0d0a134433f90ae9cc7fc59009c45ecb825cae6b58ec9",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "1eca80f995b8201795c6faa14dfb3597b200a8961ba716411af7f1ba4c63db96",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "5bfb128d099517da9cf40767e606dc6d3fad01313ec18d3b9340e1866d919f18",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",

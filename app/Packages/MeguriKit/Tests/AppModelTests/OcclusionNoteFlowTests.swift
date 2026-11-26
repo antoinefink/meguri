@@ -112,18 +112,35 @@ import WebKit
         }
     }
 
-    @Test func bitmapEncodingAndFileConversionValidateBeforeImport() throws {
+    @Test func bitmapEncodingAndFileConversionValidateBeforeImport() async throws {
         let png = try Self.bitmap()
-        let kept = try OcclusionImageInput.prepare(png, name: "Diagram.PNG", asPNG: false)
+        let kept = try await OcclusionImageInput.prepare(png, name: "Diagram.PNG", asPNG: false)
         #expect(kept.name == "Diagram.PNG" && kept.bytes == png)
-        let converted = try OcclusionImageInput.prepare(png, name: "Diagram.tiff", asPNG: false)
+        let converted = try await OcclusionImageInput.prepare(png, name: "Diagram.tiff", asPNG: false)
         #expect(converted.name.hasPrefix("paste-") && converted.name.hasSuffix(".jpg"))
         #expect(converted.size == CGSize(width: 4, height: 2) && converted.bytes != png)
-        #expect(throws: (any Error).self) {
-            try OcclusionImageInput.prepare(Data("broken".utf8), name: "Diagram.png", asPNG: false)
+        await #expect(throws: (any Error).self) {
+            try await OcclusionImageInput.prepare(Data("broken".utf8), name: "Diagram.png", asPNG: false)
         }
         #expect(try !occlusionHasNumberedMask(Self.label))
         #expect(try occlusionHasNumberedMask(Self.first + "<br>" + Self.label))
+    }
+
+    @Test func photoSizeLimitOffAndSystemSVGDecoder() async throws {
+        let photo = try Self.bitmap(width: 1600)
+        let limited = try await OcclusionImageInput.prepare(photo, name: nil, asPNG: true, maximumDimension: 640)
+        #expect(limited.size == CGSize(width: 640, height: 1))
+        let off = try await OcclusionImageInput.prepare(photo, name: nil, asPNG: true, maximumDimension: nil)
+        #expect(off.size == CGSize(width: 1600, height: 2))
+        let small = try await OcclusionImageInput.prepare(Self.bitmap(), name: nil, asPNG: true, maximumDimension: 1024)
+        #expect(small.size == CGSize(width: 4, height: 2))
+        let svg = Data("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"12\"><rect width=\"24\" height=\"12\" fill=\"red\"/></svg>".utf8)
+        // Call the fallback directly as well as the actual file preparation:
+        // ImageIO support can vary between system releases.
+        let system = try await OcclusionSVGDecoder.decode(svg)
+        #expect(system.width == 24 && system.height == 12)
+        let kept = try await OcclusionImageInput.prepare(svg, name: "diagram.svg", asPNG: false)
+        #expect(kept.bytes == svg && kept.name == "diagram.svg" && kept.size == CGSize(width: 24, height: 12))
     }
 }
 

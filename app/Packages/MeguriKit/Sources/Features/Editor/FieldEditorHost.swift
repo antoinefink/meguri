@@ -13,14 +13,6 @@ import WebKit
 /// This component deliberately offers no Add/Edit/Browse persistence command.
 @Observable @MainActor
 public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteFieldRuntime, BrowseFieldRuntime {
-    public nonisolated struct FetchedImage: Sendable {
-        public let name: String
-        public let bytes: Data
-        public init(name: String, bytes: Data) { self.name = name; self.bytes = bytes }
-    }
-    /// Supplied by the common Rust remote-media fetch adapter (paste P10.2).
-    /// It must propagate task cancellation to the core job.
-    public var fetchOcclusionImage: (@Sendable (URL) async throws -> FetchedImage)?
     /// P6's device setting; nil is Off. The default is 1024 pixels.
     public var occlusionPhotoMaximumDimension: Int? = 1024
     public let draft: NoteEditorDraft
@@ -198,7 +190,6 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         refreshMaskSession()
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
         browsing = previous.browsing
-        fetchOcclusionImage = previous.fetchOcclusionImage
         occlusionPhotoMaximumDimension = previous.occlusionPhotoMaximumDimension
         onPlayMedia = previous.onPlayMedia; onOpenMedia = previous.onOpenMedia
         relay.owner = self; webView.navigationDelegate = self
