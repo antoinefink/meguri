@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import UIKit
 import Vision
 import XCTest
 
@@ -41,25 +42,51 @@ final class BackupSettingsTouchUITests: XCTestCase {
         add(attachment)
         let image = try XCTUnwrap(screenshot.image.cgImage)
         let viewport = window.frame, frame = field.frame
-        // Vision uses normalized image coordinates with the origin at the bottom left.
-        let input = CGRect(x: (frame.minX - viewport.minX) / viewport.width,
-                           y: (viewport.maxY - frame.maxY) / viewport.height,
-                           width: frame.width / viewport.width, height: frame.height / viewport.height)
-        let area = CGRect(x: 0, y: input.minY - input.height, width: 1, height: 3 * input.height)
-            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = false
-        request.regionOfInterest = area
-        var diagnostics = "Normalized bottom-left coordinates: field=\(input), area=\(area)\n"
-        defer {
+        let scaleX = CGFloat(image.width) / viewport.width
+        let scaleY = CGFloat(image.height) / viewport.height
+        // CGImage cropping uses pixels with a top-left origin. Keep the full row
+        // width and one field-height of context above and below the anchored field.
+        let fieldPixels = CGRect(x: (frame.minX - viewport.minX) * scaleX,
+                                 y: (frame.minY - viewport.minY) * scaleY,
+                                 width: frame.width * scaleX, height: frame.height * scaleY)
+        let cropPixels = CGRect(x: 0, y: fieldPixels.minY - fieldPixels.height,
+                                width: CGFloat(image.width), height: 3 * fieldPixels.height).integral
+            .intersection(CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+        var diagnostics = "Window=\(viewport), field=\(frame), image=\(image.width)x\(image.height)\n"
+        diagnostics += "Scale=\(scaleX),\(scaleY); top-left pixels: field=\(fieldPixels), crop=\(cropPixels)\n"
+        func attachDiagnostics() {
             let text = XCTAttachment(string: diagnostics)
             text.name = "interval-ocr"
             text.lifetime = .keepAlways
             add(text)
         }
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        guard let cropped = image.cropping(to: cropPixels) else {
+            attachDiagnostics()
+            XCTFail("Could not crop the interval row; see interval-ocr")
+            return
+        }
+        let cropAttachment = XCTAttachment(image: UIImage(cgImage: cropped))
+        cropAttachment.name = "interval-native-row-crop"
+        cropAttachment.lifetime = .keepAlways
+        add(cropAttachment)
+        // Every OCR box and the field anchor now uses this cropped image's
+        // normalized Vision coordinates, with the origin at the bottom left.
+        let input = CGRect(x: (fieldPixels.minX - cropPixels.minX) / cropPixels.width,
+                           y: (cropPixels.maxY - fieldPixels.maxY) / cropPixels.height,
+                           width: fieldPixels.width / cropPixels.width, height: fieldPixels.height / cropPixels.height)
+        diagnostics += "Crop image=\(cropped.width)x\(cropped.height); normalized bottom-left field=\(input)\n"
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.01
+        do {
+            try VNImageRequestHandler(cgImage: cropped, options: [:]).perform([request])
+        } catch {
+            diagnostics += "Recognition failed: \(error)\n"
+            attachDiagnostics()
+            throw error
+        }
         struct Word {
             let text: String
             let box: CGRect
@@ -68,19 +95,27 @@ final class BackupSettingsTouchUITests: XCTestCase {
         }
         let words = try NSRegularExpression(pattern: #"(?i)\b(interval|30|min)\b"#)
         var recognized: [Word] = []
-        for (index, observation) in try XCTUnwrap(request.results).enumerated() {
-            let line = try XCTUnwrap(observation.topCandidates(1).first)
-            diagnostics += "\(index): \(line.string.debugDescription) \(observation.boundingBox)\n"
+        diagnostics += "Observations=\(request.results?.count ?? 0), minimumTextHeight=\(request.minimumTextHeight)\n"
+        for (index, observation) in (request.results ?? []).enumerated() {
+            let candidates = observation.topCandidates(3)
+            diagnostics += "\(index): box=\(observation.boundingBox), candidates=\(candidates.map { $0.string.debugDescription })\n"
+            guard let line = candidates.first else { continue }
             for match in words.matches(in: line.string, range: NSRange(line.string.startIndex..., in: line.string)) {
-                let range = try XCTUnwrap(Range(match.range, in: line.string))
-                let box = try XCTUnwrap(try line.boundingBox(for: range)).boundingBox
+                guard let range = Range(match.range, in: line.string) else { continue }
                 let word = String(line.string[range]).lowercased()
-                diagnostics += "  \(word): \(box)\n"
-                if area.contains(CGPoint(x: box.midX, y: box.midY)) {
+                do {
+                    guard let box = try line.boundingBox(for: range)?.boundingBox else {
+                        diagnostics += "  \(word): no word geometry\n"
+                        continue
+                    }
+                    diagnostics += "  \(word): \(box), range=\(match.range)\n"
                     recognized.append(Word(text: word, box: box, observation: index, range: range))
+                } catch {
+                    diagnostics += "  \(word): word geometry failed: \(error)\n"
                 }
             }
         }
+        attachDiagnostics()
         func word(_ text: String) throws -> Word {
             let matches = recognized.filter { $0.text == text }
             XCTAssertEqual(matches.count, 1, "Expected one \(text) in the interval area; see interval-ocr")

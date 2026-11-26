@@ -35,7 +35,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                             XCTAssertEqual(create.label, "Back Up Now")
                             XCTAssertEqual(create.isEnabled, state != "loading" && state != "error")
                             if state == "loading" {
-                                XCTAssertEqual(app.progressIndicators["settings.backups.progress"].firstMatch.label, "Creating Backup…")
+                                self.assertProgress("settings.backups.progress", label: "Creating Backup…", in: app)
                                 XCTAssertTrue(app.buttons["settings.backups.cancelOperation"].firstMatch.isEnabled)
                             }
                             let controls = ["restore", "folder", "export"]
@@ -54,7 +54,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                             }
                             let media = app.staticTexts["settings.backups.mediaExplanation"].firstMatch
                             if try self.reach(media, in: app) { try audit("media explanation") }
-                            XCTAssertTrue(media.label.contains("Device backups contain only the collection"))
+                            self.assertStaticText(media, contains: "Device backups contain only the collection")
                             if state != "error" {
                                 for field in ["interval", "daily", "weekly", "monthly"] {
                                     let input = app.textFields["settings.backups.limit.\(field)"].firstMatch
@@ -71,16 +71,31 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 if try self.reach(link, in: app) { try audit("server disclosure") }
                                 XCTAssertEqual(link.label, "Server Backups in Browser…")
                                 let disclosure = app.staticTexts["settings.backups.serverExplanation"].firstMatch
-                                XCTAssertTrue(disclosure.exists)
-                                XCTAssertTrue(disclosure.label.contains("Scheduled server backups include media"))
-                                XCTAssertTrue(disclosure.label.contains("Restoring there replaces the server collection"))
+                                XCTAssertTrue(disclosure.exists, "Expected server backup explanation: \(disclosure.debugDescription)")
+                                self.assertStaticText(disclosure, contains: "Scheduled server backups include media")
+                                self.assertStaticText(disclosure, contains: "Restoring there replaces the server collection")
                             }
                         } else {
                             #if os(macOS)
-                            let window = app.windows.containing(.any, identifier: anchor).firstMatch
+                            // The native route also opens a Launcher main window.
+                            let window = app.windows["settings.backups.restoreWindow"]
+                            XCTAssertTrue(window.waitForExistence(timeout: 10))
+                            try app.bringToFront(bundleIdentifier: self.bundle)
+                            if !window.frame.isEmpty {
+                                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+                                    .withOffset(CGVector(dx: 0, dy: 12)).click()
+                            }
+                            let cancel = window.buttons[anchor].firstMatch
+                            XCTAssertTrue(self.wait {
+                                window.title == "Restore from Backup" && !window.frame.isEmpty
+                                    && cancel.exists && cancel.isEnabled && cancel.isHittable
+                            }, "The bound restore window must be ready")
                             XCTAssertEqual(window.title, "Restore from Backup")
-                            XCTAssertTrue(window.buttons[XCUIIdentifierCloseWindow].exists)
-                            XCTAssertFalse(app.sheets.containing(.any, identifier: anchor).firstMatch.exists)
+                            XCTAssertEqual(window.descendants(matching: .any).matching(identifier: anchor).count, 1)
+                            XCTAssertFalse(window.sheets.firstMatch.exists)
+                            let restoreScope: XCUIElement = window
+                            #else
+                            let restoreScope: XCUIElement = app
                             #endif
                             let apply = app.buttons["settings.backups.apply"].firstMatch
                             XCTAssertEqual(apply.label, "Restore…")
@@ -88,18 +103,18 @@ final class BackupsAccessibilityTests: XCTestCase {
                             XCTAssertEqual(app.buttons["settings.backups.cancel"].firstMatch.label, "Cancel")
                             XCTAssertTrue(app.buttons["settings.backups.cancel"].firstMatch.isEnabled)
                             if state == "empty" || state == "error" {
-                                let emptyTitle = app.staticTexts["No Backups Yet"].firstMatch
-                                let emptyExplanation = app.staticTexts["Create a backup on this device, or check the configured backup folder."].firstMatch
-                                let errorTitle = app.staticTexts["Unable to Load Backups"].firstMatch
-                                let errorExplanation = app.staticTexts["The backup could not be read or written. Check file access and free space, then try again."].firstMatch
-                                XCTAssertEqual(emptyTitle.exists, state == "empty")
-                                XCTAssertEqual(emptyExplanation.exists, state == "empty")
-                                XCTAssertEqual(errorTitle.exists, state == "error")
-                                XCTAssertEqual(errorExplanation.exists, state == "error")
+                                let emptyTitle = self.staticText("No Backups Yet", in: restoreScope)
+                                let emptyExplanation = self.staticText("Create a backup on this device, or check the configured backup folder.", in: restoreScope)
+                                let errorTitle = self.staticText("Unable to Load Backups", in: restoreScope)
+                                let errorExplanation = self.staticText("The backup could not be read or written. Check file access and free space, then try again.", in: restoreScope)
+                                XCTAssertEqual(emptyTitle.exists, state == "empty", "Expected empty heading only in empty state: \(restoreScope.debugDescription)")
+                                XCTAssertEqual(emptyExplanation.exists, state == "empty", "Expected empty explanation only in empty state: \(restoreScope.debugDescription)")
+                                XCTAssertEqual(errorTitle.exists, state == "error", "Expected failure heading only in error state: \(restoreScope.debugDescription)")
+                                XCTAssertEqual(errorExplanation.exists, state == "error", "Expected failure explanation only in error state: \(restoreScope.debugDescription)")
                                 if state == "error" {
                                     if try self.reach(errorTitle, in: app) { try audit("list failure heading") }
                                     if try self.reach(errorExplanation, in: app) { try audit("list failure explanation") }
-                                    XCTAssertFalse(app.staticTexts["The backup was not restored. Try another backup or resolve the problem and try again."].exists)
+                                    XCTAssertFalse(self.staticText("The backup was not restored. Try another backup or resolve the problem and try again.", in: restoreScope).exists)
                                 }
                                 let retry = app.buttons["settings.backups.retry"].firstMatch
                                 if state == "error", try self.reach(retry, in: app) { try audit("list failure retry") }
@@ -107,9 +122,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 XCTAssertEqual(retry.label, "Try Again")
                                 XCTAssertTrue(retry.isEnabled)
                             } else if state == "loading" {
-                                let progress = app.progressIndicators["settings.backups.loading"].firstMatch
-                                XCTAssertTrue(progress.exists)
-                                XCTAssertEqual(progress.label, "Loading Backups…")
+                                self.assertProgress("settings.backups.loading", label: "Loading Backups…", in: app)
                             } else {
                                 let names = ["backup-2026-11-25-17.25.00.colpkg", "server-copy-2026-11-24-09.10.00.colpkg",
                                              "server-copy-2026-11-23-09.10.00.unverified.anki2", "backup-2026-11-22-08.00.00.colpkg"]
@@ -132,13 +145,31 @@ final class BackupsAccessibilityTests: XCTestCase {
                                 // date and the provider's publication/media decision. No restore runs.
                                 try app.bringToFront(bundleIdentifier: self.bundle)
                                 apply.clickOrTap()
-                                XCTAssertTrue(app.buttons["Restore"].firstMatch.waitForExistence(timeout: 5))
                                 let date = state == "overflow" ? "Nov 24, 2026" : "Nov 25, 2026"
-                                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", date)).firstMatch.exists)
                                 let message = state == "overflow"
                                     ? "Restoring does not upload this collection to Meguri Sync."
                                     : "Media files are kept."
-                                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", message)).firstMatch.exists)
+                                // Bind the action and text to the smallest native prompt.
+                                // iOS 27 can expose a Menu with MenuItem actions.
+                                let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
+                                    XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.menu.rawValue,
+                                    XCUIElement.ElementType.sheet.rawValue, XCUIElement.ElementType.alert.rawValue,
+                                    XCUIElement.ElementType.dialog.rawValue,
+                                ]))
+                                var found: XCUIElement?
+                                XCTAssertTrue(self.wait {
+                                    found = contexts.allElementsBoundByIndex.filter {
+                                        self.confirmationRestore(in: $0).exists
+                                            && self.containsText(date, in: $0) && self.containsText(message, in: $0)
+                                            && !$0.descendants(matching: .any).matching(identifier: anchor).firstMatch.exists
+                                    }.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+                                    return found != nil
+                                }, "Expected native Restore confirmation for \(date)")
+                                let confirmation = try XCTUnwrap(found,
+                                    "Expected native Restore confirmation: \(restoreScope.debugDescription)")
+                                XCTAssertTrue(self.confirmationRestore(in: confirmation).isEnabled)
+                                XCTAssertTrue(self.containsText(date, in: confirmation))
+                                XCTAssertTrue(self.containsText(message, in: confirmation))
                                 try audit("restore confirmation")
                             }
                         }
@@ -152,6 +183,68 @@ final class BackupsAccessibilityTests: XCTestCase {
             AccessibilityAudit.assertClean(result.findings)
             TouchTargets.assertMet(result.touchTargets)
         }
+    }
+
+    private func assertProgress(_ identifier: String, label expectedLabel: String, in app: XCUIApplication,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        let matches = app.descendants(matching: .any).matching(identifier: identifier)
+        let count = matches.count
+        guard count == 1 else {
+            XCTFail("Expected exactly one native progress element with identifier \(identifier); found \(count)\n\(app.debugDescription)",
+                    file: file, line: line)
+            return
+        }
+        let progress = matches.element
+        XCTAssertTrue(progress.elementType == .activityIndicator || progress.elementType == .progressIndicator,
+                      "Expected ActivityIndicator or ProgressIndicator for \(identifier); found \(progress.elementType)\n\(progress.debugDescription)",
+                      file: file, line: line)
+        XCTAssertEqual(progress.label, expectedLabel,
+                       "Expected exact progress label for \(identifier): \(progress.debugDescription)", file: file, line: line)
+        XCTAssertEqual(progress.value as? String, "In progress",
+                       "Expected exact progress value for \(identifier): \(progress.debugDescription)", file: file, line: line)
+    }
+
+    private func confirmationRestore(in context: XCUIElement) -> XCUIElement {
+        #if os(macOS)
+        let caption = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@",
+            "Restore", "Restore", "settings.backups.apply")
+        #else
+        let caption = NSPredicate(format: "label == %@ AND identifier != %@", "Restore", "settings.backups.apply")
+        #endif
+        return context.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
+            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue,
+        ])).matching(caption).firstMatch
+    }
+
+    private func containsText(_ expected: String, in context: XCUIElement) -> Bool {
+        context.label.contains(expected) || (context.value as? String)?.contains(expected) == true
+            || context.descendants(matching: .any).matching(NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@", expected, expected)).firstMatch.exists
+    }
+
+    private func wait(_ condition: @escaping () -> Bool) -> Bool {
+        XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
+            timeout: 5) == .completed
+    }
+
+    /// Native static text can expose its displayed string as either label or value.
+    /// Match content only, never identifiers or text from another element.
+    private func staticText(_ expected: String, in scope: XCUIElement, contains: Bool = false) -> XCUIElement {
+        scope.staticTexts.matching(NSPredicate(
+            format: contains ? "label CONTAINS %@ OR value CONTAINS %@" : "label == %@ OR value == %@",
+            expected, expected)).firstMatch
+    }
+
+    private func assertStaticText(_ element: XCUIElement, contains expected: String,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        guard element.exists else {
+            XCTFail("Expected static text containing \(expected.debugDescription): \(element.debugDescription)", file: file, line: line)
+            return
+        }
+        let label = element.label, value = element.value as? String
+        XCTAssertTrue(label.contains(expected) || value?.contains(expected) == true,
+                      "Expected static text containing \(expected.debugDescription); label=\(label.debugDescription), value=\(String(describing: value))\n\(element.debugDescription)",
+                      file: file, line: line)
     }
 
     /// Lazy native Forms and Lists must bring every tested row into the viewport,
