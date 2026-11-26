@@ -251,7 +251,30 @@ extension ReviewCollectionStartupTests {
     func automaticBackupCancellationLetsBackgroundSuspendOrQuitRejoin(quitting: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "backup-lifecycle-cancel-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        let configuration = try backupConfiguration(root)
+        var configuration = try backupConfiguration(root)
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
+        configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        // Ready publishes the engine's initial deadline independently of the
+        // probe. Seed T2.3's persisted reference so the real deadline is nil.
+        let initialSync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() },
+            defaults: nil, cloudConfigured: false)
+        let initial = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            sync: initialSync, providerDirectory: root.appending(path: "synthetic-installation"))
+        initial.studyPreparation.runsUnprompted = false
+        await initial.start()
+        do {
+            await initialSync.waitForInputs()
+            await initial.studyPreparation.waitForJob()
+            await initial.waitForLifecycle()
+            await initial.backupTrigger.drain()
+            try #require(initial.state == .ready)
+            let create = try #require(initial.backups.create())
+            await create.value
+            let receipt = try #require(initial.backups.created)
+            try #require(receipt.sizeBytes > 0)
+            try #require(initial.backups.entries.contains { $0.name == receipt.name && $0.sizeBytes == receipt.sizeBytes })
+            try #require(await initial.close())
+        } catch { _ = await initial.close(); throw error }
         let service = BackupServiceProbe()
         // Off has no cloud policy to acknowledge Quit. Keep startup inert:
         // sync and study-preparation writes have their own regression suites.
