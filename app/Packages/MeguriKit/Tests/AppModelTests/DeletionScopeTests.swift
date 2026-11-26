@@ -177,7 +177,7 @@ private actor DeletionCredentials: MeguriProviderCredentialStore {
         await store.save(.init(connection: configured.connection, username: "synthetic", hostKey: "synthetic"))
         try await owner.load()
         self.owner = owner
-        round = try owner.roundService()
+        round = try await owner.roundService()
     }
     func noteTypeSyncReachable() async -> Bool { false }
     func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
