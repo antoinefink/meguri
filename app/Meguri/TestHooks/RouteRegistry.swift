@@ -50,9 +50,7 @@ extension TestHooks {
             DesignSystemRoutes.register(in: &registry)
             PerfRoutes.register(in: &registry)
             ShellRoutes.register(in: &registry)
-            #if os(macOS)
             NavigationFeedbackRoutes.register(in: &registry)
-            #endif
             SpikeRoutes.register(in: &registry)
             CardBehaviorRoutes.register(in: &registry)
             #if DEBUG && os(macOS)

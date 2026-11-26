@@ -28,7 +28,8 @@ public struct HomeView: View {
             // N27.1: the welcome and "No Decks" only once they are known; until the first read
             // the last read (or the page's own background) holds the page.
             if let deckID, collection.navigation.pendingDeckPage == DeckID(deckID) {
-                HomePendingPage(grouped: true, label: Text("Loading Deck", bundle: .module))
+                HomePendingPage(grouped: true, label: Text("Loading Deck", bundle: .module),
+                    deckName: collection.homeDeck(deckID)?.name)
             } else if deckID == nil, showsToday, phase.showsDecks || phase == .pending {
                 TodayView(collection: collection)
             } else if showsRootDeckList, let query = activeSearch {
@@ -49,8 +50,8 @@ public struct HomeView: View {
             } else if phase == .welcome {
                 welcome
             } else if phase.unknown, deckPageDetail == nil || collection.homeCountsHeld {
-                // Not known yet: no state view, no text (N27.3).
-                HomePendingPage(grouped: deckID != nil)
+                // No counts yet: keep only the requested deck's known name (N27.3).
+                HomePendingPage(grouped: deckID != nil, deckName: deckID.flatMap { collection.homeDeck($0)?.name })
             } else {
                 if let deck = deckPageDetail {
                     // Keeps the screen's and the page's identifiers on separate elements.
@@ -493,13 +494,7 @@ public struct HomeView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.deck.page.\(deck.id)")
         } header: {
-            Text(verbatim: HomeHeading.deckTitle(deck.name))
-                .font(.largeTitle.bold())
-                .foregroundStyle(.token(.textPrimary))
-                .textCase(nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("home.deck.title")
+            HomeDeckHeading(name: deck.name)
         }
     }
     private func deckWaitingText(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {

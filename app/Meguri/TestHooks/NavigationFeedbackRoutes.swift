@@ -1,4 +1,4 @@
-#if MEGURI_TEST_HOOKS && os(macOS)
+#if MEGURI_TEST_HOOKS
 @_spi(MeguriTestHooks) import AppModel
 import CoreBridge
 import Foundation
@@ -7,12 +7,16 @@ import Stats
 import SwiftUI
 
 extension TestHooks {
-    /// A real production sidebar window over synthetic reads. XCTest releases each
-    /// gate explicitly; there are no timed preview delays and no collection is opened.
+    /// Production shells over synthetic reads, with no collection opened. Mac tests
+    /// release gates explicitly; touch captures start with a read tree and hold selection.
     enum NavigationFeedbackRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.register("navigation/feedback") { context in
+                #if os(macOS)
                 .screen { NavigationFeedbackWindow(configuration: context.configuration) }
+                #else
+                .screen { NavigationFeedbackWindow(configuration: context.configuration, preparedHome: true) }
+                #endif
             }
         }
     }
@@ -65,9 +69,11 @@ extension TestHooks {
         let list = NavigationReadGate()
         let record = NavigationReadGate()
         let stats = NavigationReadGate()
+        #if os(macOS)
         private var observer: NSObjectProtocol?
+        #endif
 
-        init(configuration input: LaunchConfiguration) {
+        init(configuration input: LaunchConfiguration, preparedHome: Bool) {
             var configuration = input
             configuration.initialPresentation = nil
             configuration.deviceDefaults = nil
@@ -87,6 +93,7 @@ extension TestHooks {
             noteBackend.beforeList = { await listGate.wait() }
             noteBackend.beforeRecord = { await recordGate.wait() }
             let homeGate = home, deckGate = deck
+            if preparedHome { homeGate.release() }
             collection.configureNavigationFixture(generation: 1, tree: {
                 await homeGate.wait()
                 return CountedDeckTree(generation: 1, nextChangeAt: Int64.max, nodes: StatsSampleService.decks)
@@ -101,6 +108,7 @@ extension TestHooks {
         }
 
         func listen() {
+            #if os(macOS)
             guard observer == nil, let bundle = Bundle.main.bundleIdentifier else { return }
             observer = DistributedNotificationCenter.default().addObserver(
                 forName: Notification.Name("\(bundle).testhooks.navigation.command"), object: nil, queue: .main
@@ -129,21 +137,25 @@ extension TestHooks {
                         userInfo: nil, deliverImmediately: true)
                 }
             }
+            #endif
         }
 
         func stop() {
+            #if os(macOS)
             if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
             observer = nil
+            #endif
             for gate in [home, deck, browse, list, record, stats] { gate.release() }
         }
     }
 
-    private struct NavigationFeedbackWindow: View {
+    struct NavigationFeedbackWindow: View {
         @State private var fixture: NavigationFeedbackFixture
-        init(configuration: LaunchConfiguration) {
-            _fixture = State(initialValue: NavigationFeedbackFixture(configuration: configuration))
+        init(configuration: LaunchConfiguration, preparedHome: Bool = false) {
+            _fixture = State(initialValue: NavigationFeedbackFixture(configuration: configuration, preparedHome: preparedHome))
         }
         var body: some View {
+            #if os(macOS)
             SidebarRootView(navigation: fixture.navigation, features: fixture.features, configuration: fixture.configuration)
                 .focusedSceneValue(\.nativeCommandContext, NativeCommandContext(collection: fixture.collection,
                     host: .main, layout: .sidebar, statsPage: fixture.features.statsPage))
@@ -151,6 +163,13 @@ extension TestHooks {
                 .modifier(LaunchEnvironment(configuration: fixture.configuration))
                 .onAppear { fixture.listen() }
                 .onDisappear { fixture.stop() }
+            #else
+            CompactRootView(navigation: fixture.navigation, features: fixture.features,
+                configuration: fixture.configuration, hasDecks: !fixture.collection.homeDecks.isEmpty, besideDetail: false)
+                .environment(\.shellLayout, .compact)
+                .modifier(LaunchEnvironment(configuration: fixture.configuration))
+                .onDisappear { fixture.stop() }
+            #endif
         }
     }
 }

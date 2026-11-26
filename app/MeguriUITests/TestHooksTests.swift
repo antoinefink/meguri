@@ -310,6 +310,7 @@ final class TestHooksTests: XCTestCase {
             "home/today/after-walk",
             "home/today/nothing-waiting",
             "home/today/summary",
+            "navigation/feedback",
             "notetypes/cards/card-text",
             "notetypes/cards/issues",
             "notetypes/cards/preview-back",
@@ -576,7 +577,6 @@ final class TestHooksTests: XCTestCase {
         ]
         #if os(macOS)
         routes += [
-            "navigation/feedback",
             "settings/integrations/listening",
             "settings/integrations/port-conflict",
         ]

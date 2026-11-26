@@ -75,6 +75,7 @@ private let expectedBackupsRestorePresentation: InitialPresentation.Style = .she
             "home/today/after-walk",
             "home/today/nothing-waiting",
             "home/today/summary",
+            "navigation/feedback",
             "notetypes/cards/card-text",
             "notetypes/cards/issues",
             "notetypes/cards/preview-back",
@@ -341,7 +342,6 @@ private let expectedBackupsRestorePresentation: InitialPresentation.Style = .she
         ]
         #if os(macOS)
         routes += [
-            "navigation/feedback",
             "settings/integrations/listening",
             "settings/integrations/port-conflict",
         ]
