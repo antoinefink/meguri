@@ -22,6 +22,16 @@ extension TestHooks {
             registry.register("settings/anki-transfer/media-partial") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaPartial) } }
             registry.register("settings/anki-transfer/media-complete") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaComplete) } }
             registry.register("settings/anki-transfer/media-unknown") { _ in .screen { ManualTransferSettingsPreview.mediaFixture(.mediaUnknown) } }
+            registry.register("settings/backups/empty") { _ in .screen { BackupsPreview.settings(.empty) } }
+            registry.register("settings/backups/typical") { _ in .screen { BackupsPreview.settings(.typical) } }
+            registry.register("settings/backups/overflow") { _ in .screen { BackupsPreview.settings(.overflow) } }
+            registry.register("settings/backups/error") { _ in .screen { BackupsPreview.settings(.error) } }
+            registry.register("settings/backups/loading") { _ in .screen { BackupsPreview.settings(.loading) } }
+            registry.register("settings/backups/restore/empty") { _ in .sheet { BackupsPreview.restore(.empty) } }
+            registry.register("settings/backups/restore/typical") { _ in .sheet { BackupsPreview.restore(.typical) } }
+            registry.register("settings/backups/restore/overflow") { _ in .sheet { BackupsPreview.restore(.overflow) } }
+            registry.register("settings/backups/restore/error") { _ in .sheet { BackupsPreview.restore(.error) } }
+            registry.register("settings/backups/restore/loading") { _ in .sheet { BackupsPreview.restore(.loading) } }
             registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
             registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
             registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }

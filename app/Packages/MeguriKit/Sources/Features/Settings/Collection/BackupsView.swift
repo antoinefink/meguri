@@ -19,82 +19,17 @@ public struct BackupsView: View {
     }
     private var model: BackupCoordinator { collection.backups }
     public var body: some View {
-        Form {
-            Section {
-                Button { model.create() } label: { Text("Back Up Now", bundle: .module) }
-                    .disabled(!model.canCreate)
-                    .accessibilityIdentifier("settings.backups.create")
-                if model.work == .create { BackupProgress(model: model) }
-                if let backup = model.status?.lastBackup {
-                    LabeledContent {
-                        Text(Date(timeIntervalSince1970: Double(backup.instantMilliseconds) / 1_000), format: .dateTime)
-                    } label: { Text("Last backup", bundle: .module) }
-                } else if model.status?.failures.contains(where: { $0.field == .lastBackup }) == true || (model.status == nil && !model.loading) {
-                    Text("Last backup unavailable. Try refreshing Backups.", bundle: .module)
-                } else if model.loading { ProgressView() }
-                else { Text("No successful backup recorded", bundle: .module) }
-            } footer: {
-                if let receipt = model.created {
-                    Text("Created \(receipt.name) (\(BackupPresentation.size(receipt.sizeBytes)))", bundle: .module)
-                        .accessibilityIdentifier("settings.backups.created")
-                }
-                if let error = model.failure { BackupFailureText(error: error, candidateActive: model.candidateActive, uncertain: model.activationUncertain, restore: false) }
-                if case .uncertain = model.backupPublication {
-                    Text("The backup’s publication could not be confirmed. Check the backup folder before trying again.", bundle: .module)
-                }
-            }
-            Section {
-                Button { collection.presentBackupRestore(host: host) } label: { Text("Restore from Backup…", bundle: .module) }
-                    .disabled(!model.canOpenRestore)
-                    .accessibilityIdentifier("settings.backups.restore")
-                Button(action: revealFolder) {
-                    #if os(macOS)
-                    Text("Show in Finder", bundle: .module)
-                    #else
-                    Text("Show in Files", bundle: .module)
-                    #endif
-                }
-                .accessibilityIdentifier("settings.backups.folder")
-                Button {
-                    guard collection.navigation.sheet == nil else { return }
-                    collection.collectionExport.start()
-                    collection.navigation.sheetHost = host
-                } label: { Text("Export Collection with Media…", bundle: .module) }
-                    .disabled(!collection.collectionExport.canPresent || model.busy)
-                    .accessibilityIdentifier("settings.backups.export")
-                if folderFailed { Text("The backup folder could not be opened. Check file access and try again.", bundle: .module) }
-            } footer: { Text("Backups don’t include media files. Export the collection to save its media too.", bundle: .module) }
-            Section {
-                if let limits = model.limits {
-                    limit("Back up every (minutes)", field: .interval, value: limits.minimumIntervalMinutes)
-                    limit("Daily backups", field: .daily, value: limits.daily)
-                    limit("Weekly backups", field: .weekly, value: limits.weekly)
-                    limit("Monthly backups", field: .monthly, value: limits.monthly)
-                } else {
-                    Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
-                }
-            } header: { Text("Automatic Backups", bundle: .module) }
-            footer: { Text("Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field.", bundle: .module) }
-            if collection.sync.providerState?.selection == .meguri, collection.sync.serviceConnected,
-               let url = BackupCoordinator.accountBackupsURL(endpoint: collection.sync.meguriEndpoint) {
-                Section {
-                    Link(destination: url) { Text("Server Backups in Browser…", bundle: .module) }
-                        .accessibilityIdentifier("settings.backups.server")
-                } footer: {
-                    Text("Opens this account’s Collection page on the configured Meguri Sync server. Sign in in your browser. Scheduled server backups include media; restoring there replaces the server collection.", bundle: .module)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle(Text("Backups", bundle: .module))
-        .task { await model.refresh() }
+        BackupsContent(presentation: .init(collection), actions: .init(
+            create: { model.create() }, restore: { collection.presentBackupRestore(host: host) },
+            revealFolder: revealFolder, export: {
+                guard collection.navigation.sheet == nil else { return }
+                collection.collectionExport.start()
+                collection.navigation.sheetHost = host
+            }, editLimit: { field, value in Task { await model.editLimit(field, value: value) } },
+            cancel: model.cancel), folderFailed: folderFailed)
+            .task { await model.refresh() }
     }
 
-    private func limit(_ title: LocalizedStringKey, field: BackupCoordinator.LimitField, value: UInt32) -> some View {
-        BackupLimitRow(title: title, value: value, minimum: field == .interval ? 5 : 0, enabled: model.canEditLimits) { edited in
-            Task { await model.editLimit(field, value: edited) }
-        }
-    }
     private func revealFolder() {
         let url = collection.configuration.collectionLocation.backupsDirectory
         #if os(macOS)
@@ -109,8 +44,90 @@ public struct BackupsView: View {
     }
 }
 
+/// The production grouped form; immutable render values carry no host or service.
+struct BackupsContent: View {
+    let presentation: BackupsPresentation
+    let actions: BackupsActions
+    let folderFailed: Bool
+    var body: some View {
+        Form {
+            Section {
+                Button(action: actions.create) { Text("Back Up Now", bundle: .module) }
+                    .disabled(!presentation.canCreate)
+                    .accessibilityIdentifier("settings.backups.create")
+                if presentation.work == .create { BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: actions.cancel) }
+                if let instant = presentation.lastBackupMilliseconds {
+                    LabeledContent {
+                        Text(Date(timeIntervalSince1970: Double(instant) / 1_000), format: .dateTime)
+                    } label: { Text("Last backup", bundle: .module) }
+                } else if presentation.lastBackupUnavailable {
+                    Text("Last backup unavailable. Try refreshing Backups.", bundle: .module)
+                } else if presentation.loading { ProgressView() }
+                else { Text("No successful backup recorded", bundle: .module) }
+            } footer: {
+                if let receipt = presentation.created {
+                    Text("Created \(receipt.name) (\(BackupPresentation.size(receipt.sizeBytes)))", bundle: .module)
+                        .accessibilityIdentifier("settings.backups.created")
+                }
+                if let error = presentation.failure { BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: false) }
+                if case .uncertain = presentation.backupPublication {
+                    Text("The backup’s publication could not be confirmed. Check the backup folder before trying again.", bundle: .module)
+                }
+            }
+            Section {
+                Button(action: actions.restore) { Text("Restore from Backup…", bundle: .module) }
+                    .disabled(!presentation.canOpenRestore)
+                    .accessibilityIdentifier("settings.backups.restore")
+                Button(action: actions.revealFolder) {
+                    #if os(macOS)
+                    Text("Show in Finder", bundle: .module)
+                    #else
+                    Text("Show in Files", bundle: .module)
+                    #endif
+                }
+                .accessibilityIdentifier("settings.backups.folder")
+                Button(action: actions.export) { Text("Export Collection with Media…", bundle: .module) }
+                    .disabled(!presentation.canExport)
+                    .accessibilityIdentifier("settings.backups.export")
+                if folderFailed { Text("The backup folder could not be opened. Check file access and try again.", bundle: .module) }
+            } footer: { Text("Backups don’t include media files. Export the collection to save its media too.", bundle: .module)
+                .accessibilityIdentifier("settings.backups.mediaExplanation") }
+            Section {
+                if let limits = presentation.limits {
+                    limit("Back up every (minutes)", field: .interval, value: limits.minimumIntervalMinutes)
+                    limit("Daily backups", field: .daily, value: limits.daily)
+                    limit("Weekly backups", field: .weekly, value: limits.weekly)
+                    limit("Monthly backups", field: .monthly, value: limits.monthly)
+                } else {
+                    Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
+                }
+            } header: { Text("Automatic Backups", bundle: .module) }
+            footer: { Text("Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field.", bundle: .module) }
+            if let url = presentation.serverBackupsURL {
+                Section {
+                    Link(destination: url) { Text("Server Backups in Browser…", bundle: .module) }
+                        .accessibilityIdentifier("settings.backups.server")
+                } footer: {
+                    Text("Opens this account’s Collection page on the configured Meguri Sync server. Sign in in your browser. Scheduled server backups include media; restoring there replaces the server collection.", bundle: .module)
+                        .accessibilityIdentifier("settings.backups.serverExplanation")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(Text("Backups", bundle: .module))
+        .accessibilityIdentifier("settings.backups.content")
+    }
+
+    private func limit(_ title: LocalizedStringKey, field: BackupCoordinator.LimitField, value: UInt32) -> some View {
+        BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", value: value, minimum: field == .interval ? 5 : 0, enabled: presentation.canEditLimits) { edited in
+            actions.editLimit(field, edited)
+        }
+    }
+}
+
 private struct BackupLimitRow: View {
     let title: LocalizedStringKey
+    let identifier: String
     let value: UInt32
     let minimum: UInt32
     let enabled: Bool
@@ -121,6 +138,7 @@ private struct BackupLimitRow: View {
     var body: some View {
         LabeledContent {
             TextField(text: $draft) { Text(title, bundle: .module) }
+                .accessibilityIdentifier(identifier)
                 .multilineTextAlignment(.trailing)
                 #if os(iOS)
                 .keyboardType(.numbersAndPunctuation)
@@ -143,31 +161,55 @@ private struct BackupLimitRow: View {
 
 public struct BackupRestoreSheet: View {
     let collection: ReviewCollection
-    @Environment(\.locale) private var locale
-    @State private var confirmation = false
-    @State private var confirmedEntry: BackupEntry?
     public init(collection: ReviewCollection) { self.collection = collection }
     private var model: BackupCoordinator { collection.backups }
     public var body: some View {
+        BackupRestoreContent(presentation: .init(collection), selectedName: Binding(
+            get: { model.selectedName }, set: { model.selectedName = $0 }),
+            refresh: { Task { await model.refresh() } }, cancel: {
+                if model.busy { model.cancel() }
+                else { collection.navigation.dismissSheet() }
+            }, restore: { model.restoreConfirmed(name: $0) })
+            .task { await model.openedRestore() }
+    }
+}
+
+struct BackupRestoreContent: View {
+    let presentation: BackupsPresentation
+    @Binding var selectedName: String?
+    let refresh: () -> Void
+    let cancel: () -> Void
+    let restore: (String) -> Void
+    @Environment(\.locale) private var locale
+    @State private var confirmation = false
+    @State private var confirmedEntry: BackupEntry?
+    private var selectedEntry: BackupEntry? {
+        presentation.entries.first { $0.name == selectedName && !unavailable($0) }
+    }
+    var body: some View {
         NavigationStack {
             VStack {
-                if model.work == .restore {
-                    BackupProgress(model: model)
+                if presentation.work == .restore {
+                    BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: cancel)
                         .padding()
-                } else if model.loading {
+                } else if presentation.loading {
                     ProgressView { Text("Loading Backups…", bundle: .module) }
-                } else if model.entries.isEmpty {
+                        .accessibilityLabel(Text("Loading Backups…", bundle: .module))
+                        .accessibilityValue(Text("In progress", bundle: .module))
+                        .accessibilityIdentifier("settings.backups.loading")
+                } else if presentation.entries.isEmpty {
                     ContentUnavailableView {
                         Label { Text("No Backups Yet", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
                     } description: { Text("Create a backup on this device, or check the configured backup folder.", bundle: .module) }
-                    actions: { Button { Task { await model.refresh() } } label: { Text("Try Again", bundle: .module) } }
+                    actions: { Button(action: refresh) { Text("Try Again", bundle: .module) }
+                        .accessibilityIdentifier("settings.backups.retry") }
                 } else {
-                    List(selection: Binding(get: { model.selectedName }, set: { name in
-                        guard let name, model.entries.contains(where: { $0.name == name && $0.kind != .serverCopyUnverified }),
-                              !model.rejectedNames.contains(name) else { return }
-                        model.selectedName = name
+                    List(selection: Binding(get: { selectedName }, set: { name in
+                        guard let name, presentation.entries.contains(where: { $0.name == name && $0.kind != .serverCopyUnverified }),
+                              !presentation.rejectedNames.contains(name) else { return }
+                        selectedName = name
                     })) {
-                        ForEach(model.entries, id: \.name) { entry in
+                        ForEach(presentation.entries, id: \.name) { entry in
                             VStack(alignment: .leading) {
                                 Text(verbatim: BackupPresentation.timestamp(entry, locale: locale))
                                 Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
@@ -179,62 +221,62 @@ public struct BackupRestoreSheet: View {
                             .selectionDisabled(unavailable(entry))
                             .foregroundStyle(unavailable(entry) ? .secondary : .primary)
                             .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(selectedName == entry.name ? .isSelected : [])
                             .accessibilityIdentifier("settings.backups.entry.\(entry.name)")
                         }
                     }
                     .accessibilityIdentifier("settings.backups.list")
                 }
-                if let error = model.failure {
-                    BackupFailureText(error: error, candidateActive: model.candidateActive, uncertain: model.activationUncertain, restore: true)
+                if let error = presentation.failure {
+                    BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: true)
                         .padding()
                         .accessibilityIdentifier("settings.backups.failure")
                 }
-                if let safety = model.safetyBackup {
+                if let safety = presentation.safetyBackup {
                     Text("Safety copy: \(safety)", bundle: .module).font(.caption)
+                        .accessibilityIdentifier("settings.backups.safetyCopy")
                 }
-                if case .uncertain = model.backupPublication {
+                if case .uncertain = presentation.backupPublication {
                     Text("The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing.", bundle: .module)
                         .padding()
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.backups.restoreContent")
             .navigationTitle(Text("Restore from Backup", bundle: .module))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        if model.busy { model.cancel() }
-                        else { collection.navigation.dismissSheet() }
-                    } label: { Text("Cancel", bundle: .module) }
+                    Button(action: cancel) { Text("Cancel", bundle: .module) }
                         .keyboardShortcut(.cancelAction)
-                        .disabled(model.busy && !model.canCancel)
+                        .disabled(presentation.busy && !presentation.canCancel)
                         .accessibilityIdentifier("settings.backups.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        confirmedEntry = model.selectedEntry; confirmation = confirmedEntry != nil
+                        confirmedEntry = selectedEntry; confirmation = confirmedEntry != nil
                     } label: { Text("Restore…", bundle: .module) }
-                        .disabled(!model.canOpenRestore || model.loading || model.selectedEntry == nil)
+                        .disabled(!presentation.canOpenRestore || presentation.loading || selectedEntry == nil)
                         .accessibilityIdentifier("settings.backups.apply")
                 }
             }
             .confirmationDialog(confirmationTitle, isPresented: $confirmation, titleVisibility: .visible) {
                 Button(role: .destructive) {
-                    if let entry = confirmedEntry { model.restoreConfirmed(name: entry.name) }
+                    if let entry = confirmedEntry { restore(entry.name) }
                 } label: { Text("Restore", bundle: .module) }
                 Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
             } message: { Text(confirmationMessage, bundle: .module) }
         }
-        .interactiveDismissDisabled(model.busy || confirmation)
-        .task { await model.openedRestore() }
+        .interactiveDismissDisabled(presentation.busy || confirmation)
     }
     private func unavailable(_ entry: BackupEntry) -> Bool {
-        entry.kind == .serverCopyUnverified || model.rejectedNames.contains(entry.name)
+        entry.kind == .serverCopyUnverified || presentation.rejectedNames.contains(entry.name)
     }
     private var confirmationTitle: Text {
         let date = confirmedEntry.map { BackupPresentation.timestamp($0, locale: locale) } ?? ""
         return Text("Replace the current collection with the backup from \(date)?", bundle: .module)
     }
     private var confirmationMessage: LocalizedStringKey {
-        switch collection.sync.providerState?.selection {
+        switch presentation.provider {
         case .iCloud:
             "The current collection is backed up first. The restored collection stays on this device until you choose what to do with iCloud."
         case .meguri:
@@ -246,13 +288,18 @@ public struct BackupRestoreSheet: View {
 }
 
 private struct BackupProgress: View {
-    let model: BackupCoordinator
+    let work: BackupCoordinator.Work?
+    let canCancel: Bool
+    let cancel: () -> Void
     var body: some View {
         ProgressView {
-            Text(model.work == .restore ? "Restoring Backup…" : "Creating Backup…", bundle: .module)
+            Text(work == .restore ? "Restoring Backup…" : "Creating Backup…", bundle: .module)
         }
-        if model.canCancel {
-            Button { model.cancel() } label: { Text("Cancel", bundle: .module) }
+        .accessibilityLabel(Text(work == .restore ? "Restoring Backup…" : "Creating Backup…", bundle: .module))
+        .accessibilityValue(Text("In progress", bundle: .module))
+        .accessibilityIdentifier("settings.backups.progress")
+        if canCancel {
+            Button(action: cancel) { Text("Cancel", bundle: .module) }
                 .accessibilityIdentifier("settings.backups.cancelOperation")
         }
     }

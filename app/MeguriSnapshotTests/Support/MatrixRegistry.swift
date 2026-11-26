@@ -63,6 +63,7 @@ enum MatrixRegistry {
         ScreenRegistration(type: CollectionExportPreview.self) { _, state in
             [.typical, .error, .loading].contains(state) ? .pairwise : nil
         },
+        ScreenRegistration(type: BackupsPreview.self) { _, _ in .pairwise },
         ScreenRegistration(type: CollectionEntryPreview.self) { _, _ in .pairwise },
         ScreenRegistration(type: ReviewQuestionPreview.self) { _, _ in .keyVariants },
         ScreenRegistration(type: ReviewAnswerPreview.self) { _, _ in .keyVariants },
