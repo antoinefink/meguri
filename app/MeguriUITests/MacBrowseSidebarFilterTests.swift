@@ -63,7 +63,7 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         let (app, bundle) = try launch(route: "browse/sidebar/keyboard-target")
         addTeardownBlock { @MainActor in
             guard self.testRun?.hasSucceeded == false else { return }
-            let evidence = XCTAttachment(string: app.windows.debugDescription)
+            let evidence = XCTAttachment(string: app.windows.firstMatch.debugDescription)
             evidence.name = "browse-keyboard-target-AX"
             evidence.lifetime = .keepAlways
             self.add(evidence)
@@ -74,16 +74,20 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         let filterID = "browse.sidebar.state.suspended"
         let filter = list.descendants(matching: .any).matching(identifier: filterID).firstMatch
         let filterRows = list.outlineRows.containing(.any, identifier: filterID)
-        XCTAssertTrue(waitUntil { filterRows.count == 1 && filterRows.firstMatch.isHittable })
+        XCTAssertTrue(waitUntil { filterRows.count == 1 }, "Exactly one native outline row contains Suspended")
         let filterRow = filterRows.firstMatch
+        // NSOutlineRow is not itself hittable; its label is interactive.
+        XCTAssertTrue(waitUntil { filter.exists && filter.isHittable })
         let token = element(app, "browse.search.token.0")
-        let query = app.toolbars.searchFields.firstMatch
+        let query = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
         XCTAssertTrue(query.waitForExistence(timeout: 10))
         XCTAssertTrue(waitUntil { !self.statusText(app).isEmpty })
         let whole = statusText(app)
         XCTAssertFalse(whole.contains(" of "))
+        XCTAssertFalse(token.exists)
         let originalQuery = try XCTUnwrap(query.value as? String)
-        XCTAssertEqual(originalQuery, "")
+        // An empty AppKit AXSearchField can expose its placeholder as value.
+        XCTAssertTrue(originalQuery.isEmpty || originalQuery == query.placeholderValue)
 
         func assertUnchanged() {
             XCTAssertEqual(query.value as? String, originalQuery)
