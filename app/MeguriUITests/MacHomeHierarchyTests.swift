@@ -100,28 +100,29 @@ final class MacHomeHierarchyTests: XCTestCase {
         let picker = unique(settings, "settings.sync.service")
         XCTAssertEqual(picker.elementType, .popUpButton)
         actionable(picker)
-        // T19.2: Off, Meguri Sync, iCloud, in that order; iCloud carries its Beta label.
-        let captions = ["Off", "Meguri Sync", "iCloud (Beta)"]
+        // N15.2 / T19.2: native menu titles expose accessibility names;
+        // iCloud's accessibility label is "iCloud, Beta", including its Beta label.
+        let accessibilityNames = ["Off", "Meguri Sync", "iCloud, Beta"]
 
-        func choose(_ caption: String) throws {
+        func choose(_ accessibilityName: String) throws {
             actionable(picker)
             try click(picker, app: app, bundle: bundle)
             let items = picker.menuItems
             XCTAssertTrue(items.matching(NSPredicate(format: "title == %@", "Meguri Sync"))
                 .element(boundBy: 0).waitForExistence(timeout: 10))
             XCTAssertEqual(items.count, 3, "Off is the first value of the one Service control")
-            XCTAssertEqual(items.allElementsBoundByIndex.map(\.title), captions,
-                "Require the full native menu's actual captions, in order")
-            for title in captions {
+            XCTAssertEqual(items.allElementsBoundByIndex.map(\.title), accessibilityNames,
+                "Require the full native menu's exact accessibility names, in order")
+            for title in accessibilityNames {
                 let options = items.matching(NSPredicate(format: "title == %@", title))
-                XCTAssertEqual(options.count, 1, "Require the exact native service caption: \(title)")
+                XCTAssertEqual(options.count, 1, "Require the exact native service accessibility name: \(title)")
                 XCTAssertEqual(options.element(boundBy: 0).elementType, .menuItem)
                 actionable(options.element(boundBy: 0))
             }
-            let intended = items.matching(NSPredicate(format: "title == %@", caption))
+            let intended = items.matching(NSPredicate(format: "title == %@", accessibilityName))
             XCTAssertEqual(intended.count, 1)
             let option = intended.element(boundBy: 0)
-            XCTAssertEqual(option.title, caption)
+            XCTAssertEqual(option.title, accessibilityName)
             XCTAssertEqual(option.elementType, .menuItem)
             actionable(option)
             try click(option, app: app, bundle: bundle)
