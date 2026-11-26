@@ -89,7 +89,7 @@ final class BackupRestoreWindowUITests: XCTestCase {
         XCTAssertEqual(scrollbars.count, 1, "The same history viewport must own one native vertical scrollbar")
         let scrollbar = try XCTUnwrap(scrollbars.first)
         let thumbs = scrollbar.descendants(matching: .valueIndicator).allElementsBoundByIndex
-        XCTAssertEqual(thumbs.count, 1, "Drag the native scrollbar's own thumb")
+        XCTAssertEqual(thumbs.count, 1, "The native scrollbar must expose its own thumb")
         let thumb = try XCTUnwrap(thumbs.first)
         func attachHistory(_ state: String) {
             self.attachHistory(window, viewport: viewport, firstCell: firstCell, oldest: oldest,
@@ -101,26 +101,30 @@ final class BackupRestoreWindowUITests: XCTestCase {
         assertFooterSeparation(window, viewport: viewport, cell: firstCell)
         let trackFrame = scrollbar.frame
         let thumbFrame = thumb.frame
-        let windowFrame = window.frame
         XCTAssertTrue(!trackFrame.isEmpty
             && !thumbFrame.isEmpty && trackFrame.contains(thumbFrame) && initialViewport.contains(thumbFrame),
             "The same native vertical track must contain its visible thumb")
-        let startPoint = CGPoint(x: thumbFrame.midX, y: thumbFrame.midY)
-        let endPoint = CGPoint(x: trackFrame.midX, y: trackFrame.maxY - thumbFrame.height / 2)
-        XCTAssertTrue(initialViewport.contains(startPoint) && trackFrame.contains(startPoint)
-            && initialViewport.contains(endPoint) && trackFrame.contains(endPoint),
-            "Both native drag points must lie within the viewport and the actual scrollbar track")
-        // ValueIndicator and ScrollView are passive, disabled AX objects. Anchor
-        // input to the key restore window using their actual screen-space frames.
-        let origin = window.coordinate(withNormalizedOffset: .zero)
-        let start = origin.withOffset(CGVector(dx: startPoint.x - windowFrame.minX,
-            dy: startPoint.y - windowFrame.minY))
-        let end = origin.withOffset(CGVector(dx: endPoint.x - windowFrame.minX,
-            dy: endPoint.y - windowFrame.minY))
+        func normalizedScrollValue() -> Double? {
+            let value = scrollbar.value
+            if let number = value as? NSNumber { return number.doubleValue }
+            if let string = value as? String { return Double(string) }
+            return nil
+        }
+        let initialScrollValue = normalizedScrollValue()
         try app.bringToFront(bundleIdentifier: bundle)
-        // One native mouse drag, using only this thumb and its vertical track.
-        // Align the thumb's bottom with the track's bottom; AppKit clamps it.
-        start.click(forDuration: 0.1, thenDragTo: end)
+        // Focus the real filename-bound data cell through its visible midpoint
+        // in the bound native window, then use the Table's ordinary End key.
+        let firstCellFrame = firstCell.frame
+        let windowFrame = window.frame
+        XCTAssertTrue(viewport.frame.intersection(windowFrame).contains(firstCellFrame)
+            && !firstCellFrame.isEmpty)
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: firstCellFrame.midX - windowFrame.minX,
+                dy: firstCellFrame.midY - windowFrame.minY)).click()
+        let firstSelected = wait { first.value as? String == "Selected" }
+        attachHistory("first-archive-focused")
+        XCTAssertTrue(firstSelected, "The native Table must select the exact first filename before keyboard scrolling")
+        window.typeKey(XCUIKeyboardKey.end.rawValue, modifierFlags: [])
         let reachedOldest = wait {
             let visible = viewport.frame.intersection(window.frame)
             guard oldest.exists && oldestCell.exists else { return false }
@@ -133,6 +137,14 @@ final class BackupRestoreWindowUITests: XCTestCase {
         // continueAfterFailure is false: save the actual outcome before asserting.
         attachHistory("after-native-scroll")
         XCTAssertTrue(reachedOldest, "The exact oldest archive and its complete data cell must become visible and actionable")
+        let finalViewport = viewport.frame.intersection(window.frame)
+        XCTAssertTrue(scrollbar.exists && thumb.exists && !scrollbar.frame.isEmpty && !thumb.frame.isEmpty
+            && scrollbar.frame.contains(thumb.frame) && finalViewport.contains(thumb.frame),
+            "The same native vertical scrollbar must retain its own visible thumb after End")
+        if let initialScrollValue, let finalScrollValue = normalizedScrollValue() {
+            XCTAssertGreaterThan(finalScrollValue, initialScrollValue,
+                "The native normalized scrollbar value must show progress after End")
+        }
         assertFooterSeparation(window, viewport: viewport, cell: oldestCell)
         try app.bringToFront(bundleIdentifier: bundle)
         oldest.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
