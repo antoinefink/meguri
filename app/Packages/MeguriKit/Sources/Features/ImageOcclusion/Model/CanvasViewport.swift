@@ -13,6 +13,11 @@ struct CanvasViewport {
               y: (area.height - reference.height * zoom) / 2 + pan.height)
     }
     var imageRect: CGRect { screenRect(CGRect(origin: .zero, size: reference)) }
+    var isFitted: Bool {
+        guard reference.width > 0, reference.height > 0, area.width > 0, area.height > 0 else { return false }
+        let fittedZoom = min(area.width / reference.width, area.height / reference.height)
+        return abs(zoom - fittedZoom) <= fittedZoom * 0.000001 && pan == .zero
+    }
 
     func polygonFrame(_ points: [CGPoint]) -> CGRect? {
         guard let first = points.first else { return nil }

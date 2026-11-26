@@ -12,6 +12,8 @@ struct MaskCanvas: View {
     let fill: String
     let editLabel: (UUID) -> Void
     let focusCanvas: () -> Void
+    var formStyle = false
+    var acceptsKeyboardNavigation: () -> Bool = { true }
     @Environment(\.isEnabled) private var isEnabled
     @State private var interaction = MaskCanvasInteraction()
     @State private var pointer: CGPoint?
@@ -38,7 +40,8 @@ struct MaskCanvas: View {
             handles
                 .accessibilityHidden(usesNativeAccessibility)
             #if os(macOS)
-            NativeCanvasAccessibility(items: nativeAccessibilityItems, enabled: isEnabled)
+            NativeCanvasAccessibility(items: nativeAccessibilityItems, enabled: isEnabled,
+                                      selectionDescription: formStyle ? selectionDescription(session.selection) : nil)
             // Do not apply accessibilityHidden or allowsHitTesting here: AppKit
             // returns nil from mouse hitTest while retaining its AX children.
             #endif
@@ -49,12 +52,22 @@ struct MaskCanvas: View {
                     viewport.pan.width += delta.width; viewport.pan.height += delta.height
                 },
                 ended: { interaction.navigationEnded() },
-                panStarted: { interaction.navigationStarted(session: session) }
+                panStarted: { interaction.navigationStarted(session: session) },
+                acceptsKeyboard: acceptsKeyboardNavigation
             )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(macOS)
+        .background { if formStyle { Color(nsColor: .underPageBackgroundColor) } }
+        .contextMenu { if formStyle { canvasContextMenu } }
+        .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { value in
+            guard formStyle, isEnabled,
+                  let shape = shape(at: viewport.referencePoint(value.location)), shape.isLabel else { return }
+            focusCanvas(); session.select(shape.id); editLabel(shape.id)
+        }, including: formStyle ? .all : .none)
+        #endif
         .contentShape(Rectangle())
         .onContinuousHover { phase in
             switch phase {
@@ -173,6 +186,20 @@ struct MaskCanvas: View {
             for alignment in MaskAlignment.allCases {
                 actions.append((ioString(alignment.key), { select(); session.align(alignment) }))
             }
+            if formStyle {
+                if item.first.isLabel {
+                    actions.append((ioString("io.label.edit"), { select(); editLabel(item.first.id) }))
+                }
+                for move in CanvasMove.allCases {
+                    actions.append((ioString(move.key), {
+                        select(); session.commit(session.moved(dx: move.delta.width, dy: move.delta.height, finishing: true))
+                    }))
+                }
+                if item.ids.count == 1 {
+                    actions.append((ioString("io.rotate.clockwise"), { select(); session.rotateStep(increment: true) }))
+                    actions.append((ioString("io.rotate.counterclockwise"), { select(); session.rotateStep(increment: false) }))
+                }
+            }
             result.append(.init(identifier: item.identifier, label: itemLabel(item.ids, first: item.first),
                 frame: item.frame, selected: session.selection.contains(item.first.id), press: select,
                 adjust: { increment in
@@ -205,6 +232,49 @@ struct MaskCanvas: View {
             }
         }
         return result
+    }
+
+    private func shape(at point: CGPoint) -> OcclusionShape? {
+        session.document.shapes.reversed().first { $0.path(in: session.referenceSize).contains(point) }
+    }
+    private var contextSelection: Set<UUID> {
+        if let pointer, let shape = shape(at: pointer), !session.selection.contains(shape.id) {
+            return Set(session.document.items.first { $0.contains(shape.id) } ?? [shape.id])
+        }
+        return session.selection
+    }
+    private func selectionDescription(_ ids: Set<UUID>) -> String {
+        String(format: ioString("io.selection.count"), Int64(ids.count))
+    }
+    private func prepareContextSelection(_ ids: Set<UUID>) {
+        focusCanvas(); session.selection = ids
+    }
+    private var canvasContextMenu: some View {
+        let selection = contextSelection
+        return Group {
+            Text(selectionDescription(selection))
+            if selection.count == 1,
+               let shape = session.document.shapes.first(where: { selection.contains($0.id) }) {
+                if shape.isLabel {
+                    Button(ioString("io.label.edit")) {
+                        prepareContextSelection(selection); editLabel(shape.id)
+                    }
+                }
+                Button(ioString("io.rotate.clockwise")) {
+                    prepareContextSelection(selection); session.rotateStep(increment: true)
+                }
+                Button(ioString("io.rotate.counterclockwise")) {
+                    prepareContextSelection(selection); session.rotateStep(increment: false)
+                }
+            }
+            ForEach(CanvasMove.allCases) { move in
+                Button(ioString(move.key)) {
+                    prepareContextSelection(selection)
+                    session.commit(session.moved(dx: move.delta.width, dy: move.delta.height, finishing: true))
+                }.disabled(selection.isEmpty)
+            }
+        }
+        .disabled(!isEnabled || !session.isReadable)
     }
     #endif
 
@@ -291,6 +361,22 @@ struct MaskCanvas: View {
          - atan2(value.startLocation.y - center.y, value.startLocation.x - center.x)) * 180 / .pi
     }
 }
+
+#if os(macOS)
+private enum CanvasMove: String, CaseIterable, Identifiable {
+    case left, right, up, down
+    var id: Self { self }
+    var key: String { "io.move.\(rawValue)" }
+    var delta: CGSize {
+        switch self {
+        case .left: .init(width: -5, height: 0)
+        case .right: .init(width: 5, height: 0)
+        case .up: .init(width: 0, height: -5)
+        case .down: .init(width: 0, height: 5)
+        }
+    }
+}
+#endif
 
 /// The production drawing layer stays SwiftUI-only so ImageRenderer can render
 /// imported fills without placeholders for the canvas's native input/AX views.

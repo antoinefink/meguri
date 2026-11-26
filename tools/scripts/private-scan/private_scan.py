@@ -843,8 +843,8 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "c94356e618294a9266b4a71d4522ca8fe1228b065567d0f568c31c1901a122cc",
-    "app/MeguriUITests/IOAddEditUITests.swift": "f0fc68a61843adf2187f018bea9274ac9536e860b70410eee71618be3455e157",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
+    "app/MeguriUITests/IOAddEditUITests.swift": "7c0fc12cf3d0cea0bea8597b7d5892797ad686854ed9f033c441c3d865513167",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",

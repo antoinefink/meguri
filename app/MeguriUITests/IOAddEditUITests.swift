@@ -45,12 +45,14 @@ import XCTest
         app.typeKey("n", modifierFlags: .command)
         let addWindow = app.windows["editor.add.window"]
         XCTAssertTrue(addWindow.waitForExistence(timeout: 15))
-        try enlarge(addWindow, in: app)
+        try sizeWindow(addWindow)
         try prepareInput()
         addWindow.popUpButtons["editor.add.type"].click()
         app.menuItems["Image Occlusion"].click()
         let paste = addWindow.buttons["Paste Image"]
         XCTAssertTrue(paste.waitForExistence(timeout: 15), "the on-demand stock type opens the image picker")
+        try assertForm(in: addWindow, hasImage: false)
+        capture(addWindow, named: "image-occlusion-add-note-no-image-native-form-synthetic")
 
         // Never read or save the workstation clipboard. Only generated pixels
         // enter the VM clipboard, which is cleared even after a failed assertion.
@@ -63,9 +65,8 @@ import XCTest
         XCTAssertTrue(pasteboard.setData(png, forType: .png))
         try click(paste)
         let addCanvas = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "add")
-        let initialAdd = try settledPresentation(in: addWindow, imageSize: imageSize)
-        XCTAssertEqual(initialAdd.zoom, 100,
-                       "Add loads its image after enlarge: the first usable layout must open at 100%")
+        try assertForm(in: addWindow, hasImage: true)
+        assertFitDisplay(in: addWindow)
 
         // O4.2 opens Rectangle. These are real mouse drags over the two
         // diagram labels, expressed as fractions of the fitted source image.
@@ -76,31 +77,32 @@ import XCTest
         capture(addWindow, named: "image-occlusion-add-two-masks-immediately-after-input-synthetic")
         try requireMask(2, in: addWindow, stage: "add-second")
         try deselect(in: addCanvas, app: app)
-        capture(addWindow, named: "image-occlusion-add-note-two-drawn-masks-synthetic")
         assertNativeImage(addCanvas, in: addWindow, stage: "add-completed")
         let original = try maskBounds(in: addWindow, canvas: addCanvas)
         assertBounds(original, equalTo: [
             CGRect(x: 0.05, y: 0.50, width: 0.26, height: 0.12),
             CGRect(x: 0.69, y: 0.50, width: 0.26, height: 0.12)
         ])
-        // The actual fields/masks composition must hide the native subtree,
-        // restore it, and preserve every mask without an intervening save.
-        try click(element(addWindow, "io.maskEditor.toggle"))
-        capture(addWindow, named: "image-occlusion-add-fields-after-toggle-synthetic")
-        let hidden = addCanvas.viewport.waitForNonExistence(timeout: 10)
-        if !hidden { captureToolbar(addWindow, stage: "fields-canvas-unexpectedly-visible") }
-        XCTAssertTrue(hidden)
-        XCTAssertFalse(element(addWindow, "io.mask.1").exists)
-        XCTAssertFalse(element(addWindow, "io.mask.2").exists)
-        try click(element(addWindow, "io.maskEditor.toggle"))
-        let restored = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "restored-masks")
-        assertNativeImage(restored, in: addWindow, stage: "restored-masks")
-        assertBounds(try maskBounds(in: addWindow, canvas: restored), equalTo: original)
+        // Option B keeps ordinary fields and both native masks visible while
+        // typing. Focus the actual editable role, never the Header label.
+        let header = "Isosceles triangle"
+        let headerInput = try formField("Header", in: addWindow)
+        try click(headerInput)
+        try prepareInput()
+        app.typeText(header)
+        try prepareInput()
+        app.typeKey(.tab, modifierFlags: [])
+        try assertHeader(header, in: addWindow)
+        try assertForm(in: addWindow, hasImage: true)
+        assertTwoCardFooter(in: addWindow)
+        assertBounds(try maskBounds(in: addWindow, canvas: addCanvas), equalTo: original)
+        capture(addWindow, named: "image-occlusion-add-note-two-drawn-masks-synthetic")
         try click(addWindow.buttons["editor.add.save"])
         capture(addWindow, named: "image-occlusion-add-immediately-after-save-input-synthetic")
         XCTAssertTrue(element(addWindow, "editor.add.result").waitForExistence(timeout: 20))
         XCTAssertFalse(element(addWindow, "editor.add.error").exists)
         XCTAssertTrue(paste.waitForExistence(timeout: 15), "the next draft has no image or masks")
+        try assertForm(in: addWindow, hasImage: false)
         try click(addWindow.buttons["editor.add.close"])
         XCTAssertTrue(addWindow.waitForNonExistence(timeout: 15))
         XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 2, learning: 0, review: 0),
@@ -111,6 +113,9 @@ import XCTest
         let editWindow = try openEditCurrent(app, bundle: bundle, imageSize: imageSize)
         let editCanvas = try readableCanvas(in: editWindow, imageSize: imageSize, stage: "edit")
         assertNativeImage(editCanvas, in: editWindow, stage: "edit")
+        try assertForm(in: editWindow, hasImage: true)
+        try assertHeader(header, in: editWindow)
+        assertTwoCardFooter(in: editWindow)
         assertBounds(try maskBounds(in: editWindow, canvas: editCanvas), equalTo: original)
 
         // Edit opens Select. Drag the first mask's interior, away from handles.
@@ -130,6 +135,8 @@ import XCTest
         XCTAssertEqual(edited[0].minX, original[0].minX + 0.04, accuracy: 0.015)
         XCTAssertEqual(edited[0].minY, original[0].minY + 0.14, accuracy: 0.015)
         assertBounds([edited[1]], equalTo: [original[1]])
+        try assertHeader(header, in: editWindow)
+        assertTwoCardFooter(in: editWindow)
         try click(editWindow.buttons["review.editCurrent.done"])
         // Keep the actual workspace/window state even if closing or resuming
         // review fails. Capture before waiting for either state to settle.
@@ -144,6 +151,9 @@ import XCTest
         let reloadedCanvas = try readableCanvas(in: reopened, imageSize: imageSize, stage: "reopened")
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
         assertNativeImage(reloadedCanvas, in: reopened, stage: "reopened")
+        try assertForm(in: reopened, hasImage: true)
+        try assertHeader(header, in: reopened)
+        assertTwoCardFooter(in: reopened)
         assertBounds(try maskBounds(in: reopened, canvas: reloadedCanvas), equalTo: edited)
         try click(reopened.buttons["review.editCurrent.cancel"])
         XCTAssertTrue(reopened.waitForNonExistence(timeout: 15))
@@ -184,22 +194,54 @@ import XCTest
         }
         let window = app.windows["review.editCurrent.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
-        // Edit loads media before our manual resize. Sample the live native
-        // layout, not a logged early proposal that may already have disappeared.
-        // The reference size stays fixed (M1); M6.1 refits by changing zoom.
+        // Fit uses the measured Image field viewport, with the other form rows
+        // still visible. A restored window may already be at the reference size.
         let before = try settledPresentation(in: window, imageSize: imageSize)
-        try enlarge(window, in: app)
+        try sizeWindow(window)
         let after = try settledPresentation(in: window, imageSize: imageSize)
+        assertResize(from: before, to: after, imageSize: imageSize)
+        if !viaToolbar {
+            try verifyResizing(window, imageSize: imageSize)
+        }
+        assertFitDisplay(in: window)
+        return window
+    }
+
+    private func assertResize(from before: Presentation, to after: Presentation, imageSize: CGSize) {
         let ratio = after.image.width / before.image.width
         let fitRatio = min(after.viewport.width / imageSize.width, after.viewport.height / imageSize.height)
             / min(before.viewport.width / imageSize.width, before.viewport.height / imageSize.height)
         XCTAssertEqual(ratio, fitRatio, accuracy: 0.01, "native image follows the real viewport resize")
         // Each displayed percentage is rounded to an integer. Propagate both
-        // half-point rounding bounds through the measured scale change. A
-        // restored window already at the target size can keep its initial 100%.
+        // half-point rounding bounds through the measured scale change. An
+        // already-sized restored window keeps the same numeric percentage.
         XCTAssertEqual(after.zoom, before.zoom * Double(ratio), accuracy: 0.5 * Double(ratio) + 0.5 + 0.01,
                        "resize fits the locked reference size rather than resetting zoom to 100%")
-        return window
+    }
+
+    private func verifyResizing(_ window: XCUIElement, imageSize: CGSize) throws {
+        let before = try settledPresentation(in: window, imageSize: imageSize)
+        let bounds = try visibleFrame(around: window.frame).insetBy(dx: 8, dy: 8)
+        // Prefer growing the canvas. A smaller VM display can instead exercise
+        // native shrinking; AppKit retains the window's own minimum size.
+        let canGrow = bounds.width - before.window.width >= 60 || bounds.height - before.window.height >= 60
+        let target = canGrow
+            ? CGSize(width: min(bounds.width, before.window.width + 120),
+                     height: min(bounds.height, before.window.height + 80))
+            : CGSize(width: before.window.width - 120, height: before.window.height - 80)
+        try sizeWindow(window, target: target)
+        let after = try settledPresentation(in: window, imageSize: imageSize)
+        XCTAssertTrue(abs(after.window.width - before.window.width) >= 20 ||
+                      abs(after.window.height - before.window.height) >= 20,
+                      "the native resize border must change the actual window size")
+        XCTAssertTrue(abs(after.viewport.width - before.viewport.width) >= 10 ||
+                      abs(after.viewport.height - before.viewport.height) >= 10,
+                      "Image's viewport must respond to native window resizing")
+        assertResize(from: before, to: after, imageSize: imageSize)
+        try assertForm(in: window, hasImage: true)
+        try sizeWindow(window)
+        let restored = try settledPresentation(in: window, imageSize: imageSize)
+        assertResize(from: after, to: restored, imageSize: imageSize)
     }
 
     private struct Presentation: Equatable {
@@ -220,7 +262,9 @@ import XCTest
         let settled = wait {
             guard surface.viewport.exists, surface.nativeImage.exists, zoom.exists,
                   let value = zoom.value as? String,
-                  let percent = Double(value.replacingOccurrences(of: "%", with: "")), percent > 0 else {
+                  value.contains("%"),
+                  let percent = Double(value.replacingOccurrences(of: "%", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)), percent > 0 else {
                 previous = nil; stableSamples = 0; return false
             }
             let sample = Presentation(image: surface.nativeImage.frame, viewport: surface.viewport.frame,
@@ -242,23 +286,49 @@ import XCTest
 
     /// Native title-bar and resize-border drags keep screenshots readable. Only
     /// the VM's app windows receive input; no window-server manipulation hooks.
-    private func enlarge(_ window: XCUIElement, in app: XCUIApplication) throws {
-        let workspace = app.windows["main"].frame
-        XCTAssertGreaterThan(workspace.width, 1100)
-        XCTAssertGreaterThan(workspace.height, 780)
+    private func sizeWindow(_ window: XCUIElement, target: CGSize = CGSize(width: 1040, height: 720)) throws {
+        let safe = try visibleFrame(around: window.frame).insetBy(dx: 8, dy: 8)
+        let requested = CGSize(width: min(target.width, safe.width), height: min(target.height, safe.height))
         let frame = window.frame
         let title = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
             .withOffset(CGVector(dx: 0, dy: 12))
         try prepareInput()
         title.click(forDuration: 0.1, thenDragTo: title.withOffset(CGVector(
-            dx: workspace.minX + 30 - frame.minX, dy: workspace.minY + 30 - frame.minY)))
+            dx: safe.minX - frame.minX, dy: safe.minY - frame.minY)))
+        _ = try settledWindowFrame(window)
         let edge = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
             .withOffset(CGVector(dx: -2, dy: -2))
         try prepareInput()
         edge.click(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(
-            dx: 1040 - window.frame.width, dy: 720 - window.frame.height)))
-        XCTAssertTrue(wait { window.frame.width >= 1000 && window.frame.height >= 680 },
-                      "the complete native editor window must be large enough to read")
+            dx: requested.width - window.frame.width, dy: requested.height - window.frame.height)))
+        let actual = try settledWindowFrame(window)
+        XCTAssertTrue(safe.insetBy(dx: -1, dy: -1).contains(actual),
+                      "the entire genuine editor window must fit inside the VM display's native safe bounds")
+    }
+
+    private func settledWindowFrame(_ window: XCUIElement) throws -> CGRect {
+        var previous: CGRect?
+        var stableSamples = 0
+        XCTAssertTrue(wait {
+            let frame = window.frame
+            stableSamples = previous == frame ? stableSamples + 1 : 0
+            previous = frame
+            return stableSamples >= 3
+        }, "native window geometry must settle after a drag")
+        return try XCTUnwrap(previous)
+    }
+
+    /// AppKit uses a bottom-left origin; XCTest uses the main display's top-left.
+    private func visibleFrame(around frame: CGRect) throws -> CGRect {
+        let height = try XCTUnwrap(NSScreen.screens.first).frame.height
+        func flipped(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        func area(_ rect: CGRect) -> CGFloat { rect.isNull ? 0 : rect.width * rect.height }
+        let screen = try XCTUnwrap(NSScreen.screens.max {
+            area(flipped($0.frame).intersection(frame)) < area(flipped($1.frame).intersection(frame))
+        })
+        return flipped(screen.visibleFrame)
     }
 
     /// Input can still complete and produce evidence if the fitted child is
@@ -293,13 +363,18 @@ import XCTest
         captureHierarchy(window, stage: stage)
         if !appeared { captureToolbar(window, stage: stage) }
         XCTAssertTrue(appeared)
-        XCTAssertTrue(wait { viewport.frame.width >= 600 && viewport.frame.height >= 330 })
+        let imageField = element(window, "io.editor.imageField")
+        XCTAssertTrue(imageField.exists)
+        XCTAssertTrue(wait { viewport.frame.height >= 279 && viewport.frame.width >= imageField.frame.width * 0.9 },
+                      "the canvas fills the Image field's width and keeps its roughly 280 pt minimum height")
+        XCTAssertTrue(imageField.frame.contains(viewport.frame))
         XCTAssertTrue(window.frame.contains(viewport.frame), "capture includes the full viewport")
         let result = DrawingSurface(viewport: viewport, nativeImage: element(window, "io.editor.canvas"), imageSize: imageSize)
         if !result.nativeImage.exists { captureToolbar(window, stage: "\(stage)-image-absent") }
         let zoom = element(window, "io.zoom")
         if !zoom.exists { captureToolbar(window, stage: "\(stage)-zoom-absent") }
         XCTAssertTrue(zoom.exists)
+        _ = try settledPresentation(in: window, imageSize: imageSize)
         return result
     }
 
@@ -311,14 +386,103 @@ import XCTest
         XCTAssertTrue(surface.nativeImage.exists, "the fitted image must be a native AX image child")
         XCTAssertEqual(surface.nativeImage.elementType, .image)
         let actual = surface.nativeImage.frame, fitted = surface.fittedFrame
-        XCTAssertGreaterThan(actual.width, 600)
-        XCTAssertGreaterThan(actual.height, 330)
+        XCTAssertGreaterThan(actual.width, 0)
+        XCTAssertGreaterThan(actual.height, 0)
         XCTAssertTrue(window.frame.contains(actual))
         XCTAssertEqual(actual.minX, fitted.minX, accuracy: 1)
         XCTAssertEqual(actual.minY, fitted.minY, accuracy: 1)
         XCTAssertEqual(actual.width, fitted.width, accuracy: 1)
         XCTAssertEqual(actual.height, fitted.height, accuracy: 1)
         XCTAssertEqual(actual.width / actual.height, surface.imageSize.width / surface.imageSize.height, accuracy: 0.02)
+    }
+
+    private func formField(_ name: String, in window: XCUIElement) throws -> XCUIElement {
+        // SwiftUI/AppKit single-line fields and WebKit's multiline textbox are
+        // both native AX inputs. Scope by role and name so the label cannot win.
+        let inputs = window.descendants(matching: .any).matching(NSPredicate(
+            format: "(label == %@ OR label == %@) AND (elementType == %lu OR elementType == %lu)",
+            name, name + ":", XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.textView.rawValue))
+        XCTAssertTrue(wait { inputs.count == 1 }, "expected one native editable \(name) field")
+        let input = inputs.firstMatch
+        XCTAssertTrue(input.isEnabled)
+        XCTAssertGreaterThan(input.frame.width, 0)
+        XCTAssertGreaterThan(input.frame.height, 0)
+        XCTAssertTrue(window.frame.contains(input.frame), "the whole \(name) field stays visible with Image")
+        return input
+    }
+
+    private func assertForm(in window: XCUIElement, hasImage: Bool) throws {
+        let header = try formField("Header", in: window)
+        let back = try formField("Back Extra", in: window)
+        let comments = try formField("Comments", in: window)
+        let tags = element(window, "io.editor.tags.input")
+        XCTAssertTrue(tags.exists && tags.isEnabled)
+        XCTAssertGreaterThan(tags.frame.width, 0)
+        XCTAssertGreaterThan(tags.frame.height, 0)
+        XCTAssertTrue(window.frame.contains(tags.frame))
+        let field = element(window, "io.editor.imageField")
+        XCTAssertTrue(field.exists)
+        XCTAssertGreaterThan(field.frame.width, 0)
+        XCTAssertGreaterThan(field.frame.height, 0)
+        XCTAssertTrue(window.frame.contains(field.frame))
+        XCTAssertLessThanOrEqual(header.frame.maxY, field.frame.minY + 1)
+        XCTAssertLessThanOrEqual(field.frame.maxY, back.frame.minY + 1)
+        XCTAssertLessThanOrEqual(back.frame.maxY, comments.frame.minY + 1)
+        XCTAssertLessThanOrEqual(comments.frame.maxY, tags.frame.minY + 1)
+        let footer = element(window, "io.editor.imageFooter")
+        if hasImage {
+            XCTAssertTrue(footer.exists)
+            XCTAssertGreaterThan(footer.frame.height, 0)
+            XCTAssertTrue(field.frame.contains(footer.frame))
+            let canvas = element(window, "io.canvas")
+            XCTAssertTrue(canvas.exists)
+            XCTAssertLessThanOrEqual(canvas.frame.maxY, footer.frame.minY + 1)
+            let change = element(footer, "io.editor.changeImage")
+            XCTAssertTrue(change.exists && change.isEnabled && change.isHittable,
+                          "Change Image belongs to the visible image footer")
+        } else {
+            XCTAssertFalse(footer.exists, "no-image form has no image footer")
+            XCTAssertFalse(element(window, "io.zoom").exists, "no-image form has no image toolbar")
+            XCTAssertFalse(element(window, "io.canvas").exists)
+            let picker = element(window, "io.picker.container")
+            XCTAssertTrue(picker.exists)
+            XCTAssertTrue(field.frame.contains(picker.frame))
+        }
+    }
+
+    private func assertHeader(_ expected: String, in window: XCUIElement) throws {
+        let input = try formField("Header", in: window)
+        XCTAssertTrue(wait {
+            guard let value = input.value as? String else { return false }
+            return value == expected || value == expected + "\n"
+        }, "the Header's actual AX input value must survive save and reopening")
+    }
+
+    private func assertTwoCardFooter(in window: XCUIElement) {
+        let footer = element(window, "io.editor.imageFooter")
+        let summary = footer.descendants(matching: .staticText).matching(
+            NSPredicate(format: "label CONTAINS %@", "2 masks make 2 cards")).firstMatch
+        // A native footer may combine its text children into one AX element.
+        XCTAssertTrue(wait { footer.label.contains("2 masks make 2 cards") || summary.exists },
+                      "the footer reports distinct card ordinals for both masks")
+        XCTAssertTrue(window.frame.contains(footer.frame))
+        if summary.exists {
+            XCTAssertTrue(footer.frame.contains(summary.frame))
+            XCTAssertTrue(window.frame.contains(summary.frame))
+        }
+    }
+
+    private func assertFitDisplay(in window: XCUIElement) {
+        let zoom = element(window, "io.zoom")
+        let fit = window.descendants(matching: .any).matching(identifier: "io.zoom")
+            .matching(NSPredicate(format: "title == %@ OR label == %@", "Fit", "Fit")).firstMatch
+        XCTAssertTrue(wait { fit.exists || zoom.staticTexts["Fit"].exists },
+                      "the fitted image's native zoom menu displays Fit")
+        let value = zoom.value as? String
+        XCTAssertTrue(value?.contains("%") == true, "io.zoom keeps its numeric percent AX value")
+        XCTAssertNotNil(value.flatMap {
+            Double($0.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespacesAndNewlines))
+        })
     }
 
     private func requireMask(_ number: Int, in window: XCUIElement, stage: String) throws {

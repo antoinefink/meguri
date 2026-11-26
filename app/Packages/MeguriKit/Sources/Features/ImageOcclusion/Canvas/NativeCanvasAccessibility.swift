@@ -18,9 +18,13 @@ struct NativeCanvasAccessibility: NSViewRepresentable {
     }
     let items: [Item]
     let enabled: Bool
+    var selectionDescription: String? = nil
 
     func makeNSView(context: Context) -> Container { Container() }
-    func updateNSView(_ view: Container, context: Context) { view.update(items, enabled: enabled) }
+    func updateNSView(_ view: Container, context: Context) {
+        view.setAccessibilityValue(selectionDescription)
+        view.update(items, enabled: enabled)
+    }
 
     final class Container: NSView {
         private var elements: [Element] = []

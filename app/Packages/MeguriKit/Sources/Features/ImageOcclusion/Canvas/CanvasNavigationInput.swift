@@ -9,10 +9,12 @@ struct CanvasNavigationInput: NSViewRepresentable {
     let navigate: (Double, CGSize, CGPoint) -> Void
     let ended: () -> Void
     let panStarted: () -> Void
+    var acceptsKeyboard: () -> Bool = { true }
 
     func makeNSView(context: Context) -> NavigationView { NavigationView() }
     func updateNSView(_ view: NavigationView, context: Context) {
         view.navigate = navigate; view.ended = ended; view.panStarted = panStarted
+        view.acceptsKeyboard = acceptsKeyboard
     }
     static func dismantleNSView(_ view: NavigationView, coordinator: ()) { view.stop() }
 
@@ -20,6 +22,7 @@ struct CanvasNavigationInput: NSViewRepresentable {
         var navigate: ((Double, CGSize, CGPoint) -> Void)?
         var ended: (() -> Void)?
         var panStarted: (() -> Void)?
+        var acceptsKeyboard: () -> Bool = { true }
         private var monitor: Any?
         private var resignKeyObserver: NSObjectProtocol?
         private var space = false
@@ -53,6 +56,7 @@ struct CanvasNavigationInput: NSViewRepresentable {
             guard let window, window.isKeyWindow, event.window === window, !isHiddenOrHasHiddenAncestor else { return event }
             let p = convert(event.locationInWindow, from: nil)
             let inside = bounds.contains(p) && visibleRect.contains(p)
+            if space && !acceptsKeyboard() { clearPan() }
             switch event.type {
             case .scrollWheel where inside:
                 panStarted?()
@@ -68,7 +72,7 @@ struct CanvasNavigationInput: NSViewRepresentable {
                 panStarted?(); navigate?(1 + event.magnification, .zero, p); ended?(); return nil
             case .keyDown where inside && event.charactersIgnoringModifiers == " ":
                 // Native text entry (for example the label sheet) keeps Space.
-                guard !(window.firstResponder is NSTextView) else { return event }
+                guard acceptsKeyboard(), !(window.firstResponder is NSTextView) else { return event }
                 space = true; return nil
             case .keyUp where space && event.charactersIgnoringModifiers == " ":
                 space = false; if dragging { dragging = false; ended?() }; return nil
@@ -90,6 +94,7 @@ struct CanvasNavigationInput: UIViewRepresentable {
     let navigate: (Double, CGSize, CGPoint) -> Void
     let ended: () -> Void
     let panStarted: () -> Void
+    var acceptsKeyboard: () -> Bool = { true }
     func makeUIView(context: Context) -> NavigationView { NavigationView() }
     func updateUIView(_ view: NavigationView, context: Context) {
         view.navigate = navigate; view.ended = ended; view.panStarted = panStarted

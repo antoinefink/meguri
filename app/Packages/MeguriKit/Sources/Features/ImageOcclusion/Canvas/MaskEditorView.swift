@@ -2,6 +2,7 @@ import CoreBridge
 import SwiftUI
 #if os(macOS)
 import AppKit
+import WebKit
 #else
 import UIKit
 #endif
@@ -15,23 +16,27 @@ public struct MaskEditorView: View {
     @Binding private var occlusions: String
     @State private var retainedSession: MaskEditorSession?
     private let suppliedSession: MaskEditorSession?
+    private let formStyle: Bool
     public init(image: Image, imageSize: CGSize, occlusions: Binding<String>, isEditing: Bool) {
         self.init(image: image, imageSize: imageSize, occlusions: occlusions, isEditing: isEditing, session: nil)
     }
 
     /// Use an externally retained session when switching between fields and
     /// masks removes the view. A new image needs a new session/reference size.
+    /// `formStyle` opts macOS Add/Edit into the inline Option B toolbar/canvas;
+    /// other callers and platforms retain their existing layout.
     public init(image: Image, imageSize: CGSize, occlusions: Binding<String>, isEditing: Bool,
-                session: MaskEditorSession?) {
+                session: MaskEditorSession?, formStyle: Bool = false) {
         self.image = image; self.imageSize = imageSize; self._occlusions = occlusions; self.isEditing = isEditing
         suppliedSession = session
+        self.formStyle = formStyle
     }
 
     public var body: some View {
         Group {
             if let session = suppliedSession ?? retainedSession {
                 MaskEditorContent(image: image, imageSize: imageSize, isEditing: isEditing,
-                                  occlusions: $occlusions, session: session)
+                                  occlusions: $occlusions, session: session, formStyle: formStyle)
                     .id(ObjectIdentifier(session))
             } else {
                 ProgressView()
@@ -51,6 +56,7 @@ private struct MaskEditorContent: View {
     let isEditing: Bool
     @Binding var occlusions: String
     @Bindable var session: MaskEditorSession
+    let formStyle: Bool
     @State private var viewport = CanvasViewport()
     @State private var showInspector = false
     @State private var labelEdit: LabelEdit?
@@ -80,7 +86,8 @@ private struct MaskEditorContent: View {
                 GeometryReader { geometry in
                     MaskCanvas(image: image, session: session, viewport: $viewport,
                                translucent: translucent, fill: selectedFill, editLabel: beginLabelEdit,
-                               focusCanvas: { canvasFocused = true })
+                               focusCanvas: { canvasFocused = true }, formStyle: usesFormStyle,
+                               acceptsKeyboardNavigation: { !usesFormStyle || (canvasFocused && commandsAvailable) })
                         #if os(macOS)
                         // A focusable SwiftUI ancestor replaces the canvas AX
                         // subtree with a leaf. Keep keyboard focus in a sibling.
@@ -119,9 +126,13 @@ private struct MaskEditorContent: View {
             session.polygon = []; session.preview = nil
             if !session.hasIndependentWriter { session.onWrite = nil }
         }
-        .onChange(of: isEnabled, initial: true) { _, enabled in canvasFocused = enabled }
+        .onChange(of: isEnabled, initial: true) { _, enabled in
+            // An inline image field must not take focus from a rich-text field
+            // when it mounts or becomes enabled. A canvas interaction owns focus.
+            if !usesFormStyle || !enabled { canvasFocused = enabled }
+        }
         .onChange(of: occlusions) { _, field in session.receive(field, isEditing: isEditing) }
-        .inspector(isPresented: $showInspector) { inspector }
+        .inspector(isPresented: Binding(get: { !usesFormStyle && showInspector }, set: { showInspector = $0 })) { inspector }
         .sheet(item: $labelEdit, onDismiss: { canvasFocused = true }) { edit in
             TextLabelEditor(initial: edit.text, reject: session.rejectLabelBraces) { text in
                 session.editLabel(edit.id, text: text)
@@ -133,6 +144,13 @@ private struct MaskEditorContent: View {
     private var compact: Bool {
         #if os(iOS)
         sizeClass == .compact
+        #else
+        false
+        #endif
+    }
+    private var usesFormStyle: Bool {
+        #if os(macOS)
+        formStyle
         #else
         false
         #endif
@@ -150,7 +168,14 @@ private struct MaskEditorContent: View {
         return "#" + components.map { String(format: "%02x", Int((min(1, max(0, $0)) * 255).rounded(.toNearestOrAwayFromZero))) }.joined()
     }
 
-    private var toolRow: some View {
+    @ViewBuilder private var toolRow: some View {
+        #if os(macOS)
+        if usesFormStyle { formToolbar } else { legacyToolRow }
+        #else
+        legacyToolRow
+        #endif
+    }
+    private var legacyToolRow: some View {
         ViewThatFits(in: .horizontal) {
             HStack {
                 toolPicker
@@ -181,6 +206,98 @@ private struct MaskEditorContent: View {
             }
         }
         .pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
+    }
+    #if os(macOS)
+    private var formTools: [MaskEditorTool] { MaskEditorTool.allCases.filter { $0 != .fill } }
+
+    private var formToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                formToolPicker
+                formFillPicker
+                Divider()
+                historyButtons
+                Spacer()
+                formModeMenu
+                zoomMenu
+                actionsMenu
+            }.fixedSize(horizontal: false, vertical: true)
+            VStack {
+                HStack {
+                    formToolPicker
+                    formFillPicker
+                    Spacer()
+                }
+                HStack {
+                    historyButtons
+                    Spacer()
+                    formModeMenu
+                    zoomMenu
+                    actionsMenu
+                }
+            }
+            VStack {
+                HStack {
+                    Menu {
+                        ForEach(formTools) { tool in
+                            Button { chooseTool(tool) } label: { Label(ioString(tool.key), systemImage: tool.symbol) }
+                                .accessibilityIdentifier("io.tool.\(tool.rawValue)")
+                        }
+                    } label: { Label(ioString(session.tool.key), systemImage: session.tool.symbol) }
+                    formFillPicker
+                    Spacer()
+                    historyButtons
+                    actionsMenu
+                }
+                HStack { formModeMenu; Spacer(); zoomMenu }
+            }
+        }
+        .padding()
+        .disabled(!session.isReadable)
+    }
+    private var formToolPicker: some View {
+        Picker(ioString("io.tools"), selection: Binding(get: { session.tool }, set: chooseTool)) {
+            ForEach(formTools) { tool in
+                Label(ioString(tool.key), systemImage: tool.symbol).tag(tool)
+                    .accessibilityIdentifier("io.tool.\(tool.rawValue)")
+            }
+        }
+        .pickerStyle(.segmented).labelsHidden().labelStyle(.iconOnly)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+    private var formFillPicker: some View {
+        HStack {
+            // Picking a colour keeps M3.5's explicit click-to-fill behavior:
+            // changing the well never recolours the current selection.
+            ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false)
+                .labelsHidden()
+                .accessibilityIdentifier("io.fill")
+                .onChange(of: fill) { _, _ in session.tool = .fill }
+            resetFillButton
+        }
+        .fixedSize()
+        .popover(isPresented: $showFill) { fillPicker.padding() }
+    }
+    private var formModeMenu: some View {
+        HStack {
+            Text(ioString("io.cards"))
+            Menu {
+                modeChoices
+            } label: {
+                Text(ioString(session.document.hideAll ? "io.mode.hideAll" : "io.mode.hideOne"))
+            }
+            .fixedSize()
+            .accessibilityLabel(ioString("io.cards"))
+            .accessibilityValue(ioString(session.document.hideAll ? "io.mode.hideAll" : "io.mode.hideOne"))
+            .accessibilityIdentifier("io.mode")
+        }
+    }
+    #endif
+    private var modeChoices: some View {
+        Picker(ioString("io.command.mode"), selection: Binding(get: { session.document.hideAll }, set: session.setMode)) {
+            Text(ioString("io.mode.hideAll")).tag(true)
+            Text(ioString("io.mode.hideOne")).tag(false)
+        }
     }
     private var toolChoices: some View {
         ForEach(MaskEditorTool.allCases) { tool in
@@ -231,7 +348,13 @@ private struct MaskEditorContent: View {
             Button(ioString("io.command.zoomIn")) { zoom(1.1) }
             Button(ioString("io.command.zoomOut")) { zoom(1 / 1.1) }
             Button(ioString("io.command.zoomToFit")) { viewport.fit() }
-        } label: { Text(viewport.zoom, format: .percent.precision(.fractionLength(0))) }
+        } label: {
+            if usesFormStyle && viewport.isFitted {
+                Text(ioString("io.zoom.fit"))
+            } else {
+                Text(viewport.zoom, format: .percent.precision(.fractionLength(0)))
+            }
+        }
         .accessibilityLabel(ioString("io.zoom"))
         .accessibilityValue(Text(viewport.zoom, format: .percent.precision(.fractionLength(0))))
         .accessibilityIdentifier("io.zoom")
@@ -279,12 +402,19 @@ private struct MaskEditorContent: View {
     private var fillPicker: some View {
         VStack(alignment: .leading) {
             ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false)
-            Button { fill = MaskAppearance.defaultColor } label: {
-                Image(systemName: "circle.fill").foregroundStyle(MaskAppearance.defaultColor)
-            }
-            .accessibilityLabel(MaskAppearance.defaultFill)
-            .accessibilityIdentifier("io.palette.swatch.ffeba2")
+            resetFillButton
         }
+    }
+    private var resetFillButton: some View {
+        Button {
+            fill = MaskAppearance.defaultColor
+            if usesFormStyle { session.tool = .fill }
+        } label: {
+            Image(systemName: "circle.fill").foregroundStyle(MaskAppearance.defaultColor)
+        }
+        .accessibilityLabel(MaskAppearance.defaultFill)
+        .help(ioString("io.fill.reset"))
+        .accessibilityIdentifier("io.palette.swatch.ffeba2")
     }
 
     private func chooseTool(_ tool: MaskEditorTool) {
@@ -308,6 +438,16 @@ private struct MaskEditorContent: View {
         #if os(macOS)
         guard let window = windowScope.window, window.isKeyWindow, window.attachedSheet == nil,
               !(window.firstResponder is NSTextView) else { return false }
+        if usesFormStyle {
+            guard !(window.firstResponder is NSTextField) else { return false }
+            // Rich-text fields use a WebKit descendant as their responder,
+            // rather than AppKit's field editor. SwiftUI focus can lag it.
+            var view = window.firstResponder as? NSView
+            while let current = view {
+                if current is WKWebView { return false }
+                view = current.superview
+            }
+        }
         #endif
         return true
     }
@@ -349,6 +489,20 @@ private struct MaskEditorContent: View {
     }
     private func keyPressed(_ press: KeyPress) -> KeyPress.Result {
         guard commandsAvailable else { return .ignored }
+        if usesFormStyle, canvasFocused, press.modifiers.isEmpty, !session.selection.isEmpty {
+            let delta: CGSize
+            switch press.key {
+            case .leftArrow: delta = .init(width: -5, height: 0)
+            case .rightArrow: delta = .init(width: 5, height: 0)
+            case .upArrow: delta = .init(width: 0, height: -5)
+            case .downArrow: delta = .init(width: 0, height: 5)
+            default: delta = .zero
+            }
+            if delta != .zero {
+                session.commit(session.moved(dx: delta.width, dy: delta.height, finishing: true))
+                return .handled
+            }
+        }
         if press.key == .escape, !session.polygon.isEmpty { session.polygon = []; return .handled }
         let modifiers = press.modifiers.intersection([.command, .shift, .option, .control])
         if press.characters.lowercased() == "m", modifiers.isEmpty { return .handled }
