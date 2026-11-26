@@ -26,3 +26,11 @@ Plancheck reviewed all 1,586 lines of `docs/design/native-interface-contract.md`
 The keyboard shortcut and saved-state feedback changed the form. Independent reviewer planinterop examined its complete 13,239 bytes. The verified public digest for `FilteredStudyForm.swift` is `3c7cd4ebb07a6408449ccebce59ae624fb41be4ae044bf03a39e784821442310`.
 
 Planinterop reviewed all 179 entries, including translator comments and plural variants, in `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings`. The orchestrator verified the public catalog's 51,185 bytes and SHA-256 `6b96ea5123988e28e5a4a8a79187594ffeb5ef0ff85ee2f7871821dff1e16275`.
+
+Plancheck inspected all 166,484 bytes of `ReviewCollection.swift` at `176e96726`. It handles collection state and native navigation, and takes card, media and account values from runtime arguments. Its verified public SHA-256 is `fb7df5a364e8fc7d99f79196d53705eca5bfa7826a00518486236a63cd6858cd`.
+
+Planinterop reviewed all 292,739 bytes of the interface contract at `472bd637b`, including the added menu-bar commands and their enablement. The file contains public product decisions, feedback, examples and test measurements. Its verified SHA-256 is `bb9a40b994d55e420f4408d58927b6deddf0072e78b404677503591044c4bf24`.
+
+## Verification
+
+The collection writer and pending-answer projection now preserve the original deck and due date through a filtered answer. The Docker suite covered preview completion, rescheduling, overlapping searches and stale answers after a same-second rebuild. All 236 selected engine and search tests passed in `core-test/20261126T121534Z-38442`. The real collection-replacement test passed with test hooks in `core-test/20261126T115955Z-77161`. Rust lint, crate layering and the endpoint scan passed in `core-lint/20261126T122102Z-61502`. All six static checks passed in `static-checks/20261126T122201Z-64664`.

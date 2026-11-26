@@ -937,7 +937,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '5f81c9b56335f87958c5d53bba3dd4dbe770cccda8bc1764b89f9aa182286dbe',
+        'bb9a40b994d55e420f4408d58927b6deddf0072e78b404677503591044c4bf24',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1451,7 +1451,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '079593aab3e69f01f91cb900ca3e328ffe3dea3706933bc527ba9e47d64586b4',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'fb7df5a364e8fc7d99f79196d53705eca5bfa7826a00518486236a63cd6858cd',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
