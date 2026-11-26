@@ -359,7 +359,7 @@ extension ReviewCollectionStartupTests {
             try #require(review.phase == .question && review.canEditNote)
             #expect(review.item?.cardId == card && review.shownItem?.cardId == card)
             #expect(surface.presented.count == presentations + 1 && surface.visible?.cardID == card)
-            #expect(surface.visible?.question.contains("Edited metadata") == true)
+            #expect(surface.visible?.question?.contains("Edited metadata") == true)
             try #require(await owner.openEditNote())
             #expect(edit.draft?.values == saved.fields && edit.draft?.tags == saved.tags)
             #expect(await edit.requestCancel())

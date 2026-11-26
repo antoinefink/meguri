@@ -166,7 +166,11 @@ extension ReviewCollectionStartupTests {
             session.chooseBitmap(try OcclusionFieldFlowTests.bitmap(), host: host, photo: true)
             await session.completion?.value
             #expect(session.image?.size == CGSize(width: 4, height: 2))
-            await owner.shutDown()
-        } catch { await owner.shutDown(); throw error }
+            owner.addNoteFlow.generationEnded(); owner.editNoteFlow.generationEnded()
+            #expect(await owner.close())
+        } catch {
+            owner.addNoteFlow.generationEnded(); owner.editNoteFlow.generationEnded()
+            _ = await owner.close(); throw error
+        }
     }
 }
