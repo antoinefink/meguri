@@ -230,8 +230,13 @@ import XCTest
         return HomeControls.hittable(matches) ?? matches.firstMatch
     }
 
-    private func wait(_ condition: @escaping () -> Bool) -> Bool {
-        XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)], timeout: 15) == .completed
+    private func wait(_ condition: @MainActor () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(15)
+        while !condition() {
+            guard Date() < deadline else { return false }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return true
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

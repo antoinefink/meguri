@@ -168,7 +168,7 @@ import XCTest
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("b", modifierFlags: [.command, .shift])
         XCTAssertTrue(element(app, "browse.toolbar.mode").waitForExistence(timeout: 15))
-        func search(_ text: String) throws {
+        @MainActor func search(_ text: String) throws {
             let clear = element(app, "browse.filterBar.clear")
             if clear.exists { try click("browse.filterBar.clear", app: app, bundle: bundle) }
             app.typeKey("f", modifierFlags: .command)
@@ -213,7 +213,7 @@ import XCTest
             XCTAssertTrue(tabs.waitForExistence(timeout: 10), "Inspector remains visible between searches")
             let info = tabs.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Info")).firstMatch
             XCTAssertTrue(info.waitForExistence(timeout: 10))
-            func infoSelected() -> Bool { info.isSelected || (info.value as? Int) == 1 || (info.value as? String) == "1" }
+            @MainActor func infoSelected() -> Bool { info.isSelected || (info.value as? Int) == 1 || (info.value as? String) == "1" }
             if !infoSelected() { info.click() }
             XCTAssertTrue(wait { infoSelected() }, "Info tab is selected independently of its loading content")
             XCTAssertTrue(wait { self.element(app, "cardInfo.row.card_id").value as? String == card })
@@ -350,8 +350,13 @@ import XCTest
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
-    private func wait(_ condition: @escaping () -> Bool) -> Bool {
-        XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)], timeout: 15) == .completed
+    private func wait(_ condition: @MainActor () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(15)
+        while !condition() {
+            guard Date() < deadline else { return false }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return true
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())

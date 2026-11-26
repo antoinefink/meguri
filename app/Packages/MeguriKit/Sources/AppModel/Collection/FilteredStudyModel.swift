@@ -107,7 +107,7 @@ public final class FilteredStudyModel {
             defer { busy = false; task = nil }
             // Content can be absent while a read runs. Only the operation that
             // still owns the foreground route may navigate or publish an alert.
-            func current() -> Bool {
+            @MainActor func current() -> Bool {
                 self.revision == revision && !Task.isCancelled && busy &&
                     owner.generation == expected && owner.navigation.intentRevision == intent &&
                     owner.foreground && !owner.resuming && owner.browseReadable &&
@@ -270,7 +270,7 @@ public final class FilteredStudyModel {
                 await publish(revision)
             } catch {
                 guard current(revision) else { return }
-                if case .deckRefused(.noMatches) = error {
+                if case BridgeError.deckRefused(.noMatches) = error {
                     failure = .noMatches
                     if source == nil { emptyCandidate = value }
                 } else { failure = .write }
