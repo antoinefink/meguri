@@ -13,13 +13,13 @@ public enum ReviewInputOwnership {
     }
     #if os(macOS)
     /// Nil waits only for this editor to return the keys. A different window
-    /// or an inactive app relinquishes the one-use request.
-    static func editedCardWindowReady(in view: CardPlatformView) -> Bool? {
-        guard let window = view.window, NSApp?.isActive == true else { return false }
+    /// or an inactive/busy presenter relinquishes the one-use request.
+    static func editedCardWindowReady(in view: CardPlatformView, presenter: NativeCardBehaviorPresenter) -> Bool? {
+        guard let window = view.window, NSApp?.isActive == true,
+              presenter.isAvailable, window.attachedSheet == nil, NSApp.modalWindow == nil,
+              RunLoop.current.currentMode != .eventTracking else { return false }
         if NSApp.keyWindow?.identifier?.rawValue == "review.editCurrent.window" { return nil }
-        guard window.isKeyWindow,
-              window.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
-        return true
+        return window.isKeyWindow
     }
 
     /// Only repair the exact parked native page retained across this edit's

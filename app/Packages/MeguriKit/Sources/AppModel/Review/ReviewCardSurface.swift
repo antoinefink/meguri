@@ -109,8 +109,8 @@ public final class ReviewPages: ReviewCardSurface {
     private var committedMediaUpdate: CardUpdate?
     #if os(macOS)
     private var editedFocusUpdate: CardUpdate?
-    // Offscreen tests supply window ownership without activating the app.
-    var editedCardWindowReady: @MainActor (CardPlatformView) -> Bool? = ReviewInputOwnership.editedCardWindowReady
+    // All OS/presenter readiness lives here so offscreen tests need no app activation.
+    var editedCardWindowReady: @MainActor (CardPlatformView, NativeCardBehaviorPresenter) -> Bool? = ReviewInputOwnership.editedCardWindowReady
     #endif
     var onMediaReady: (() -> Void)?
     /// The Study click's way to the first card (R1813): this surface marks the
@@ -222,9 +222,9 @@ public final class ReviewPages: ReviewCardSurface {
 
     private func establishEditedCardFocus() {
         guard let update = editedFocusUpdate else { return }
-        guard !closed, inputActive, !editing, presenter.isAvailable,
+        guard !closed, inputActive, !editing,
               let pair, pair.current.update == update else { editedFocusUpdate = nil; return }
-        guard let ready = editedCardWindowReady(pair.current.webView) else { return }
+        guard let ready = editedCardWindowReady(pair.current.webView, presenter) else { return }
         guard ready else { editedFocusUpdate = nil; return }
         // Both orders occur: the page commits before key return, or the
         // editor closes before the presentation's asynchronous commit.

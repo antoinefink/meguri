@@ -358,6 +358,7 @@ private struct MaskEditorContent: View {
         }
         .accessibilityLabel(ioString("io.zoom"))
         .accessibilityValue(Text(viewport.zoom, format: .percent.precision(.fractionLength(0))))
+        .help(ioString(viewport.isFitted ? "io.zoom.fit.help" : "io.zoom.help"))
         .accessibilityIdentifier("io.zoom")
     }
     private var inspectorButton: some View {

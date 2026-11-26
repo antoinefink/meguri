@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ApplicationServices
 import Foundation
 import XCTest
 
@@ -419,7 +420,7 @@ import XCTest
         check(window.frame.contains(viewport.frame), "capture includes full viewport")
         let result = DrawingSurface(viewport: viewport, nativeImage: element(window, "io.editor.canvas"), imageSize: imageSize)
         if !result.nativeImage.exists { captureToolbar(window, stage: "\(stage)-image-absent") }
-        let zoom = element(window, "io.zoom")
+        let zoom = zoomControls(in: window).firstMatch
         if !zoom.exists { captureToolbar(window, stage: "\(stage)-zoom-absent") }
         check(zoom.exists, "Zoom retains io.zoom identifier")
         _ = try settledPresentation(in: window, imageSize: imageSize)
@@ -517,11 +518,21 @@ import XCTest
             }
         } else {
             check(!footer.exists, "no-image form has no image footer")
-            check(!element(window, "io.zoom").exists, "no-image form has no image toolbar")
+            check(zoomControls(in: window).count == 0, "no-image form has no image toolbar")
             check(!element(window, "io.canvas").exists, "no-image form has no canvas")
-            let picker = element(window, "io.picker.container")
-            check(picker.exists, "empty Image contains the native picker group")
-            check(picker.exists && fieldFrame.contains(picker.frame), "Image contains the whole picker")
+            // AppKit may omit the picker's outer stack from AX. Its native
+            // source buttons still belong to the meaningful Image field group.
+            for caption in ["Choose File…", "Paste Image"] {
+                let buttons = field.buttons.matching(NSPredicate(
+                    format: "title == %@ OR label == %@", caption, caption))
+                check(buttons.count == 1, "empty Image contains one native \(caption) picker button")
+                guard buttons.count == 1 else { continue }
+                let button = buttons.firstMatch, frame = button.frame
+                check(button.isEnabled && button.isHittable, "\(caption) is enabled and hittable")
+                check(frame.width > 0 && frame.height > 0, "\(caption) picker bounds: \(frame)")
+                check(fieldFrame.contains(frame), "Image contains the whole \(caption) picker button")
+                check(window.frame.contains(frame), "the whole \(caption) picker button stays visible")
+            }
         }
     }
 
@@ -571,22 +582,56 @@ import XCTest
     }
 
     private func zoomControls(in window: XCUIElement) -> XCUIElementQuery {
-        window.descendants(matching: .any).matching(NSPredicate(
-            format: "label == %@ AND (elementType == %lu OR elementType == %lu)", "Zoom",
-            XCUIElement.ElementType.menuButton.rawValue, XCUIElement.ElementType.popUpButton.rawValue))
+        window.menuButtons.matching(NSPredicate(
+            format: "identifier == %@ AND (title == %@ OR label == %@)", "io.zoom", "Zoom", "Zoom"))
     }
 
     private func recordFitDisplay(in window: XCUIElement) {
         let controls = zoomControls(in: window)
-        check(controls.count == 1, "expected one native Zoom menu with its own role and label")
+        check(controls.count == 1, "expected one native io.zoom menu button titled or labelled Zoom")
         guard controls.count == 1 else { return }
         let zoom = controls.firstMatch
         check(zoom.identifier == "io.zoom", "Zoom menu keeps its own identifier: \(zoom.identifier)")
-        let fit = controls.matching(NSPredicate(format: "title == %@ OR label == %@", "Fit", "Fit")).firstMatch
-        check(wait { fit.exists || zoom.staticTexts["Fit"].exists }, "fitted native Zoom menu displays Fit")
+        // The AX title names the menu Zoom; AppKit does not duplicate the
+        // visible Fit caption as a static-text child. Native help conveys state.
+        check(wait { nativeZoomHelp(in: window) == "Fit: the image is fitted to the canvas." },
+              "native Zoom help exposes the current Fit state")
         let value = zoom.value as? String
         check(value?.contains("%") == true, "io.zoom keeps its numeric percent AX value: \(String(describing: value))")
         check(value.flatMap(Self.zoomPercent) != nil, "Zoom AX percentage parses as a number")
+    }
+
+    private func nativeZoomHelp(in window: XCUIElement) -> String? {
+        guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: inputBundleIdentifier)
+            .first(where: { !$0.isTerminated }) else { return nil }
+        func read(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
+            guard AXUIElementSetMessagingTimeout(node, 0.1) == .success else { return nil }
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(node, attribute as CFString, &value) == .success else { return nil }
+            return value
+        }
+        let application = AXUIElementCreateApplication(running.processIdentifier)
+        guard let windows = read(application, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
+        let windowID = window.identifier
+        let roots = windows.filter { read($0, kAXIdentifierAttribute) as? String == windowID }
+        guard roots.count == 1 else { return nil }
+        // Read native AXHelp, which XCTest's public element attributes omit.
+        // Visit only the current disposable editor window, with bounded traversal.
+        var pending = roots.map { ($0, 0) }, visited = 0
+        let deadline = Date().addingTimeInterval(2)
+        while visited < 2048, Date() < deadline, let (node, depth) = pending.popLast() {
+            visited += 1
+            if read(node, kAXIdentifierAttribute) as? String == "io.zoom",
+               read(node, kAXRoleAttribute) as? String == kAXMenuButtonRole,
+               read(node, kAXTitleAttribute) as? String == "Zoom" ||
+                read(node, kAXDescriptionAttribute) as? String == "Zoom" {
+                return read(node, kAXHelpAttribute) as? String
+            }
+            if depth < 48, let children = read(node, kAXChildrenAttribute) as? [AXUIElement] {
+                pending.append(contentsOf: children.map { ($0, depth + 1) })
+            }
+        }
+        return nil
     }
 
     private static func zoomPercent(_ value: String) -> Double? {

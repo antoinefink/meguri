@@ -21,6 +21,26 @@
         }
       }
     },
+    "io.zoom.fit.help": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fit: the image is fitted to the canvas."
+          }
+        }
+      }
+    },
+    "io.zoom.help": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust the zoom level or choose Zoom to Fit."
+          }
+        }
+      }
+    },
     "io.fill.reset": {
       "localizations": {
         "en": {

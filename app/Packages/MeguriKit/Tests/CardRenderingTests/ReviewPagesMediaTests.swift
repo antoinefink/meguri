@@ -54,10 +54,10 @@ extension WebKitSuites {
             model.endEditingNote(saved: owner != "cancel")
             #expect(model.paused && !model.editingNote && window.firstResponder === old)
 
-            // Model just the OS window ownership; the coordinator, page swap,
+            // Model just OS/presenter readiness; the coordinator, page swap,
             // commit and responder restoration all run their production paths.
             state.ready = owner == "key-return" || owner == "reopen" ? nil : owner != "background"
-            pages.editedCardWindowReady = { [weak model, weak pages] _ in
+            pages.editedCardWindowReady = { [weak model, weak pages] _, _ in
                 state.readinessChecks += 1
                 #expect(model?.paused == false && model?.editingNote == false && pages?.inputActive == true)
                 return state.ready
@@ -96,6 +96,7 @@ extension WebKitSuites {
                 #expect(!old.acceptsFirstResponder)
             }
             if owner == "key-return" {
+                try #require(state.readinessChecks > 0)
                 #expect(window.firstResponder === old)
                 state.ready = true
                 pages.establishInitialFocus()
@@ -105,6 +106,7 @@ extension WebKitSuites {
                 model.endEditingNote(saved: false)
             }
             if owner == "parked" || owner == "key-return" {
+                #expect(state.readinessChecks > 0)
                 #expect(window.firstResponder === pair.current.webView)
                 #expect(pair.ownsKeyboardFocus)
                 #expect(try await pair.current.string("return document.activeElement.id;") != "entry")
