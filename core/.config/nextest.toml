@@ -66,8 +66,9 @@ threads-required = "num-test-threads"
 # T8: the watchdog fires within a second of its timeout, and a trickle never
 # trips it), cancellation (`a_cancelled_token_*`, T9: within 200 ms) and the
 # refusal of a decompression bomb (R1852: within 2 s) against the wall clock.
+# The editor body-limit unit test also bounds its loopback accepts and reads.
 [[profile.default.overrides]]
-filter = 'package(meguri-sync) and binary(sync_it) and (test(/^transport::.*times_out$/) or test(/^transport::a_cancelled_token_/) or test(=transport::bytes_past_the_declared_size_are_refused_and_never_handed_out))'
+filter = 'package(meguri-sync) and ((binary(sync_it) and (test(/^transport::.*times_out$/) or test(/^transport::a_cancelled_token_/) or test(=transport::bytes_past_the_declared_size_are_refused_and_never_handed_out))) or test(=transport::http::tests::editor_encoded_body_limit_covers_declared_unknown_and_chunked_lengths))'
 threads-required = "num-test-threads"
 
 # U32: WAL full-sync coverage and bounded suspension must measure an idle

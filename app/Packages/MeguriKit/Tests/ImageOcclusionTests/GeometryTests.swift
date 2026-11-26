@@ -21,7 +21,7 @@ import Testing
         let image = CGSize(width: 960, height: 540)
         var viewport = CanvasViewport()
         // The initial GeometryReader proposal must never become document W/H.
-        for area in [CGSize.zero, CGSize(width: 1040, height: 11), CGSize(width: .nan, height: 431)] {
+        for area in [CGSize.zero, CGSize(width: 1040, height: 11), CGSize(width: CGFloat.nan, height: 431)] {
             viewport.resize(session: session, imageSize: image, area: area, displayScale: 2)
             #expect(session.referenceSize == .zero)
         }

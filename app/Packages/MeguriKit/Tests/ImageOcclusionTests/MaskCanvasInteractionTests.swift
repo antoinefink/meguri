@@ -79,6 +79,27 @@ import Testing
         #expect(session.canUndo && session.document.shapes[0].data.angle == 15)
     }
 
+    @Test func asymmetricPolygonRotationKeepsCommittedPivotThroughPreviewAndFinish() throws {
+        let session = OcclusionDocumentTests().session(
+            "{{c1::image-occlusion:polygon:left=.3:top=.3:points=.3,.3 .6,.3 .35,.5:oi=1}}", editing: true)
+        session.selectAll()
+        let pivot = try #require(session.rotationPivot)
+        #expect(pivot == CGPoint(x: 450, y: 400))
+        let expected = session.rotated(degrees: 40, finishing: true)
+        let interaction = MaskCanvasInteraction()
+        var writes = 0
+        session.onWrite = { _ in writes += 1 }
+        for degrees in [20.0, 40.0] {
+            interaction.rotate(degrees: degrees, finishing: false, session: session)
+            let previewBox = try #require(session.displayed.bounds(of: session.selection, in: session.referenceSize))
+            #expect(CGPoint(x: previewBox.midX, y: previewBox.midY) != pivot)
+            #expect(session.rotationPivot == pivot)
+        }
+        interaction.rotate(degrees: 40, finishing: true, session: session)
+        #expect(session.document == expected && session.preview == nil)
+        #expect(writes == 1 && session.canUndo)
+    }
+
     @Test func navigationCancelsMoveAndRestoresSelectionWithoutWriting() {
         let session = OcclusionDocumentTests().session(OcclusionDocumentTests().rect1, editing: true)
         let interaction = MaskCanvasInteraction()

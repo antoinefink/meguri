@@ -360,7 +360,8 @@ extension FieldEditorTests {
 }
 
 extension ReviewCollectionStartupTests {
-    @Test(.timeLimit(.minutes(1))) @MainActor func occlusionNormalAddGeneratesCardsAndEditCurrentReopensExactMasksAndMetadata() async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true]) @MainActor
+    func occlusionNormalAddGeneratesCardsAndEditCurrentReopensExactMasksAndMetadata(customRoles: Bool) async throws {
         let path = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
         let root = URL(filePath: String(cString: path)).appending(path: UUID().uuidString)
         free(path)
@@ -378,6 +379,15 @@ extension ReviewCollectionStartupTests {
             await owner.start(); await owner.startEmpty()
             try #require(owner.state == .ready)
             if owner.policy != .ok { await owner.enableFsrs() }
+            if customRoles {
+                let types = CoreNotetypeService()
+                let id = try await types.ensureImageOcclusionNotetype().id
+                var layout = NotetypeStructureDraft(try await types.readNotetype(id: id), skipChecks: false)
+                // Keep real role tags, moving both hidden roles away from field 0.
+                let fields = layout.fields
+                layout.fields = [fields[2], fields[3], fields[1], fields[0]] + Array(fields.dropFirst(4))
+                _ = try await types.startNotetypeStructureSave(layout).value()
+            }
             let host = try #require(await owner.prepareAddNoteEditor())
             let flow = owner.addNoteFlow
             await flow.selectNotetype(AddNoteFlow.imageOcclusionChoice)
@@ -410,6 +420,17 @@ extension ReviewCollectionStartupTests {
             #expect(try MediaFolder.read(imageName, in: media.root).isEmpty == false)
             let masks = OcclusionFieldFlowTests.first + " \t<br/>" + OcclusionFieldFlowTests.second + "<br>" + OcclusionFieldFlowTests.label
             ioHost.setHostField(masks, at: roles.occlusions)
+            if customRoles {
+                try #require(roles.header == 0 && roles.image == 2 && roles.occlusions == 3)
+                let unchanged = draft.values
+                #expect(await flow.save() == nil && flow.refusal == .empty && !ioHost.held)
+                #expect(draft.values == unchanged && flow.missingClozeConfirmation == nil)
+                // O7 keeps A5's refusal for a cloze outside the template's cloze field.
+                try await ioHost.setMode(.html, ord: roles.header)
+                try #require(try await FieldEditorTests.replaceSource(ioHost, ord: roles.header, value: "{{c9::header}}"))
+                #expect(await flow.save() == nil && flow.refusal == .fieldNotCloze && !ioHost.held)
+                #expect(draft.values[roles.occlusions] == masks && draft.values[roles.image] == unchanged[roles.image])
+            }
             let oldImage = draft.values[roles.image]
             imageSession.replacing = true
             let cancelledFile = try #require(imageSession.reserveSource(host: ioHost))

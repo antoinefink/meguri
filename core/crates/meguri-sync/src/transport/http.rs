@@ -33,7 +33,7 @@ pub(crate) struct EditorImageResponse {
 /// from sync: GET, redirects and content decoding have different contracts.
 pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) -> Result<EditorImageResponse, SyncError> {
     use crate::remote_media::failure;
-    let mut url = url::Url::parse(written_url).map_err(|e| failure(&e.to_string()))?;
+    let mut url = editor_image_url(written_url, None)?;
     let client = reqwest::Client::builder()
         .http1_only().no_proxy().retry(reqwest::retry::never())
         .redirect(reqwest::redirect::Policy::none())
@@ -42,9 +42,6 @@ pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) ->
         .dns_resolver(Arc::new(SystemResolver))
         .build().map_err(|e| failure(&chain(&e)))?;
     for redirects in 0..=10 {
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err(failure("Only HTTP and HTTPS image URLs are supported."));
-        }
         #[cfg(feature = "test-hooks")]
         guard(url.as_str())?;
         let mut response = client.get(url.clone())
@@ -56,8 +53,7 @@ pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) ->
             && let Some(location) = response.headers().get("location")
         {
             if redirects == 10 { return Err(failure("The image URL redirected too many times.")); }
-            url = url.join(location.to_str().map_err(|e| failure(&e.to_string()))?)
-                .map_err(|e| failure(&e.to_string()))?;
+            url = editor_image_url(location.to_str().map_err(|_| failure("Invalid image redirect."))?, Some(&url))?;
             continue;
         }
         if status != 200 { return Err(SyncError::Status { code: status, reason: String::new() }); }
@@ -76,6 +72,23 @@ pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) ->
         return Ok(EditorImageResponse { bytes, content_type, encoding });
     }
     unreachable!("the redirect bound returns in the loop")
+}
+
+/// Validate both source and redirect before reqwest can turn URL userinfo
+/// into Basic authentication. Errors never include the supplied URL.
+fn editor_image_url(written: &str, base: Option<&url::Url>) -> Result<url::Url, SyncError> {
+    use crate::remote_media::failure;
+    let url = match base {
+        Some(base) => base.join(written),
+        None => url::Url::parse(written),
+    }.map_err(|_| failure("Invalid image URL."))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(failure("Only HTTP and HTTPS image URLs are supported."));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(failure("Image URLs with credentials are not supported."));
+    }
+    Ok(url)
 }
 
 /// One job's HTTP client: its proxy and (test builds) its pins and roots are
@@ -455,6 +468,46 @@ fn chain(err: &(dyn StdError + 'static)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_image_urls_refuse_credentials_in_sources_and_redirects() {
+        let base = url::Url::parse("https://images.example.test/folder/image.png").unwrap();
+        let refused = crate::remote_media::failure("Image URLs with credentials are not supported.");
+        for written in [
+            "http://reader:sample@images.example.test/image.png",
+            "https://reader@images.example.test/image.png",
+            "https://:sample@images.example.test/image.png",
+            "https://reader:@images.example.test/image.png",
+            "https://%72eader:%73ample@images.example.test/image.png",
+        ] {
+            assert_eq!(editor_image_url(written, None), Err(refused.clone()));
+            assert_eq!(editor_image_url(written, Some(&base)), Err(refused.clone()));
+        }
+        assert_eq!(editor_image_url("//reader:sample@images.example.test/image.png", Some(&base)), Err(refused));
+    }
+
+    #[test]
+    fn editor_image_urls_keep_public_sources_and_redirects_without_authorization() {
+        let base = url::Url::parse("https://images.example.test/folder/image.png").unwrap();
+        for (written, parent, expected) in [
+            ("http://images.example.test/a/../image.png?q=public#view", None,
+             "http://images.example.test/image.png?q=public#view"),
+            ("https://images.example.test/a%40b.png", None, "https://images.example.test/a%40b.png"),
+            ("../next.png?q=public", Some(&base), "https://images.example.test/next.png?q=public"),
+            ("//cdn.example.test/image.png", Some(&base), "https://cdn.example.test/image.png"),
+            ("http://cdn.example.test/image.png", Some(&base), "http://cdn.example.test/image.png"),
+        ] {
+            let url = editor_image_url(written, parent).unwrap();
+            assert_eq!(url.as_str(), expected);
+            // Build only: these benign fixtures never contact their named hosts.
+            let request = reqwest::Client::new().get(url).build().unwrap();
+            assert!(!request.headers().contains_key("authorization"));
+        }
+        for written in ["file:///image.png", "ftp://images.example.test/image.png"] {
+            assert!(editor_image_url(written, None).is_err());
+            assert!(editor_image_url(written, Some(&base)).is_err());
+        }
+    }
 
     /// Synthetic loopback responses only; accepts and request reads are bounded.
     fn editor_response(response: Vec<u8>, limit: usize) -> Result<EditorImageResponse, SyncError> {

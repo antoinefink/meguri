@@ -197,7 +197,7 @@ public struct OcclusionNoteEditor: View {
                 } label: { Text(verbatim: IONoteText.chooseFile) }
                     .accessibilityIdentifier("io.picker.chooseFile")
                 Button(action: paste) { Text(verbatim: IONoteText.paste) }
-                    .keyboardShortcut("v", modifiers: .command)
+                    .keyboardShortcut(masksShown ? KeyboardShortcut("v", modifiers: .command) : nil)
                     .accessibilityIdentifier("io.picker.paste")
                 #if os(iOS)
                 PhotosPicker(selection: $photo, matching: .images) { Text(verbatim: IONoteText.photoLibrary) }
@@ -219,7 +219,7 @@ public struct OcclusionNoteEditor: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .disabled(!host.acceptsHostInput)
+        .disabled(!masksShown || !host.acceptsHostInput)
         .onDrop(of: [.fileURL, .url, .image], isTargeted: nil) { providers in
             session.chooseProvider(providers, host: host)
         }

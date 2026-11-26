@@ -95,6 +95,16 @@ extension MaskEditorSession {
     }
     var canRotate: Bool { selection.count == 1 }
 
+    /// Match rotated(): the pivot comes from committed geometry, never preview.
+    var rotationPivot: CGPoint? {
+        guard canRotate, let shape = document.shapes.first(where: { selection.contains($0.id) }) else { return nil }
+        if case .polygon = shape.data.kind {
+            let box = shape.bounds(in: referenceSize)
+            return CGPoint(x: box.midX, y: box.midY)
+        }
+        return shape.unrotatedBounds(in: referenceSize).origin
+    }
+
     func handlePoint(_ handle: ResizeHandle, in value: OcclusionDocument) -> CGPoint {
         if selection.count == 1, let shape = value.shapes.first(where: { selection.contains($0.id) }) {
             if case .polygon = shape.data.kind {} else {

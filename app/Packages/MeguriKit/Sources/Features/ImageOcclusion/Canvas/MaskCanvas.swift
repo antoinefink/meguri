@@ -310,11 +310,7 @@ struct MaskCanvas: View {
                     }
             }
             if session.canRotate {
-                let origin = session.document.shapes.first { session.selection.contains($0.id) }
-                    .map { shape in
-                        if case .polygon = shape.data.kind { return CGPoint(x: box.midX, y: box.midY) }
-                        return shape.unrotatedBounds(in: viewport.reference).origin
-                    } ?? box.origin
+                let origin = session.rotationPivot ?? box.origin
                 let center = viewport.screenPoint(origin)
                 Image(systemName: "arrow.trianglehead.clockwise.rotate.90")
                     .foregroundStyle(.tint).padding().contentShape(Rectangle())
