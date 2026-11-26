@@ -32,13 +32,18 @@ public enum BackupsPreview: PreviewStates {
         let state: PreviewState
         let cancel: () -> Void
         @State private var selected: String?
+        @State private var retriedError = false
         init(state: PreviewState, cancel: @escaping () -> Void) {
             self.state = state; self.cancel = cancel
             _selected = State(initialValue: selectedName(state))
         }
         var body: some View {
-            BackupRestoreContent(presentation: restorePresentation(state), selectedName: $selected,
-                                 refresh: {}, cancel: cancel, restore: { _ in })
+            BackupRestoreContent(presentation: restorePresentation(retriedError ? .empty : state), selectedName: $selected,
+                                 refresh: {
+                                     #if os(iOS)
+                                     if state == .error { retriedError = true }
+                                     #endif
+                                 }, cancel: cancel, restore: { _ in })
         }
     }
 

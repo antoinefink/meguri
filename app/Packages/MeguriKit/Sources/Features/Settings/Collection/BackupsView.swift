@@ -214,7 +214,12 @@ private struct BackupLimitRow: View {
     let enabled: Bool
     let save: (UInt32) -> Void
     @State private var draft = BackupLimitDraft()
+    #if os(iOS)
+    @State private var focused = false
+    @Environment(\.locale) private var locale
+    #else
     @FocusState private var focused: Bool
+    #endif
     @Environment(\.dynamicTypeSize) private var textSize
     var body: some View {
         Group {
@@ -229,6 +234,11 @@ private struct BackupLimitRow: View {
             regularRow
             #endif
         }
+        #if os(iOS)
+        // Use the existing row's vertical space for the real input, rather than
+        // adding a 44-point control to the Form's ordinary text-row padding.
+        .listRowInsets(.vertical, Spacing.xxSmall)
+        #endif
         .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
         if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
     }
@@ -260,25 +270,108 @@ private struct BackupLimitRow: View {
         field == .interval ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module)
     }
     private var input: some View {
+        #if os(iOS)
+        BackupLimitTouchField(text: $draft.text, focused: $focused, identifier: identifier,
+                              label: touchFieldLabel, enabled: enabled,
+                              trailing: !textSize.isAccessibilitySize)
+            .onChange(of: focused) { _, active in
+                if active { draft.reset(to: value) } else { commit() }
+            }
+            .disabled(!enabled)
+        #else
             TextField(text: $draft.text) { Text(title, bundle: .module) }
                 .labelsHidden()
                 .accessibilityLabel(fieldLabel)
                 .accessibilityIdentifier(identifier)
-                #if os(iOS)
-                .keyboardType(.numbersAndPunctuation)
-                #endif
                 .focused($focused)
                 .onSubmit(commit)
                 .onChange(of: focused) { _, active in
                     if active { draft.reset(to: value) } else { commit() }
                 }
                 .disabled(!enabled)
+        #endif
     }
+    #if os(iOS)
+    private var touchFieldLabel: String {
+        switch field {
+        case .interval: String(localized: "Interval in minutes", bundle: .module, locale: locale)
+        case .daily: String(localized: "Daily", bundle: .module, locale: locale)
+        case .weekly: String(localized: "Weekly", bundle: .module, locale: locale)
+        case .monthly: String(localized: "Monthly", bundle: .module, locale: locale)
+        }
+    }
+    #endif
     private func commit() {
         guard enabled else { return }
         if let number = draft.commit(value: value, minimum: minimum) { save(number) }
     }
 }
+
+#if os(iOS)
+/// One editable native element: its UIView bounds are both its AX and hit frame.
+/// SwiftUI padding around a text-sized field does not enlarge that native frame.
+private struct BackupLimitTouchField: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var focused: Bool
+    let identifier: String
+    let label: String
+    let enabled: Bool
+    let trailing: Bool
+    @Environment(\.layoutDirection) private var layoutDirection
+    @ScaledMetric(relativeTo: .body) private var pointSize = UIFont.preferredFont(
+        forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)).pointSize
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.borderStyle = .none
+        field.keyboardType = .numbersAndPunctuation
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.parent = self
+        if field.text != text { field.text = text }
+        field.font = trailing ? .monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
+            : UIFont.preferredFont(forTextStyle: .body).withSize(pointSize)
+        field.semanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
+        let rightToLeft = field.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        field.textAlignment = trailing == rightToLeft ? .left : .right
+        field.isEnabled = enabled && context.environment.isEnabled
+        field.accessibilityIdentifier = identifier
+        field.accessibilityLabel = label
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
+        // The regular row asks for an ideal width. Reserve the same ten digits
+        // and horizontal space as its existing SwiftUI measuring text.
+        let font = uiView.font ?? UIFont.preferredFont(forTextStyle: .body).withSize(pointSize)
+        let idealWidth = trailing
+            ? (String(UInt32.max) as NSString).size(withAttributes: [.font: font]).width + 2 * Spacing.small
+            : uiView.intrinsicContentSize.width
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? idealWidth
+        return CGSize(width: max(ControlMetrics.minimumTarget, width),
+                      height: max(ControlMetrics.minimumTarget, uiView.intrinsicContentSize.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: BackupLimitTouchField
+        init(parent: BackupLimitTouchField) { self.parent = parent }
+        @objc func changed(_ field: UITextField) { parent.text = field.text ?? "" }
+        func textFieldDidBeginEditing(_ field: UITextField) { parent.focused = true }
+        func textFieldDidEndEditing(_ field: UITextField) { parent.focused = false }
+        func textFieldShouldReturn(_ field: UITextField) -> Bool {
+            // A successful resign follows the same editing-ended commit as blur.
+            // Committing here too would reset the draft before an async save lands.
+            return field.resignFirstResponder()
+        }
+    }
+}
+#endif
 
 /// Standard label/value alignment; only accessibility text sizes may reflow.
 private struct BackupLimitRowStyle: LabeledContentStyle {
@@ -460,9 +553,7 @@ struct BackupRestoreContent: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("settings.backups.listFailure")
                         } actions: {
-                            Button(action: refresh) { Text("Try Again", bundle: .module) }
-                                .backupFormActionTint()
-                                .accessibilityIdentifier("settings.backups.retry")
+                            retryButton
                         }
                         restoreNotices
                     }
@@ -473,14 +564,23 @@ struct BackupRestoreContent: View {
                         Text("Create a backup on this device, or check the configured backup folder.", bundle: .module)
                             .backupTouchSecondaryStyle()
                     }
-                    actions: { Button(action: refresh) { Text("Try Again", bundle: .module) }
-                        .backupFormActionTint()
-                        .accessibilityIdentifier("settings.backups.retry") }
+                    actions: { retryButton }
                 } else {
                     history
                 }
                 if !showsListFailure { restoreNotices }
             }
+    }
+    private var retryButton: some View {
+        Button(action: refresh) {
+            Text("Try Again", bundle: .module)
+                #if os(iOS)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
+                #endif
+        }
+        .backupFormActionTint()
+        .accessibilityIdentifier("settings.backups.retry")
     }
     private var restoreTitle: Text {
         #if os(iOS)

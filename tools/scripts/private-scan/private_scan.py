@@ -840,7 +840,7 @@ PUBLIC_ARTIFACTS = {
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":
         "ad79311280c0e3216296e574b0aab632e8529c7c725afda3dd9720ed379ba5ff",
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
-        "1bb288ec50e6095918c4b5688ee51ba0018d256252a1c2ed90aebc7d5fc9931f",
+        "d138c50c111442461faeea201b89da8d1b676b51e15aef48904daeb24f6bda5c",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
@@ -1456,7 +1456,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',
-    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': '604866a5ae2ff4b07a59905a4827d25fdd58b89bdc003139ba23d1e9517a24b4',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': 'b3f49eb3b6a8844fd5b245bfe224daef9ee95858097bdba9c0ea6f1e963767be',
     'app/Packages/MeguriKit/Tests/AppModelTests/BackupCoordinatorTests.swift': 'dcc5d9841079f09f3f8cdd8e525a4911fd952f8145d620ad67011c30b31ac977',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',
