@@ -112,14 +112,14 @@ struct BackupsContent: View {
                 } else {
                     Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
                 }
-            } header: { caption { Text("Automatic Backups", bundle: .module) } }
+            } header: { caption(footer: false) { Text("Automatic Backups", bundle: .module) } }
             footer: { caption { Text("Synced settings. Enter 5–9999 minutes.", bundle: .module) } }
             if let limits = presentation.limits {
                 Section {
                     limit("Daily", field: .daily, value: limits.daily)
                     limit("Weekly", field: .weekly, value: limits.weekly)
                     limit("Monthly", field: .monthly, value: limits.monthly)
-                } header: { caption { Text("Keep Backups", bundle: .module) } }
+                } header: { caption(footer: false) { Text("Keep Backups", bundle: .module) } }
                 footer: { caption { Text("Synced settings. Enter 0–9999 backups per period.", bundle: .module) } }
             }
             if let url = presentation.serverBackupsURL {
@@ -140,13 +140,13 @@ struct BackupsContent: View {
         .accessibilityIdentifier("settings.backups.content")
     }
 
-    // The native light iPhone audit found these Form captions below 4.5:1.
-    @ViewBuilder private func caption<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    // Mac light-mode failures were footer text; ordinary headers retain native styling.
+    @ViewBuilder private func caption<Content: View>(footer: Bool = true, @ViewBuilder _ content: () -> Content) -> some View {
         #if os(iOS)
         // Footer status views also use the secondary style.
         content().foregroundStyle(ColorToken.textSecondary.color, ColorToken.textSecondary.color)
         #else
-        content()
+        content().backupMacLightTextStyle(when: footer)
         #endif
     }
 
@@ -158,10 +158,18 @@ struct BackupsContent: View {
 }
 
 private extension View {
-    // Native touch backup captions/status text measured below 4.5:1.
+    // Measured backup captions/status text; touch keeps its existing exception in all appearances.
     @ViewBuilder func backupTouchSecondaryStyle() -> some View {
         #if os(iOS)
         self.foregroundStyle(ColorToken.textSecondary.color, ColorToken.textSecondary.color)
+        #else
+        self.backupMacLightTextStyle()
+        #endif
+    }
+
+    @ViewBuilder func backupMacLightTextStyle(when applies: Bool = true, native: HierarchicalShapeStyle? = nil) -> some View {
+        #if os(macOS)
+        modifier(BackupMacLightTextStyle(applies: applies, native: native))
         #else
         self
         #endif
@@ -176,6 +184,25 @@ private extension View {
         #endif
     }
 }
+
+#if os(macOS)
+/// Only measured app-owned labels opt in; dark appearance and selection keep native styles.
+private struct BackupMacLightTextStyle: ViewModifier {
+    let applies: Bool
+    let native: HierarchicalShapeStyle?
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if applies && colorScheme == .light {
+            content.foregroundStyle(ColorToken.textSecondary.color)
+        } else if let native {
+            content.foregroundStyle(native)
+        } else {
+            content
+        }
+    }
+}
+#endif
 
 private struct BackupLimitRow: View {
     let title: LocalizedStringKey
@@ -221,7 +248,7 @@ private struct BackupLimitRow: View {
                         #if os(iOS)
                         .foregroundStyle(ColorToken.textSecondary.color)
                         #else
-                        .foregroundStyle(.secondary)
+                        .backupMacLightTextStyle(when: enabled, native: .secondary)
                         #endif
                 }
             }
@@ -427,7 +454,7 @@ struct BackupRestoreContent: View {
                 } else if showsListFailure, let error = presentation.listFailure {
                     ScrollView {
                         ContentUnavailableView {
-                            Label { Text("Unable to Load Backups", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
+                            Label { Text("Unable to Load Backups", bundle: .module).backupMacLightTextStyle() } icon: { Image(systemName: "exclamationmark.triangle") }
                         } description: {
                             BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -441,7 +468,7 @@ struct BackupRestoreContent: View {
                     }
                 } else if presentation.entries.isEmpty {
                     ContentUnavailableView {
-                        Label { Text("No Backups Yet", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
+                        Label { Text("No Backups Yet", bundle: .module).backupMacLightTextStyle() } icon: { Image(systemName: "clock.arrow.circlepath") }
                     } description: {
                         Text("Create a backup on this device, or check the configured backup folder.", bundle: .module)
                             .backupTouchSecondaryStyle()
@@ -492,8 +519,10 @@ struct BackupRestoreContent: View {
                     .accessibilityIdentifier("settings.backups.entry.\(row.entry.name)")
             }
             TableColumn(Text("Size", bundle: .module)) { row in
+                let isUnavailable = unavailable(row.entry)
                 Text(verbatim: BackupPresentation.size(row.entry.sizeBytes))
-                    .foregroundStyle(unavailable(row.entry) ? .secondary : .primary)
+                    .backupMacLightTextStyle(when: isUnavailable && selectedName != row.entry.name,
+                                             native: isUnavailable ? .secondary : .primary)
             }
             .width(min: 70, ideal: 90)
         } rows: {
@@ -544,15 +573,28 @@ struct BackupRestoreContent: View {
         #endif
     }
     private func entryLabel(_ entry: BackupEntry) -> some View {
-        VStack(alignment: .leading) {
+        let isUnavailable = unavailable(entry)
+        #if os(macOS)
+        let isUnselected = selectedName != entry.name
+        #endif
+        return VStack(alignment: .leading) {
             Text(verbatim: BackupPresentation.timestamp(entry, locale: locale))
             if let index = duplicateIndex(entry) {
-                Text("Archive \(index)", bundle: .module).foregroundStyle(.secondary)
+                Text("Archive \(index)", bundle: .module)
+                    #if os(macOS)
+                    .backupMacLightTextStyle(when: isUnselected, native: .secondary)
+                    #else
+                    .foregroundStyle(.secondary)
+                    #endif
             }
             if entry.kind == .serverCopy { Text("Server copy", bundle: .module) }
-            if unavailable(entry) { Text("Can’t be restored", bundle: .module) }
+            if isUnavailable { Text("Can’t be restored", bundle: .module) }
         }
-        .foregroundStyle(unavailable(entry) ? .secondary : .primary)
+        #if os(macOS)
+        .backupMacLightTextStyle(when: isUnavailable && isUnselected, native: isUnavailable ? .secondary : .primary)
+        #else
+        .foregroundStyle(isUnavailable ? .secondary : .primary)
+        #endif
         .help(entry.name)
     }
     private func duplicateIndex(_ entry: BackupEntry) -> Int? {
@@ -686,7 +728,7 @@ private struct BackupFailureText: View {
         #if os(iOS)
         .backupTouchSecondaryStyle()
         #else
-        .foregroundStyle(.secondary)
+        .backupMacLightTextStyle(native: .secondary)
         #endif
     }
     private var cause: LocalizedStringKey {

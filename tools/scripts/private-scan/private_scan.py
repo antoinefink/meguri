@@ -1456,7 +1456,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',
-    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': '306d74528c531f2b7eb0055f8647a4be93a1ea78e6b8ea5d1779b7ea9427ff8a',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': '604866a5ae2ff4b07a59905a4827d25fdd58b89bdc003139ba23d1e9517a24b4',
     'app/Packages/MeguriKit/Tests/AppModelTests/BackupCoordinatorTests.swift': 'dcc5d9841079f09f3f8cdd8e525a4911fd952f8145d620ad67011c30b31ac977',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',

@@ -59,7 +59,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                                                   checks: (XCUIElement) throws -> Void) throws {
                                 try verify(element, detail: detail, reach: {
                                     let index = try XCTUnwrap(order.firstIndex(of: detail))
-                                    return try self.reach(element, in: app, scope: settings,
+                                    return try self.reach(element, detail: detail, in: app, scope: settings,
                                                           preceding: Array(neighbours.prefix(index)), passive: passive)
                                 }, checks: checks)
                             }
@@ -171,7 +171,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                                                       (retry, "list retry", false)].enumerated() {
                                     let (element, detail, passive) = item
                                     try verify(element, detail: detail, reach: {
-                                        try self.reach(element, in: app, scope: restoreScope, preceding: Array(order.prefix(index)), passive: passive)
+                                        try self.reach(element, detail: detail, in: app, scope: restoreScope, preceding: Array(order.prefix(index)), passive: passive)
                                     }) { visible in
                                         if detail == "list retry" {
                                             XCTAssertEqual(app.buttons.matching(identifier: "settings.backups.retry").count, 1)
@@ -187,7 +187,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                             } else if state == "loading" {
                                 let progress = restoreScope.descendants(matching: .any).matching(identifier: "settings.backups.loading").firstMatch
                                 try verify(progress, detail: "loading", reach: {
-                                    try self.reach(progress, in: app, scope: restoreScope, passive: true)
+                                    try self.reach(progress, detail: "loading", in: app, scope: restoreScope, passive: true)
                                 }) { _ in
                                     self.assertProgress("settings.backups.loading", label: "Loading Backups…", in: app)
                                 }
@@ -199,7 +199,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                                     #if os(iOS)
                                     let scrolled = try self.reachHistoryEntry(index, names: names, in: app)
                                     #else
-                                    let scrolled = try self.reach(row, in: app, scope: restoreScope)
+                                    let scrolled = try self.reach(row, detail: "settings.backups.entry.\(name)", in: app, scope: restoreScope)
                                     #endif
                                     guard row.exists else {
                                         XCTFail("Reached backup entry disappeared before its semantics were read: \(name)\n\(app.debugDescription)")
@@ -301,13 +301,24 @@ final class BackupsAccessibilityTests: XCTestCase {
             return
         }
         let progress = matches.element
+        XCTAssertEqual(progress.label, expectedLabel,
+                       "Expected exact progress label for \(identifier): \(progress.debugDescription)", file: file, line: line)
+        #if os(macOS)
+        XCTAssertEqual(progress.elementType, .activityIndicator,
+                       "Expected ActivityIndicator for \(identifier): \(progress.debugDescription)", file: file, line: line)
+        guard let value = progress.value as? NSNumber else {
+            XCTFail("Expected numeric progress value for \(identifier): \(progress.debugDescription)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(value, NSNumber(value: 0),
+                       "Expected exact progress value for \(identifier): \(progress.debugDescription)", file: file, line: line)
+        #else
         XCTAssertTrue(progress.elementType == .activityIndicator || progress.elementType == .progressIndicator,
                       "Expected ActivityIndicator or ProgressIndicator for \(identifier); found \(progress.elementType)\n\(progress.debugDescription)",
                       file: file, line: line)
-        XCTAssertEqual(progress.label, expectedLabel,
-                       "Expected exact progress label for \(identifier): \(progress.debugDescription)", file: file, line: line)
         XCTAssertEqual(progress.value as? String, "In progress",
                        "Expected exact progress value for \(identifier): \(progress.debugDescription)", file: file, line: line)
+        #endif
     }
 
     private func confirmationRestore(in context: XCUIElement) -> XCUIElement {
@@ -348,7 +359,7 @@ final class BackupsAccessibilityTests: XCTestCase {
     private func assertStaticText(_ element: XCUIElement, contains expected: String,
                                   file: StaticString = #filePath, line: UInt = #line) {
         guard element.exists else {
-            XCTFail("Expected static text containing \(expected.debugDescription): \(element.debugDescription)", file: file, line: line)
+            XCTFail("Expected static text containing \(expected.debugDescription)", file: file, line: line)
             return
         }
         let label = element.label, value = element.value as? String
@@ -368,18 +379,110 @@ final class BackupsAccessibilityTests: XCTestCase {
         let rows = names.map { name in
             history.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
         }
-        return try reachTouch(rows[index], in: history, window: window,
-                              preceding: Array(rows.prefix(index)), passive: false, app: app)
+        return try reachTouch(rows[index], target: "settings.backups.entry.\(names[index])", in: history, window: window,
+                              preceding: Array(rows.prefix(index)), passive: false)
     }
 
-    /// Audits can finish at 100% with every lazy cell virtualized. Recover toward
-    /// earlier controls unless a preceding visible control proves the target is ahead.
-    private func reachTouch(_ element: XCUIElement, in scroll: XCUIElement, window: XCUIElement,
-                            preceding: [XCUIElement], passive: Bool, app: XCUIApplication,
+    private struct TouchScrollProgress {
+        let indicatorFrame: CGRect?
+        let nativeValue: String?
+        let fraction: Double?
+        let visibleFrames: [String: CGRect]
+
+        var summary: String {
+            let sample = visibleFrames.sorted { $0.key < $1.key }.prefix(3).map { "\($0.key)=\($0.value)" }
+            return "offset=\(nativeValue ?? "unavailable"), visible=\(visibleFrames.count) \(sample), indicator=\(String(describing: indicatorFrame))"
+        }
+    }
+
+    /// Read the active native List/ScrollView only. Some virtualized snapshots
+    /// expose no cells at all, but still expose a real percentage on the scrollbar.
+    private func touchProgress(in scroll: XCUIElement, viewport: CGRect) throws -> TouchScrollProgress {
+        let snapshot = try scroll.snapshot()
+        var indicator: (any XCUIElementSnapshot)?
+        var frames: [String: CGRect] = [:]
+        @MainActor func visit(_ node: any XCUIElementSnapshot) {
+            let label = node.label.lowercased()
+            let vertical = node.elementType == .scrollBar || label.contains("vertical scroll bar")
+                || label.contains("vertical scrolling indicator") || label.contains("vertical scroll indicator")
+            if vertical && node.frame.height > node.frame.width && node.frame.intersects(viewport) {
+                indicator = node
+                return
+            }
+            switch node.elementType {
+            case .cell, .staticText, .button, .textField, .link, .image, .switch, .activityIndicator, .progressIndicator:
+                if !node.frame.isEmpty && node.frame.intersects(viewport) {
+                    let key = "\(node.elementType.rawValue)|\(node.identifier)|\(node.label)"
+                    frames[key] = node.frame
+                }
+            default: break
+            }
+            for child in node.children { visit(child) }
+        }
+        visit(snapshot)
+        let value = indicator.flatMap { $0.value }.map { String(describing: $0) }
+        let percent = value.flatMap { value -> Double? in
+            guard let range = value.range(of: #"[0-9]+(?:[.,][0-9]+)?(?=\s*%)"#, options: .regularExpression) else { return nil }
+            return Double(value[range].replacingOccurrences(of: ",", with: "."))
+        }
+        return TouchScrollProgress(indicatorFrame: indicator?.frame, nativeValue: value,
+                                   fraction: percent.map { $0 / 100 }, visibleFrames: frames)
+    }
+
+    /// Gesture bounds exclude this surface's navigation bar even without an
+    /// indicator. A transient scrollbar thumb never defines content visibility.
+    /// Toolbars can report the whole device and are not clipping witnesses.
+    private func touchGestureBounds(in scroll: XCUIElement, window: XCUIElement) -> CGRect {
+        var viewport = scroll.frame.intersection(window.frame)
+        guard !viewport.isEmpty else { return .null }
+        for bar in window.navigationBars.allElementsBoundByIndex {
+            let frame = bar.frame
+            let relevant = bar.identifier == "Backups" || bar.identifier == "Restore from Backup"
+                || bar.label == "Backups" || bar.label == "Restore from Backup"
+                || bar.buttons.matching(identifier: "settings.backups.cancel").firstMatch.exists
+                || bar.buttons.matching(identifier: "settings.backups.apply").firstMatch.exists
+            // Do not clip an unrelated iPad sidebar's navigation or status areas.
+            guard relevant, frame.contains(CGPoint(x: viewport.midX, y: frame.midY)),
+                  frame.intersection(viewport).width >= viewport.width / 2,
+                  frame.minY <= viewport.midY, frame.maxY > viewport.minY,
+                  frame.maxY < viewport.maxY else { continue }
+            viewport = CGRect(x: viewport.minX, y: frame.maxY, width: viewport.width,
+                              height: viewport.maxY - frame.maxY)
+        }
+        return viewport
+    }
+
+    /// Audits can finish at 100% with every lazy cell virtualized. Recover using
+    /// native offset and local semantic order, with both drag ends inside content.
+    private func reachTouch(_ element: XCUIElement, target: String, in scroll: XCUIElement, window: XCUIElement,
+                            preceding: [XCUIElement], passive: Bool,
                             canScroll: Bool = true) throws -> Bool {
         _ = try XCTUnwrap(scroll.exists ? scroll : nil, "Expected the native backup content container")
         _ = try XCTUnwrap(window.exists ? window : nil, "Expected the window containing the backup content anchor")
         var scrolled = false
+        var trace: [String] = []
+        var traceSaved = false
+        func saveTrace() {
+            if !trace.isEmpty && !traceSaved {
+                traceSaved = true
+                let attachment = XCTAttachment(string: "target=\(target)\n" + trace.joined(separator: "\n"))
+                attachment.name = "Backups native scroll trace"
+                attachment.lifetime = .deleteOnSuccess
+                add(attachment)
+            }
+        }
+        func saveFailureEvidence() {
+            saveTrace()
+            let image = XCTAttachment(screenshot: window.screenshot())
+            image.name = "Backups unreachable content"
+            image.lifetime = .keepAlways
+            add(image)
+            let tree = XCTAttachment(string: window.debugDescription)
+            tree.name = "Backups final native scroll tree"
+            tree.lifetime = .keepAlways
+            add(tree)
+        }
+        defer { saveTrace() }
         for _ in 0..<24 {
             let scrollFrame = scroll.frame
             let viewport = scrollFrame.intersection(window.frame)
@@ -397,17 +500,64 @@ final class BackupsAccessibilityTests: XCTestCase {
                 let frame = row.frame
                 return !frame.isEmpty && viewport.intersects(frame)
             }
-            let step = viewport.height * (earlierVisible ? 1.0 / 3.0 : 0.75)
-            let move = frame.isEmpty
-                ? (earlierVisible ? -step : step)
-                : max(-step, min(step, viewport.midY - frame.midY))
-            let start = scroll.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                dx: viewport.midX - scrollFrame.minX, dy: viewport.midY - scrollFrame.minY - move / 2))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
-                        withVelocity: .slow, thenHoldForDuration: 0.2)
+            let interior = touchGestureBounds(in: scroll, window: window).insetBy(dx: 1, dy: 1)
+            guard interior.width > 0, interior.height > 0 else { break }
+            let before: TouchScrollProgress
+            do { before = try touchProgress(in: scroll, viewport: viewport) }
+            catch { saveFailureEvidence(); throw error }
+            let step = interior.height * (earlierVisible ? 1.0 / 3.0 : 0.75)
+            let seekEarlier: Bool
+            if !frame.isEmpty {
+                seekEarlier = frame.midY < interior.midY
+            } else if let offset = before.fraction, offset == 1 || offset == 0 {
+                seekEarlier = offset == 1
+            } else {
+                seekEarlier = !earlierVisible
+            }
+            let distance = frame.isEmpty ? step : min(step, abs(interior.midY - frame.midY))
+            let move = seekEarlier ? distance : -distance
+            var x = interior.midX
+            if let track = before.indicatorFrame, x >= track.minX && x <= track.maxX {
+                let left = max(0, track.minX - interior.minX)
+                let right = max(0, interior.maxX - track.maxX)
+                x = left >= right ? interior.minX + left / 2 : track.maxX + right / 2
+            }
+            let startPoint = CGPoint(x: x, y: interior.midY - move / 2)
+            let endPoint = CGPoint(x: x, y: interior.midY + move / 2)
+            guard distance > 0, interior.contains(startPoint), interior.contains(endPoint),
+                  before.indicatorFrame?.contains(startPoint) != true,
+                  before.indicatorFrame?.contains(endPoint) != true else { break }
+            let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: startPoint.x - scrollFrame.minX, dy: startPoint.y - scrollFrame.minY))
+            let end = origin.withOffset(CGVector(dx: endPoint.x - scrollFrame.minX, dy: endPoint.y - scrollFrame.minY))
+            let direction = seekEarlier ? "earlier" : "later"
+            let gesture = "window=\(window.frame), scroll=\(scrollFrame), viewport=\(viewport), input=\(interior), gesture=\(startPoint)->\(endPoint)"
+            trace.append("\(direction): before {\(before.summary)}; \(gesture); after=pending")
             scrolled = true
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            let after: TouchScrollProgress
+            do { after = try touchProgress(in: scroll, viewport: viewport) }
+            catch { saveFailureEvidence(); throw error }
+            let beforeNodes = Set(before.visibleFrames.keys)
+            let afterNodes = Set(after.visibleFrames.keys)
+            let identitiesChanged = beforeNodes != afterNodes
+            let commonNodes = beforeNodes.intersection(afterNodes)
+            let movedNodes = commonNodes.filter { before.visibleFrames[$0] != after.visibleFrames[$0] }.sorted()
+            let contentMoved = identitiesChanged || !movedNodes.isEmpty
+            let offsetMoved = before.fraction != nil && after.fraction != nil && before.fraction != after.fraction
+            let movement = movedNodes.prefix(3).map { "\($0): \(before.visibleFrames[$0]!) -> \(after.visibleFrames[$0]!)" }
+            trace[trace.count - 1] = "\(direction): before {\(before.summary)} after {\(after.summary)}, identitiesChanged=\(identitiesChanged), moved=\(movement); \(gesture)"
+            // A rounded percentage is corroborated by content identities and frames.
+            // Equal percentages also detect inert gestures with virtualized rows.
+            let sameOffset = before.fraction != nil && before.fraction == after.fraction
+            if !contentMoved && !offsetMoved && (!commonNodes.isEmpty || sameOffset) {
+                saveFailureEvidence()
+                XCTFail("Inert native backup gesture; target=\(target); \(trace.last!)")
+                return scrolled
+            }
         }
-        XCTFail("Unreachable backup content: \(element)\n\(app.debugDescription)")
+        saveFailureEvidence()
+        XCTFail("Unreachable backup content: \(target); scroll=\(scroll.frame), window=\(window.frame); \(trace.last ?? "no valid native gesture")")
         return scrolled
     }
     #endif
@@ -415,14 +565,14 @@ final class BackupsAccessibilityTests: XCTestCase {
     /// Lazy native Forms and Lists must bring every tested row into the viewport,
     /// including at AX5. A missing or unreachable row fails, never skips its audit.
     /// Returns whether scrolling changed the viewport and requires another audit.
-    private func reach(_ element: XCUIElement, in app: XCUIApplication, scope: XCUIElement? = nil,
+    private func reach(_ element: XCUIElement, detail: String, in app: XCUIApplication, scope: XCUIElement? = nil,
                        preceding: [XCUIElement] = [], passive: Bool = false) throws -> Bool {
         let scope = scope ?? app
         _ = try XCTUnwrap(scope.exists ? scope : nil, "Expected the native backup verification scope")
         #if os(iOS)
         if scope.elementType == .collectionView {
             let window = app.windows.containing(.collectionView, identifier: "settings.backups.content").firstMatch
-            return try reachTouch(element, in: scope, window: window, preceding: preceding, passive: passive, app: app)
+            return try reachTouch(element, target: detail, in: scope, window: window, preceding: preceding, passive: passive)
         }
         let identifier = "settings.backups.restoreContent"
         let content = scope.descendants(matching: .any).matching(identifier: identifier).firstMatch
@@ -433,8 +583,8 @@ final class BackupsAccessibilityTests: XCTestCase {
         let childScroll = content.scrollViews.firstMatch
         let errorScroll = scope.scrollViews.containing(.any, identifier: "settings.backups.listFailure").firstMatch
         let scroll = namedScroll.exists ? namedScroll : (childScroll.exists ? childScroll : errorScroll)
-        return try reachTouch(element, in: scroll.exists ? scroll : content, window: window,
-                              preceding: preceding, passive: passive, app: app, canScroll: scroll.exists)
+        return try reachTouch(element, target: detail, in: scroll.exists ? scroll : content, window: window,
+                              preceding: preceding, passive: passive, canScroll: scroll.exists)
         #else
         let list = scope.collectionViews.firstMatch
         let scroll = list.exists ? list : scope.scrollViews.firstMatch
@@ -455,7 +605,7 @@ final class BackupsAccessibilityTests: XCTestCase {
             scroll.scroll(byDeltaX: 0, deltaY: move)
             scrolled = true
         }
-        XCTFail("Unreachable backup content: \(element)\n\(app.debugDescription)")
+        XCTFail("Unreachable backup content: \(detail)\n\(app.debugDescription)")
         return scrolled
         #endif
     }
