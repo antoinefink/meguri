@@ -8,11 +8,11 @@ The following receipts use disposable Meguri Dev collections or synthetic fixtur
 
 | Scope | Verified result | Receipt |
 |---|---|---|
-| Backup, scheduler and restore lifecycle | 37 tests passed across six Swift suites on clean `44305c7be`. Coverage includes cold recovery, cancellation, lifecycle races, retention and sync publication. | `swift-test/20261126T114421Z-27219` |
+| Backup, scheduler and restore lifecycle | 37 tests passed across six Swift suites on clean `51fbe5e0b`. Coverage includes cold recovery, cancellation, lifecycle races, retention and sync publication. | `swift-test/20261126T133439Z-7679` |
 | Cancellation before restore activation | Explicit Cancel, backgrounding and shutdown retained the synthetic deck and reattached the real offline provider. | `swift-test/20261126T093355Z-64340` |
 | Core and native bridge | Four bound-provider restore tests passed, with 79 passing in the surrounding selection. The native bridge and instrumentation selection passed 25 tests. | `core-test/20261126T081912Z-10883`, `core-test/20261126T082001Z-13461`, `swift-test/20261126T090437Z-84979` |
 | Retention writes | 13 retention and 19 maintenance FFI tests passed. Single-field changes preserve concurrent updates, unknown members and legacy values. | `core-test/20261126T090027Z-72015`, `core-test/20261126T085906Z-69143` |
-| Static checks | Six checks passed, including provenance trailers, recorded sessions and the retry policy. | `static-checks/20261126T114419Z-26798` |
+| Static checks | Six checks passed, including provenance trailers, recorded sessions and the retry policy. | `static-checks/20261126T133318Z-97884` |
 
 Independent review identified a cancellation path that could leave sync detached and a retention write that could overwrite another device’s edits. Restore now completes reattachment on an uncancelled task. Retention updates read the other settings inside the write transaction. The cancellation and retention tests exercise both fixes.
 
@@ -22,11 +22,11 @@ Each journey creates a backup, edits a real card, selects an older archive, canc
 
 | Platform | Result |
 |---|---|
-| Mac | `ui-test/20261126T093850Z-76474` passed on a dirty checkout at `d322d24e5`. The compact window implementation was committed in `cc1202cea`. The capture includes the native titlebar and all three table rows in a 560 × 262 point window. |
-| iPhone | `ui-test/20261126T104835Z-79610` passed on clean `8d39140df`. All three rows fit, the title is visible, and the selected date matches the confirmation. |
-| iPad | `ui-test/20261126T115746Z-69296` passed on clean `034acbe90`. The native three-row sheet uses 52-point rows and a 268-point height. All rows fit inside its bounds. |
+| Mac | `ui-test/20261126T132033Z-28841`, clean `03359cb22`. The recovery journey passed. The separate long-list test scrolled one page and failed before reaching the oldest row. |
+| iPhone | `ui-test/20261126T133142Z-89261`, clean `51fbe5e0b`. The recovery journey passed, including Cancel and Restore in the system alert. |
+| iPad | `ui-test/20261126T133303Z-95586`, clean `51fbe5e0b`. The recovery journey passed, including the safety copy after relaunch. |
 
-The gallery contains three original app-window PNGs per platform. Its nine uploaded files matched the original captures byte for byte. Updated Settings colors on touch require fresh captures.
+The nine PNG files on the pull request matched these three runs byte for byte.
 
 ## Screenshots and accessibility
 
@@ -36,5 +36,3 @@ The production picker uses a native table in a separate Mac window and a selecta
 
 
 The [integration register](../verification-status.md) retains the failed full-project gate. The latest complete gate is `gate/20261116T005859Z-94440`. A later attempt stopped during the Swift suite. The focused results above cover the backup subsystem.
-
-The independent checks reviewer approved the complete public verification register at SHA-256 `078604c0ea8b0dd0f821da5407fbea6b5325ba03f83cc809ac57d7e7b8a2f88e` and the complete native interface contract at `7156ed8b110f1d63d92d86e839d846af11cac625ac0752815694acda38a70d57`. The three reviewed snapshot manifests have SHA-256 `f5d117ee410ed0bf037ead622ba6828c7c455214f0861041e31fc469d7843f09`, `1aaf9cfc8294e163785d86e0725ab3fa9340be5c6f55f67a23a1804b53734428` and `97ee84edf2d06a49780b060c404c121423c00d32f2fe727cca7fccce66b202d9`.
