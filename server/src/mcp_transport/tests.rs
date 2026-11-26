@@ -119,8 +119,8 @@ fn modern_meta() -> Value {
         (wire::CLIENT_INFO):{"name":"Generated fixture", "version":"1"},
         (wire::CLIENT_CAPABILITIES):{}})
 }
-#[test]
-fn attachment_wire_shapes_reject_missing_null_and_duplicate_members_before_dispatch() {
+#[tokio::test]
+async fn attachment_wire_shapes_reject_missing_null_and_duplicate_members_before_dispatch() {
     let valid_file = json!({"download_url":"https://files.oaiusercontent.com/generated","file_id":"generated"});
     for (name,arguments) in [
         ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{},"files":[valid_file.clone()],"file_fields":["Front"]})),
@@ -144,6 +144,33 @@ fn attachment_wire_shapes_reject_missing_null_and_duplicate_members_before_dispa
     }
     let duplicate = br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"edit_note","arguments":{"note_id":"1","revision":"generated","uploads":[{"upload_id":"u","field":"Front","field":"Back"}]}}}"#;
     assert!(super::json::parse(duplicate).is_err());
+    // URL size remains a wire error, before authority or acquisition diagnostics.
+    for url in [String::new(),"x".repeat(4097)] {
+        for (name,mut args) in [
+            ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{}})),
+            ("edit_note",json!({"note_id":"1","revision":"generated"})),
+        ] {
+            args["files"]=json!([{"download_url":url,"file_id":"f"}]);
+            args["file_fields"]=json!(["Front"]);
+            let value=body("tools/call",json!({"name":name,"arguments":args}));
+            let bytes=serde_json::to_vec(&value).unwrap();
+            let response=wire::validate(&axum::http::HeaderMap::new(),value,&bytes).err().unwrap();
+            assert_eq!(response.status(),StatusCode::OK);
+            let diagnostic=*response.extensions().get::<Diagnostic>().unwrap();
+            assert_eq!(diagnostic.outcome,Outcome::InvalidParameters(ValidationError::Arguments));
+            assert_eq!(diagnostic.detail,None);
+            assert!(diagnostic.record(crate::config::LogLevel::Off,StatusCode::OK,0).is_none());
+            let record="mcp_response_ready stage=protocol operation=unknown status=200 outcome=invalid_parameters reason=invalid_arguments";
+            assert_eq!(diagnostic.record(crate::config::LogLevel::Info,StatusCode::OK,0).unwrap(),record);
+            assert_eq!(diagnostic.record(crate::config::LogLevel::Debug,StatusCode::OK,12).unwrap(),
+                format!("{record} elapsed_ms=12"));
+            let bytes=axum::body::to_bytes(response.into_body(),MAX_RESPONSE_BYTES).await.unwrap();
+            let value:Value=serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value,json!({"jsonrpc":"2.0","id":7,"error":{"code":-32602,
+                "message":"Use the tool's published argument names and types. Omit optional values instead of sending null.",
+                "data":{"reason":"invalid_arguments"}}}));
+        }
+    }
 }
 fn body(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0", "id":7, "method":method, "params":params})
@@ -677,7 +704,15 @@ async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_de
             (ToolFailure::UnsupportedCollection,Detail::SqliteOpen,"sqlite_open"),
             (ToolFailure::UnsupportedCollection,Detail::SqliteAccess,"sqlite_access"),
             (ToolFailure::AttachmentUnavailable,Detail::AttachmentClient,"attachment_client"),
-            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrl,"attachment_url"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlLength,"attachment_url_length"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlCharacters,"attachment_url_characters"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlParse,"attachment_url_parse"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlScheme,"attachment_url_scheme"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlHost,"attachment_url_host"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlPort,"attachment_url_port"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlUserinfo,"attachment_url_userinfo"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlFragment,"attachment_url_fragment"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrlRawAt,"attachment_url_raw_at"),
             (ToolFailure::AttachmentUnavailable,Detail::AttachmentDns,"attachment_dns"),
             (ToolFailure::AttachmentUnavailable,Detail::AttachmentAddress,"attachment_address"),
             (ToolFailure::AttachmentUnavailable,Detail::AttachmentHttpClient,"attachment_http_client"),
