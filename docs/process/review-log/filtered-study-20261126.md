@@ -75,3 +75,5 @@ Planinterop reviewed the complete 24,257-byte touch test after it used the nativ
 Plancheck reviewed the complete public 14,618-byte form after the empty touch fields stopped repeating their persistent labels. The data bindings, accessibility labels and Mac fields are retained. Its verified SHA-256 is `7365d1732a69f2cc3c08a7394d42727df98171af5278402d058c447c2191dc49`.
 
 Planinterop reviewed the complete 25,175-byte public touch test. Its input helper clears synthetic fixture text around the insertion point and checks that the field is empty. Its verified SHA-256 is `1e27e026a80bd495134fa80bad0a07613202cd3fa00bd46fbf99117e305c4762`.
+
+Planinterop reviewed all 25,615 bytes of the public touch test with actual caret-movement events and synthetic field diagnostics. Its verified SHA-256 is `22267f674a8fb719ccfc675caab34256567c1cc8b18264aafc7c39fe1a9d3e8f`.

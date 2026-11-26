@@ -341,23 +341,39 @@ import XCTest
         let target = try visible(id, app: app)
         XCTAssertTrue(target.isEnabled, id)
         XCTAssertTrue([.textField, .textView, .searchField].contains(target.elementType), id)
-        // Favor the trailing end of the visible text. Wrapped or scrolled text
-        // can still leave the caret in the middle, so clear in both directions.
-        target.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.95)).tap()
-        let previous = try XCTUnwrap(target.value as? String, id)
-        let count = previous == target.placeholderValue ? 0 : previous.utf16.count
-        if count > 0 {
-            // UTF-16 length bounds the required key events, even if a deletion
-            // removes a whole selection or several code units at once.
-            target.typeText(String(repeating: XCUIKeyboardKey.forwardDelete.rawValue, count: count)
-                + String(repeating: XCUIKeyboardKey.delete.rawValue, count: count))
+        func fieldText() -> String? {
+            guard let value = target.value else { return "" }
+            guard let value = value as? String else { return nil }
+            return value == target.placeholderValue ? "" : value
         }
-        let cleared = try XCTUnwrap(target.value as? String, id)
-        let isEmpty = cleared.isEmpty || cleared == target.placeholderValue
-        XCTAssertTrue(isEmpty, "Native field must be empty before replacement: " + id)
-        guard isEmpty else { return }
+        func diagnostics() -> String {
+            "\(id); observed=\(String(reflecting: target.value)); "
+                + "placeholder=\(String(reflecting: target.placeholderValue)); frame=\(target.frame)"
+        }
+        target.tap()
+        guard let previous = fieldText() else {
+            attachState(app, "replace-unreadable-" + id)
+            XCTFail("Native field must expose text: " + diagnostics())
+            return
+        }
+        let count = previous.utf16.count
+        if count > 0 {
+            // Actual right-arrow events reach the end from any caret or
+            // selection. UTF-16 length bounds both movement and deletion.
+            for _ in 0..<count {
+                target.typeKey(.rightArrow, modifierFlags: [])
+            }
+            target.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count))
+        }
+        guard fieldText() == "" else {
+            attachState(app, "replace-not-empty-" + id)
+            XCTFail("Native field must be empty before replacement: " + diagnostics())
+            return
+        }
         target.typeText(text)
-        XCTAssertEqual(target.value as? String, text, id)
+        let final = fieldText()
+        if final != text { attachState(app, "replace-final-mismatch-" + id) }
+        XCTAssertEqual(final, text, "Native field must equal replacement: " + diagnostics())
     }
 
     /// iOS does not preserve identifiers on SwiftUI Picker options. Select
