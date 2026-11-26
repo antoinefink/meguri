@@ -210,10 +210,26 @@ import XCTest
         try assertMenuEnabled("Deck", "Rename…", false)
         try assertMenuEnabled("View", "Browse", true)
 
-        let back = element("shell.navigation.pendingBack")
-        XCTAssertTrue(back.isEnabled && back.isHittable)
         try app.bringToFront(bundleIdentifier: bundle)
-        back.click()
+        let window = app.windows.containing(.any, identifier: "shell.root.sidebar.home").firstMatch
+        let backButtons = window.toolbars.buttons.matching(identifier: "shell.navigation.pendingBack")
+        let back = backButtons.firstMatch
+        let backReady = wait(NSPredicate { _, _ in
+            guard backButtons.count == 1, back.exists, back.isEnabled, back.label == "Back" else { return false }
+            let frame = back.frame
+            return !frame.isEmpty && window.frame.contains(frame)
+        }, back)
+        let backDescription = back.exists
+            ? "role=\(back.elementType), identifier=\(back.identifier), label=\(back.label), enabled=\(back.isEnabled), hittable=\(back.isHittable), frame=\(back.frame)"
+            : "Toolbar Back is missing"
+        let evidence = XCTAttachment(string: "\(backDescription)\nWindow hierarchy:\n\(window.debugDescription)")
+        evidence.name = "pending-deck-toolbar-back-before-physical-click"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCTAssertTrue(backReady, "The live window's native toolbar Back is enabled with a visible frame after menu dismissal")
+        // AppKit toolbar buttons can report isHittable=false after menu tracking.
+        // Click the actual button's visible AX frame; navigation below proves it worked.
+        back.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         try waitForState("pending=0")
         assertTitle("Languages")
         assertSelected("home.sidebar.deck.\(languages)")
