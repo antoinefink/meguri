@@ -73,6 +73,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertEqual(entryNames(app), beforeWindowClose, "The red control must clear the intent without writing")
         #endif
         try cancelHistory(app)
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone { try frameSettingsReceipt(app) }
+        #endif
         try capture(app, anchor: "settings.backups.create", state: "settings-manual-backup-created")
 
         // Separate fixed instants avoid same-second archive-name collisions;
@@ -122,6 +125,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertEqual(element(app, entryPrefix + older).value as? String, "Not selected",
             "The older archive must start unselected while newer backups exist")
         try select(older, app)
+        #if os(iOS)
+        try assertShortHistoryGeometry(app, names: beforeCancel)
+        #endif
         try capture(app, anchor: historyAnchor, state: "history-older-backup-selected")
         let historyWindow = try captureWindow(app, anchor: historyAnchor)
         let outside = try confirmationDismissalPoint(historyWindow)
@@ -179,8 +185,13 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func arguments(minute: Int, fixture: URL? = nil) -> [String] {
         launchedMinutes.insert(minute)
+        #if os(iOS)
+        let textArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        #else
+        let textArguments: [String] = []
+        #endif
         return MeguriLaunch(fixture: fixture, fixtureRunID: runID, now: "2030-01-15T10:0\(minute):00Z", timeZone: "UTC",
-            locale: "en_US", animations: false).arguments
+            locale: "en_US", animations: false, extra: textArguments).arguments
     }
 
     private func relaunch(_ app: XCUIApplication, minute: Int) throws {
@@ -540,6 +551,67 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
             timeout: 20) == .completed
     }
+
+    #if os(iOS)
+    private func assertShortHistoryGeometry(_ app: XCUIApplication, names: Set<String>) throws {
+        XCTAssertEqual(names.count, 3, "This stage exercises three real, ordinary eligible archives")
+        let rows = names.map { element(app, entryPrefix + $0) }
+        let window = try captureWindow(app, anchor: historyAnchor)
+        let sheet = app.sheets.containing(.any, identifier: historyAnchor).firstMatch
+        // SwiftUI may omit the sheet node. Its existing content identifier is
+        // still scoped to the presented picker, excluding background windows.
+        let content = element(app, "settings.backups.restoreContent")
+        XCTAssertTrue(wait {
+            let surface = sheet.exists ? sheet.frame : content.frame
+            guard !surface.isEmpty, window.frame.contains(surface),
+                  rows.allSatisfy({ $0.exists && !$0.frame.isEmpty && surface.contains($0.frame) }),
+                  let last = rows.max(by: { $0.frame.maxY < $1.frame.maxY }) else { return false }
+            let gap = surface.maxY - last.frame.maxY
+            // Points/row geometry, never screenshot pixels. A half-screen iPad
+            // sheet or the old iPhone's ~180 pt trailing gap must fail.
+            return gap >= 0 && gap <= max(96, last.frame.height * 2)
+        }, "Three simple rows must be visible with at most two rows of trailing space")
+    }
+
+    private func frameSettingsReceipt(_ app: XCUIApplication) throws {
+        let monthly = app.textFields["settings.backups.limit.monthly"].firstMatch
+        let label = app.staticTexts["Monthly"].firstMatch
+        XCTAssertTrue(monthly.waitForExistence(timeout: 10))
+        XCTAssertTrue(label.exists)
+        let cell = app.cells.containing(.textField, identifier: "settings.backups.limit.monthly").firstMatch
+        func rowFrame() -> CGRect { cell.exists ? cell.frame : monthly.frame.union(label.frame) }
+        let window = try captureWindow(app, anchor: "settings.backups.create")
+        let list = window.collectionViews.firstMatch
+        let scroll = list.exists ? list : window.scrollViews.firstMatch
+        // Follow the existing slow coordinate-drag helper pattern. Each drag
+        // moves only the measured overlap; no page swipe or inertial overshoot.
+        for _ in 0..<3 {
+            let row = rowFrame()
+            guard let bar = window.tabBars.allElementsBoundByIndex.first(where: {
+                !$0.frame.isEmpty && $0.frame.intersects(row)
+            }) else { break }
+            let overlap = row.maxY - bar.frame.minY
+            XCTAssertGreaterThan(overlap, 0)
+            XCTAssertTrue(scroll.exists)
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -overlap)),
+                        withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(wait {
+            let row = rowFrame()
+            let receipt = self.element(app, "settings.backups.created")
+            let lastBackup = app.staticTexts["Last backup"].firstMatch
+            let navigation = window.navigationBars.firstMatch
+            let top = navigation.exists ? navigation.frame.maxY : window.frame.minY
+            return window.frame.contains(row) && monthly.isHittable
+                && window.tabBars.allElementsBoundByIndex.allSatisfy { !$0.frame.intersects(row) }
+                && receipt.exists && window.frame.contains(receipt.frame)
+                && receipt.frame.minY >= top
+                && lastBackup.exists && window.frame.contains(lastBackup.frame)
+                && lastBackup.frame.minY >= top
+        }, "Show the complete Monthly row above the tab bar while retaining the backup receipt")
+    }
+    #endif
 
     private func capture(_ app: XCUIApplication, anchor: String, state: String) throws {
         if anchor == historyAnchor { try assertRunHistory(app) }

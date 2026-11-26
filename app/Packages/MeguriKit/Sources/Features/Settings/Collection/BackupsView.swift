@@ -229,6 +229,13 @@ struct BackupRestoreContent: View {
     @State private var confirmation = false
     @State private var confirmedEntry: BackupEntry?
     @Environment(\.dynamicTypeSize) private var textSize
+    #if os(iOS)
+    // Native single-line rows plus inline navigation and grouped-list insets.
+    // These are scaled point estimates, independent of the presenting viewport.
+    @ScaledMetric(relativeTo: .body) private var compactRowHeight: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var compactChromeHeight: CGFloat = 100
+    @State private var hasWrappedRow = false
+    #endif
     init(presentation: BackupsPresentation, selectedName: Binding<String?>,
          refresh: @escaping () -> Void, cancel: @escaping () -> Void, restore: @escaping (String) -> Void) {
         self.presentation = presentation
@@ -257,11 +264,28 @@ struct BackupRestoreContent: View {
                    minHeight: BackupRestoreWindowLayout.minimumSize.height)
         #else
         NavigationStack { restoreBody }
-            .presentationSizing(.form)
-            .presentationDetents(textSize.isAccessibilitySize || presentation.entries.count > 8 ? [.large] : [.medium, .large])
+            // Form sizing can impose its own minimum height on iPad.
+            .presentationSizing(.page)
+            .presentationDetents(restoreDetents)
             .interactiveDismissDisabled(presentation.busy || confirmation)
         #endif
     }
+    #if os(iOS)
+    private var restoreDetents: Set<PresentationDetent> {
+        guard textSize <= .large, !hasWrappedRow, presentation.entries.count <= 5,
+              presentation.work == nil, presentation.failure == nil, presentation.listFailure == nil,
+              !presentation.candidateActive, !presentation.activationUncertain, presentation.safetyBackup == nil,
+              presentation.entries.allSatisfy({
+                  $0.kind == .backup && !unavailable($0) && duplicateIndex($0) == nil
+              }) else { return [.large] }
+        if case .uncertain = presentation.backupPublication { return [.large] }
+        // Reserve three rows before discovery too: opening a short history must
+        // not first flash a large sheet. Real errors/work use the large detent.
+        let rows = presentation.entries.isEmpty ? 3 : presentation.entries.count
+        let height = min(compactRowHeight * CGFloat(rows) + compactChromeHeight, compactRowHeight * 8)
+        return [.height(height), .large]
+    }
+    #endif
     private var restoreBody: some View {
             VStack {
                 if presentation.work == .restore {
@@ -305,6 +329,7 @@ struct BackupRestoreContent: View {
                 HStack { Spacer(); cancelButton; restoreButton }.padding()
             }
             #else
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { cancelButton }
                 ToolbarItem(placement: .confirmationAction) { restoreButton }
@@ -367,6 +392,11 @@ struct BackupRestoreContent: View {
                     entryLabel(entry)
                     Spacer()
                     Text(verbatim: BackupPresentation.size(entry.sizeBytes)).foregroundStyle(.secondary)
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    // Observe the intrinsic row content, never the parent sheet.
+                    // Promotion is one-way so a detent cannot feed back into sizing.
+                    if height > compactRowHeight * 0.75 { hasWrappedRow = true }
                 }
                 .tag(entry.name)
                 .selectionDisabled(unavailable(entry))
