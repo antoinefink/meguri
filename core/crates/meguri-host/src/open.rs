@@ -722,6 +722,27 @@ impl CoreHost {
     pub fn collection(&self) -> Result<Collection, EngineError> {
         self.engine.collection()
     }
+    /// Admit a command from an existing UI scope to this Host, never to a
+    /// successor collection. Check the live generation after leasing, since a
+    /// Collection handle's generation alone is immutable.
+    pub fn collection_for_generation(&self, expected: meguri_engine::Generation) -> Result<Collection, EngineError> {
+        let collection = self.collection()?;
+        let current = collection.generation();
+        if current != expected {
+            return Err(EngineError::StaleGeneration { planned: expected, current });
+        }
+        {
+            let _lease = collection.reader(meguri_storage::ReaderRole::Query)?;
+            let current = self.cloud_connection_generation()?;
+            if current != expected {
+                return Err(EngineError::StaleGeneration { planned: expected, current });
+            }
+            if !self.original_resource_authority(&collection).is_live() {
+                return Err(EngineError::unavailable("command's original host closed"));
+            }
+        }
+        Ok(collection)
+    }
     /// The staging directory, clock, randomness and space an import session
     /// of this host's collection uses (`package/apkg-import` I2, I15).
     pub fn deck_package_context(&self) -> meguri_package::apkg::ApkgContext {

@@ -34,6 +34,8 @@ import Foundation
     func notetypes() async throws -> [NotetypeName]
     /// T9: deletes registry entries and matching note tags in one undoable job.
     func deleteTags(text: String) async throws -> CountMutation
+    /// The generation retained by the menu's originating collection scope.
+    func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation
     func tagTree() async throws -> [TagNode]
     /// The seven flags' shown names (`tags/flags-and-marked` F4).
     func flagNames() async throws -> [String]
@@ -60,6 +62,7 @@ import Foundation
 
 extension BrowseBackend {
     public func deleteTags(text: String) async throws -> CountMutation { throw BrowseCommandUnsupported() }
+    public func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation { throw BrowseCommandUnsupported() }
     /// No field columns to offer (the model's own tests).
     public func fieldNames(notetype: Int64) async throws -> [String] { [] }
 }
@@ -101,6 +104,14 @@ extension BrowseBackend {
     }
     public func deleteTags(text: String) async throws -> CountMutation {
         let job = try await tags.startDeleteTags(text: text)
+        return try await withTaskCancellationHandler {
+            try await job.value()
+        } onCancel: {
+            Task { try? await job.job.cancel() }
+        }
+    }
+    public func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation {
+        let job = try await tags.startDeleteTags(text: text, expectedGeneration: expectedGeneration)
         return try await withTaskCancellationHandler {
             try await job.value()
         } onCancel: {

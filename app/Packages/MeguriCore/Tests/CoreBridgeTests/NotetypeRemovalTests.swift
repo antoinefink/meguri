@@ -36,6 +36,12 @@ extension EventTests {
             let before = try await types.readNotetype(id: added.id)
             let counts = try await types.startNotetypeRemovalCounts(notetypeId: added.id).value()
             #expect(counts == .init(notes: 1, cards: 2))
+            let generation = try await collection.waitAvailable(timeoutMilliseconds: 1_000)
+            await #expect(throws: BridgeError.staleGeneration(planned: 0, current: generation)) {
+                try await types.startNotetypeRemoval(.init(notetypeId: added.id, confirmedNotes: 1, confirmedCards: 2,
+                    expectedGeneration: 0))
+            }
+            #expect(try await types.readNotetype(id: added.id) == before)
             // A lower count in either category must refuse without writing.
             for request in [NotetypeRemoval(notetypeId: added.id, confirmedNotes: 0, confirmedCards: 2),
                             NotetypeRemoval(notetypeId: added.id, confirmedNotes: 1, confirmedCards: 1)] {
@@ -45,7 +51,8 @@ extension EventTests {
                 }
                 #expect(try await types.readNotetype(id: added.id) == before)
             }
-            let removed = try await types.startNotetypeRemoval(.init(notetypeId: added.id, confirmedNotes: 1, confirmedCards: 2)).value()
+            let removed = try await types.startNotetypeRemoval(.init(notetypeId: added.id, confirmedNotes: 1, confirmedCards: 2,
+                expectedGeneration: generation)).value()
             #expect(removed.removed && removed.id == added.id && removed.notesRemoved == 1 && removed.cardsRemoved == 2)
             #expect(!((try await types.notetypeList()).contains { $0.id == added.id }))
             #expect(removed.summary.undoName == "Remove Note Type")

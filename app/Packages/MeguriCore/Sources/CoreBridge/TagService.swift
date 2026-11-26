@@ -61,7 +61,14 @@ public protocol TagService: Sendable {
     func startRenameTag(from: String, to: String) async throws(BridgeError) -> CoreTagMutationJob
     func startReparentTags(sources: [String], target: String?) async throws(BridgeError) -> CoreTagMutationJob
     func startDeleteTags(text: String) async throws(BridgeError) -> CoreTagMutationJob
+    func startDeleteTags(text: String, expectedGeneration: UInt64) async throws(BridgeError) -> CoreTagMutationJob
     func startClearUnusedTags() async throws(BridgeError) -> CoreTagMutationJob
+}
+
+extension TagService {
+    public func startDeleteTags(text: String, expectedGeneration: UInt64) async throws(BridgeError) -> CoreTagMutationJob {
+        throw .invalidArgument("Collection-scoped tag deletion is unavailable")
+    }
 }
 
 public actor CoreTagService: TagService {
@@ -169,6 +176,15 @@ public actor CoreTagService: TagService {
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startDeleteTags) {
             let raw = try MeguriCoreBindings.startDeleteTags(text: text)
+            return CoreTagMutationJob(job: try Jobs.track(raw.handle), raw: raw.result)
+        }
+    }
+    /// Pass the authoritative generation from the scope that offered the menu.
+    /// Keep it across event-stream and lane waits; never refresh it here.
+    public func startDeleteTags(text: String, expectedGeneration: UInt64) async throws(BridgeError) -> CoreTagMutationJob {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startDeleteTagsForGeneration) {
+            let raw = try MeguriCoreBindings.startDeleteTagsForGeneration(text: text, generation: expectedGeneration)
             return CoreTagMutationJob(job: try Jobs.track(raw.handle), raw: raw.result)
         }
     }

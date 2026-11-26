@@ -276,8 +276,19 @@ impl CoreHost {
     /// unreachable case: no round, the save, and the upload left pending.
     pub fn start_meguri_structure_save(&self, access: MeguriAccessSource, work: MeguriStructureWork, reachable: bool)
         -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
+        let generation = self.cloud_connection_generation().map_err(MeguriStructureRefusal::Engine)?;
+        self.start_meguri_structure_save_for_generation(generation, access, work, reachable)
+    }
+    /// A confirmed operation belongs to the collection that supplied its UI
+    /// scope. Refuse before settling uploads or starting a round on a successor.
+    pub fn start_meguri_structure_save_for_generation(&self, generation: Generation, access: MeguriAccessSource,
+        work: MeguriStructureWork, reachable: bool) -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
         use MeguriStructureRefusal as R;
-        let (admission, collection) = self.structure_admission()?;
+        let collection = self.collection_for_generation(generation).map_err(R::Engine)?;
+        let admission = self.admit_meguri_structure_job().map_err(|_| R::Busy)?;
+        // Acquiring the provider lane can wait. Recheck live admission before
+        // any provider work, then retain the already-bound collection in task.
+        self.collection_for_generation(generation).map_err(R::Engine)?;
         if self.settle_meguri_structure_upload().map_err(R::Engine)? { return Err(R::UploadPending); }
         if !matches!(self.meguri_readiness(), Ok(MeguriReadiness::Ready)) { return Err(R::NotReady); }
         if !reachable {

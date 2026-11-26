@@ -120,10 +120,16 @@ extension CoreMeguriRoundService {
         let drains = drains
         let (connection, credentials) = try await admittedInputs()
         let op = MeguriCoreBindings.ProviderStructureOp.remove(request: request.raw)
+        let expectedGeneration = request.expectedGeneration
         return try await owned(since: drains, busy: .refused(.busy)) {
             try await CoreEventStream.shared.start()
-            let started = try await MaintenanceLane.shared.call(.providerStartStructureSave) {
-                try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
+            let call: BridgeCall = expectedGeneration == nil ? .providerStartStructureSave : .providerStartStructureSaveForGeneration
+            let started = try await MaintenanceLane.shared.call(call) {
+                if let expectedGeneration {
+                    return try connection.startStructureSaveForGeneration(credentials: credentials, op: op,
+                        reachable: reachable, generation: expectedGeneration)
+                }
+                return try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
             }
             return try await Self.drive(started, onStage: onStage)
         }

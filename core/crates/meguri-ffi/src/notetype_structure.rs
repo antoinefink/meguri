@@ -505,7 +505,20 @@ pub struct NotetypeRemovalJobStart {
 #[uniffi::export]
 pub fn start_notetype_removal(request: NotetypeRemoval) -> Result<NotetypeRemovalJobStart, CoreError> {
     callback::enter("start_notetype_removal");
-    let collection = runtime::host()?.collection()?;
+    let host = runtime::host()?;
+    let generation = host.collection()?.generation().0;
+    remove_notetype_on(host, request, generation)
+}
+/// `generation` is the collection the removal question described.
+#[uniffi::export]
+pub fn start_notetype_removal_for_generation(request: NotetypeRemoval, generation: u64)
+    -> Result<NotetypeRemovalJobStart, CoreError> {
+    callback::enter("start_notetype_removal_for_generation");
+    remove_notetype_on(runtime::host()?, request, generation)
+}
+pub(crate) fn remove_notetype_on(host: Arc<meguri_host::CoreHost>, request: NotetypeRemoval, generation: u64)
+    -> Result<NotetypeRemovalJobStart, CoreError> {
+    let collection = host.collection_for_generation(meguri_engine::Generation(generation))?;
     let input = RemoveNotetype {
         notetype: NotetypeId(request.notetype_id),
         confirmed_notes: request.confirmed_notes,
@@ -513,7 +526,9 @@ pub fn start_notetype_removal(request: NotetypeRemoval) -> Result<NotetypeRemova
     };
     let result = Arc::new(Mutex::new(None));
     let out = result.clone();
-    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
+    let engine = host.engine().clone();
+    let handle = engine.start_job(meguri_engine::JobKind::BulkOp, move |job| {
+        let _host = host;
         let removed = remove::remove(&collection, input, job.cancel.clone(), job.progress.clone())?;
         *out.lock().unwrap() = Some(NotetypeRemoved {
             summary: MutationSummary::of(&removed),

@@ -232,12 +232,14 @@ impl ProviderConnection {
     pub fn start_structure_save(&self, credentials: ProviderCredentials, op: ProviderStructureOp, reachable: bool)
         -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_save");
-        self.owner.validate()?;
-        let Some((work, saved, import)) = work(op, &self.owner.host)? else {
-            return Ok(ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed });
-        };
-        let start = self.owner.host.start_meguri_structure_save(self.structure_access(credentials), work, reachable);
-        Ok(self.structure_start(start, saved, import))
+        self.start_structure_save_on(credentials, op, reachable, self.owner.generation.0)
+    }
+    /// Use the generation of the sheet/question's originating collection,
+    /// even when credentials or the provider connection were awaited later.
+    pub fn start_structure_save_for_generation(&self, credentials: ProviderCredentials, op: ProviderStructureOp,
+        reachable: bool, generation: u64) -> Result<ProviderStructureStart, CoreError> {
+        callback::enter("ProviderConnection.start_structure_save_for_generation");
+        self.start_structure_save_on(credentials, op, reachable, generation)
     }
     /// MP7 step 5's Upload…: no round and no further question.
     pub fn start_structure_upload(&self, credentials: ProviderCredentials) -> Result<ProviderStructureStart, CoreError> {
@@ -245,6 +247,22 @@ impl ProviderConnection {
         self.owner.validate()?;
         let start = self.owner.host.start_meguri_structure_upload(self.structure_access(credentials));
         Ok(self.structure_start(start, Saved::default(), None))
+    }
+}
+impl ProviderConnection {
+    fn start_structure_save_on(&self, credentials: ProviderCredentials, op: ProviderStructureOp,
+        reachable: bool, generation: u64) -> Result<ProviderStructureStart, CoreError> {
+        self.owner.validate()?;
+        let generation = meguri_engine::Generation(generation);
+        // Check before op preparation as well as at the host's actual lane
+        // admission; neither is allowed to follow a newer connection to B.
+        self.owner.host.collection_for_generation(generation)?;
+        let Some((work, saved, import)) = work(op, &self.owner.host)? else {
+            return Ok(ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed });
+        };
+        let start = self.owner.host.start_meguri_structure_save_for_generation(generation,
+            self.structure_access(credentials), work, reachable);
+        Ok(self.structure_start(start, saved, import))
     }
 }
 #[uniffi::export]
