@@ -21,8 +21,7 @@ import XCTest
         let app = try launch(sizeClass: sizeClass)
         defer { app.terminate() }
         let prefix = "filtered-touch-" + sizeClass
-        let normal = try selectDeck("Preview Source", app: app)
-        let normalID = try XCTUnwrap(HomeControls.deckID(normal.identifier))
+        let normalID = try selectDeck("Preview Source", app: app)
         try tap("home.deck.customStudy", app: app)
         XCTAssertTrue(element(app, "home.customStudy.available").waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, "home.customStudy.state").exists, "Only relevant inputs are exposed")
@@ -70,7 +69,10 @@ import XCTest
         XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 0, learning: 0, review: 2),
                       "Overlap gathers two distinct eligible cards and excludes the suspended match")
         let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 15))
         let filteredID = String(page.identifier.dropFirst("home.deck.page.".count))
+        XCTAssertNotNil(Int64(filteredID), "Filtered deck page has a deck ID")
+        XCTAssertNotEqual(filteredID, normalID, "Creation selects the new filtered deck")
         XCTAssertFalse(element(app, "home.deck.addNote").exists)
         XCTAssertFalse(element(app, "home.deck.customStudy").exists)
         try tap("home.filteredDeck.edit." + filteredID, app: app)
@@ -134,18 +136,51 @@ import XCTest
         XCTAssertTrue(element(app, "home.deckMenu.study." + id).waitForExistence(timeout: 10))
     }
 
-    private func selectDeck(_ name: String, app: XCUIApplication) throws -> XCUIElement {
-        let rows = app.buttons.matching(NSPredicate(format: "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label == %@",
-            HomeControls.rowPrefix, HomeControls.sidebarPrefix, name))
-        XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
-        let row = try XCTUnwrap(HomeControls.hittable(rows))
+    private func selectDeck(_ name: String, app: XCUIApplication) throws -> String {
+        // Follow the native Decks tab / Today sidebar entry, including a sidebar
+        // the split view has hidden. Do not navigate through a test-hook route.
+        let home = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["shell.root.tab.decks", "shell.root.sidebar.home"]))
+        let decksTab = app.tabBars.buttons["Decks"].firstMatch
+        if HomeControls.hittable(home) == nil && !decksTab.isHittable {
+            let toggle = app.buttons["Toggle Sidebar"].firstMatch
+            if toggle.exists && toggle.isHittable { toggle.tap() }
+        }
+        XCTAssertTrue(wait { HomeControls.hittable(home) != nil || decksTab.isHittable }, deckRowDiagnostics(app))
+        let entry = try XCTUnwrap(HomeControls.hittable(home) ?? (decksTab.isHittable ? decksTab : nil))
+        entry.tap()
+
+        // SwiftUI may expose the same sidebar row on several element types.
+        // Accept appended count labels, but exclude subdecks and name lookalikes.
+        let rows = HomeControls.deckRows(app, labelContaining: name).matching(NSPredicate(
+            format: "label == %@ OR label BEGINSWITH %@", name, name + ","))
+        XCTAssertTrue(wait { HomeControls.hittable(rows) != nil }, deckRowDiagnostics(app))
+        let ids = Set(rows.allElementsBoundByIndex.compactMap { HomeControls.deckID($0.identifier) })
+        XCTAssertEqual(ids.count, 1, "Expected one synthetic deck named \(name). \(deckRowDiagnostics(app))")
+        let row = try XCTUnwrap(HomeControls.hittable(rows), deckRowDiagnostics(app))
         let id = try XCTUnwrap(HomeControls.deckID(row.identifier))
         row.tap()
         XCTAssertTrue(element(app, "home.deck.page." + id).waitForExistence(timeout: 15))
-        return row
+        // Compact navigation removes the row from the tree; retain its ID now.
+        return id
+    }
+
+    private func deckRowDiagnostics(_ app: XCUIApplication) -> String {
+        let rows = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
+            HomeControls.rowPrefix, HomeControls.sidebarPrefix)).allElementsBoundByIndex
+        return "Deck rows: " + rows.map {
+            "type=\($0.elementType) label=\($0.label.debugDescription) id=\($0.identifier.debugDescription) hittable=\($0.isHittable)"
+        }.joined(separator: "\n")
     }
 
     private func visible(_ id: String, app: XCUIApplication) throws -> XCUIElement {
+        let hideKeyboard = app.keyboards.buttons.matching(NSPredicate(
+            format: "label IN %@", ["Hide keyboard", "Hide Keyboard"])).firstMatch
+        if hideKeyboard.exists && hideKeyboard.isHittable {
+            hideKeyboard.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        }
         let target = element(app, id)
         // Forms are ordinary scrollable controls; find the field in either direction
         // when revisiting a sheet whose first search is already above the viewport.
@@ -154,14 +189,32 @@ import XCTest
         let scroll = filtered.exists ? filtered : custom.exists ? custom : app
         for _ in 0..<8 {
             if target.exists && target.isHittable { break }
-            scroll.swipeUp()
+            try scrollForm(scroll, up: true, app: app)
         }
         for _ in 0..<8 {
             if target.exists && target.isHittable { break }
-            scroll.swipeDown()
+            try scrollForm(scroll, up: false, app: app)
         }
         XCTAssertTrue(wait { target.exists && target.isHittable }, id)
         return target
+    }
+
+    private func scrollForm(_ container: XCUIElement, up: Bool, app: XCUIApplication) throws {
+        // As in the native transfer journey, keep the gesture in the Form's
+        // viewport. A sheet-centred swipe can land on the software keyboard.
+        let form = container.collectionViews.firstMatch
+        var viewport = (form.exists ? form.frame : container.frame).intersection(app.frame)
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists && viewport.intersects(keyboard.frame) {
+            viewport.size.height = max(0, min(viewport.maxY, keyboard.frame.minY) - viewport.minY)
+        }
+        XCTAssertFalse(viewport.isNull || viewport.isEmpty, "Visible native form viewport")
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let top = origin.withOffset(CGVector(dx: viewport.midX - app.frame.minX,
+            dy: viewport.minY - app.frame.minY + viewport.height * 0.2))
+        let bottom = origin.withOffset(CGVector(dx: viewport.midX - app.frame.minX,
+            dy: viewport.minY - app.frame.minY + viewport.height * 0.8))
+        (up ? bottom : top).press(forDuration: 0.05, thenDragTo: up ? top : bottom)
     }
 
     private func tap(_ id: String, app: XCUIApplication) throws {
