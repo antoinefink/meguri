@@ -37,21 +37,28 @@ public struct NotetypeRemoved: Sendable, Hashable {
 
 extension CoreNotetypeService {
     public func startNotetypeRemoval(_ request: NotetypeRemoval) async throws(BridgeError) -> CoreNotetypeReadJob<NotetypeRemoved> {
+        try await startNotetypeRemoval(request, trackingSetup: { try Jobs.track($0) })
+    }
+
+    func startNotetypeRemoval(
+        _ request: NotetypeRemoval,
+        trackingSetup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob
+    ) async throws(BridgeError) -> CoreNotetypeReadJob<NotetypeRemoved> {
         try await CoreEventStream.shared.start()
         let expectedGeneration = request.expectedGeneration
         let request = request.raw
         let call: BridgeCall = expectedGeneration == nil ? .startNotetypeRemoval : .startNotetypeRemovalForGeneration
-        return try await MaintenanceLane.shared.call(call) {
-            let started: MeguriCoreBindings.NotetypeRemovalJobStart
+        let started = try await MaintenanceLane.shared.call(call) {
             if let expectedGeneration {
-                started = try MeguriCoreBindings.startNotetypeRemovalForGeneration(request: request, generation: expectedGeneration)
+                return try MeguriCoreBindings.startNotetypeRemovalForGeneration(request: request, generation: expectedGeneration)
             } else {
-                started = try MeguriCoreBindings.startNotetypeRemoval(request: request)
+                return try MeguriCoreBindings.startNotetypeRemoval(request: request)
             }
-            let result = started.result
-            return CoreNotetypeReadJob(job: try Jobs.track(started.handle), resultCall: .notetypeRemovalJobResult) {
-                try result.result().map(NotetypeRemoved.init)
-            }
+        }
+        let job = await Jobs.trackMutationDraining(started.handle, setup: trackingSetup)
+        let result = started.result
+        return CoreNotetypeReadJob(job: job, resultCall: .notetypeRemovalJobResult) {
+            try result.result().map(NotetypeRemoved.init)
         }
     }
 }

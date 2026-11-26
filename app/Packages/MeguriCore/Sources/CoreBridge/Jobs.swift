@@ -97,6 +97,25 @@ enum Jobs {
         case .drained(let error, _): throw error
         }
     }
+    /// An accepted mutation can commit before listener setup fails. Keep its
+    /// terminal authoritative so callers still read the result (including Undo)
+    /// or receive the core's typed committed-outcome error.
+    static func trackMutationDraining(
+        _ handle: MeguriCoreBindings.JobHandle,
+        setup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }
+    ) async -> CoreJob {
+        switch await trackRetainingDrain(handle, setup: setup) {
+        case .tracked(let job): return job
+        case .drained(let error, let terminal):
+            let (progress, continuation) = AsyncStream.makeStream(of: CoreProgress.self)
+            let completion = JobCompletion(progress: continuation)
+            // Cancellation during fallback setup has no committed result.
+            // Preserve the setup failure rather than claim user cancellation.
+            completion.resolve(terminal == .cancelled ? .failed(error) : terminal)
+            return CoreJob(id: JobID(rawValue: handle.id), cancelToken: CancelToken(raw: handle.cancel),
+                           progress: progress, completion: completion)
+        }
+    }
     static func trackRetainingDrain(
         _ handle: MeguriCoreBindings.JobHandle,
         setup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }

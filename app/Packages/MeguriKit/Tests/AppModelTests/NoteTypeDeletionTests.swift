@@ -79,6 +79,26 @@ import Testing
         #expect(backend.saved.isEmpty)
     }
 
+    @Test func committedRemovalErrorRetiresTheDraftAndReportsDeletion() async {
+        let (model, backend) = await open()
+        model.setText(7, card: 0, part: .front, "Draft to retire")
+        var deleted: [Int64] = []
+        model.didDelete = { deleted.append($0) }
+        model.delete(7)
+        await model.settle()
+        backend.beforeRemoval = {
+            backend.names.removeAll { $0.id == 7 }
+            backend.records[7] = nil
+        }
+        backend.removalErrors = [BridgeError.commitCompleted(sequence: 42, message: "Committed result unavailable")]
+        model.confirmDeletion()
+        await model.settle()
+        #expect(deleted == [7])
+        #expect(model.draft(7) == nil && !model.isEdited(7))
+        #expect(!model.items.contains { $0.id == 7 } && model.selection == 8)
+        #expect(model.failure == nil && model.progress == nil)
+    }
+
     @Test(arguments: [NotetypeRemovalCounts(notes: 21, cards: 30), .init(notes: 19, cards: 32)])
     func eachGrowingCategoryReconfirmsEvenWhenTheTotalShrinks(_ latest: NotetypeRemovalCounts) async {
         let (model, backend) = await open()
