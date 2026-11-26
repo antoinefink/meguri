@@ -77,3 +77,5 @@ Plancheck reviewed the complete public 14,618-byte form after the empty touch fi
 Planinterop reviewed the complete 25,175-byte public touch test. Its input helper clears synthetic fixture text around the insertion point and checks that the field is empty. Its verified SHA-256 is `1e27e026a80bd495134fa80bad0a07613202cd3fa00bd46fbf99117e305c4762`.
 
 Planinterop reviewed all 25,615 bytes of the public touch test with actual caret-movement events and synthetic field diagnostics. Its verified SHA-256 is `22267f674a8fb719ccfc675caab34256567c1cc8b18264aafc7c39fe1a9d3e8f`.
+
+Planinterop reviewed the complete 27,617-byte touch test, including the native switch interaction and synthetic simulator diagnostics. Its verified SHA-256 is `b8d679d1313c00539c57989e0789dbca1a2540aa8fdd1a255da133e42b4cda2e`.

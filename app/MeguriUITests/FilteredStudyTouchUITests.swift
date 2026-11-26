@@ -278,29 +278,63 @@ import XCTest
         XCTAssertLessThanOrEqual(descendants.count, 1, "Unambiguous native switch descendant: " + id)
         let thumb = descendants.count == 1 ? descendants.firstMatch : control
         attachState(app, "before-switch-" + id)
-        XCTAssertTrue(control.isEnabled && thumb.isHittable, id)
+        func diagnostics() -> String {
+            "\(id); requested=\(enabled); keyboardPresent=\(app.keyboards.firstMatch.exists); "
+                + "sheet=\(element(app, "home.filteredStudy.sheet").frame); "
+                + "row(value=\(String(reflecting: control.value)), frame=\(control.frame), "
+                + "enabled=\(control.isEnabled), hittable=\(control.isHittable)); "
+                + "native(value=\(String(reflecting: thumb.value)), frame=\(thumb.frame), "
+                + "enabled=\(thumb.isEnabled), hittable=\(thumb.isHittable))"
+        }
+        XCTAssertTrue(control.isEnabled && thumb.isEnabled && thumb.isHittable, diagnostics())
         XCTAssertFalse(control.label.isEmpty, "Named native action: " + id)
-        XCTAssertEqual(switchValue(control), !enabled, "Old switch value: " + id)
-        // A row-centre tap can focus the preceding text field. The native switch
-        // sits at the trailing edge even when AX reports the whole Form row.
+        let oldValue = switchValue(control)
+        if oldValue != !enabled {
+            captureSwitchFailure(app, "unexpected-old-value-" + id, details: diagnostics())
+        }
+        XCTAssertEqual(oldValue, !enabled, "Old switch value: " + diagnostics())
         let frame = thumb.frame
         XCTAssertTrue(frame.width > 0 && frame.height > 0)
-        let point = CGPoint(x: frame.maxX - min(30, frame.width / 2), y: frame.midY)
-        // isHittable can describe an exposed part of the row while the chosen
-        // thumb point is covered by the keyboard's accessory toolbar.
-        XCTAssertTrue(app.frame.contains(point), "Switch tap point is onscreen: " + id)
-        XCTAssertFalse(app.keyboards.allElementsBoundByIndex.contains {
-            $0.exists && $0.frame.contains(point)
-        }, "Switch tap point is covered by the keyboard: " + id)
-        XCTAssertFalse(app.toolbars.allElementsBoundByIndex.contains {
-            $0.exists && $0.isHittable && $0.frame.contains(point)
-        }, "Switch tap point is covered by a toolbar: " + id)
-        thumb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-            dx: frame.width - min(30, frame.width / 2), dy: frame.height / 2)).tap()
+        let nativeTap = descendants.count == 1 || frame.width <= frame.height * 3
+        if nativeTap {
+            // After finishCardLimitEditing, let XCTest choose the exposed native
+            // switch's hittable point on either iPhone or iPad.
+            thumb.tap()
+        } else {
+            // When AX exposes only a wide row, its centre can focus the preceding
+            // field. Use the upper trailing portion of the native control.
+            let offset = CGVector(dx: frame.width - min(30, frame.width / 2), dy: frame.height / 4)
+            let point = CGPoint(x: frame.minX + offset.dx, y: frame.minY + offset.dy)
+            let sheet = element(app, "home.filteredStudy.sheet")
+            let keyboardCoversPoint = app.keyboards.allElementsBoundByIndex.contains {
+                $0.exists && $0.isHittable && $0.frame.intersects(sheet.frame) && $0.frame.contains(point)
+            }
+            let pointIsVisible = app.frame.contains(point) && sheet.frame.contains(point) && !keyboardCoversPoint
+            let details = "point=\(point); keyboardCoversPoint=\(keyboardCoversPoint); " + diagnostics()
+            if !pointIsVisible { captureSwitchFailure(app, "switch-point-obscured-" + id, details: details) }
+            // Background toolbars in other presentation layers cannot establish
+            // occlusion of this foreground sheet; XCTest geometry is not a hit test.
+            XCTAssertTrue(pointIsVisible, "Native switch point must be visible in the sheet: " + details)
+            thumb.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
+        }
         let changed = wait { switchValue(control) == enabled }
         attachState(app, "after-switch-" + id)
-        XCTAssertTrue(changed, "Native switch must change to \(enabled): \(id); actual=\(String(describing: control.value))")
-        XCTAssertEqual(switchValue(control), enabled, "New switch value: " + id)
+        let newValue = switchValue(control)
+        let details = "old=\(String(describing: oldValue)); new=\(String(describing: newValue)); "
+            + "tap=\(nativeTap ? "native default" : "upper trailing point"); " + diagnostics()
+        if !changed || newValue != enabled {
+            captureSwitchFailure(app, "unexpected-new-value-" + id, details: details)
+        }
+        XCTAssertTrue(changed, "Native switch must change: " + details)
+        XCTAssertEqual(newValue, enabled, "New switch value: " + details)
+    }
+
+    private func captureSwitchFailure(_ app: XCUIApplication, _ name: String, details: String) {
+        capture(app, name)
+        let attachment = XCTAttachment(string: details + "\n" + app.debugDescription)
+        attachment.name = name + "-hierarchy"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func switchValue(_ control: XCUIElement) -> Bool? {
