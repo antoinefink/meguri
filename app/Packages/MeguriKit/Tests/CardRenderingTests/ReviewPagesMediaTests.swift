@@ -13,6 +13,13 @@ extension WebKitSuites {
         #if os(macOS)
         @Test(arguments: ["parked", "key-return", "native", "editing", "background", "reopen", "cancel", "resume-cancel", "identity", "ended"])
         func coordinatorRestoresSavedEditAfterPauseAndResume(owner: String) async throws {
+            @MainActor final class State {
+                var committedUpdate: CardUpdate?
+                var replacementEditing = false
+                var ready: Bool?
+                var readinessChecks = 0
+            }
+            let state = State()
             let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: directory) }
             let fixture = MediaFixture()
@@ -29,17 +36,15 @@ extension WebKitSuites {
             let model = ReviewCoordinator(deckID: 1, surface: pages,
                 store: ReviewRecordStore(file: directory.appending(path: "session.json")),
                 clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client)
-            var committedUpdate: CardUpdate?
-            var replacementEditing = false
             let committed = pair.onCommitted
             pair.onCommitted = { update, token in
-                if replacementEditing { pair.onInteraction?("focus", ["editable": true]) }
+                if state.replacementEditing { pair.onInteraction?("focus", ["editable": true]) }
                 committed?(update, token)
-                committedUpdate = update
+                state.committedUpdate = update
             }
             await model.start()
             try await pair.current.waitForShown(try #require(pair.current.update))
-            try await CardBehaviorFixture.until("initial edit card committed") { committedUpdate == pair.current.update }
+            try await CardBehaviorFixture.until("initial edit card committed") { state.committedUpdate == pair.current.update }
             let old = pair.current.webView, window = try #require(old.window)
             pair.ownsKeyboardFocus = true
             try #require(window.makeFirstResponder(old))
@@ -51,18 +56,17 @@ extension WebKitSuites {
 
             // Model just the OS window ownership; the coordinator, page swap,
             // commit and responder restoration all run their production paths.
-            var ready: Bool? = owner == "key-return" || owner == "reopen" ? nil : owner != "background"
-            var readinessChecks = 0
+            state.ready = owner == "key-return" || owner == "reopen" ? nil : owner != "background"
             pages.editedCardWindowReady = { [weak model, weak pages] _ in
-                readinessChecks += 1
+                state.readinessChecks += 1
                 #expect(model?.paused == false && model?.editingNote == false && pages?.inputActive == true)
-                return ready
+                return state.ready
             }
             let input = NSTextView()
             pair.container.addSubview(input)
             if owner == "native" { try #require(window.makeFirstResponder(input)) }
             if owner == "identity" { client.item = Self.item(2) }
-            replacementEditing = owner == "editing"
+            state.replacementEditing = owner == "editing"
             if owner == "ended" { model.generationEnded() }
             if owner == "resume-cancel" {
                 let gate = CardAudioControllerTests.Hold()
@@ -73,19 +77,19 @@ extension WebKitSuites {
                 resuming.cancel(); gate.release()
                 do { try await resuming.value; Issue.record("Cancelled edit resume succeeded") }
                 catch is CancellationError {}
-                #expect(model.paused && readinessChecks == 0 && window.firstResponder === old)
+                #expect(model.paused && state.readinessChecks == 0 && window.firstResponder === old)
                 client.beforeHead = nil
             }
             try await model.resume()
             if owner == "ended" {
-                #expect(model.phase == .ended && readinessChecks == 0)
+                #expect(model.phase == .ended && state.readinessChecks == 0)
                 return
             }
             try await pair.current.waitForShown(try #require(pair.current.update))
-            try await CardBehaviorFixture.until("resumed edit card committed") { committedUpdate == pair.current.update }
+            try await CardBehaviorFixture.until("resumed edit card committed") { state.committedUpdate == pair.current.update }
             #expect(!model.paused && pages.inputActive && model.phase == .question)
             if owner == "cancel" {
-                #expect(pair.current.webView === old && readinessChecks == 0)
+                #expect(pair.current.webView === old && state.readinessChecks == 0)
             } else {
                 #expect(pair.current.webView !== old && pair.idle.webView === old)
                 #expect(pair.container.subviews.last === pair.current.webView)
@@ -93,11 +97,11 @@ extension WebKitSuites {
             }
             if owner == "key-return" {
                 #expect(window.firstResponder === old)
-                ready = true
+                state.ready = true
                 pages.establishInitialFocus()
             } else if owner == "reopen" {
                 try #require(model.beginEditingNote())
-                ready = true
+                state.ready = true
                 model.endEditingNote(saved: false)
             }
             if owner == "parked" || owner == "key-return" {
@@ -111,11 +115,11 @@ extension WebKitSuites {
             }
             // Each request is consumed once, including a refusal: a later
             // key return/attachment must leave the person's new input alone.
-            ready = true
+            state.ready = true
             try #require(window.makeFirstResponder(input))
-            let checks = readinessChecks
+            let checks = state.readinessChecks
             pages.establishInitialFocus(); pages.establishInitialFocus()
-            #expect(window.firstResponder === input && readinessChecks == checks)
+            #expect(window.firstResponder === input && state.readinessChecks == checks)
             if owner == "identity" || owner == "cancel" || owner == "resume-cancel" { #expect(checks == 0) }
             #expect(await model.end())
         }
