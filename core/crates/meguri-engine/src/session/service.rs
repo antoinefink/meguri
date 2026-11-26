@@ -891,6 +891,7 @@ impl ReviewService {
                     &rows.filtered_lifecycle,
                     &q,
                     &Overlay::default(),
+                    false,
                     e.id,
                     e.kind,
                     at,
@@ -1206,7 +1207,7 @@ impl ReviewService {
                 let reader = c.reader(ReaderRole::Interactive)?;
                 let rows = reader.snapshot()?;
                 let presentation = session.presentation.lock().unwrap();
-                let (_, card) = presentation_card(&*rows, &presentation.overlay, card, session.undo_view.as_ref())?;
+                let (_, card) = presentation_card(&*rows, &presentation.overlay, session.filtered, card, session.undo_view.as_ref())?;
                 review_capture(&*rows, card, session.undo_view.as_ref())?
             };
             if capture.key() != *key {
@@ -1334,6 +1335,7 @@ impl ReviewService {
             &*rows,
             &rows.filtered_lifecycle,
             &p.overlay,
+            session.filtered,
             card,
             at,
             day.today,
@@ -2167,6 +2169,7 @@ fn sibling_ids(
 fn presentation_card(
     rows: &impl ReadRows,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     undo: Option<&crate::undo::entry::Entry>,
 ) -> Result<(Vec<Cell>, Card), EngineError> {
@@ -2180,6 +2183,16 @@ fn presentation_card(
         image = before;
     }
     if let Some(card) = overlay.row(id) {
+        if !filtered_session {
+            // Ordinary answers never change membership. Validate the stored
+            // (or committed-undo) row before answer columns can conceal a
+            // malformed assignment or a concurrent move to another deck.
+            let stored = Card::from_cells(&image).map_err(meguri_storage::StorageError::from)?;
+            answer::membership(rows, &stored)?;
+            if stored.deck_id != card.deck_id || stored.original_deck_id != card.original_deck_id {
+                return Err(invalid("pending card membership changed"));
+            }
+        }
         let post = card.to_cells();
         for i in meguri_storage::rows::cards::ANSWER_COLUMNS {
             image[i] = post[i].clone();
@@ -2248,6 +2261,7 @@ fn capture_state(
     rows: &impl ReadRows,
     lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     at: i64,
     today: u32,
@@ -2256,7 +2270,7 @@ fn capture_state(
     undo: Option<&crate::undo::entry::Entry>,
     models: &mut FsrsCache,
 ) -> Result<(StateToken, SchedulingStates, Captured), EngineError> {
-    let (image, card) = presentation_card(rows, overlay, id, undo)?;
+    let (image, card) = presentation_card(rows, overlay, filtered_session, id, undo)?;
     let removed = undo
         .map(|entry| {
             entry
@@ -2326,6 +2340,7 @@ fn project_item(
     lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     q: &SessionQueue,
     overlay: &Overlay,
+    filtered_session: bool,
     id: CardId,
     kind: Kind,
     at: i64,
@@ -2336,7 +2351,7 @@ fn project_item(
     models: &mut FsrsCache,
 ) -> Result<HeadItem, EngineError> {
     let rows = render_keys.rows();
-    let (token, states, captured) = capture_state(rows, lifecycle, overlay, id, at, today, boundary, chooser, undo, models)?;
+    let (token, states, captured) = capture_state(rows, lifecycle, overlay, filtered_session, id, at, today, boundary, chooser, undo, models)?;
     let Captured { card, inputs, .. } = &captured;
     let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
     let mut predicted = [None; 4];
@@ -2604,6 +2619,7 @@ fn project_snapshot(
             &rows.filtered_lifecycle,
             &p.queue,
             &p.overlay,
+            s.filtered,
             e.id,
             e.kind,
             at,

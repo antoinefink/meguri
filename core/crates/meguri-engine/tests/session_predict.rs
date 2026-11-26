@@ -238,3 +238,101 @@ fn malformed_membership_refuses_session_prediction_and_answer_without_journal_or
         }
     }
 }
+
+#[test]
+fn ordinary_pending_overlay_cannot_hide_changed_stored_membership() {
+    use meguri_engine::{OpSource, OpSpec, decks::filtered::{self, Definition, Term}};
+    use meguri_model::ids::DeckId;
+    use meguri_storage::{ReadRows, ReaderRole, Record, StampMode};
+    use std::{fs, sync::Arc};
+
+    for change in ["malformed", "borrowed", "moved"] {
+        let h = Harness::new(1);
+        let card = h.cards[0];
+        // Review a normal descendant: membership is the card's own deck,
+        // rather than necessarily the selected session deck.
+        h.collection.run(OpSpec::named("descendant membership fixture", OpSource::Maintenance), move |ctx| {
+            let mut child = ctx.scope().deck(DeckId(1))?.unwrap();
+            child.id = DeckId(2);
+            child.name = format!("{}\u{1f}Child", child.name);
+            ctx.scope().put(&child)?;
+            child.id = DeckId(3);
+            child.name = "Other home".into();
+            ctx.scope().put(&child)?;
+            let mut row = ctx.scope().card(card)?.unwrap();
+            row.deck_id = DeckId(2);
+            ctx.scope().put(&row)?;
+            Ok(())
+        }).unwrap();
+        let borrowed = filtered::save(&h.collection, None, Definition {
+            name: "Borrowed pending card".into(),
+            terms: vec![Term { search: "cid:0".into(), limit: 1, order: 5 }],
+            ..Definition::default()
+        }, true).unwrap().value;
+        let (session, head) = h.start();
+        h.settle();
+        let gate = common::Gate::new();
+        let held = gate.clone();
+        h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+            if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+        })));
+        // Occupy the service worker before it can apply Again, keeping the
+        // writer free for the maintenance commit and its delayed observer.
+        h.collection.run(OpSpec::named("hold ordinary review observer", OpSource::Maintenance)
+            .stamp(StampMode::Raw), move |ctx| {
+                let mut row = ctx.scope().card(card)?.unwrap();
+                row.flags = 3;
+                ctx.scope().put(&row)?;
+                Ok(())
+            }).unwrap();
+        gate.wait_entered();
+        let AnswerOutcome::Accepted { head_diff, .. } = h.review.answer(
+            session, card, Rating::Again, head.items[0].state_token,
+            EpochMillis(h.clock.now_ms()), 100).unwrap()
+        else { panic!("valid descendant pending answer refused"); };
+        let repeat = &head_diff.head.items[0];
+        assert_eq!(repeat.card_id, card);
+        h.collection.run(OpSpec::named("change pending card membership", OpSource::Maintenance)
+            .stamp(StampMode::Raw), move |ctx| {
+                let mut row = ctx.scope().card(card)?.unwrap();
+                match change {
+                    "malformed" => row.original_deck_id = DeckId(3),
+                    "borrowed" => {
+                        row.deck_id = borrowed;
+                        row.original_deck_id = DeckId(2);
+                    }
+                    _ => row.deck_id = DeckId(3),
+                }
+                ctx.scope().put(&row)?;
+                Ok(())
+            }).unwrap();
+        let image = || h.collection.reader(ReaderRole::Query).unwrap()
+            .card(card).unwrap().unwrap().to_cells();
+        let before = image();
+        let seq = h.collection.last_seq();
+        let journal = h.dir.path().join("meguri-pending-answers.jsonl");
+        // Installing a hook is an ordered file-worker barrier: include the
+        // first intent before comparing bytes, without draining its answer.
+        h.review.journal_hook_for_testing(Arc::new(|_| {})).unwrap();
+        let journal_before = fs::read(&journal).unwrap();
+        let polled = h.review.head(session, 3);
+        let repeated = h.review.answer(session, card, Rating::Again, repeat.state_token,
+            EpochMillis(h.clock.now_ms()), 100);
+        h.review.journal_hook_for_testing(Arc::new(|_| {})).unwrap();
+        let journal_after = fs::read(&journal).unwrap();
+        let after = image();
+        let seq_after = h.collection.last_seq();
+        h.review.observe_hook_for_testing(None);
+        gate.open();
+        h.settle();
+
+        assert!(polled.is_err(), "pending prediction hid {change} membership");
+        assert!(repeated.is_err(), "second answer admitted: {change}: {repeated:?}");
+        assert_eq!(journal_after, journal_before, "{change}");
+        assert_eq!(after, before, "{change}");
+        assert_eq!(seq_after, seq, "{change}");
+        assert!(h.logs().is_empty(), "{change}");
+        assert_eq!(image(), before, "{change}");
+        h.review.end(session).unwrap();
+    }
+}
