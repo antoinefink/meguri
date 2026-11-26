@@ -195,7 +195,7 @@ extension ReviewCollectionStartupTests {
                 await sync.waitForInputs()
                 let originalEvents = original.events, successorEvents = successor.events
                 // Background still reaches policy while resume proof is pending.
-                sync.receive(.background); await sync.waitForInputs()
+                sync.receive(.background(deadlineMilliseconds: 123_000)); await sync.waitForInputs()
                 #expect(successor.events == successorEvents + ["background"])
                 #expect(original.events == originalEvents)
             }
