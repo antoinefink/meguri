@@ -243,14 +243,15 @@ private struct DeletionAlertHost: NSViewRepresentable {
             self.alert = alert
             shown = question
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak alert] event in
-                MainActor.assumeIsolated {
+                let handled = MainActor.assumeIsolated {
                     guard let self, let alert, self.alert === alert,
                           event.window === alert.window, event.keyCode == 53,
                           event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
-                          let cancel = alert.buttons.first, cancel.isEnabled else { return event }
+                          let cancel = alert.buttons.first, cancel.isEnabled else { return false }
                     cancel.performClick(nil)
-                    return nil
+                    return true
                 }
+                return handled ? nil : event
             }
             alert.beginSheetModal(for: window) { [weak self] response in
                 guard let self else { return }
