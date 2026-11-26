@@ -35,16 +35,28 @@ import XCTest
         XCTAssertTrue(waitUntil { self.status(app).contains(" of ") && self.count(app) > 0 })
         let matching = count(app)
         let table = app.outlines.matching(identifier: "browse.results.table").firstMatch
-        XCTAssertTrue(table.outlineRows.firstMatch.waitForExistence(timeout: 10))
-        try click(app, table.outlineRows.firstMatch, bundle)
+        let row = table.outlineRows.element(boundBy: 0)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        // As in the inspector/table suites, SwiftUI's outline row is not
+        // itself hittable. Click only the part visible inside the table.
+        let tableBounds = table.frame
+        let visibleRow = row.frame.intersection(tableBounds)
+        XCTAssertFalse(visibleRow.isNull || visibleRow.isEmpty, "The first result must be visible")
+        table.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: visibleRow.midX - tableBounds.minX, dy: visibleRow.midY - tableBounds.minY)).click()
+        XCTAssertTrue(waitUntil { row.isSelected }, "The table receives the click and selects its result")
         try key(app, .delete, bundle)
         assertTagSurvives(app, tag, count: matching)
+        XCTAssertTrue(row.isSelected, "Ordinary Delete leaves the table selection intact")
 
         if !element(app, "editor.fields").exists {
             try click(app, element(app, "browse.toolbar.inspector"), bundle)
         }
         let field = element(app, "editor.fields").textViews.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))
+        XCTAssertTrue(waitUntil { (field.value as? String ?? "").contains("palabra") },
+                      "The inspector shows the selected synthetic Spanish note")
         try click(app, field, bundle)
         try key(app, "a", bundle, modifiers: .command)
         try app.bringToFront(bundleIdentifier: bundle)
