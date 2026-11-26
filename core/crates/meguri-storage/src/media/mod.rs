@@ -4,6 +4,7 @@ mod cloud;
 pub use cloud::{CloudInstall, CloudMoveEvidence};
 mod check_report;
 mod collection_import;
+pub mod export;
 mod feed;
 mod folder;
 mod inventory;

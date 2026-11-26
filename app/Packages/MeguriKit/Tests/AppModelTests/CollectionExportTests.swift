@@ -8,10 +8,14 @@ private struct RefusingExportService: CollectionExportService {
     let cause: BridgeError
     var prepareReal = false
     var uncertain = false
+    var deckRefusal: DeckExportRefusal?
     func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
-        if prepareReal { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
+    func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        if prepareReal { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         if uncertain { throw ExportDestinationCompletionUncertain() }
-        throw CollectionExportFailure(cause: cause, destination: URL(fileURLWithPath: "/synthetic/do-not-display"))
+        throw CollectionExportFailure(cause: cause, destination: URL(fileURLWithPath: "/synthetic/do-not-display"), deckRefusal: deckRefusal)
     }
     func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {
         if uncertain { throw ExportDestinationCompletionUncertain() }
@@ -23,7 +27,10 @@ private struct RefusingExportService: CollectionExportService {
 private final class ObservedExportService: CollectionExportService {
     let lastError = Mutex<String?>(nil)
     func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
-        do { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
+    func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        do { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         catch { lastError.withLock { $0 = String(describing: error) }; throw error }
     }
     func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {
@@ -254,6 +261,14 @@ extension ReviewCollectionStartupTests {
             #expect(coordinator.stage == .failed && coordinator.message == expected)
             #expect(coordinator.artifact == nil && !coordinator.publicationUncertain)
         }
+        for (refusal, action) in [(DeckExportRefusal.missingDeck, "select another deck"),
+                                  (.invalidIDs, "Run Check Database"), (.needsCheckDatabase, "Run Check Database")] {
+            let coordinator = CollectionExportCoordinator(owner: owner, service: RefusingExportService(
+                cause: .internal("private diagnostic"), deckRefusal: refusal))
+            coordinator.prepare(); await coordinator.waitForCompletion()
+            #expect(coordinator.stage == .failed && coordinator.message?.contains(action) == true)
+            #expect(coordinator.message?.contains("media item") == false && coordinator.artifact == nil)
+        }
         // Actual report() precedence: destination and uncertain publication stay
         // actionable as destination problems even when a source cause is present.
         for uncertain in [false, true] {
@@ -402,9 +417,152 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let coordinator = owner.collectionExport
         #expect(!coordinator.canPrepare && coordinator.availabilityMessage != nil)
+        #expect(!coordinator.canPresentDeck(1))
+        coordinator.presentDeck(1)
+        #expect(owner.navigation.sheet == nil)
         coordinator.prepare(); #expect(coordinator.stage == .idle)
         coordinator.generationChanged()
         #expect(coordinator.stage == .idle && coordinator.artifact == nil)
         #expect(await owner.close())
+    }
+}
+
+
+extension ReviewCollectionStartupTests {
+    @Test func selectedDeckExportSavesAPKGRemembersChoicesAndLeavesCollectionExportUnchanged() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let suite = "DeckExportTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var configuration = LaunchConfiguration()
+        configuration.deviceDefaults = defaults
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+        try #require(owner.state == .ready)
+        let coordinator = owner.collectionExport
+        do {
+            let deck = try #require(owner.decks.first { $0.name == "Lang" })
+            try #require(deck.counts.new + deck.counts.learning + deck.counts.review > 0)
+            coordinator.presentDeck(deck.id)
+            #expect(coordinator.showsDeckOptions && coordinator.title == "Export Deck")
+            #expect(coordinator.deckOptions == DeckExportOptions())
+            coordinator.deckOptions = DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
+            coordinator.exportDeck()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented && coordinator.providerLease != nil, "\(coordinator.message ?? "missing deck save dialog")")
+            let artifact = try #require(coordinator.artifact)
+            #expect(artifact.metadata.suggestedName == "Lang.apkg")
+            let counts = try #require(artifact.metadata.deckCounts)
+            #expect(counts.notes > 0 && counts.cards > 0)
+            let saved = root.appending(path: "selected.apkg")
+            coordinator.save(to: saved); await coordinator.waitForCompletion()
+            #expect(files.fileExists(atPath: saved.path))
+            #expect(coordinator.stage == .idle && coordinator.artifact == nil && coordinator.providerLease == nil)
+            #expect(owner.navigation.sheet == nil)
+            coordinator.presentDeck(deck.id)
+            #expect(coordinator.deckOptions == DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false))
+            await coordinator.cancel()
+            // The ordinary prepare entry must clear the closed deck options,
+            // just as the continuous File/Settings command does below.
+            coordinator.present(); coordinator.prepare(); await coordinator.waitForCompletion()
+            try #require(coordinator.stage == .ready)
+            #expect(!coordinator.isDeckExport)
+            #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
+            await coordinator.cancel()
+            coordinator.presentDeck(deck.id); await coordinator.cancel()
+            coordinator.start()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented)
+            #expect(!coordinator.isDeckExport)
+            #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            #expect(owner.navigation.sheet == nil && coordinator.providerLease == nil)
+            // A delayed bridge request retains the originating generation,
+            // even when the replacement has exactly the same deck ID.
+            let delayed = DeckExportRequest(deckID: deck.id, options: coordinator.deckOptions,
+                                            expectedGeneration: owner.generation)
+            owner.entry.inspect(source); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+            try #require(owner.state == .ready && owner.generation != delayed.expectedGeneration)
+            try #require(owner.fullDeckName(deck.id) == "Lang")
+            do {
+                let unexpected = try await CoreCollectionExportService().prepare(deck: delayed,
+                    operation: CollectionExportOperation(), progress: { _ in })
+                try await unexpected.discard()
+                Issue.record("An old deck action must refuse a replacement with the same deck ID")
+            } catch let error as BridgeError {
+                #expect(error == .staleGeneration(planned: delayed.expectedGeneration, current: owner.generation))
+            }
+            #expect(await owner.close())
+        } catch {
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            await coordinator.cancel(); await coordinator.discard(); _ = await owner.close(); throw error
+        }
+    }
+}
+
+@Suite @MainActor struct DeckExportPreferencesTests {
+    @Test func firstUseAndRememberedChoicesAreDeviceLocal() throws {
+        let suite = "DeckExportPreferencesTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = DeckExportPreferences(defaults: defaults)
+        #expect(preferences.read() == DeckExportOptions())
+        let changed = DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
+        preferences.write(changed)
+        #expect(DeckExportPreferences(defaults: defaults).read() == changed)
+        #expect(DeckExportPreferences(defaults: nil).read() == DeckExportOptions())
+    }
+}
+
+extension ReviewCollectionStartupTests {
+    @Test func emptyDeckConfirmsZeroNotesBeforeNativePickerAndCancelRemovesArtifact() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+        try #require(owner.state == .ready)
+        let coordinator = owner.collectionExport
+        do {
+            owner.deckActions.present(.create); owner.deckActions.name = "Empty Export Regression"
+            owner.deckActions.submit(); await owner.deckActions.waitForCompletion()
+            let emptyID = try #require(owner.decks.first(where: { $0.name == "Empty Export Regression" })?.id)
+            try #require(owner.navigation.sheet == nil)
+            coordinator.presentDeck(emptyID); coordinator.exportDeck()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            #expect(coordinator.stage == .ready && coordinator.confirmsEmptyDeck)
+            #expect(coordinator.deckExportSummary == "0 notes · 0 cards · 0 media files")
+            #expect(!coordinator.destinationPresented && coordinator.providerLease == nil && !coordinator.canChooseAgain)
+            await coordinator.cancel()
+            #expect(coordinator.artifact == nil && owner.navigation.sheet == nil)
+            // Save is the explicit native confirmation action for an empty deck.
+            coordinator.presentDeck(emptyID); coordinator.exportDeck()
+            await coordinator.waitForCompletion()
+            try #require(coordinator.confirmsEmptyDeck)
+            coordinator.chooseDestination(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented && coordinator.providerLease != nil)
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            #expect(coordinator.artifact == nil && coordinator.providerLease == nil && owner.navigation.sheet == nil)
+            #expect(await owner.close())
+        } catch {
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            await coordinator.cancel(); await coordinator.discard(); _ = await owner.close(); throw error
+        }
     }
 }

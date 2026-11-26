@@ -449,10 +449,77 @@ fn exported_open_counts_review_close_reopen_upgrade_and_races() {
     verify_imported_sentinels(&location, persisted.1);
     #[cfg(feature = "test-hooks")]
     all_deck_name_projection_regressions(&rx, &mut events);
+    deck_export_replacement_regression(&rx, &mut events);
     assert!(
         events.windows(2).all(|e| e[0].seq < e[1].seq),
         "one process dispatcher preserves order across reopen"
     );
+}
+
+// Stay inside this binary's single runtime owner. Two different collections
+// contain deck 1; a delayed action from the first must never export the second.
+fn deck_export_replacement_regression(rx: &mpsc::Receiver<CoreEvent>, events: &mut Vec<CoreEvent>) {
+    use meguri_ffi::{
+        collection_export::{self, CollectionExportOutcome, DeckExportOptions},
+        decks,
+    };
+    let original = tempfile::tempdir().unwrap();
+    let replacement = tempfile::tempdir().unwrap();
+    let original_location = location(original.path());
+    let replacement_location = location(replacement.path());
+    fixture(&original_location);
+    fixture(&replacement_location);
+    let start = collection::start_open(original_location, Arc::new(Clock), Arc::new(Space), 37).unwrap();
+    let (outcome, more) = finish(rx, start.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let old = decks::all_deck_names().unwrap();
+    assert!(old.decks.iter().any(|deck| deck.id == 1));
+    lifecycle::close_collection().unwrap();
+    let start = collection::start_open(replacement_location, Arc::new(Clock), Arc::new(Space), 37).unwrap();
+    let (outcome, more) = finish(rx, start.id);
+    events.extend(more);
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    let current = decks::all_deck_names().unwrap();
+    assert_ne!(old.generation, current.generation);
+    assert!(current.decks.iter().any(|deck| deck.id == 1));
+    let options = DeckExportOptions {
+        include_scheduling: false,
+        include_presets: false,
+        include_media: false,
+    };
+    assert!(matches!(
+        collection_export::start_deck_export(1, options, old.generation),
+        Err(CoreError::StaleGeneration { planned, current: got })
+            if planned == old.generation && got == current.generation
+    ));
+    assert!(!replacement.path().join("CollectionExports").exists());
+    // The refusal reserved no flow and left the current collection usable.
+    // Both the fresh deck action and the original no-argument API still work.
+    for deck in [true, false] {
+        let start = if deck {
+            collection_export::start_deck_export(1, options, current.generation).unwrap()
+        } else {
+            collection_export::start_collection_export().unwrap()
+        };
+        let (outcome, more) = finish(rx, start.job.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Succeeded);
+        let CollectionExportOutcome::Ready { artifact } = start.result.outcome().unwrap() else {
+            panic!("fresh export must deliver Ready")
+        };
+        let metadata = artifact.metadata().unwrap();
+        assert_eq!(metadata.source_generation, current.generation);
+        assert_eq!(
+            metadata.suggested_name,
+            if deck { "Default.apkg" } else { "Meguri-Collection.colpkg" }
+        );
+        let cleanup = artifact.discard().unwrap().unwrap();
+        let (outcome, more) = finish(rx, cleanup.id);
+        events.extend(more);
+        assert_eq!(outcome, JobOutcome::Succeeded);
+    }
+    lifecycle::close_collection().unwrap();
 }
 
 #[cfg(feature = "test-hooks")]

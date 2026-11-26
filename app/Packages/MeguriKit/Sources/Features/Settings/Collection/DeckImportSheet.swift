@@ -127,6 +127,12 @@ struct DeckImportPresentation {
         guard progressStage == .media, let (done, total) = progressFraction else { return nil }
         return "\(done.formatted()) of \(DeckImportText.count(total, "file", "files"))"
     }
+    /// The line under the progress bar: the files done while media counts,
+    /// otherwise why Cancel is off once the work can't stop (X2.4).
+    var progressNote: String? {
+        if let progressDetail { return progressDetail }
+        return busy && !cancellable ? DeckImportText.finishing : nil
+    }
 
     /// The sheet's title, in the window's title bar: the file it is about.
     var title: String {
@@ -355,28 +361,28 @@ struct DeckImportContent: View {
     }
 
     @ViewBuilder private var progressSection: some View {
+        // One bar for every stage, indeterminate while a stage has no total:
+        // the sheet never switches between a spinner and a bar.
+        let fraction = presentation.progressFraction
         Section {
-            Group {
-                if let (done, total) = presentation.progressFraction {
-                    ProgressView(value: Double(done), total: Double(total)) {
-                        Text(verbatim: presentation.progressTitle)
-                    } currentValueLabel: {
-                        if let detail = presentation.progressDetail { Text(verbatim: detail) }
-                    }
-                } else {
-                    ProgressView { Text(verbatim: presentation.progressTitle) }
-                }
+            ProgressView(value: fraction.map { Double($0.0) }, total: Double(fraction?.1 ?? 1)) {
+                Text(verbatim: presentation.progressTitle)
+            } currentValueLabel: {
+                if let note = presentation.progressNote { Text(verbatim: note) }
             }
+            .progressViewStyle(.linear)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: presentation.progressTitle))
-            .accessibilityValue(Text(verbatim: presentation.progressFraction.map { "\($0.0.formatted()) of \($0.1.formatted())" }
-                ?? "In progress"))
+            .accessibilityValue(Text(verbatim: progressAccessibilityValue))
             .accessibilityIdentifier("\(Self.id).progress")
         } header: {
             sheetTitle
-        } footer: {
-            if presentation.busy, !presentation.cancellable { Text(verbatim: DeckImportText.finishing) }
         }
+    }
+
+    private var progressAccessibilityValue: String {
+        let amount = presentation.progressFraction.map { "\($0.0.formatted()) of \($0.1.formatted())" } ?? "In progress"
+        return presentation.busy && !presentation.cancellable ? "\(amount). \(DeckImportText.finishing)" : amount
     }
 
     // MARK: X2.1, X2.2
@@ -693,7 +699,9 @@ struct DeckImportContent: View {
                     .disabled(!presentation.cancellable || presentation.cancelling)
                     .accessibilityIdentifier("\(Self.id).cancel")
             }
-            if presentation.facts != nil, presentation.step == .importing {
+            // While the options stay on screen (a fast import) their Import
+            // shows, disabled; the progress view has no Import to offer.
+            if presentation.facts != nil, presentation.step == .importing, !presentation.showsProgress {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {} label: { Text(verbatim: "Import") }.disabled(true)
                         .accessibilityIdentifier("\(Self.id).import")

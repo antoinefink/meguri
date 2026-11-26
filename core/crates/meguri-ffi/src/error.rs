@@ -26,6 +26,10 @@ pub enum CoreError {
     ExportSourceInvalid,
     /// The collection or media exceeds the file format's supported limits.
     ExportFormatLimit,
+    /// Selected ids exceed the export time bound; run Check Database.
+    ExportInvalidIds,
+    /// Selected records or references need Check Database.
+    ExportNeedsCheckDatabase,
     DeckOptionsInvalid {
         issues: Vec<crate::deck_options::OptionIssue>,
     },
@@ -129,6 +133,8 @@ impl fmt::Display for CoreError {
             CoreError::CloudSdkCallbackRejected => f.write_str("old cloud SDK callback rejected"),
             CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
+            CoreError::ExportInvalidIds => f.write_str("export ids need Check Database"),
+            CoreError::ExportNeedsCheckDatabase => f.write_str("export records need Check Database"),
             CoreError::ExportSourceInvalid => f.write_str("export source item refused"),
             CoreError::ExportFormatLimit => f.write_str("export format limit"),
             CoreError::DeckOptionsInvalid { .. } => write!(f, "{self:?}"),
@@ -178,6 +184,8 @@ impl From<EngineError> for CoreError {
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::ExportSourceChanged => CoreError::ExportSourceChanged,
             EngineError::ExportSourceInvalid => CoreError::ExportSourceInvalid,
+            EngineError::ExportInvalidIds => CoreError::ExportInvalidIds,
+            EngineError::ExportNeedsCheckDatabase => CoreError::ExportNeedsCheckDatabase,
             EngineError::ExportFormatLimit => CoreError::ExportFormatLimit,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::SessionActive => CoreError::SessionActive,
@@ -289,6 +297,8 @@ impl From<CoreError> for EngineError {
             CoreError::Cancelled => EngineError::Cancelled,
             CoreError::ExportSourceChanged => EngineError::ExportSourceChanged,
             CoreError::ExportSourceInvalid => EngineError::ExportSourceInvalid,
+            CoreError::ExportInvalidIds => EngineError::ExportInvalidIds,
+            CoreError::ExportNeedsCheckDatabase => EngineError::ExportNeedsCheckDatabase,
             CoreError::ExportFormatLimit => EngineError::ExportFormatLimit,
             CoreError::Busy { running_op } => EngineError::Busy { running_op },
             CoreError::Unavailable { reason } => EngineError::CollectionUnavailable { reason },

@@ -38,7 +38,7 @@ final class StagedCollectionExportDestination: Sendable {
     init(publication: any CollectionExportPublication = FoundationCollectionExportPublication()) {
         self.publication = publication
     }
-    func save(to destination: URL, operation: any CollectionExportCancellationChecking,
+    func save(to destination: URL, operation: any CollectionExportCancellationChecking, deckPackage: Bool = false,
               beforePublication: @escaping @Sendable () async -> Void = {},
               stage: @escaping @Sendable (URL) async throws -> Void) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
@@ -58,7 +58,7 @@ final class StagedCollectionExportDestination: Sendable {
                     }
                     let directory = try files.url(for: .itemReplacementDirectory, in: .userDomainMask,
                                                   appropriateFor: destination, create: true)
-                    let staged = directory.appendingPathComponent("Meguri-Collection.colpkg")
+                    let staged = directory.appendingPathComponent(deckPackage ? "Meguri-Deck.apkg" : "Meguri-Collection.colpkg")
                     var retainRecovery = false
                     defer {
                         if !retainRecovery {
