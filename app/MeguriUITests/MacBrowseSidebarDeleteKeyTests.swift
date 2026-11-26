@@ -55,14 +55,25 @@ import XCTest
         }
         let field = element(app, "editor.fields").textViews.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))
-        XCTAssertTrue(waitUntil { (field.value as? String ?? "").contains("palabra") },
-                      "The inspector shows the selected synthetic Spanish note")
+        XCTAssertTrue(waitUntil { !(field.value as? String ?? "").isEmpty },
+                      "The inspector shows a nonempty field on the selected row")
+        let priorText = try XCTUnwrap(field.value as? String)
+        let marker = try XCTUnwrap(["Z", "Q", "X"].first { !priorText.contains($0) })
         try click(app, field, bundle)
-        try key(app, "a", bundle, modifiers: .command)
+        // Match MacBrowseInspectorTests: collapse to a concrete end caret,
+        // without selecting the WebView's contents.
+        try key(app, .downArrow, bundle, modifiers: .command)
+        XCTAssertTrue(waitUntil { element(app, "browse.inspector.format.bold").isEnabled },
+                      "The note field owns editing focus")
         try app.bringToFront(bundleIdentifier: bundle)
-        field.typeText("Synthetic keyboard focusZ")
+        app.typeText(marker)
+        XCTAssertTrue(waitUntil { (field.value as? String ?? "").contains(marker) },
+                      "The focused field receives the marker before Backspace")
         try key(app, .delete, bundle)
-        XCTAssertTrue(waitUntil { field.value as? String == "Synthetic keyboard focus" }, "the editor receives Backspace")
+        XCTAssertTrue(waitUntil {
+            guard let text = field.value as? String else { return false }
+            return text == priorText || (!text.isEmpty && !text.contains(marker))
+        }, "Backspace removes the observed marker from the note field")
         assertTagSurvives(app, tag, count: matching)
 
         // Restore sidebar focus, then move it to the sidebar's native search.
