@@ -3,10 +3,14 @@
 **Integration status: failed.** No current passing full gate is established.
 
 The tag and note type deletion branch passed 44 focused Swift tests
-(`swift-test/20261126T072032Z-297`) and 40 provider and FFI tests
+(`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed
 all four cases (`ui-test/20261126T071556Z-86434`). The macOS tag menu
 journeys passed both cases (`ui-test/20261126T073941Z-29697`).
+The Mac alert opened from Browse and cancelled with Escape
+(`ui-test/20261126T075449Z-57290`, Browse case). The Note Types list
+journey verified Return, Escape, Cancel, deletion and Undo restoring the
+90 notes and 180 cards (`ui-test/20261126T075938Z-70274`).
 The branch's independent review is in
 [the deletion review log](review-log/delete-tags-note-types-20261126.md).
 
