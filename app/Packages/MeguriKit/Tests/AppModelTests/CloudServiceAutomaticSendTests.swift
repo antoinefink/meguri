@@ -10,6 +10,65 @@ import Testing
 // The existing suite serializes the process-global Core owner.
 extension ReviewCollectionStartupTests {
     #if DEBUG
+    @Test func nativeBackupRestoreOnBoundProviderBlocksAutomaticUploadUntilExplicitCollectionDecision() async throws {
+        try await withAutomaticServiceApp { app, fixture, wire in
+            let note = try #require(fixture.notes.sorted { $0.id < $1.id }.first { !$0.fields.isEmpty })
+            let earlier = try await CoreNoteService().readNote(id: note.id)
+            let create = try #require(app.owner.backups.create())
+            await create.value
+            let backup = try #require(app.owner.backups.created)
+            try await automaticServiceEdit(app, id: note.id, suffix: " Synthetic remote successor")
+            try await app.exchange()
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            app.sync.setDeviceSettings(paused: false, automatic: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            for sdk in await app.factory.engines { await sdk.waitForAutomaticSend() }
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            try #require(app.sync.settings.automatic)
+
+            // Read exact records from the real synthetic Service, including the
+            // root, epoch and collection rows; retain envelopes and server tags.
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            var remote: [Data] = []
+            for record in fixture.records {
+                let reply = try await wire.read(zone: record.zone, name: record.name, all: true)
+                remote.append(try encoder.encode(reply.ok()))
+            }
+            let completedBefore = wire.process.transportExchanges().count
+            app.owner.presentBackupRestore()
+            await app.owner.backups.openedRestore()
+            app.owner.backups.selectedName = backup.name
+            let restore = try #require(app.owner.backups.restoreConfirmed(name: backup.name))
+            await restore.value
+            try #require(app.owner.backups.restoreCompleted)
+            #expect(try await CoreNoteService().readNote(id: note.id).fields == earlier.fields)
+
+            // Exercise actual automatic policy inputs after native reattachment.
+            // Neither a fake binding nor a scripted sync result supplies the fence.
+            app.sync.receive(.network(reachable: true))
+            await app.sync.foregroundAfterLocalResume()
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            for sdk in await app.factory.engines { await sdk.waitForAutomaticSend() }
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            #expect(app.sync.status?.state == .paused(.decisionRequired))
+            #expect(app.owner.syncNowAvailability() == .unavailable(.decisionRequired))
+            try await app.owner.prepareCloudConnectionPreview()
+            await app.sync.waitForConnectionPreview()
+            guard case .ready(_, let choice) = app.sync.preview else { throw ServiceWorkflowFailure.refused }
+            #expect(choice.decision == .chooseCollection)
+
+            for exchange in wire.process.transportExchanges().dropFirst(completedBefore) {
+                let request = try JSONDecoder().decode(ServiceJSON.self, from: exchange.request.header)
+                let operation = try #require(request["operation"])
+                #expect(operation["Modify"] == nil && operation["DeleteZone"] == nil && operation["CreateZone"] == nil)
+            }
+            for (index, record) in fixture.records.enumerated() {
+                let reply = try await wire.read(zone: record.zone, name: record.name, all: true)
+                #expect(try encoder.encode(reply.ok()) == remote[index])
+            }
+        }
+    }
+
     // A characterization/control pair, not a reproduction claim for the old
     // connection.incomplete receipt. Both retire through ConfigureAutomatic;
     // only the second suspends after real preparation and pinned SDK lookup.

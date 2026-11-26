@@ -166,14 +166,14 @@ public final class BackupCoordinator {
         if work == .restore { host?.cancelBackupRestoreAdmission() }
         Task { await operation.cancel() }
     }
-    public func cancelAndDrain() async {
+    func cancelAndDrain() async {
         if work == .restore { host?.cancelBackupRestoreAdmission() }
         if let operation { await operation.cancel() }
         task?.cancel()
         await task?.value
     }
 
-    public func collectionChanged() {
+    func collectionChanged() {
         ownership &+= 1; loadRevision &+= 1; loading = false
         entries = []; selectedName = nil; limits = nil; status = nil; created = nil
         rejectedNames.removeAll()

@@ -1,14 +1,15 @@
-import CoreBridge
+@testable import CoreBridge
 import Foundation
 import Testing
 @testable import AppModel
 
-private actor BackupServiceProbe: MaintenanceService {
+actor BackupServiceProbe: MaintenanceService {
     var entries: [BackupEntry] = []
     var limits = BackupLimits(daily: .max, weekly: 10, monthly: 9, minimumIntervalMinutes: .max)
     var written: [BackupLimits] = []
     var restoredNames: [String] = []
     var triggers: [MaintenanceTrigger] = []
+    var dueOperation: MaintenanceOperation?
     var refusal: MaintenanceFailure?
     var deadline: Int64?
     var held = false
@@ -47,8 +48,22 @@ private actor BackupServiceProbe: MaintenanceService {
     }
     func runDueMaintenance(_ trigger: MaintenanceTrigger, operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> Int64? {
         triggers.append(trigger)
+        dueOperation = operation
         await reachGate()
         return deadline
+    }
+    func requireOperationNotCancelled() throws {
+        try dueOperation?.check()
+    }
+    func waitForOperationCancellation() async throws {
+        let limit = ContinuousClock.now.advanced(by: .seconds(4))
+        while ContinuousClock.now < limit {
+            if let dueOperation {
+                do { try dueOperation.check() } catch BridgeError.cancelled { return }
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        throw BridgeError.internal("Automatic maintenance operation was not cancelled")
     }
     func listBackups() async throws -> [BackupEntry] { entries }
     func backupLimits() async throws -> BackupLimits { limits }
@@ -238,6 +253,49 @@ private actor BackupServiceProbe: MaintenanceService {
         trigger.event(deadline: 12000)
         await service.release(); await retired.value
         #expect(trigger.deadlineMilliseconds == 12000)
+        trigger.own(nil)
+    }
+    @Test func cancellationRetiresHeldAndQueuedWorkButJoinsBeforeSuccessor() async throws {
+        let service = BackupServiceProbe()
+        await service.configureDue(deadline: 4000, held: true)
+        let trigger = BackupTrigger(service: service, schedule: { _, _ in {} })
+        trigger.own(1)
+        var firstEnded = false, successorEnded = false
+        let running = Task { await trigger.run(.opened); firstEnded = true }
+        await service.waitForStart()
+        var queuedEntered = false
+        let queued = Task { queuedEntered = true; await trigger.run(.background) }
+        let admissionLimit = ContinuousClock.now.advanced(by: .seconds(2))
+        while !queuedEntered, ContinuousClock.now < admissionLimit { await Task.yield() }
+        try #require(queuedEntered)
+        trigger.cancelPending()
+        do { try await service.waitForOperationCancellation() }
+        catch { await service.release(); await running.value; await queued.value; throw error }
+        let successor = Task { await trigger.run(.opened); successorEnded = true }
+        await Task.yield()
+        #expect(!firstEnded && !successorEnded) // Cancellation never abandons the active operation.
+        trigger.event(deadline: 9000)
+        await service.release()
+        await running.value; await queued.value; await successor.value
+        #expect(await service.triggers == [.opened, .opened])
+        #expect(firstEnded && successorEnded)
+        trigger.own(nil)
+    }
+    @Test func quitBudgetCancelsTheHeldOperationAndStillWaitsForItsTerminalResult() async throws {
+        let service = BackupServiceProbe()
+        await service.configureDue(deadline: nil, held: true)
+        let trigger = BackupTrigger(service: service, schedule: { _, _ in {} })
+        trigger.own(1)
+        var ended = false
+        let began = ContinuousClock.now
+        let quit = Task { await trigger.run(.quit); ended = true }
+        await service.waitForStart()
+        do { try await service.waitForOperationCancellation() }
+        catch { await service.release(); await quit.value; throw error }
+        #expect(began.duration(to: .now) < .seconds(3))
+        #expect(!ended)
+        await service.release(); await quit.value
+        #expect(ended && trigger.deadlineMilliseconds == nil)
         trigger.own(nil)
     }
     @Test func coreNilLeavesNoTimerAndLifecycleTriggersAreForwarded() async {

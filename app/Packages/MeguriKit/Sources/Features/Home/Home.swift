@@ -296,7 +296,13 @@ public struct HomeView: View {
         case .pending, .kept: EmptyView()
         case .welcome: EmptyView() // The welcome owns the page (N18.3).
         case .unavailable:
-            LoadingStateView(Text("Collection is busy…", bundle: .module))
+            if collection.backupRecoveryRequired {
+                EmptyStateView(Text("Restore Needs Recovery", bundle: .module), systemImage: "exclamationmark.triangle",
+                    description: Text("Meguri couldn’t confirm which collection is active. Quit and reopen Meguri to check the collection before studying or syncing. Your collection files and backups will be kept.", bundle: .module))
+                    .accessibilityIdentifier("home.backup.recovery")
+            } else {
+                LoadingStateView(Text("Collection is busy…", bundle: .module))
+            }
         case .creationRecovery:
             EmptyStateView(Text("Couldn’t Start Empty", bundle: .module), systemImage: "exclamationmark.triangle",
                 description: Text("Quit and reopen Meguri before trying again. Any collection file already created will be kept.", bundle: .module))

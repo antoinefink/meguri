@@ -121,6 +121,135 @@ extension ReviewCollectionStartupTests {
         } catch { _ = await recovery.close(); throw error }
     }
 
+    @Test(arguments: [false, true])
+    func earlyBackupRestoreRefusalRejoinsTheUnchangedArmedDeadline(cancelBeforeInspection: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "backup-refusal-timer-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = try backupConfiguration(root)
+        let owner = backupOwner(configuration, root: root)
+        await owner.start()
+        do {
+            try #require(owner.state == .ready)
+            _ = try await CoreDeckService().addDeck(name: "Synthetic pending backup")
+            await owner.backupTrigger.run(.opened)
+            let armed = try #require(owner.backupTrigger.deadlineMilliseconds)
+            if cancelBeforeInspection {
+                try await owner.beginBackupRestore()
+                #expect(owner.backupTrigger.deadlineMilliseconds == nil)
+                _ = await owner.finishBackupRestore(candidateActive: false, generation: nil)
+            } else {
+                let invalid = "backup-2099-01-01-00.00.00.colpkg"
+                try Data("Synthetic invalid backup".utf8).write(to: configuration.collectionLocation.backupsDirectory.appending(path: invalid))
+                await owner.backups.openedRestore()
+                owner.backups.selectedName = invalid
+                let restore = try #require(owner.backups.restoreConfirmed(name: invalid))
+                await restore.value
+                #expect(!owner.backups.candidateActive && owner.backups.failure != nil)
+            }
+            #expect(owner.state == .ready)
+            #expect(owner.backupTrigger.deadlineMilliseconds == armed)
+            try #require(await owner.close())
+        } catch { _ = await owner.close(); throw error }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func coldDamagedCollectionListingCancelQuitsNormallyAndColdReopensWithoutChangingBytes() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "backup-cancel-damaged-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = try backupConfiguration(root)
+        let damaged = Data("Synthetic invalid collection retained across recovery cancellation".utf8)
+        try damaged.write(to: configuration.collectionLocation.collectionFile)
+        for _ in 0..<2 {
+            let owner = backupOwner(configuration, root: root)
+            await owner.start()
+            do {
+                guard case .failed = owner.state else { throw BridgeError.internal("Expected damaged cold open") }
+                owner.presentBackupRestore()
+                await owner.backups.openedRestore()
+                // Listing retains a real Failed host even with no backup selected.
+                guard case .failed = try await CoreCollectionService().lifecycle() else {
+                    throw BridgeError.internal("Expected retained failed recovery host")
+                }
+                owner.navigation.dismissSheet()
+                let began = ContinuousClock.now
+                try #require(await owner.closeForQuit())
+                #expect(began.duration(to: .now) < .seconds(5))
+                #expect(try Data(contentsOf: configuration.collectionLocation.collectionFile) == damaged)
+            } catch { _ = await owner.close(); throw error }
+        }
+    }
+
+    @Test func uncertainBackupActivationKeepsRecoveryAfterDismissalAndAllowsDrainedClose() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "backup-uncertain-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = try backupConfiguration(root)
+        let owner = backupOwner(configuration, root: root)
+        await owner.start()
+        do {
+            try #require(owner.state == .ready)
+            try await owner.beginBackupRestore()
+            // Lose the host before activation facts can be delivered. This is
+            // real lifecycle evidence, not a fabricated terminal restore result.
+            try await CoreCollectionService().close()
+            let completion = await owner.finishBackupRestore(candidateActive: nil, generation: nil)
+            #expect(completion.candidateActive == nil && !completion.ready)
+            owner.navigation.dismissSheet()
+            owner.receiveLifecycle(.ready(generation: owner.generation)) // Late delivery cannot reopen input.
+            #expect(owner.backupRecoveryRequired && owner.homePhase == .unavailable)
+            #expect(!owner.backups.canCreate && !owner.backups.canOpenRestore)
+            #expect(!owner.entryAllowed && owner.backupTrigger.deadlineMilliseconds == nil)
+            try #require(await owner.closeForQuit())
+        } catch { _ = await owner.close(); throw error }
+        let reopened = backupOwner(configuration, root: root)
+        await reopened.start()
+        #expect(reopened.state == .ready && !reopened.backupRecoveryRequired)
+        #expect(await reopened.close())
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func automaticBackupCancellationLetsBackgroundSuspendOrQuitRejoin(quitting: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "backup-lifecycle-cancel-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = try backupConfiguration(root)
+        let service = BackupServiceProbe()
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            sync: SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil),
+            providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
+        await owner.start()
+        do {
+            try #require(owner.state == .ready)
+            await service.configureDue(deadline: nil, held: true)
+            let automatic = Task { await owner.backupTrigger.run(.deadline) }
+            await service.waitForStart()
+            var quit: Task<Bool, Never>?
+            let lease: UInt64?
+            if quitting {
+                lease = nil
+                quit = Task { await owner.closeForQuit() }
+            } else {
+                lease = try #require(owner.beginBackgroundTask(deadlineMilliseconds: 123_000))
+                owner.backgroundTaskExpired(try #require(lease))
+            }
+            do { try await service.waitForOperationCancellation() }
+            catch { await service.release(); await automatic.value; _ = await quit?.value; throw error }
+            await service.release(); await automatic.value
+            if let quit { try #require(await quit.value) }
+            else {
+                await owner.waitForLifecycle()
+                #expect(await service.triggers == [.opened, .deadline]) // Expired lease never starts Background.
+                owner.setForeground(true)
+                await owner.waitForLifecycle()
+                await service.configureDue(deadline: nil, held: true)
+                let foreground = Task { await owner.backupTrigger.run(.opened) }
+                await service.waitForStart()
+                owner.backgroundTaskExpired(try #require(lease)) // Stale expiry must not cancel new work.
+                try await service.requireOperationNotCancelled()
+                await service.release(); await foreground.value
+                try #require(await owner.close())
+            }
+        } catch { await service.release(); _ = await owner.close(); throw error }
+    }
+
     @Test func anotherForegroundSceneRetainsTheSharedCollectionLifetime() {
         let configuration = LaunchConfiguration()
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
