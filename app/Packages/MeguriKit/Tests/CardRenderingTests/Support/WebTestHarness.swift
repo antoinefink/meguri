@@ -605,9 +605,13 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
             send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
             return
         }
-        let runtimeAsset = servesRuntime && path.hasPrefix(CardRuntime.assetPrefix)
-            ? CardRuntime.asset(at: String(path.dropFirst(CardRuntime.assetPrefix.count))) : nil
-        guard let file = files[path] ?? runtimeAsset.map({ File(data: $0.data, mimeType: $0.mimeType) }) else {
+        let file: File
+        if let provided = files[path] {
+            file = provided
+        } else if servesRuntime, path.hasPrefix(CardRuntime.assetPrefix),
+                  let asset = CardRuntime.asset(at: String(path.dropFirst(CardRuntime.assetPrefix.count))) {
+            file = File(data: asset.data, mimeType: asset.mimeType)
+        } else {
             send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
             return
         }

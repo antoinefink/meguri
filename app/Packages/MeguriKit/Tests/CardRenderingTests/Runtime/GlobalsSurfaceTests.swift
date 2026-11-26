@@ -384,18 +384,45 @@ extension WebKitSuites.CardRuntimeSuites {
                     """#)
                 #expect(try await page.bool("document.querySelector('#m mjx-container svg path') !== null"))
                 #expect(try await page.bool("MathJax.version === '4.1.3'"))
+                #expect(try await page.bool("MathJax.startup.document.inputJax[0].options.packages.slice().sort().join(',') === 'ams,autoload,base,mhchem,require'"))
                 #expect(try await page.string("document.getElementById('m').dataset.requireIntact") == "true")
                 #expect(try await page.string("Array.from(MathJax.startup.document.math)[0].math") == "x^2")
                 #expect(try await page.bool("document.querySelector('#m mjx-assistive-mml math') !== null"))
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
                 try await page.run("await MathJax.startup.promise; MathJax.typesetClear([document.getElementById('m')]);")
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"))
+                let requestsBeforeRefusals = harness.media.requests.count
+                try await page.run("""
+                    window.__loaderScripts = [];
+                    window.__loaderObserver = new MutationObserver(function (records) {
+                      records.forEach(function (record) {
+                        record.addedNodes.forEach(function (node) {
+                          // Mutation records retain scripts even after the loader removes them.
+                          if (node.nodeName === 'SCRIPT') __loaderScripts.push(node.src);
+                        });
+                      });
+                    });
+                    __loaderObserver.observe(document.head, { childList: true });
+                    """)
                 for path in ["https://unbundled.invalid/component.js", "meguri-media://other/_anki/mathjax/tex-svg.js",
                              "../runtime.js", "%2e%2e/runtime.js", "tex-svg.js?remote=1", "tex-svg.js#fragment",
                              "meguri-media://user:password@media/_anki/mathjax/tex-svg.js"] {
-                    let refused = try await page.run("try { await MathJax.config.loader.require(path); return false; } catch (_) { return true; }", ["path": path])
-                    #expect(refused as? Bool == true, "Loader must refuse \(path)")
+                    let reason = try await page.run("""
+                        try { await MathJax.config.loader.require(path); return 'no error'; }
+                        catch (error) { return error.name + ': ' + error.message; }
+                        """, ["path": path])
+                    #expect(reason as? String == "Error: Unbundled MathJax component refused", "Loader must refuse \(path)")
+                    #expect(try await page.bool("__loaderScripts.length === 0"), "Loader must not insert a script for \(path)")
                 }
+                try await page.run("""
+                    await MathJax.config.loader.require('font/svg/dynamic/fraktur.js');
+                    await MathJax.typesetPromise([document.getElementById('m')]);
+                    """)
+                #expect(try await page.bool("document.querySelector('#m mjx-container svg path') !== null"))
+                let scripts = try await page.json([String].self, "__loaderObserver.disconnect(); return JSON.stringify(__loaderScripts);")
+                #expect(scripts == ["meguri-media://media/_anki/mathjax/font/svg/dynamic/fraktur.js"])
+                #expect(harness.media.requests.dropFirst(requestsBeforeRefusals).map(\.path) == ["/_anki/mathjax/font/svg/dynamic/fraktur.js"])
+                #expect(harness.remote.requests.isEmpty)
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
@@ -429,6 +456,54 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(try await page.bool("__templateReadyCalls === 1"))
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func templateMathButtonAfterRevealGetsAFreshDeadline() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p><script>window.__mathAPI = MathJax;</script>"#)
+                try await page.showPresentedAnswer(#"""
+                    <p id="m"></p><button id="render">Show formula</button><script>
+                    document.getElementById('render').onclick = function () {
+                      var m = document.getElementById('m');
+                      m.textContent = '\\(𝔄\\)';
+                      window.__buttonMath = Promise.all([
+                        MathJax.startup.promise, __mathAPI.typesetPromise([m])
+                      ]);
+                    };
+                    </script>
+                    """#)
+                // A normal card button remains usable long after reveal. The
+                // deferred glyph makes an expired face deadline observable.
+                harness.media.delay("/_anki/mathjax/font/svg/dynamic/fraktur.js", by: .milliseconds(100))
+                try await Task.sleep(for: .seconds(9))
+                try await page.run("document.getElementById('render').click(); await __buttonMath;")
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && document.getElementById('qa').style.opacity === '1'"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func cleanupTimeoutConsumesTheCurrentMathFaceBudget() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                try await page.run("""
+                    var held = new Promise(function (resolve) { window.__releaseCleanup = resolve; });
+                    MathJax.whenReady(function () { window.__cleanupBlocked = true; return held; });
+                    """)
+                try await harness.until("cleanup queue blocked") { try await page.bool("window.__cleanupBlocked === true") }
+                try await page.announce(card: 93, generation: 2)
+                // The harness's ten-second shown deadline admits one eight-
+                // second cleanup wait, but cannot admit a second math wait.
+                try await page.showPresentedAnswer(#"<p id="current">\(y+1\)</p>"#)
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#current svg')"))
+                #expect(harness.diagnostics.contains {
+                    $0.card == 93 && $0["kind"] as? String == "math"
+                        && ($0["message"] as? String)?.contains("timed out") == true
+                })
+                try await page.run("__releaseCleanup(); await MathJax.whenReady(function () {});")
+                #expect(try await page.bool("document.querySelector('#current svg path') !== null && MathJax.startup.document.getMathItemsWithin([document.getElementById('current')]).length === 1"))
+                try await page.showPresentedQuestion(#"<p id="next">\(z+1\)</p>"#)
+                #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
             }
         }
 
@@ -814,6 +889,108 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: [false, true])
+        func supersededPublicTypesetPromiseRejectsWithCancellation(documentWide: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.announce(card: 94, generation: 1)
+                try await page.showPresentedQuestion(#"<p id="old">\(x+1\)</p>"#)
+                try await page.run("""
+                    var held = new Promise(function (resolve) { window.__releaseRequest = resolve; });
+                    MathJax.whenReady(function () { window.__requestBlocked = true; return held; });
+                    """)
+                try await harness.until("public queue blocked") { try await page.bool("window.__requestBlocked === true") }
+                let targets = documentWide ? "" : "[document.getElementById('old')]"
+                try await page.run("""
+                    window.__requestResult = MathJax.typesetPromise(\(targets)).then(
+                      function () { return 'resolved'; }, function (error) { return error.name; });
+                    """)
+                try await page.announce(card: 95, generation: 2)
+                try await page.showAnswer("<p id='current'>Current card</p>")
+                try await harness.until("replacement inserted cleanup barrier") { try await page.bool("document.getElementById('old') === null") }
+                try await page.run("__releaseRequest(); window.__requestStatus = await __requestResult;")
+                try await harness.signal("shown", count: 2, from: page)
+                #expect(try await page.string("__requestStatus") == "AbortError")
+                #expect(try await page.string("document.getElementById('current').textContent") == "Current card")
+                try await page.run(#"""
+                    document.getElementById('current').textContent = '\\(y+1\\)';
+                    await MathJax.typesetPromise([document.getElementById('current')]);
+                    """#)
+                #expect(try await page.bool("document.querySelector('#current svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func texLabelsFollowRemovedSidesAndRetainPageTargets() async throws {
+            let extra = #"""
+                <aside id="pageMath">
+                <p>\[\begin{align}s&=1\label{pageEquation}\end{align}\]</p>
+                <p id="pageRef">\(\ref{pageEquation}\)</p></aside><script>
+                MathJax.tex.tags = 'ams';
+                window.__pageMath = MathJax.typesetPromise([document.getElementById('pageMath')]);
+                </script>
+                """#
+            try await WebTestHarness.withPage(reviewExtra: extra, log: false) { harness, page async throws in
+                try await page.run("""
+                    await __pageMath;
+                    window.__pageItems = MathJax.startup.document.getMathItemsWithin([document.getElementById('pageMath')]);
+                    window.__pageSVG = document.querySelector('#pageMath svg');
+                    window.__pageTarget = document.getElementById(decodeURIComponent(document.querySelector('#pageRef svg a').getAttribute('href').split('#')[1]));
+                    """)
+                #expect(try await page.bool("__pageItems.length === 2 && __pageSVG.querySelector('path') && __pageTarget && document.getElementById('pageMath').contains(__pageTarget)"))
+                let front = #"<p>\[\begin{align}x&=1\label{shared}\end{align}\]</p>"#
+                try await page.announce(card: 101, generation: 1)
+                try await page.showPresentedQuestion(front)
+                // FrontSide repeats the question verbatim. Keep the exact native
+                // identity: release is tied to the removed side, not a new card.
+                try await page.showPresentedAnswer(front + #"<p id="questionRef">\(\ref{shared}\)</p><p>\[\begin{align}y&=2\label{answerOnly}\end{align}\]</p><p id="answerRef">\(\ref{answerOnly}\)</p><p id="currentPageRef">\(\ref{pageEquation}\)</p>"#)
+                #expect(try await page.string("document.querySelector('#questionRef mjx-assistive-mml math').textContent.trim()") == "2")
+                #expect(try await page.string("document.querySelector('#answerRef mjx-assistive-mml math').textContent.trim()") == "3")
+                #expect(try await page.string("document.querySelector('#currentPageRef mjx-assistive-mml math').textContent.trim()") == "1")
+                #expect(try await page.bool("!document.querySelector('#qa [data-mml-node=merror]')"))
+                try await page.announce(card: 102, generation: 2)
+                try await page.showPresentedQuestion(#"<p>\[\begin{align}z&=3\label{shared}\end{align}\]</p><p id="newRef">\(\ref{shared}\)</p><p id="expiredRef">\(\ref{answerOnly}\)</p><p id="currentPageRef">\(\ref{pageEquation}\)</p>"#)
+                #expect(try await page.string("document.querySelector('#newRef mjx-assistive-mml math').textContent.trim()") == "2")
+                #expect(try await page.string("document.querySelector('#expiredRef mjx-assistive-mml math').textContent.trim()") == "???")
+                #expect(try await page.string("document.querySelector('#currentPageRef mjx-assistive-mml math').textContent.trim()") == "1")
+                #expect(try await page.bool("!document.querySelector('#qa [data-mml-node=merror]') && MathJax.startup.document.getMathItemsWithin([document.getElementById('pageMath')]).length === 2 && MathJax.startup.document.getMathItemsWithin([document.getElementById('pageMath')]).every(function (item, i) { return item === __pageItems[i]; }) && document.querySelector('#pageMath svg') === __pageSVG && __pageSVG.isConnected && __pageTarget.isConnected && document.getElementById(__pageTarget.id) === __pageTarget && document.getElementById(decodeURIComponent(document.querySelector('#currentPageRef svg a').getAttribute('href').split('#')[1])) === __pageTarget"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func declaredOperatorsFollowCardScopeAndRetainPageDefinitions() async throws {
+            let extra = #"""
+                <aside id="pageOperator">\(\DeclareMathOperator{\pageTrace}{tr}\pageTrace(A)\)</aside><script>
+                window.__pageOperator = MathJax.typesetPromise([document.getElementById('pageOperator')]);
+                </script>
+                """#
+            try await WebTestHarness.withPage(reviewExtra: extra, log: false) { harness, page async throws in
+                try await page.run("await __pageOperator; window.__operatorItem = MathJax.startup.document.getMathItemsWithin([document.getElementById('pageOperator')])[0]; window.__operatorSVG = document.querySelector('#pageOperator svg');")
+                try await page.announce(card: 111, generation: 1)
+                try await page.showPresentedQuestion(#"<p id="operator">\(\DeclareMathOperator{\cardRank}{rank}\cardRank(A)\)</p>"#)
+                #expect(try await page.string("document.querySelector('#operator mjx-assistive-mml mi').textContent") == "rank")
+                try await page.announce(card: 111, generation: 2)
+                try await page.showPresentedAnswer(#"<p id="operator">\(\cardRank(B)\)</p><p id="pageUse">\(\pageTrace(B)\)</p>"#)
+                #expect(try await page.string("document.querySelector('#operator mjx-assistive-mml mi').textContent") == "rank")
+                #expect(try await page.string("document.querySelector('#pageUse mjx-assistive-mml mi').textContent") == "tr")
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+                try await page.announce(card: 112, generation: 3)
+                try await page.showPresentedQuestion(#"<p id="expired">\(\cardRank(C)\)</p><p id="pageUse">\(\pageTrace(C)\)</p><p id="stock">\(\sin(x)\)</p>"#)
+                // The expired declaration uses the approved source fallback;
+                // page declarations and stock operators still render normally.
+                #expect(try await page.string("document.querySelector('#expired [data-meguri-math-error] code').textContent") == #"\(\cardRank(C)\)"#)
+                #expect(try await page.bool("document.querySelector('#expired [data-meguri-math-error][role=group]').getAttribute('aria-label') === 'Formula could not be rendered' && document.querySelector('#expired strong').textContent === 'Formula could not be rendered: ' && !document.querySelector('#expired mjx-container')"))
+                #expect(try await page.string("document.querySelector('#pageUse mjx-assistive-mml mi').textContent") == "tr")
+                #expect(try await page.string("document.querySelector('#stock mjx-assistive-mml mi').textContent") == "sin")
+                #expect(try await page.bool("document.querySelector('#pageUse svg path') && document.querySelector('#stock svg path') && !document.querySelector('#qa [data-mml-node=merror]') && MathJax.startup.document.getMathItemsWithin([document.getElementById('pageOperator')])[0] === __operatorItem && document.querySelector('#pageOperator svg') === __operatorSVG && __operatorSVG.isConnected"))
+                #expect(harness.diagnostics.count == 1, "\(harness.diagnostics.map(\.body))")
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0["phase"] as? String == "typeset"
+                        && $0.card == 112 && $0.generation == 3 && $0.side == "question"
+                        && ($0["message"] as? String)?.contains("Undefined control sequence \\cardRank") == true
+                }, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func supersededTypesettingCannotRevealTheReplacement() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
@@ -857,13 +1034,25 @@ extension WebKitSuites.CardRuntimeSuites {
                 let enabled = process ? #"<code class="mathjax_process mathjax_ignore" id="enabled">\(x+1\)</code>"# : ""
                 try await page.showPresentedQuestion(#"""
                     <div class="mathjax_ignore"><span id="ignored">\(a+1\)</span>\#(enabled)</div>
-                    <pre><span class="mathjax_process">\(skipped\)</span></pre>
-                    <code class="sample&#9;mathjax_process">\(tab-separated\)</code>
-                    <div data-MJX="true" class="mathjax_process">\(already-handled\)</div>
+                    <pre id="skippedPre"><span class="mathjax_process">\(skipped\)</span></pre>
+                    <code id="tabCode" class="sample&#9;mathjax_process">\(tab-separated\)</code>
+                    <div id="handled" data-MJX="true" class="mathjax_process">\(already-handled\)</div>
                     """#)
                 #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/tex-svg.js" } == process)
-                try await MathRenderingProbe.expect(in: page.webView, count: process ? 1 : 0, label: "process=\(process)")
-                #expect(try await page.bool("!document.querySelector('#ignored mjx-container')"))
+                for afterStartup in [false, true] {
+                    if afterStartup {
+                        try await page.run("await MathJax.startup.promise; await MathJax.typesetPromise([document.getElementById('qa')]);")
+                    }
+                    try await MathRenderingProbe.expect(in: page.webView, count: process ? 1 : 0, label: "process=\(process), afterStartup=\(afterStartup)")
+                    if process {
+                        #expect(try await page.bool("document.querySelector('#enabled mjx-container svg path') !== null"))
+                    }
+                    #expect(try await page.string("document.getElementById('ignored').textContent") == #"\(a+1\)"#)
+                    #expect(try await page.string("document.getElementById('skippedPre').textContent") == #"\(skipped\)"#)
+                    #expect(try await page.string("document.getElementById('tabCode').textContent") == #"\(tab-separated\)"#)
+                    #expect(try await page.string("document.getElementById('handled').textContent") == #"\(already-handled\)"#)
+                    #expect(try await page.bool("!document.querySelector('#ignored mjx-container, #skippedPre mjx-container, #tabCode mjx-container, #handled mjx-container')"))
+                }
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
@@ -979,6 +1168,12 @@ extension WebKitSuites.CardRuntimeSuites {
                     """#)
                 #expect(try await page.string("document.getElementById('qa').style.opacity") == "1")
                 #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" })
+                if failure == "entry-exception" {
+                    #expect(harness.diagnostics.contains {
+                        ($0["message"] as? String)?.contains("Synthetic MathJax evaluation failure") == true
+                            && ($0["source"] as? String)?.hasSuffix("/mathjax/tex-svg.js") == true
+                    })
+                }
                 #expect(try await page.bool("typeof MathJax.typeset === 'function' && typeof MathJax.typesetPromise === 'function' && typeof MathJax.typesetClear === 'function'"))
                 #expect(try await page.bool("window.__mathRejected === true"))
                 #expect(try await page.bool("require('anki/reviewer').onUpdateHook === onUpdateHook"))
@@ -1079,6 +1274,64 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func mathReplacementPreservesCustomElementCallbacks() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"""
+                    <study-note id="outgoing"></study-note><p>\(x+1\)</p>
+                    <script>
+                    window.__cardCallbacks = { connected: 0, disconnected: 0 };
+                    window.__replacementOrder = [];
+                    customElements.define('study-note', class extends HTMLElement {
+                      connectedCallback() { __cardCallbacks.connected++; }
+                      disconnectedCallback() {
+                        __cardCallbacks.disconnected++;
+                        __replacementOrder.push('disconnect');
+                        var replacement = document.getElementById('replacement');
+                        __cardCallbacks.text = replacement && replacement.textContent;
+                        __cardCallbacks.next = replacement && replacement.nextSibling.id;
+                        __cardCallbacks.detachedSibling = this.nextSibling === null;
+                        if (replacement) replacement.appendChild(this);
+                      }
+                    });
+                    </script>
+                    """#)
+                #expect(try await page.bool("MathJax.version === '4.1.3' && __cardCallbacks.connected === 1"))
+                try await page.showPresentedAnswer(#"""
+                    <p id="replacement">Replacement</p><p id="following">\(y+1\)</p>
+                    <script>__replacementOrder.push('script');</script>
+                    """#)
+                #expect(try await page.string("__cardCallbacks.text") == "Replacement")
+                #expect(try await page.string("__cardCallbacks.next") == "following")
+                #expect(try await page.bool("__cardCallbacks.detachedSibling && __cardCallbacks.connected === 2 && __cardCallbacks.disconnected === 1"))
+                #expect(try await page.bool("document.getElementById('outgoing').parentNode === document.getElementById('replacement')"))
+                #expect(try await page.string("__replacementOrder.join(',')") == "disconnect,script")
+                #expect(try await page.bool("document.querySelector('#following svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.showPresentedQuestion("<p>Next ordinary card</p>")
+                #expect(try await page.bool("__cardCallbacks.connected === 2 && __cardCallbacks.disconnected === 2 && Array.from(MathJax.startup.document.math).length === 0"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func mathReplacementPreservesAuthoredMarkupAndFallbackSource() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                try await page.announce(card: 123, generation: 2)
+                try await page.showPresentedAnswer(#"""
+                    <p id="formatted" style="color: rgb(1, 2, 3)">Study <em data-note="kept">A &amp; B</em></p>
+                    <code id="literal">\\(literal\\)</code><p id="bad">\(\frac{1}\)</p>
+                    """#)
+                #expect(try await page.string("document.getElementById('formatted').innerHTML") == #"Study <em data-note="kept">A &amp; B</em>"#)
+                #expect(try await page.string("getComputedStyle(document.getElementById('formatted')).color") == "rgb(1, 2, 3)")
+                #expect(try await page.string("document.getElementById('literal').textContent") == #"\\(literal\\)"#)
+                #expect(try await page.string("document.querySelector('#bad [data-meguri-math-error] code').textContent") == #"\(\frac{1}\)"#)
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#literal mjx-container')"))
+                #expect(harness.diagnostics.count == 1, "\(harness.diagnostics.map(\.body))")
+                #expect(harness.diagnostics.allSatisfy {
+                    $0["kind"] as? String == "math" && $0.card == 123 && $0.generation == 2 && $0.side == "answer"
+                })
+            }
+        }
+
         @Test func plainFollowingCardReleasesTheStaleMathScanTarget() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"<p id="old">\(x+1\)</p>"#)
@@ -1106,11 +1359,15 @@ extension WebKitSuites.CardRuntimeSuites {
                 harness.media.hold(path)
                 let targets = documentWide ? "" : "[document.getElementById('qa')]"
                 try await page.showPresentedAnswer("""
-                    <p>\\(𝔄\\)</p><script>
+                    <p id='stale'>\\(𝔄\\)</p><script>
+                    var added = document.createElement('aside');
+                    added.id = 'templateSibling'; added.textContent = '\\\\(t+1\\\\)';
+                    document.body.appendChild(added);
                     onUpdateHook.push(function () { return MathJax.typesetPromise(\(targets)); });
                     </script>
                     """)
                 #expect(harness.media.requests(for: path).count == 1, "\(harness.mathRequestDetails)")
+                try await page.run("window.__staleTarget = document.getElementById('stale');")
                 try await page.showPresentedQuestion("""
                     <p id='current'>Current card</p>
                     <style>#qa > p { color: rgb(1, 2, 3); }</style>
@@ -1126,11 +1383,14 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(try await page.bool("MathJax.startup.document.options.elements === \(scanTarget)"), "\(harness.mathRequestDetails)")
                 #expect(try await page.string("document.getElementById('current').textContent") == "Current card", "\(harness.mathRequestDetails)")
                 #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#qa mjx-container') && getComputedStyle(document.getElementById('current')).color === 'rgb(1, 2, 3)'"), "\(harness.mathRequestDetails)")
-                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1 && MathJax.startup.document.getMathItemsWithin([document.getElementById('sibling')])[0] === __siblingItem && document.querySelector('#sibling svg') === __siblingSVG"), "\(harness.mathRequestDetails)")
+                let retainedCount = documentWide ? 2 : 1
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === \(retainedCount) && MathJax.startup.document.getMathItemsWithin([document.getElementById('sibling')])[0] === __siblingItem && document.querySelector('#sibling svg') === __siblingSVG && __siblingSVG.isConnected && !__staleTarget.isConnected && MathJax.startup.document.getMathItemsWithin([__staleTarget]).length === 0"), "\(harness.mathRequestDetails)")
+                let templateRendered = documentWide ? "true" : "false"
+                #expect(try await page.bool("(document.querySelector('#templateSibling svg path') !== null) === \(templateRendered) && MathJax.startup.document.getMathItemsWithin([document.getElementById('templateSibling')]).length === \(retainedCount - 1)"), "\(harness.mathRequestDetails)")
                 // A later document render still retains the exact sibling item.
                 try await page.showPresentedAnswer(#"<p id="next">\(n+1\)</p>"#)
                 try await page.run("await MathJax.typesetPromise();")
-                #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 2 && Array.from(MathJax.startup.document.math).includes(__siblingItem) && document.querySelector('#sibling svg') === __siblingSVG"), "\(harness.mathRequestDetails)")
+                #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 3 && Array.from(MathJax.startup.document.math).includes(__siblingItem) && document.querySelector('#sibling svg') === __siblingSVG && document.querySelector('#templateSibling svg path') !== null && MathJax.startup.document.getMathItemsWithin([document.getElementById('templateSibling')]).length === 1"), "\(harness.mathRequestDetails)")
                 #expect(harness.remote.requests.isEmpty, "\(harness.mathRequestDetails)")
             }
         }
@@ -1205,11 +1465,50 @@ extension WebKitSuites.CardRuntimeSuites {
                 } else {
                     #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/" + source }, "\(harness.mathRequestDetails)")
                 }
+                #expect(harness.signals("mediaError", from: page).isEmpty, "Loader failures belong to math diagnostics")
                 try await page.announce(card: 82, generation: 10)
                 try await page.showPresentedQuestion("<p>Next ordinary card</p>")
                 #expect(try await page.string("document.getElementById('qa').textContent") == "Next ordinary card", "\(harness.mathRequestDetails)")
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"), "\(harness.mathRequestDetails)")
                 #expect(!harness.diagnostics.contains { $0.card == 82 }, "\(harness.mathRequestDetails)")
+            }
+        }
+
+        @Test func loaderResourceErrorsExcludeOnlyRuntimeOwnedScripts() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.announce(card: 121, generation: 1)
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                let path = "/_anki/mathjax/font/svg/dynamic/fraktur.js"
+                harness.media.hold(path)
+                harness.media.respondNotFound(path)
+                try await page.announce(card: 121, generation: 2)
+                try await page.showAnswer(#"<p>\(𝔄\)</p>"#)
+                try await harness.until("loader requested held component") { !harness.media.requests(for: path).isEmpty }
+                #expect(try await page.bool("document.querySelector('script[src$=\"/font/svg/dynamic/fraktur.js\"]').hasAttribute('data-meguri-preload')"))
+                try await page.announce(card: 122, generation: 3)
+                try await page.showPresentedQuestion("<p id='current'>Replacement card</p>")
+                harness.media.release(path)
+                try await page.run("await MathJax.whenReady(function () {});")
+                #expect(harness.signals("mediaError", from: page).isEmpty)
+                #expect(!harness.diagnostics.contains { $0.card == 122 })
+                // An authored script at the very same URL is still media.
+                try await page.run("""
+                    window.__authoredDone = new Promise(function (resolve) {
+                      var script = document.createElement('script');
+                      script.onerror = resolve; script.src = '\(path)';
+                      document.getElementById('qa').appendChild(script);
+                    });
+                    var image = document.createElement('img');
+                    image.src = '/missing-math-fixture.png'; document.getElementById('qa').appendChild(image);
+                    await __authoredDone;
+                    """)
+                try await harness.until("authored script and image errors") { harness.signals("mediaError", from: page).count == 2 }
+                let media = harness.signals("mediaError", from: page)
+                #expect(media.allSatisfy { $0.card == 122 && $0.generation == 3 && $0.side == "question" })
+                #expect(media.contains { $0["tag"] as? String == "script" && ($0["url"] as? String)?.hasSuffix(path) == true })
+                #expect(media.contains { $0["tag"] as? String == "img" && ($0["url"] as? String)?.hasSuffix("/missing-math-fixture.png") == true })
+                #expect(try await page.string("document.getElementById('current').textContent") == "Replacement card")
+                #expect(!harness.diagnostics.contains { $0.card == 122 })
             }
         }
 

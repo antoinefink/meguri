@@ -27,6 +27,7 @@
   const isSafeInteger = Number.isSafeInteger;
   const parseInteger = parseInt;
   const ErrorCtor = Error;
+  const ErrorEventCtor = ErrorEvent;
   const URLCtor = URL;
   const urlProtocol = getter(URLCtor.prototype, "protocol");
   const urlHost = getter(URLCtor.prototype, "host");
@@ -41,6 +42,10 @@
   const WeakMapCtor = WeakMap;
   const WeakRefCtor = WeakRef;
   const SetCtor = Set;
+  const mapForEach = Map.prototype.forEach;
+  const mapClear = Map.prototype.clear;
+  const mapSet = Map.prototype.set;
+  const objectKeys = Object.keys;
   const ElementCtor = Element;
   const HTMLElementCtor = HTMLElement;
   const InputCtor = HTMLInputElement;
@@ -79,6 +84,11 @@
   const composedPath = Event.prototype.composedPath;
   const eventTarget = getter(Event.prototype, "target");
   const customDetail = getter(CustomEvent.prototype, "detail");
+  const errorEventError = getter(ErrorEvent.prototype, "error");
+  const errorEventFilename = getter(ErrorEvent.prototype, "filename");
+  const errorEventMessage = getter(ErrorEvent.prototype, "message");
+  const errorEventLine = getter(ErrorEvent.prototype, "lineno");
+  const errorEventColumn = getter(ErrorEvent.prototype, "colno");
   const abortedGetter = getter(AbortSignal.prototype, "aborted");
 
   const getElementById = Document.prototype.getElementById;
@@ -311,36 +321,36 @@
     emit(signal);
   }
 
-  function reportHook(value, phase) {
-    report({ kind: "hook", message: describe(value), phase: phase });
+  function reportHook(value, phase, update) {
+    updateSignal("error", update, { kind: "hook", message: describe(value), phase: phase });
   }
 
   call(nativeAdd, win, "error", function (event) {
-    if (call(eventTarget, event) !== win) return;
+    if (call(eventTarget, event) !== win || !(event instanceof ErrorEventCtor)) return;
     if (call(weakMapGet, mathEvaluationErrors, event)) return;
+    const filename = call(errorEventFilename, event);
     let phase = "later";
     let index;
     if (runningScript) {
       phase = "script";
       index = runningScript;
-    } else if (awaitedScript && event.filename === awaitedScript.url) {
+    } else if (awaitedScript && filename === awaitedScript.url) {
       phase = "script";
       index = awaitedScript.index;
     } else if (hookPhase) {
       phase = hookPhase;
     }
-    const value = event.error;
-    const filename = event.filename;
+    const value = call(errorEventError, event);
     if (filename && call(stringIndexOf, filename, mathRoot) === 0) {
-      mathError(value === undefined || value === null ? event.message : value,
+      mathError(value === undefined || value === null ? call(errorEventMessage, event) : value,
         mathOwner || mathStartupOwner, filename);
       return;
     }
     report({
       kind: "exception",
-      message: describe(value === undefined || value === null ? event.message : value),
-      line: event.lineno,
-      column: event.colno,
+      message: describe(value === undefined || value === null ? call(errorEventMessage, event) : value),
+      line: call(errorEventLine, event),
+      column: call(errorEventColumn, event),
       source: !filename || filename === pageURL || filename === doc.URL ? "inline" : filename,
       phase: phase,
       index: index,
@@ -953,13 +963,13 @@
   // Hooks (C6.4).
 
   // Waits for a value a hook returned; rejections are recorded.
-  function settleHookValue(value, phase) {
+  function settleHookValue(value, phase, update) {
     if (value === null || (typeof value !== "object" && typeof value !== "function")) return resolved();
     let thenMethod;
     try {
       thenMethod = value.then;
     } catch (error) {
-      reportHook(error, phase);
+      reportHook(error, phase, update);
       return resolved();
     }
     if (typeof thenMethod !== "function") return resolved();
@@ -970,18 +980,18 @@
             resolve();
           },
           function (reason) {
-            reportHook(reason, phase);
+            reportHook(reason, phase, update);
             resolve();
           },
         ]);
       } catch (error) {
-        reportHook(error, phase);
+        reportHook(error, phase, update);
         resolve();
       }
     });
   }
 
-  async function runHooks(hooks, phase) {
+  async function runHooks(hooks, phase, update) {
     const waits = [];
     for (let i = 0; i < hooks.length; i++) {
       const hook = hooks[i];
@@ -990,12 +1000,12 @@
       try {
         value = apply(hook, undefined, []);
       } catch (error) {
-        reportHook(error, phase);
+        reportHook(error, phase, update);
         continue;
       } finally {
         hookPhase = null;
       }
-      waits[waits.length] = settleHookValue(value, phase);
+      waits[waits.length] = settleHookValue(value, phase, update);
     }
     await all(waits);
   }
@@ -1135,6 +1145,102 @@
   let mathOwner = null;
   let mathStartupOwner = null;
   const mathEvaluationErrors = new WeakMapCtor();
+  const mathCancelled = new ErrorCtor("MathJax typesetting cancelled");
+  mathCancelled.name = "AbortError";
+  let mathCard = null;
+  const mathTeXStates = [];
+
+  function copyMathValues(values) {
+    const copy = createObject(null);
+    for (const name of objectKeys(values)) copy[name] = values[name];
+    return copy;
+  }
+
+  function mathCommands(map) {
+    const copy = createObject(null);
+    call(mapForEach, map, function (value, name) { copy[name] = value; });
+    return copy;
+  }
+
+  function trackMathTeX(engine) {
+    // 4.1.3 integration: public equation filters expose the input-jax-local
+    // tags and new-Command map used by AMS DeclareMathOperator. Leave the
+    // upstream package/configuration maps (including stock operators) alone.
+    for (const jax of engine.startup.document.inputJax) {
+      if (jax.name !== "TeX") continue;
+      const tags = jax.parseOptions.tags;
+      const commands = jax.parseOptions.handlers.retrieve("new-Command").map;
+      const items = new WeakMapCtor(), before = new WeakMapCtor();
+      const state = { jax: jax, items: items, commands: commands,
+        labels: copyMathValues(tags.allLabels), ids: copyMathValues(tags.allIds),
+        counter: tags.allCounter, baseline: mathCommands(commands) };
+      mathTeXStates[mathTeXStates.length] = state;
+      jax.preFilters.add(function (args) {
+        // A component retry can have applied declarations before suspending.
+        if (!call(weakMapGet, before, args.math)) {
+          call(weakMapSet, before, args.math, mathCommands(commands));
+        }
+      });
+      jax.postFilters.add(function (args) {
+        const prior = call(weakMapGet, before, args.math);
+        const current = mathCommands(commands);
+        const old = call(weakMapGet, items, args.math);
+        const changes = old ? old.commands : createObject(null);
+        for (const name of objectKeys(current)) {
+          if (current[name] !== prior[name]) changes[name] = current[name];
+        }
+        for (const name of objectKeys(prior)) {
+          if (current[name] === undefined) changes[name] = undefined;
+        }
+        call(weakMapSet, items, args.math, { labels: copyMathValues(tags.labels),
+          ids: copyMathValues(tags.ids), counter: tags.counter, commands: changes });
+        call(weakMapSet, before, args.math, null);
+      });
+    }
+  }
+
+  function clearMath(elements, update) {
+    call(mathClear, mathEngine, elements);
+    const newCard = update && update.identity && mathCard !== update.identity.card;
+    for (const state of mathTeXStates) {
+      const labels = copyMathValues(state.labels), ids = copyMathValues(state.ids);
+      const commands = copyMathValues(state.baseline);
+      let counter = state.counter;
+      // Only surviving MathItems contribute tags. This releases question
+      // labels even on a same-card FrontSide answer, retaining page targets
+      // and references without recompiling or replacing their output.
+      for (const item of mathEngine.startup.document.math) {
+        const contribution = call(weakMapGet, state.items, item);
+        if (!contribution) continue;
+        for (const name of objectKeys(contribution.labels)) labels[name] = contribution.labels[name];
+        for (const name of objectKeys(contribution.ids)) ids[name] = contribution.ids[name];
+        counter = mathMax(counter, contribution.counter);
+        for (const name of objectKeys(contribution.commands)) commands[name] = contribution.commands[name];
+      }
+      const tags = state.jax.parseOptions.tags;
+      tags.allLabels = labels;
+      tags.allIds = ids;
+      tags.counter = tags.allCounter = counter;
+      // Declarations survive removed sides of this card. On the next card,
+      // retain only baseline definitions and those owned by surviving items.
+      if (newCard) {
+        call(mapClear, state.commands);
+        for (const name of objectKeys(commands)) {
+          if (commands[name] !== undefined) call(mapSet, state.commands, name, commands[name]);
+        }
+      }
+    }
+    if (newCard) mathCard = update.identity.card;
+  }
+
+  // Cleanup, startup and rendering share the pending face's wait budget.
+  // Once shown, each template API call gets a fresh deadline (card buttons
+  // may request math long after reveal).
+  function mathBudget(update) {
+    if (!update || update.shown) return 8000;
+    if (update.mathDeadline === undefined) update.mathDeadline = now() + 8000;
+    return mathMax(0, update.mathDeadline - now());
+  }
 
   function mathError(error, update, source) {
     // Late work belongs to its requesting side, never the page's next user.
@@ -1146,7 +1252,7 @@
 
   function mathStartup() {
     const update = latest;
-    const waiting = mathDeadline(loadMath(), 8000);
+    const waiting = mathDeadline(loadMath(), mathBudget(update));
     then(waiting, noop, function (error) {
       if (update) update.mathFailed = true;
       mathError(error, update);
@@ -1197,6 +1303,10 @@
       const owner = mathOwner || mathStartupOwner;
       const source = call(urlHref, url);
       const script = call(createElement, doc, "script");
+      // interaction.js observes resource errors in the isolated world. This
+      // shared DOM marker excludes only our loader requests from mediaError;
+      // their math diagnostics retain the requesting update captured here.
+      call(setAttribute, script, "data-meguri-preload", "");
       let finished = false;
       const finish = function (error) {
         if (finished) return;
@@ -1212,14 +1322,15 @@
         } else resolve();
       };
       const evaluationFailed = function (event) {
-        if (call(eventTarget, event) !== win || event.filename !== source) return;
+        if (call(eventTarget, event) !== win || !(event instanceof ErrorEventCtor)) return;
+        if (call(errorEventFilename, event) !== source) return;
         const current = call(documentCurrentScript, doc);
         if (current && current !== script) return;
         // Classic scripts still emit load after evaluation throws. Reject
         // before that event lets upstream mark a missing component loaded.
         // The global reporter must not attribute this to a replacement side.
         call(weakMapSet, mathEvaluationErrors, event, true);
-        finish(new ErrorCtor(event.message || "Bundled MathJax component evaluation failed"));
+        finish(new ErrorCtor(call(errorEventMessage, event) || "Bundled MathJax component evaluation failed"));
       };
       const loaded = function () { finish(); };
       const loadFailed = function () { finish(new ErrorCtor("Bundled MathJax component failed")); };
@@ -1436,6 +1547,8 @@
           };
           engine.startup.defaultReady();
           mathEngine = engine;
+          trackMathTeX(engine);
+          mathCard = latest && latest.identity ? latest.identity.card : null;
           mathTypesetSync = engine.typeset;
           mathTypeset = engine.typesetPromise;
           mathClear = engine.typesetClear;
@@ -1524,7 +1637,7 @@
     const start = function (engine) {
       return call(mathWhenReady, engine, async function () {
         // Requests before the first update belong to the page itself.
-        if (update && update !== latest) return;
+        if (update && update !== latest) throw mathCancelled;
         mathOwner = update;
         try {
           await call(mathTypeset, engine, targets);
@@ -1539,8 +1652,9 @@
     // Keep the synchronous API out of the document until the real queued
     // work finishes, even if its caller's deadline has already expired.
     then(work, function () { mathPending--; }, function () { mathPending--; });
-    const waiting = mathDeadline(work, 8000);
+    const waiting = mathDeadline(work, mathBudget(update));
     then(waiting, noop, function (error) {
+      if (error === mathCancelled) return;
       if (update) update.mathFailed = true;
       mathError(error, update);
     });
@@ -1574,7 +1688,7 @@
       }
     },
     typesetPromise: function typesetPromise(elements) { return requestMath(elements); },
-    typesetClear: function typesetClear(elements) { if (mathClear) call(mathClear, mathEngine, elements); },
+    typesetClear: function typesetClear(elements) { if (mathClear) clearMath(elements); },
     startup: {},
   };
   defineProperty(mathFacade.startup, "promise", { get: mathStartup });
@@ -1608,7 +1722,10 @@
             const child = call(firstChildOf, node);
             if (child && !call(getAttribute, node, "data-MJX")
                 && (mode === 1 || !call(regexpExec, mathSkippedTags, tag))) {
-              if (mode) { scope = node; ignored = mode === 2; }
+              if (mode) {
+                scope = { node: node, ignored: ignored, previous: scope };
+                ignored = mode === 2;
+              }
               node = child;
               continue;
             }
@@ -1638,15 +1755,9 @@
       }
       for (;;) {
         if (node === qa) return false;
-        if (node === scope) {
-          scope = call(parentNodeOf, node);
-          ignored = false;
-          while (scope) {
-            const mode = mathClassMode(scope);
-            if (mode) { ignored = mode === 2; break; }
-            if (scope === qa) { scope = null; break; }
-            scope = call(parentNodeOf, scope);
-          }
+        if (scope && node === scope.node) {
+          ignored = scope.ignored;
+          scope = scope.previous;
         }
         const sibling = call(nextSiblingOf, node);
         if (sibling) { node = sibling; break; }
@@ -1685,20 +1796,36 @@
       setOpacity(qa, "0");
       // 4. Video release.
       releaseVideos(qa);
-      // Upstream render retries operate on the document's MathItem list. Move
-      // old source/output nodes together so those retries cannot reach the next
-      // side. Keep the actual #qa, its attributes and listeners in the page.
+      // Retain outgoing nodes without disconnecting them before replacement:
+      // custom-element callbacks must see the new side, as with innerHTML alone.
+      const oldNodes = [];
+      if (mathEngine) {
+        for (let node = call(firstChildOf, qa); node; node = call(nextSiblingOf, node)) {
+          oldNodes[oldNodes.length] = node;
+        }
+      }
+      // 5. Insert.
+      held = [];
+      call(innerHTMLSetter, qa, StringCtor(update.html));
+      labelGeneratedReplays(qa, update.replayIDs);
+      // Upstream retries need old source/output nodes together, isolated from
+      // the actual #qa. Retarget synchronously before any work can resume.
       if (mathEngine) {
         const oldQA = call(cloneNode, qa, false);
-        while (call(firstChildOf, qa)) call(appendChild, oldQA, call(firstChildOf, qa));
+        for (let i = 0; i < oldNodes.length; i++) {
+          const node = oldNodes[i];
+          // A callback may have moved an outgoing node into its own new home.
+          if (!call(parentNodeOf, node)) call(appendChild, oldQA, node);
+        }
         // findMath normally already ran before a component wait; constrain any
         // late scan too. Subsequent queued typesets set their own elements.
         const options = mathEngine.startup.document.options;
         const staleElements = [oldQA];
         options.elements = staleElements;
         const cleanup = call(mathWhenReady, mathEngine, function () {
-          try { call(mathClear, mathEngine, staleElements); }
-          finally {
+          try {
+            clearMath(staleElements, update);
+          } finally {
             // Upstream clear leaves this scan target; release only ours.
             if (options.elements === staleElements) options.elements = null;
           }
@@ -1707,22 +1834,19 @@
           if (mathOwner) {
             then(cleanup, noop, noop);
           } else {
-            await mathDeadline(cleanup, 8000);
+            await mathDeadline(cleanup, mathBudget(update));
           }
         } catch (error) {
+          update.mathFailed = true;
           mathError(error, update);
         }
         if (update !== latest) return;
       }
-      // 5. Insert.
-      held = [];
-      call(innerHTMLSetter, qa, StringCtor(update.html));
-      labelGeneratedReplays(qa, update.replayIDs);
       // 6. Script walk.
       await walkScripts(qa);
       if (update !== latest) return;
       // 7. Update hooks.
-      await runHooks(updateHooks, "update-hook");
+      await runHooks(updateHooks, "update-hook", update);
       if (update !== latest) return;
       // Scripts and hooks can add math. Finish it before reveal/settled on
       // reviewer faces and previews alike; math failures still reveal the side.
@@ -1740,7 +1864,7 @@
         if ((await parkUnpresented(update, qa)) !== "present") return;
         if (update !== latest) return;
       }
-      await runHooks(shownHooks, "shown-hook");
+      await runHooks(shownHooks, "shown-hook", update);
       if (update !== latest) return;
       updateSignal("shown", update);
     } catch (error) {
