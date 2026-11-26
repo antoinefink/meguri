@@ -197,6 +197,8 @@ extension TestHooks {
                 .focusedSceneValue(\.nativeCommandContext, NativeCommandContext(collection: fixture.collection,
                     host: .main, layout: .sidebar, statsPage: fixture.features.statsPage)
                     .observingReviewAvailability())
+                .modifier(PresentationHost(navigation: fixture.navigation, features: fixture.features,
+                    configuration: fixture.configuration, isActive: true, host: .main))
                 .environment(\.shellLayout, .sidebar)
                 .modifier(LaunchEnvironment(configuration: fixture.configuration))
                 .onAppear { fixture.listen() }

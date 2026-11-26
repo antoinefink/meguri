@@ -240,7 +240,6 @@ import XCTest
 
         // Invoke the restored mutation entry, proving it targets Languages.
         let rename = try menuItem("Deck", "Rename…")
-        try app.bringToFront(bundleIdentifier: bundle)
         rename.click()
         let name = element("home.deckName.name")
         XCTAssertTrue(wait(NSPredicate(format: "exists == true AND value == 'Languages'"), name))
