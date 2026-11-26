@@ -313,7 +313,10 @@ import XCTest
         XCTAssertTrue(target.isEnabled, id)
         target.tap()
         let previous = target.value as? String ?? ""
-        target.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + text)
+        if !previous.isEmpty && previous != target.placeholderValue {
+            app.typeKey("a", modifierFlags: .command)
+        }
+        app.typeText(text)
         XCTAssertEqual(target.value as? String, text, id)
     }
 
