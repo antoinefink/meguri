@@ -133,8 +133,8 @@ public final class AppNavigation {
     /// Identity for native bindings, including repeated requests for the same deck.
     public var pendingDeckSelectionID: UInt64? { pendingDeckPage == nil ? nil : intentRevision }
 
-    /// The independent transient stack used by split detail columns. Its native
-    /// Back dismisses feedback without changing the committed stack or selection.
+    /// The transient deck route. Split detail renders it directly as a root;
+    /// Back writes an empty path without changing the committed stack or selection.
     public var pendingDetailPath: [Destination] {
         get { pendingDeckPage.map { [.deckPage($0)] } ?? [] }
         set {

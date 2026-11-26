@@ -21,6 +21,7 @@ extension TestHooks {
         private var held = true
         private var waiters: [CheckedContinuation<Void, Never>] = []
         private(set) var calls = 0
+        var fails = false
 
         func wait() async {
             calls += 1
@@ -91,6 +92,7 @@ extension TestHooks {
                 return CountedDeckTree(generation: 1, nextChangeAt: Int64.max, nodes: StatsSampleService.decks)
             }, select: { _ in
                 await deckGate.wait()
+                if deckGate.fails { throw BridgeError.invalidArgument("Synthetic deck selection failure") }
                 return 1
             }, browse: BrowseModel(backend: browseBackend, store: BrowseDeviceStore(defaults: nil)),
                noteTypes: NoteTypesModel(backend: noteBackend))
@@ -111,7 +113,10 @@ extension TestHooks {
                     if pieces.count == 2, let gate = gates[pieces[1]] {
                         if pieces[0] == "release" { gate.release() }
                         if pieces[0] == "hold" { gate.hold() }
+                        if pieces[0] == "fail" { gate.fails = true }
+                        if pieces[0] == "succeed" { gate.fails = false }
                     }
+                    if command == "settle.deck" { await collection.deckPageOpened() }
                     if command == "refresh.home" { collection.refreshCounts() }
                     if command == "refresh.list" { collection.noteTypes.reloadList() }
                     let state = ["home=\(home.calls)", "deck=\(deck.calls)", "browse=\(browse.calls)",

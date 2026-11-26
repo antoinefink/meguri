@@ -121,24 +121,39 @@ struct SidebarRootView: View {
     }
 }
 
-/// Feedback has its own native Back affordance and never binds the underlying
-/// section's stack. The model retains that stack and its scroll positions.
+/// Render feedback as the root, not as an initial nonempty path on a newly
+/// mounted stack: macOS can leave that stack at its empty root. The underlying
+/// section's stack and scroll positions stay in the model until save succeeds.
 struct PendingDeckDetail: View {
     let navigation: AppNavigation
     let features: ShellFeatures
 
     var body: some View {
         let displayed = navigation.pendingDeckSelectionID
-        NavigationStack(path: Binding(get: { navigation.pendingDetailPath }, set: { path in
-            guard navigation.pendingDeckSelectionID == displayed else { return }
-            navigation.pendingDetailPath = path
-        })) {
-            Color.clear
-                .navigationDestination(for: Destination.self) { destination in
-                    SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
-                }
+        NavigationStack {
+            if let deck = navigation.pendingDeckPage {
+                SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
+                    .toolbar {
+                        #if os(macOS)
+                        ToolbarItem(placement: .navigation) { back(displayed) }
+                        #else
+                        ToolbarItem(placement: .topBarLeading) { back(displayed) }
+                        #endif
+                    }
+                    .navigationDestination(for: Destination.self) { destination in
+                        SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                    }
+            }
         }
-        .id(displayed)
         .environment(\.syncStatusItem, features.syncStatus?())
+    }
+
+    private func back(_ displayed: UInt64?) -> some View {
+        Button("Back", systemImage: "chevron.backward") {
+            guard navigation.pendingDeckSelectionID == displayed else { return }
+            navigation.pendingDetailPath = []
+        }
+        .keyboardShortcut("[", modifiers: .command)
+        .accessibilityIdentifier("shell.navigation.pendingBack")
     }
 }

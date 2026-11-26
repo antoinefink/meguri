@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Loading Statistics": {
+      "comment": "Accessibility feedback while statistics are loading, including summary figures and charts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Statistics"
+          }
+        }
+      }
+    },
     "stats.activity.inARow %lld %@": {
       "localizations": {
         "en": {

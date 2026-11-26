@@ -502,7 +502,9 @@ struct StatsStrip: View {
         .buttonStyle(.plain)
         // The button is the figure's one element (S6), read as its label and value.
         .accessibilityLabel(Text(verbatim: label))
-        .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
+        .accessibilityValue(figure.loading
+            ? Text("Loading Statistics", bundle: .module)
+            : Text(verbatim: figure.spoken ?? figure.value ?? ""))
         .accessibilityIdentifier("stats.strip.\(id.rawValue)")
     }
 }
@@ -577,7 +579,9 @@ struct StatsStripTiles: View {
         .buttonStyle(.plain)
         // The button is the figure's one element (S6), read as its label and value.
         .accessibilityLabel(Text(verbatim: label))
-        .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
+        .accessibilityValue(figure.loading
+            ? Text("Loading Statistics", bundle: .module)
+            : Text(verbatim: figure.spoken ?? figure.value ?? ""))
         .accessibilityIdentifier("stats.strip.\(id.rawValue)")
     }
 }

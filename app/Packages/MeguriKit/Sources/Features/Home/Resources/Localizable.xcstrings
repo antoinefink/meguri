@@ -1,6 +1,39 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Loading Deck": {
+      "comment": "Accessibility feedback while the selected deck page is loading.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Deck"
+          }
+        }
+      }
+    },
+    "Loading Decks": {
+      "comment": "Accessibility feedback while the deck list is loading.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Decks"
+          }
+        }
+      }
+    },
+    "Loading Today": {
+      "comment": "Accessibility feedback while the Today page is loading.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Today"
+          }
+        }
+      }
+    },
     "Restore from Backup…": {
       "localizations": {
         "en": {
