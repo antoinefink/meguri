@@ -143,13 +143,29 @@ private struct BackupLimitRow: View {
     @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var textSize
     var body: some View {
+        Group {
+            #if os(iOS)
+            if textSize.isAccessibilitySize {
+                VStack(alignment: .leading) {
+                    fieldLabel.frame(maxWidth: .infinity, alignment: .leading)
+                    input
+                }
+            } else { regularRow }
+            #else
+            regularRow
+            #endif
+        }
+        .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
+        if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
+    }
+    private var regularRow: some View {
         LabeledContent {
             HStack {
                 // Measure all ten UInt32 digits in the current font, including AX.
                 // The field takes only that space instead of proposing a full row.
                 ZStack(alignment: .trailing) {
                     Text(verbatim: String(UInt32.max)).padding(.horizontal, Spacing.small).hidden().accessibilityHidden(true)
-                    input
+                    input.multilineTextAlignment(.trailing)
                 }
                 .monospacedDigit()
                 .fixedSize(horizontal: true, vertical: false)
@@ -158,15 +174,15 @@ private struct BackupLimitRow: View {
             .fixedSize(horizontal: true, vertical: false)
         } label: { Text(title, bundle: .module) }
         .labeledContentStyle(BackupLimitRowStyle(stacked: textSize.isAccessibilitySize))
-        .onChange(of: value, initial: true) { _, value in if !focused { draft.reset(to: value) } }
-        if draft.invalid { Text("Enter a whole number in the allowed range.", bundle: .module).foregroundStyle(.secondary) }
+    }
+    private var fieldLabel: Text {
+        field == .interval ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module)
     }
     private var input: some View {
             TextField(text: $draft.text) { Text(title, bundle: .module) }
                 .labelsHidden()
-                .accessibilityLabel(field == .interval ? Text("Interval in minutes", bundle: .module) : Text(title, bundle: .module))
+                .accessibilityLabel(fieldLabel)
                 .accessibilityIdentifier(identifier)
-                .multilineTextAlignment(.trailing)
                 #if os(iOS)
                 .keyboardType(.numbersAndPunctuation)
                 #endif
