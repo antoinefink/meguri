@@ -153,7 +153,7 @@ public struct OcclusionNoteEditor: View {
                             guard host.acceptsHostInput else { return }
                             host.setHostField(value, at: roles.occlusions); session.startsNewMasks = false
                         }), isEditing: draft.noteID != nil)
-                    .disabled(!host.acceptsHostInput || session.busy || session.replacing)
+                    .disabled(!masksShown || !host.acceptsHostInput || session.busy || session.replacing)
                     .opacity(session.replacing ? 0 : 1)
                     .accessibilityHidden(session.replacing)
                 if session.replacing { picker }

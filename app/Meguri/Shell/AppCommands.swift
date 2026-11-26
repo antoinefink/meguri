@@ -3,6 +3,7 @@ import Browse
 import CoreBridge
 import Editor
 import Home
+import ImageOcclusion
 import Stats
 import SwiftUI
 #if os(macOS)
@@ -351,6 +352,7 @@ extension FocusedValues {
 /// bar. There is no Study menu: Undo and Redo are Edit's alone.
 struct AppCommands: Commands {
     @FocusedValue(\.nativeCommandContext) private var context
+    @FocusedValue(\.maskEditorCommands) private var maskEditor
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -381,17 +383,24 @@ struct AppCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
         }
-        // One Undo and one Redo (N20.4): the text input's, the review's or the
-        // collection's (EditUndoRouting); a sheet or panel keeps the system's.
-        if let context, context.replacesUndo {
+        // Mask history takes precedence throughout its focused controls. With
+        // no mask step, keep the existing parent route (also in Add/Edit sheets).
+        if let context, context.replacesUndo || maskEditor?.isEnabled(.select) == true {
             CommandGroup(replacing: .undoRedo) {
                 let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
-                Button(Self.title(undo, redo: false)) { context.performUndo(redo: false) }
-                    .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
-                    .disabled(!undo.enabled)
-                Button(Self.title(redo, redo: true)) { context.performUndo(redo: true) }
-                    .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
-                    .disabled(!redo.enabled)
+                let maskUndo = maskEditor?.isEnabled(.undo) == true
+                let maskRedo = maskEditor?.isEnabled(.redo) == true
+                let reviewOwnsKeys = context.review != nil && maskEditor?.isEnabled(.select) != true
+                Button(maskUndo ? String(localized: "Undo") : Self.title(undo, redo: false)) {
+                    if maskEditor?.performIfEnabled(.undo) != true { context.performUndo(redo: false) }
+                }
+                    .keyboardShortcut(undoKey("z", modifiers: .command, review: reviewOwnsKeys))
+                    .disabled(!maskUndo && !undo.enabled)
+                Button(maskRedo ? String(localized: "Redo") : Self.title(redo, redo: true)) {
+                    if maskEditor?.performIfEnabled(.redo) != true { context.performUndo(redo: true) }
+                }
+                    .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: reviewOwnsKeys))
+                    .disabled(!maskRedo && !redo.enabled)
             }
         }
         // The system's Find, Spelling, Substitutions and other text groups stay;

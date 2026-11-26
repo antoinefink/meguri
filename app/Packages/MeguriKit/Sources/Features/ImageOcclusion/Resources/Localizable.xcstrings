@@ -564,26 +564,6 @@
           }
         }
       }
-    },
-    "io.palette.add": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add to Palette"
-          }
-        }
-      }
-    },
-    "io.palette.remove": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove from Palette"
-          }
-        }
-      }
     }
   },
   "version": "1.0"

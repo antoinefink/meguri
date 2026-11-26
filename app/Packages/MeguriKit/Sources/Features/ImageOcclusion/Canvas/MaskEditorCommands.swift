@@ -1,14 +1,13 @@
 import SwiftUI
 
-/// M7.1 registration, exposed to the host's shortcut conflict check and Edit
-/// menu routing. All dispatch goes through the visible editor's enabled guards.
+/// M7.1's focused editor context. Controls and native menus dispatch through
+/// the same bindings and the visible editor's enabled guards.
 public enum MaskEditorCommand: String, CaseIterable {
     case select, rectangle, ellipse, polygon, text, fill
     case undo, redo, selectAll, delete, duplicate, group, ungroup
     case zoomOut, zoomIn, zoomToFit, translucent, closePolygon
     case alignLeft, alignCenter, alignRight, alignTop, alignMiddle, alignBottom
 
-    public static let context = "imageOcclusion.maskEditor"
     var tool: MaskEditorTool? { MaskEditorTool(rawValue: rawValue) }
     var alignment: MaskAlignment? {
         switch self {
@@ -63,9 +62,22 @@ public struct MaskEditorCommandContext {
         self.enabled = enabled; self.action = action
     }
     public func isEnabled(_ command: MaskEditorCommand) -> Bool { enabled(command) }
-    public func perform(_ command: MaskEditorCommand) {
-        guard enabled(command) else { return }
+    public func perform(_ command: MaskEditorCommand) { _ = performIfEnabled(command) }
+
+    /// Menus and key dispatch share the enabled guard. False leaves the host's
+    /// undo/redo route in charge, including an empty mask history.
+    @discardableResult public func performIfEnabled(_ command: MaskEditorCommand) -> Bool {
+        guard enabled(command) else { return false }
         action(command)
+        return true
+    }
+
+    func keyPressed(character: String, modifiers: EventModifiers) -> Bool {
+        guard isEnabled(.select), let binding = MaskEditorCommand.bindings.first(where: {
+            $0.character == character && $0.modifiers == modifiers
+        }) else { return false }
+        if performIfEnabled(binding.command) { return true }
+        return binding.command != .undo && binding.command != .redo
     }
 }
 
@@ -83,11 +95,13 @@ public struct MaskEditorCommands: Commands {
     @FocusedValue(\.maskEditorCommands) private var target
     public init() {}
     public var body: some Commands {
-        CommandMenu(ioString("io.commands")) {
-            ForEach(MaskEditorCommand.allCases.filter { $0 != .undo && $0 != .redo }, id: \.self) { command in
-                Button(ioString(command.key)) { target?.perform(command) }
-                    .keyboardShortcut(MaskEditorCommand.bindings.first { $0.command == command }?.shortcut)
-                    .disabled(target?.isEnabled(command) != true)
+        if target?.isEnabled(.select) == true {
+            CommandMenu(ioString("io.commands")) {
+                ForEach(MaskEditorCommand.allCases.filter { $0 != .undo && $0 != .redo }, id: \.self) { command in
+                    Button(ioString(command.key)) { target?.perform(command) }
+                        .keyboardShortcut(MaskEditorCommand.bindings.first { $0.command == command }?.shortcut)
+                        .disabled(target?.isEnabled(command) != true)
+                }
             }
         }
     }

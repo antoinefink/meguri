@@ -6,3 +6,6 @@
 - The codec synchronously enters its dedicated document executor; it never waits on collection lanes. Keep completed edits ordered and measure large-document latency before acceptance.
 - Image decoding belongs to the caller of the SwiftUI.Image API. This module has no media URL/data access or independent downsampling path.
 - Card colours, Arial metrics, shape dimensions, zoom factors and transform thresholds implement mask-editor M1–M6 and image-occlusion-format. Raw colour construction stays in MaskAppearance; its and MaskCanvas's content exceptions are in tools/lint-ui/allowlist.tsv.
+- Selection alone never transforms geometry or writes. Navigation cancels all in-flight transforms through their final callback; handle and canvas callbacks share one lifecycle.
+- Mask commands belong to focused canvas, tool and inspector controls. Hidden/disabled editors and text entry relinquish them; native Edit history prefers an enabled mask step, then the host route.
+- Imported CSS fills are decoded only for drawing; keep their stored text. Custom collection palettes require a typed atomic K9 read/mutate operation; do not substitute device preferences or a read-then-write adapter.

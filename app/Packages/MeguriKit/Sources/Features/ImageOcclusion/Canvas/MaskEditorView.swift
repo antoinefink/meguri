@@ -56,6 +56,7 @@ private struct MaskEditorContent: View {
     @State private var fill = MaskAppearance.defaultColor
     @State private var showFill = false
     @AppStorage("imageOcclusion.translucent") private var translucent = false
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.displayScale) private var displayScale
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -96,6 +97,7 @@ private struct MaskEditorContent: View {
             session.receive(occlusions, isEditing: isEditing)
         }
         .onDisappear { session.polygon = []; session.preview = nil; session.onWrite = nil }
+        .onChange(of: isEnabled, initial: true) { _, enabled in canvasFocused = enabled }
         .onChange(of: occlusions) { _, field in session.receive(field, isEditing: isEditing) }
         .inspector(isPresented: $showInspector) { inspector }
         .sheet(item: $labelEdit, onDismiss: { canvasFocused = true }) { edit in
@@ -228,9 +230,13 @@ private struct MaskEditorContent: View {
                             Button(ioString("io.label.edit")) { beginLabelEdit(shape.id) }
                         }
                         if session.canRotate {
-                            Stepper(value: Binding(get: { shape.data.angle }, set: { value in
-                                session.commit(session.rotated(degrees: value - shape.data.angle, finishing: true))
-                            }), step: 1) { Text(ioString("io.a11y.handle.rotate")) }
+                            Stepper {
+                                Text(ioString("io.a11y.handle.rotate"))
+                            } onIncrement: {
+                                session.rotateStep(increment: true)
+                            } onDecrement: {
+                                session.rotateStep(increment: false)
+                            }
                         }
                     }
                     Button(ioString("io.move.left")) { session.commit(session.moved(dx: -5, dy: 0, finishing: true)) }
@@ -250,40 +256,12 @@ private struct MaskEditorContent: View {
     private var fillPicker: some View {
         VStack(alignment: .leading) {
             ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false)
-            ScrollView(.horizontal) {
-                HStack {
-                    swatch(MaskAppearance.defaultFill)
-                    if let palette = session.palette {
-                        ForEach(Array(palette.value.colors.enumerated()), id: \.offset) { index, color in
-                            swatch(color, suffix: ".slot.\(index)")
-                                .contextMenu {
-                                    Button(ioString("io.palette.remove")) {
-                                        Task { await palette.change(.remove(color)) }
-                                    }
-                                    .disabled(palette.busy)
-                                }
-                        }
-                    }
-                }
+            Button { fill = MaskAppearance.defaultColor } label: {
+                Image(systemName: "circle.fill").foregroundStyle(MaskAppearance.defaultColor)
             }
-            if let palette = session.palette {
-                Button(ioString("io.palette.add")) {
-                    let color = selectedFill
-                    Task { await palette.change(.add(color)) }
-                }
-                .disabled(palette.busy)
-                if let error = palette.error { Text(error).foregroundStyle(.secondary) }
-            }
+            .accessibilityLabel(MaskAppearance.defaultFill)
+            .accessibilityIdentifier("io.palette.swatch.ffeba2")
         }
-        .task { await session.palette?.reload() }
-    }
-
-    private func swatch(_ color: String, suffix: String = "") -> some View {
-        Button { fill = maskColor(color, fallback: MaskAppearance.defaultColor) } label: {
-            Image(systemName: "circle.fill").foregroundStyle(maskColor(color, fallback: MaskAppearance.defaultColor))
-        }
-        .accessibilityLabel(color)
-        .accessibilityIdentifier("io.palette.swatch." + color.dropFirst() + suffix)
     }
 
     private func chooseTool(_ tool: MaskEditorTool) {
@@ -304,7 +282,7 @@ private struct MaskEditorContent: View {
         labelEdit = .init(id: id, text: text)
     }
     private var commandsAvailable: Bool {
-        guard labelEdit == nil, !showFill, session.isReadable else { return false }
+        guard isEnabled, labelEdit == nil, !showFill, session.isReadable else { return false }
         #if os(macOS)
         guard let window = windowScope.window, window.isKeyWindow, window.attachedSheet == nil,
               !(window.firstResponder is NSTextView) else { return false }
@@ -359,14 +337,7 @@ private struct MaskEditorContent: View {
         case .return: character = "\r"
         default: character = press.characters.lowercased()
         }
-        guard let binding = MaskEditorCommand.bindings.first(where: {
-            $0.character == character && $0.modifiers == modifiers
-        }) else { return .ignored }
-        guard commandEnabled(binding.command) else {
-            return binding.command == .undo || binding.command == .redo ? .ignored : .handled
-        }
-        perform(binding.command)
-        return .handled
+        return commandContext.keyPressed(character: character, modifiers: modifiers) ? .handled : .ignored
     }
 }
 

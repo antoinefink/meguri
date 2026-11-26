@@ -11,15 +11,10 @@ struct MaskCanvas: View {
     let translucent: Bool
     let fill: String
     let editLabel: (UUID) -> Void
-    @State private var dragStart: CGPoint?
-    @State private var drawingTool: MaskEditorTool?
-    @State private var selectionBox: CGRect?
-    @State private var extending = false
-    @State private var selectionAtStart: Set<UUID> = []
-    @State private var isNavigating = false
+    @State private var interaction = MaskCanvasInteraction()
     @State private var pointer: CGPoint?
-    @State private var handleDragActive = false
-    @State private var handleDragCancelled = false
+    @GestureState private var pointerGestureActive = false
+    @GestureState private var handleGestureActive = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -37,7 +32,7 @@ struct MaskCanvas: View {
                 context.scaleBy(x: viewport.zoom, y: viewport.zoom)
                 for shape in session.displayed.shapes { draw(shape, in: &context) }
                 drawPolygon(in: &context)
-                if let selectionBox {
+                if let selectionBox = interaction.selectionBox {
                     context.stroke(Path(selectionBox), with: .color(.accentColor), style: .init(lineWidth: 1 / viewport.zoom, dash: [4 / viewport.zoom]))
                 }
                 if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
@@ -49,12 +44,12 @@ struct MaskCanvas: View {
             handles
             CanvasNavigationInput(
                 navigate: { factor, delta, anchor in
-                    cancelDrag(); isNavigating = true
+                    interaction.navigationStarted(session: session)
                     if factor != 1 { viewport.magnify(by: factor, at: anchor) }
                     viewport.pan.width += delta.width; viewport.pan.height += delta.height
                 },
-                ended: { isNavigating = false },
-                panStarted: { cancelDrag(); isNavigating = true }
+                ended: { interaction.navigationEnded() },
+                panStarted: { interaction.navigationStarted(session: session) }
             )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -68,7 +63,15 @@ struct MaskCanvas: View {
             }
         }
         .coordinateSpace(name: "io.canvas")
-        .gesture(DragGesture(minimumDistance: 0).onChanged(dragChanged).onEnded(dragEnded))
+        .gesture(DragGesture(minimumDistance: 0)
+            .updating($pointerGestureActive) { _, active, _ in active = true }
+            .onChanged(dragChanged).onEnded(dragEnded))
+        .onChange(of: pointerGestureActive) { _, active in
+            if !active { interaction.pointerGestureEnded(session: session) }
+        }
+        .onChange(of: handleGestureActive) { _, active in
+            if !active { interaction.handleGestureEnded(session: session) }
+        }
         .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(ioString("io.a11y.canvas"))
@@ -98,9 +101,9 @@ struct MaskCanvas: View {
                     Button(ioString("io.command.duplicate")) {
                         session.select(item.first.id); session.duplicate()
                     }
-                    if canGroup(with: item) {
+                    if session.canGroup(including: item.ids) {
                         Button(ioString("io.command.group")) {
-                            session.selection.formUnion(item.ids); session.group()
+                            session.group(including: item.ids)
                         }
                     }
                     if item.ids.count > 1 {
@@ -138,11 +141,6 @@ struct MaskCanvas: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
-    }
-
-    private func canGroup(with item: OcclusionAccessibilityItem) -> Bool {
-        let ids = session.selection.union(item.ids)
-        return Set(session.document.shapes.filter { ids.contains($0.id) && !$0.isLabel }.map { $0.data.number }).count > 1
     }
 
     private func draw(_ shape: OcclusionShape, in context: inout GraphicsContext) {
@@ -195,86 +193,22 @@ struct MaskCanvas: View {
     }
 
     private func dragChanged(_ value: DragGesture.Value) {
-        guard !isNavigating, session.isReadable else { return }
-        let point = viewport.referencePoint(value.location)
-        if dragStart == nil {
-            let start = viewport.referencePoint(value.startLocation)
-            dragStart = start; selectionAtStart = session.selection
-            #if os(macOS)
-            extending = !NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty
-            #else
-            extending = false
-            #endif
-            if session.tool == .polygon { drawingTool = .polygon; return }
-            let hit = session.document.shapes.reversed().first { $0.path(in: viewport.reference).contains(start) }
-            if let hit {
-                if session.tool == .fill { drawingTool = .fill; return }
-                session.select(hit.id, extending: extending)
-                drawingTool = .select
-            } else {
-                drawingTool = session.tool
-                if session.tool == .select, !extending { session.selection = [] }
-            }
-        }
-        guard let start = dragStart else { return }
-        if drawingTool == .select {
-            let hit = session.document.shapes.contains { $0.path(in: viewport.reference).contains(start) }
-            if hit {
-                session.preview = session.moved(dx: point.x - start.x, dy: point.y - start.y, finishing: false)
-            } else {
-                let box = rect(from: start, to: point); selectionBox = box
-                var selected = extending ? selectionAtStart : []
-                for item in session.document.items {
-                    if let bounds = session.document.bounds(of: Set(item), in: viewport.reference), bounds.intersects(box) {
-                        selected.formUnion(item)
-                    }
-                }
-                session.selection = selected
-            }
-        } else if (drawingTool == .rectangle || drawingTool == .ellipse), session.inside(start) {
-            let box = rect(from: start, to: point)
-            var preview = session.document
-            let width = box.width / viewport.reference.width, height = box.height / viewport.reference.height
-            preview.shapes.append(.init(.init(number: 0, left: box.minX / viewport.reference.width,
-                                              top: box.minY / viewport.reference.height,
-                                              kind: drawingTool == .ellipse ? .ellipse(rx: width / 2, ry: height / 2) : .rect(width: width, height: height))))
-            session.preview = preview
-        }
+        #if os(macOS)
+        let extending = !NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty
+        #else
+        let extending = false
+        #endif
+        interaction.changed(start: viewport.referencePoint(value.startLocation),
+                            point: viewport.referencePoint(value.location), extending: extending, session: session)
     }
     private func dragEnded(_ value: DragGesture.Value) {
-        defer { dragStart = nil; drawingTool = nil; session.preview = nil; selectionBox = nil }
-        guard !isNavigating, let start = dragStart else { return }
-        let end = viewport.referencePoint(value.location)
-        switch drawingTool {
-        case .rectangle: session.addBox(from: start, to: end)
-        case .ellipse: session.addBox(from: start, to: end, ellipse: true)
-        case .polygon:
-            #if os(macOS)
-            let distance = 5.0
-            #else
-            let distance = max(5, 22 / viewport.zoom)
-            #endif
-            session.addPolygonPoint(start, closingDistance: distance)
-        case .text:
-            guard session.inside(start) else { return }
-            session.addLabel(at: start)
-            if let id = session.selection.first { editLabel(id) }
-        case .fill:
-            if let shape = session.document.shapes.reversed().first(where: { $0.path(in: viewport.reference).contains(start) }) {
-                session.fill(shape.id, color: fill)
-            }
-        case .select:
-            if selectionBox == nil { session.commit(session.moved(dx: end.x - start.x, dy: end.y - start.y, finishing: true)) }
-        case nil: break
-        }
-    }
-    private func cancelDrag() {
-        if handleDragActive { handleDragCancelled = true }
-        if dragStart != nil { session.selection = selectionAtStart }
-        dragStart = nil; drawingTool = nil; session.preview = nil; selectionBox = nil
-    }
-    private func rect(from a: CGPoint, to b: CGPoint) -> CGRect {
-        .init(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+        #if os(macOS)
+        let closingDistance = 5.0
+        #else
+        let closingDistance = max(5, 22 / viewport.zoom)
+        #endif
+        if let label = interaction.ended(point: viewport.referencePoint(value.location), fill: fill,
+                                         closingDistance: closingDistance, session: session) { editLabel(label) }
     }
 
     @ViewBuilder private var handles: some View {
@@ -286,13 +220,12 @@ struct MaskCanvas: View {
                     .contentShape(Rectangle())
                     .position(viewport.screenPoint(session.handlePoint(handle, in: session.displayed)))
                     .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
+                        .updating($handleGestureActive) { _, active, _ in active = true }
                         .onChanged { value in
-                            guard beginHandleDrag() else { return }
-                            session.preview = session.resized(handle: handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: false)
+                            guard handleGestureActive else { return }
+                            interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: false, session: session)
                         }.onEnded { value in
-                            defer { endHandleDrag() }
-                            guard !handleDragCancelled, !isNavigating else { return }
-                            session.commit(session.resized(handle: handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: true))
+                            interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: true, session: session)
                         })
                     .accessibilityLabel(ioString("io.a11y.handle.resize"))
                     .accessibilityIdentifier("io.handle.resize.\(handle.rawValue)")
@@ -313,29 +246,21 @@ struct MaskCanvas: View {
                     .position(x: viewport.screenPoint(.init(x: box.midX, y: box.minY)).x,
                               y: viewport.screenPoint(.init(x: box.midX, y: box.minY)).y - 44)
                     .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
+                        .updating($handleGestureActive) { _, active, _ in active = true }
                         .onChanged { value in
-                            guard beginHandleDrag() else { return }
-                            session.preview = session.rotated(degrees: rotation(value, around: center), finishing: false)
+                            guard handleGestureActive else { return }
+                            interaction.rotate(degrees: rotation(value, around: center), finishing: false, session: session)
                         }
                         .onEnded { value in
-                            defer { endHandleDrag() }
-                            guard !handleDragCancelled, !isNavigating else { return }
-                            session.commit(session.rotated(degrees: rotation(value, around: center), finishing: true))
+                            interaction.rotate(degrees: rotation(value, around: center), finishing: true, session: session)
                         })
                     .accessibilityLabel(ioString("io.a11y.handle.rotate"))
                     .accessibilityIdentifier("io.handle.rotate")
                     .accessibilityAdjustableAction { direction in
-                        session.commit(session.rotated(degrees: direction == .increment ? 5 : -5, finishing: true))
+                        session.rotateStep(increment: direction == .increment)
                     }
             }
         }
-    }
-    private func beginHandleDrag() -> Bool {
-        if !handleDragActive { handleDragActive = true; handleDragCancelled = isNavigating }
-        return !handleDragCancelled && !isNavigating
-    }
-    private func endHandleDrag() {
-        handleDragActive = false; handleDragCancelled = false; session.preview = nil
     }
     private func rotation(_ value: DragGesture.Value, around center: CGPoint) -> Double {
         (atan2(value.location.y - center.y, value.location.x - center.x)

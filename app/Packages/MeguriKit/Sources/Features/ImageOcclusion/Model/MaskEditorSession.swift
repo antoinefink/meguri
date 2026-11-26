@@ -38,7 +38,6 @@ enum MaskAlignment: String, CaseIterable {
     public private(set) var isReadable = false
     public private(set) var referenceSize = CGSize.zero
     var onWrite: ((String) -> Void)?
-    public let palette: MaskPaletteModel?
     private var codec: OcclusionCodec?
     private var initial = OcclusionDocument()
     private var history: [OcclusionDocument] = []
@@ -53,8 +52,7 @@ enum MaskAlignment: String, CaseIterable {
     var canUngroup: Bool { document.items.contains { $0.count > 1 && selection.contains($0[0]) } }
     var displayed: OcclusionDocument { preview ?? document }
 
-    public init(field: String, isEditing: Bool, palette: MaskPaletteModel? = nil) {
-        self.palette = palette
+    public init(field: String, isEditing: Bool) {
         self.field = field
         tool = isEditing ? .select : .rectangle
         load(field, isEditing: isEditing)
@@ -143,6 +141,23 @@ enum MaskAlignment: String, CaseIterable {
         } else if !item.isSubset(of: selection) { selection = item }
     }
     func selectAll() { selection = Set(document.shapes.map(\.id)) }
+
+    func canGroup(including ids: [UUID]) -> Bool {
+        guard document.shapes.contains(where: { ids.contains($0.id) && !$0.isLabel }) else { return false }
+        let included = selection.union(ids)
+        return Set(document.shapes.filter { included.contains($0.id) && !$0.isLabel }.map { $0.data.number }).count > 1
+    }
+    func group(including ids: [UUID]) {
+        guard canGroup(including: ids) else { return }
+        selection.formUnion(ids)
+        group()
+    }
+
+    /// Each native step is a completed five-degree rotation. A polygon stores
+    /// its rotation in its vertices, so this is a delta, never an absolute angle.
+    func rotateStep(increment: Bool) {
+        commit(rotated(degrees: increment ? 5 : -5, finishing: true))
+    }
 
     func addBox(from start: CGPoint, to end: CGPoint, ellipse: Bool = false) {
         guard inside(start), let codec else { return }
