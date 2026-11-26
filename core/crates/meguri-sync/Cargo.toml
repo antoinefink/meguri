@@ -22,6 +22,7 @@ test-hooks = ["meguri-model/test-hooks", "meguri-engine/test-hooks"]
 bytes.workspace = true
 libc.workspace = true
 futures-core.workspace = true
+flate2.workspace = true
 # The job's cancel token and progress sink (U24, `engine/jobs` J4, J5).
 meguri-engine.workspace = true
 # The session key's random source (R1875), the records and their schema-11

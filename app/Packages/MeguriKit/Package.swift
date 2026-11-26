@@ -75,12 +75,13 @@ let package = Package(
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
-            dependencies: ["AppModel", "CardRendering", "Editor", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: ["AppModel", "CardRendering", "Editor", "ImageOcclusion", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
             resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg"), .copy("Fixtures/deck-tree.apkg")],
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
+        .testTarget(name: "ImageOcclusionTests", dependencies: ["ImageOcclusion", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
         .testTarget(name: "DeckOptionsTests", dependencies: ["DeckOptions", "AppModel"], swiftSettings: settings),
         .testTarget(name: "BrowseTests", dependencies: ["Browse", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
@@ -106,9 +107,10 @@ let package = Package(
             name: name,
             dependencies: ["AppModel", "DesignSystem"] + (["Review", "Browse"].contains(name) ? ["CardRendering"] : [])
                 // Browse's inspector shows the note in the round 5 editor (U273) and its Card Info (U274).
-                + (name == "Browse" ? ["Editor", "CardInfo"] : []) + (["Home", "Stats"].contains(name) ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
+                + (name == "Browse" ? ["Editor", "CardInfo"] : []) + (name == "Editor" ? ["ImageOcclusion"] : []) + (["Home", "Stats"].contains(name) ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo", "ImageOcclusion"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo"].contains(name) ? [.process("Resources")] : [],
+            exclude: ["ImageOcclusion", "Editor"].contains(name) ? ["AGENTS.md"] : [],
+            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo", "ImageOcclusion"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }

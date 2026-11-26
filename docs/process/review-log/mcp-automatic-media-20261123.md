@@ -44,3 +44,17 @@ conversation and retry a direct PNG attachment with `files` and `file_fields`.
 Record the outcome here. On success, read the note by ID and compare the image
 reference to the original PNG's SHA-256. On failure, record the tool error and
 the server's fixed diagnostic code. Native playback also remains open.
+
+## Direct URL diagnostics, 2026-11-26
+
+The direct PNG retry after a client session restart again returned
+`attachment_unavailable` with server detail `attachment_url`. The active
+tool description still mentioned the retired sign-in flow.
+
+Starting commit `58ba751e7`. Cleanroom implementation
+`20261126T160839Z-2630` split URL rejection into fixed diagnostic labels.
+Independent review found that the existing raw at-sign check can reject an
+at-sign in the query when the URL has no slash after the host. Cleanroom
+`20261126T161231Z-16602` distinguished that check from parsed user
+information and added regression coverage. Rejected URLs and their components
+stay out of logs. A hosted retry against the diagnostic build is still due.

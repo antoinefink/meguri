@@ -10,6 +10,14 @@ simulator app and UI test bundle also built successfully. The
 receipts. [PR #237](https://github.com/antoinefink/meguri/pull/237) carries
 the native screenshots and device-specific verification results.
 
+The macOS Option B image occlusion editor created two cards from two drawn
+masks. Moving one mask, saving, and reopening from Review retained both
+positions, the Header, and the tag. The ordinary-note keyboard reopen test
+also passed (`ui-test/20261126T151205Z-38579`). Nine Swift bridge tests
+and 15 Rust media tests passed, and the iOS Simulator build passed
+(`build-app/20261126T141020Z-4293`). [PR #232](https://github.com/antoinefink/meguri/pull/232)
+contains the four native screenshots and subsequent verification.
+
 The selected-deck package branch passed 25 focused package, host and FFI cases
 (`core-test/20261126T121257Z-27087`), five associated unit cases and 21
 media-capture and package cases after the final protection change

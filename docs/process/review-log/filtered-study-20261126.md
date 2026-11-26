@@ -81,3 +81,12 @@ Planinterop reviewed all 25,615 bytes of the public touch test with actual caret
 Planinterop reviewed the complete 27,617-byte touch test, including the native switch interaction and synthetic simulator diagnostics. Its verified SHA-256 is `b8d679d1313c00539c57989e0789dbca1a2540aa8fdd1a255da133e42b4cda2e`.
 
 Planinterop reviewed the complete 27,956-byte touch test. The simulator test waits for the exact field value after each edit. Its verified public SHA-256 is `aa2ec7c6b55cca107c77a59fbd3b096a445d0d40b217411d2312aed56ee3e64c`.
+
+## Integration privacy review
+
+The independent reviewers read the complete merged files and classified them as PUBLIC.
+
+| File | Reviewer | SHA-256 |
+|---|---|---|
+| `docs/design/native-interface-contract.md` | Codex privacy_contract | `ce52b837fd80fa41162ebc03cf51f1b1f004ef2c3defd5d6952d7fe003e519a9` |
+| `docs/process/verification-status.md` | Codex privacy_register | `015f7fdb8a67bacf74442f6ea44dd43951035426064608b4a2defbe8dea41326` |

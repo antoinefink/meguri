@@ -81,7 +81,14 @@ public final class ReviewPages: ReviewCardSurface {
     public var onRecovery: (() -> Void)?
     public private(set) var editing = false
     public let presenter = NativeCardBehaviorPresenter()
-    var inputActive = true { didSet { establishInitialFocus() } }
+    var inputActive = true {
+        didSet {
+            #if os(macOS)
+            if !inputActive { editedFocusUpdate = nil }
+            #endif
+            establishInitialFocus()
+        }
+    }
     private var initialFocus = ReviewInitialFocus()
     private var hasPresented = false
     private var prepared: (ReviewRenderKey, CardUpdate)?
@@ -100,6 +107,11 @@ public final class ReviewPages: ReviewCardSurface {
     private var domEditable = false
     private var composing = false
     private var committedMediaUpdate: CardUpdate?
+    #if os(macOS)
+    private var editedFocusUpdate: CardUpdate?
+    // All OS/presenter readiness lives here so offscreen tests need no app activation.
+    var editedCardWindowReady: @MainActor (CardPlatformView, NativeCardBehaviorPresenter) -> Bool? = ReviewInputOwnership.editedCardWindowReady
+    #endif
     var onMediaReady: (() -> Void)?
     /// The Study click's way to the first card (R1813): this surface marks the
     /// first card ready and its presentation's commit.
@@ -187,6 +199,9 @@ public final class ReviewPages: ReviewCardSurface {
     }
     /// Gives the first presented card its initial native focus.
     public func establishInitialFocus() {
+        #if os(macOS)
+        defer { establishEditedCardFocus() }
+        #endif
         guard let pages = pair else { return }
         let responderIsOwned = ReviewInputOwnership.initialNativeInputOwned(in: pages.current.webView)
         let acquired = initialFocus.claim(
@@ -195,6 +210,29 @@ public final class ReviewPages: ReviewCardSurface {
         pages.ownsKeyboardFocus = true
         ReviewInputOwnership.focusCard(pages.current.webView)
     }
+    #if os(macOS)
+    /// The successful edit refresh names the replacement, not the old page
+    /// that AppKit retained while the editor window held the keys.
+    func restoreFocusAfterEditing(cardID: Int64, side: CardRenderSide) {
+        guard !closed, inputActive, let pair, pair.current.update?.card == cardID,
+              pair.current.update?.side == side else { return }
+        editedFocusUpdate = pair.current.update
+        establishEditedCardFocus()
+    }
+
+    private func establishEditedCardFocus() {
+        guard let update = editedFocusUpdate else { return }
+        guard !closed, inputActive, !editing,
+              let pair, pair.current.update == update else { editedFocusUpdate = nil; return }
+        guard let ready = editedCardWindowReady(pair.current.webView, presenter) else { return }
+        guard ready else { editedFocusUpdate = nil; return }
+        // Both orders occur: the page commits before key return, or the
+        // editor closes before the presentation's asynchronous commit.
+        guard committedMediaUpdate == update, pair.current.presented else { return }
+        editedFocusUpdate = nil
+        ReviewInputOwnership.restoreEditedCardResponder(in: pair)
+    }
+    #endif
     private func payload(_ rendered: CardPayload, item: ReviewHeadItem) -> CardPayload {
         var result = rendered
         result.audioPolicy = CardAudioPolicy(
@@ -335,6 +373,9 @@ public final class ReviewPages: ReviewCardSurface {
         priorityHead = []; currentMediaRefs = []; visibleMediaNames = []
     }
     public func close() {
+        #if os(macOS)
+        editedFocusUpdate = nil
+        #endif
         #if os(iOS)
         tapZones?.close(); tapZones = nil
         #endif

@@ -107,6 +107,12 @@ enum AuditSuppressions {
 
 /// One issue the system audit reported.
 struct AuditFinding: Equatable, CustomStringConvertible {
+    enum ElementResolution: Equatable {
+        case notSupplied
+        case resolved
+        case snapshotFailed(domain: String, code: Int)
+    }
+
     let variant: String
     let identifier: String
     let label: String
@@ -119,6 +125,7 @@ struct AuditFinding: Equatable, CustomStringConvertible {
     /// Why the finding is the window's and not the app's (the Mac only;
     /// `AccessibilityAudit.systemElement`): listed in the report, not failed.
     var excluded: String? = nil
+    var elementResolution: ElementResolution = .resolved
 
     /// Whether the finding fails the audit.
     var counts: Bool { !suppressed && excluded == nil }
@@ -187,6 +194,45 @@ enum AccessibilityAudit {
         return nil
     }
 
+    struct ElementSnapshot {
+        let identifier: String
+        let label: String
+        let elementType: XCUIElement.ElementType
+        let frame: CGRect
+    }
+
+    /// Capture once, retaining only the error's stable domain and code.
+    static func capture<Element>(
+        _ element: Element?, variant: String, auditType: String, detail: String, suppressions: [AuditSuppression],
+        snapshot: (Element) throws -> ElementSnapshot
+    ) -> AuditFinding {
+        let captured: ElementSnapshot?
+        let resolution: AuditFinding.ElementResolution
+        if let element {
+            do {
+                captured = try snapshot(element)
+                resolution = .resolved
+            } catch {
+                captured = nil
+                let error = error as NSError
+                resolution = .snapshotFailed(domain: error.domain, code: error.code)
+            }
+        } else {
+            captured = nil
+            resolution = .notSupplied
+        }
+        let identifier = captured?.identifier ?? ""
+        let label = captured?.label ?? ""
+        let suppressed = !identifier.isEmpty && suppressions.contains { $0.identifier == identifier && $0.auditType == auditType }
+        let description = captured.map { "type \($0.elementType.rawValue) at \(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" } ?? "no element"
+        return AuditFinding(
+            variant: variant, identifier: identifier, label: label, element: description, auditType: auditType,
+            detail: detail, suppressed: suppressed,
+            // Preserve the Mac rule: empty metadata also excludes missing or failed snapshots.
+            excluded: systemElement(identifier: identifier, label: label), elementResolution: resolution
+        )
+    }
+
     /// Runs the audit; every issue comes back as a finding, suppressed when
     /// a suppression names its element and its type exactly, excluded when
     /// it is the window's (`systemElement`). Optional diagnostics observe each
@@ -198,23 +244,20 @@ enum AccessibilityAudit {
     ) throws -> [AuditFinding] {
         var findings: [AuditFinding] = []
         try app.performAccessibilityAudit(for: types) { issue in
-            let snapshot = try? issue.element?.snapshot()
-            let identifier = snapshot?.identifier ?? ""
             let type = AuditSuppressions.name(of: issue.auditType)
-            let suppressed = !identifier.isEmpty && suppressions.contains { $0.identifier == identifier && $0.auditType == type }
-            let element = snapshot.map { "type \($0.elementType.rawValue) at \(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" } ?? "no element"
-            let label = snapshot?.label ?? ""
-            let finding = AuditFinding(
-                variant: variant, identifier: identifier, label: label, element: element, auditType: type,
-                detail: "\(issue.compactDescription) (\(issue.detailedDescription))", suppressed: suppressed,
-                excluded: systemElement(identifier: identifier, label: label)
-            )
+            let finding = capture(
+                issue.element, variant: variant, auditType: type,
+                detail: "\(issue.compactDescription) (\(issue.detailedDescription))", suppressions: suppressions
+            ) { element in
+                let snapshot = try element.snapshot()
+                return ElementSnapshot(identifier: snapshot.identifier, label: snapshot.label, elementType: snapshot.elementType, frame: snapshot.frame)
+            }
             findings.append(finding)
             onIssue?(finding)
             if finding.counts {
                 // What the audit saw: the window, kept with the result.
                 let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-                shot.name = "a11y-finding \(variant) \(type) \(element).png"
+                shot.name = "a11y-finding \(variant) \(type) \(finding.element).png"
                 shot.lifetime = .keepAlways
                 XCTContext.runActivity(named: "accessibility finding: \(finding)") { $0.add(shot) }
             }
@@ -338,6 +381,16 @@ enum AccessibilityAudit {
                     "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed,
                 ]
                 if let excluded = $0.excluded { finding["excluded"] = excluded }
+                switch $0.elementResolution {
+                case .notSupplied:
+                    finding["elementResolution"] = "notSupplied"
+                case .resolved:
+                    finding["elementResolution"] = "resolved"
+                case let .snapshotFailed(domain, code):
+                    finding["elementResolution"] = "snapshotFailed"
+                    finding["snapshotErrorDomain"] = domain
+                    finding["snapshotErrorCode"] = code
+                }
                 return finding
             }
         }

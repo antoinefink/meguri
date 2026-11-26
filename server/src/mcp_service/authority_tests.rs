@@ -366,12 +366,34 @@ async fn direct_refusals_and_late_revocation_or_expiry_never_publish() {
     let f=Fixture::new(true).await;
     let mut bridge=McpService::new(f.service.clone());
     bridge.direct_fixture=Some(Arc::new(|_| panic!("a refused URL must not reach the fixture")));
-    for url in ["http://files.oaiusercontent.com/generated","https://untrusted.example.test/generated","https://files.oaiusercontent.com/generated#fragment"] {
-        let result=mapped(&bridge,&f,"edit_note",json!({"note_id":"1","revision":"stale","files":[{"download_url":url,"file_id":"f"}],"file_fields":["Front"]})).await;
-        assert!(matches!(result,Err(transport::DispatchFailure::Diagnosed {
-            failure:transport::ToolFailure::AttachmentUnavailable,detail:Detail::AttachmentUrl,
-        })));
+    let before=f.snapshot();
+    for (url,expected) in [
+        ("https://files.oaiusercontent.com/generated\n",Detail::AttachmentUrlCharacters),
+        ("https://files.oaiusercontent.com/\\generated",Detail::AttachmentUrlCharacters),
+        ("not a URL",Detail::AttachmentUrlParse),
+        ("http://files.oaiusercontent.com/generated",Detail::AttachmentUrlScheme),
+        ("https://untrusted.example.test/generated",Detail::AttachmentUrlHost),
+        ("https://files.oaiusercontent.com:444/generated",Detail::AttachmentUrlPort),
+        ("https://user@files.oaiusercontent.com/generated",Detail::AttachmentUrlUserinfo),
+        ("https://:secret@files.oaiusercontent.com/generated",Detail::AttachmentUrlUserinfo),
+        ("https://@files.oaiusercontent.com/generated",Detail::AttachmentUrlRawAt),
+        ("https://files.oaiusercontent.com?secret=@fixture",Detail::AttachmentUrlRawAt),
+        ("https://files.oaiusercontent.com/generated#fragment",Detail::AttachmentUrlFragment),
+    ] {
+        for (name,args) in [
+            ("edit_note",json!({"note_id":"1","revision":"stale"})),
+            ("create_note",json!({"deck_id":"1","note_type_id":"10","fields":{}})),
+        ] {
+            let mut args=args;
+            args["files"]=json!([{"download_url":url,"file_id":"f"}]);
+            args["file_fields"]=json!(["Front"]);
+            let result=mapped(&bridge,&f,name,args).await;
+            assert!(matches!(result,Err(transport::DispatchFailure::Diagnosed {
+                failure:transport::ToolFailure::AttachmentUnavailable,detail,
+            }) if detail==expected));
+        }
     }
+    assert_eq!(f.snapshot(),before);
     assert_eq!(media_counts(&f),(0,0,0));
 }
 

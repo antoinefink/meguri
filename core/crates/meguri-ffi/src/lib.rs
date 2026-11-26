@@ -31,6 +31,7 @@ pub mod deck_import;
 pub mod deck_tree;
 pub mod decks;
 pub mod editor;
+pub mod editor_image_fetch;
 pub mod error;
 pub mod error_types;
 pub mod events;

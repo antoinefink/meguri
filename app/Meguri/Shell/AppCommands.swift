@@ -3,6 +3,7 @@ import Browse
 import CoreBridge
 import Editor
 import Home
+import ImageOcclusion
 import Stats
 import SwiftUI
 #if os(macOS)
@@ -17,6 +18,35 @@ struct NativeCommandContext {
     var layout: ShellLayout = .sidebar
     /// The Statistics page, behind its flag (U296); nil while it cannot be reached.
     var statsPage: StatsPage?
+
+    /// Evaluate at the scene registration, where SwiftUI tracks the review and
+    /// flow reads. A focused value containing only model references can leave
+    /// Commands displaying the availability read while Edit Note held input.
+    struct ReviewAvailability: Equatable {
+        let input: Bool
+        let editNote: Bool
+        let reveal: Bool
+        let rate: Bool
+        let act: Bool
+        let finish: Bool
+    }
+    private(set) var reviewAvailability: ReviewAvailability? = nil
+
+    func observingReviewAvailability() -> Self {
+        var context = self
+        let review = review
+        #if os(macOS)
+        _ = MacUndoResponder.shared.firstResponder
+        let input = review.map { ReviewInputOwnership.nativeCommandFocusAvailable($0) } ?? false
+        #else
+        let input = reviewInputAvailable
+        #endif
+        context.reviewAvailability = ReviewAvailability(
+            input: input, editNote: collection.editNoteFlow.canOpen,
+            reveal: review?.canReveal == true, rate: review?.canRate == true,
+            act: review?.canActOnCard == true, finish: review?.canFinish == true)
+        return context
+    }
 
     var fileActionsAvailable: Bool {
         collection.navigation.sheet == nil && !collection.filteredStudy.busy && !collection.deckActions.busy && !collection.manualTransfers.busy
@@ -290,6 +320,11 @@ struct NativeCommandContext {
         return collection.review
     }
     var reviewInputAvailable: Bool {
+        #if os(macOS)
+        // AppKit focus is part of admission, and must also invalidate the
+        // registered availability when an auxiliary window returns the keys.
+        _ = MacUndoResponder.shared.firstResponder
+        #endif
         guard let review else { return false }
         return ReviewInputOwnership.admitsNativeCommand(review)
     }
@@ -364,10 +399,45 @@ extension FocusedValues {
     }
 }
 
+/// Add/Edit hosting roots can supply mask focus without a workspace context.
+/// When focus returns to a field, leave its native Undo/Redo items in charge.
+struct NativeUndoCommands {
+    var context: NativeCommandContext?
+    var maskEditor: MaskEditorCommandContext?
+
+    var replacesUndo: Bool { context?.replacesUndo == true || maskEditor?.isEnabled(.select) == true }
+
+    func route(redo: Bool) -> EditUndoRouting.Route {
+        if let context { return context.undoRoute(redo: redo) }
+        var inputs = EditUndoRouting.Inputs()
+        #if os(macOS)
+        let manager = MacUndoResponder.shared.firstResponder?.undoManager
+        inputs.textOwnsUndo = true
+        inputs.textAvailable = (redo ? manager?.canRedo : manager?.canUndo) == true
+        inputs.textTitle = redo ? manager?.redoMenuItemTitle : manager?.undoMenuItemTitle
+        #endif
+        return EditUndoRouting.route(inputs)
+    }
+
+    func enabled(redo: Bool) -> Bool {
+        maskEditor?.isEnabled(redo ? .redo : .undo) == true || route(redo: redo).enabled
+    }
+
+    func perform(redo: Bool) {
+        if maskEditor?.performIfEnabled(redo ? .redo : .undo) == true { return }
+        if let context { context.performUndo(redo: redo); return }
+        #if os(macOS)
+        guard route(redo: redo).enabled else { return }
+        NSApp.sendAction(redo ? Selector(("redo:")) : Selector(("undo:")), to: nil, from: nil)
+        #endif
+    }
+}
+
 /// N20.4: File, Edit, Deck and Card, the same on the Mac and in the iPad menu
 /// bar. There is no Study menu: Undo and Redo are Edit's alone.
 struct AppCommands: Commands {
     @FocusedValue(\.nativeCommandContext) private var context
+    @FocusedValue(\.maskEditorCommands) private var maskEditor
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -400,17 +470,25 @@ struct AppCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
         }
-        // One Undo and one Redo (N20.4): the text input's, the review's or the
-        // collection's (EditUndoRouting); a sheet or panel keeps the system's.
-        if let context, context.replacesUndo {
+        // Mask history takes precedence throughout its focused controls. With
+        // no mask step, keep the existing parent route (also in Add/Edit sheets).
+        let history = NativeUndoCommands(context: context, maskEditor: maskEditor)
+        if history.replacesUndo {
             CommandGroup(replacing: .undoRedo) {
-                let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
-                Button(Self.title(undo, redo: false)) { context.performUndo(redo: false) }
-                    .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
-                    .disabled(!undo.enabled)
-                Button(Self.title(redo, redo: true)) { context.performUndo(redo: true) }
-                    .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
-                    .disabled(!redo.enabled)
+                let undo = history.route(redo: false), redo = history.route(redo: true)
+                let maskUndo = maskEditor?.isEnabled(.undo) == true
+                let maskRedo = maskEditor?.isEnabled(.redo) == true
+                let reviewOwnsKeys = context?.review != nil && maskEditor?.isEnabled(.select) != true
+                Button(maskUndo ? String(localized: "Undo") : Self.title(undo, redo: false)) {
+                    history.perform(redo: false)
+                }
+                    .keyboardShortcut(undoKey("z", modifiers: .command, review: reviewOwnsKeys))
+                    .disabled(!history.enabled(redo: false))
+                Button(maskRedo ? String(localized: "Redo") : Self.title(redo, redo: true)) {
+                    history.perform(redo: true)
+                }
+                    .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: reviewOwnsKeys))
+                    .disabled(!history.enabled(redo: true))
             }
         }
         // The system's Find, Spelling, Substitutions and other text groups stay;
@@ -546,7 +624,7 @@ struct AppCommands: Commands {
                 Task { await context.collection.openEditNote() }
             }
             .keyboardShortcut("e", modifiers: .command)
-            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen) && context?.canEditBrowseNote != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.editNote) && context?.canEditBrowseNote != true)
             Divider()
             browseItem(.addTags, key: "a", [.command, .shift])
             browseItem(.removeTags, key: "a", [.command, .option, .shift])
@@ -588,7 +666,7 @@ struct AppCommands: Commands {
                 context?.review?.reveal()
             }
             .keyboardShortcut(cardKey(.space))
-            .disabled(!cardEnabled(context?.review?.canReveal))
+            .disabled(!cardEnabled(context?.reviewAvailability?.reveal))
             Divider()
             rating("Again", .again, key: "1")
             rating("Hard", .hard, key: "2")
@@ -610,7 +688,7 @@ struct AppCommands: Commands {
                 }
             }
             .keyboardShortcut("j", modifiers: .command)
-            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.bury) != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.act) && context?.browseEnabled(.bury) != true)
             browseItem(.unbury)
             Button(reviewOrBrowse(.suspend, review: "Suspend Card")) {
                 if context?.review != nil {
@@ -621,7 +699,7 @@ struct AppCommands: Commands {
                 }
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])
-            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.suspend) != true)
+            .disabled(!cardEnabled(context?.reviewAvailability?.act) && context?.browseEnabled(.suspend) != true)
             browseItem(.unsuspend)
             Divider()
             browseItem(.setDueDate, key: "d", [.command, .shift])
@@ -632,7 +710,7 @@ struct AppCommands: Commands {
                 Task { await context.collection.finishReview() }
             }
             .keyboardShortcut(cardKey(.escape))
-            .disabled(!cardEnabled(context?.review?.canFinish))
+            .disabled(!cardEnabled(context?.reviewAvailability?.finish))
         }
     }
 
@@ -715,7 +793,7 @@ struct AppCommands: Commands {
     /// The Mac reads the card's input ownership; iPad only state SwiftUI observes.
     private func cardEnabled(_ available: Bool?) -> Bool {
         #if os(macOS)
-        context?.reviewInputAvailable == true && available == true
+        context?.reviewAvailability?.input == true && context?.reviewInputAvailable == true && available == true
         #else
         context?.review?.paused == false && available == true
         #endif
@@ -727,7 +805,7 @@ struct AppCommands: Commands {
             context?.review?.rate(rating)
         }
         .keyboardShortcut(cardKey(key))
-        .disabled(!cardEnabled(context?.review?.canRate))
+        .disabled(!cardEnabled(context?.reviewAvailability?.rate))
     }
 }
 
