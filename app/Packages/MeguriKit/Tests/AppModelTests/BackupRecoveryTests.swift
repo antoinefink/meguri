@@ -9,15 +9,40 @@ extension ReviewCollectionStartupTests {
         let root = FileManager.default.temporaryDirectory.appending(path: "native-backups-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupConfiguration(root)
-        let owner = backupOwner(configuration, root: root)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() },
+            defaults: nil, cloudConfigured: false)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        owner.studyPreparation.runsUnprompted = false
         await owner.start()
         var restoredNoteID: Int64?
         do {
+            await sync.waitForInputs()
+            await owner.studyPreparation.waitForJob()
+            await owner.waitForLifecycle()
+            await owner.backupTrigger.drain()
             try #require(owner.state == .ready)
-            // Opened is a real native automatic trigger, without Settings appearing.
+            // T3.2's process-wide attempt floor can defer Opened even for this
+            // fresh folder. Always follow the app's scene lifecycle: Background
+            // has no floor (T3.4), and neither trigger needs Settings to appear.
+            let scene = UUID()
+            #expect(!owner.updateSceneActivity(scene, active: true, background: false))
+            try #require(owner.updateSceneActivity(scene, active: false, background: true))
+            owner.setForeground(false)
+            await owner.waitForLifecycle()
+            #expect(!owner.foreground && owner.error == nil)
+            #expect(!owner.updateSceneActivity(scene, active: true, background: false))
+            await owner.waitForLifecycle()
+            await owner.backupTrigger.drain()
+            try #require(owner.foreground && !owner.resuming && owner.state == .ready)
+            try #require(try await CoreCollectionService().lifecycle() == .ready(generation: owner.generation))
             let automatic = try await CoreMaintenanceService().status()
-            #expect(automatic.lastBackup != nil)
-            #expect(!(try await CoreMaintenanceService().listBackups()).isEmpty)
+            let lastBackup = try #require(automatic.lastBackup)
+            let automaticBackups = try await CoreMaintenanceService().listBackups()
+            let archive = try #require(automaticBackups.first { $0.name == lastBackup.name })
+            #expect(archive.kind == .backup && archive.sizeBytes > 0)
+            let bytes = try Data(contentsOf: configuration.collectionLocation.backupsDirectory.appending(path: archive.name))
+            #expect(!bytes.isEmpty && UInt64(bytes.count) == archive.sizeBytes)
             let beforeName = "Synthetic before backup"
             let afterName = "Synthetic after backup"
             let deck = try await CoreDeckService().addDeck(name: beforeName)
