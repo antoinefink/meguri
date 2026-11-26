@@ -346,6 +346,25 @@ extension WebKitSuites.CardRuntimeSuites {
 
         // MARK: GS9, GS10: offline MathJax (owner supersedes C10.8/D6)
 
+        @Test func reviewExtraMathRequestSurvivesTheFirstSide() async throws {
+            let extra = #"""
+                <aside id="pageMath">\(s+1\)</aside><script>
+                window.__pageMath = MathJax.typesetPromise([document.getElementById('pageMath')]);
+                // Arrive in the same script turn, before the engine can load.
+                _showQuestion('<p id="current">First ordinary side</p>', '', 'card');
+                </script>
+                """#
+            try await WebTestHarness.withPage(reviewExtra: extra, log: false) { harness, page async throws in
+                try await page.present()
+                try await harness.signal("shown", count: 1, from: page)
+                try await page.run("await __pageMath;")
+                #expect(try await page.bool("document.querySelector('#pageMath svg path') !== null && MathJax.startup.document.getMathItemsWithin([document.getElementById('pageMath')]).length === 1"))
+                #expect(try await page.string("document.getElementById('qa').textContent") == "First ordinary side")
+                #expect(try await page.bool("!document.querySelector('#qa mjx-container')"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func mathJaxTemplateAPIProducesRealDOM() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"""
@@ -1048,6 +1067,17 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func plainFollowingCardReleasesTheStaleMathScanTarget() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p id="old">\(x+1\)</p>"#)
+                try await page.run("window.__oldMathTarget = document.getElementById('old');")
+                try await page.showPresentedAnswer("<p>Plain following card</p>")
+                #expect(try await page.bool("MathJax.startup.document.options.elements === null && Array.from(MathJax.startup.document.math).length === 0 && !__oldMathTarget.isConnected"))
+                #expect(try await page.string("document.getElementById('qa').textContent") == "Plain following card")
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test(arguments: [false, true])
         func staleMathCleanupPreservesExistingSiblingItems(documentWide: Bool) async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
@@ -1073,8 +1103,15 @@ extension WebKitSuites.CardRuntimeSuites {
                     <p id='current'>Current card</p>
                     <style>#qa > p { color: rgb(1, 2, 3); }</style>
                     """)
+                // Cover both our unchanged target and an authored replacement
+                // while the old render still holds the cleanup queue.
+                if documentWide {
+                    try await page.run("window.__authoredScanTarget = [document.getElementById('sibling')]; MathJax.startup.document.options.elements = __authoredScanTarget;")
+                }
                 harness.media.release(path)
                 try await page.run("await MathJax.whenReady(function () {});")
+                let scanTarget = documentWide ? "__authoredScanTarget" : "null"
+                #expect(try await page.bool("MathJax.startup.document.options.elements === \(scanTarget)"), "\(harness.mathRequestDetails)")
                 #expect(try await page.string("document.getElementById('current').textContent") == "Current card", "\(harness.mathRequestDetails)")
                 #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#qa mjx-container') && getComputedStyle(document.getElementById('current')).color === 'rgb(1, 2, 3)'"), "\(harness.mathRequestDetails)")
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1 && MathJax.startup.document.getMathItemsWithin([document.getElementById('sibling')])[0] === __siblingItem && document.querySelector('#sibling svg') === __siblingSVG"), "\(harness.mathRequestDetails)")

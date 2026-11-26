@@ -1486,7 +1486,8 @@
     mathPending++;
     const start = function (engine) {
       return call(mathWhenReady, engine, async function () {
-        if (update !== latest) return;
+        // Requests before the first update belong to the page itself.
+        if (update && update !== latest) return;
         mathOwner = update;
         try {
           await call(mathTypeset, engine, targets);
@@ -1654,8 +1655,16 @@
         while (call(firstChildOf, qa)) call(appendChild, oldQA, call(firstChildOf, qa));
         // findMath normally already ran before a component wait; constrain any
         // late scan too. Subsequent queued typesets set their own elements.
-        mathEngine.startup.document.options.elements = [oldQA];
-        const cleanup = call(mathWhenReady, mathEngine, function () { call(mathClear, mathEngine, [oldQA]); });
+        const options = mathEngine.startup.document.options;
+        const staleElements = [oldQA];
+        options.elements = staleElements;
+        const cleanup = call(mathWhenReady, mathEngine, function () {
+          try { call(mathClear, mathEngine, staleElements); }
+          finally {
+            // Upstream clear leaves this scan target; release only ours.
+            if (options.elements === staleElements) options.elements = null;
+          }
+        });
         try {
           if (mathOwner) {
             then(cleanup, noop, noop);

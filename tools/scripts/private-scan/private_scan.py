@@ -837,9 +837,9 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     # Complete public source review of the bundled card runtime.
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
-        "fa5d19ac178410ace8f5735d69f2d99e98b1b1322fe8a7a627459a93701610d1",
+        "f93447f6c74bd3324c40ecbfc195ec4e5fc0e2a3c9f2d87917c411ecb8937ebb",
     "docs/process/review-log/mathjax-20261126.md":
-        "4f69f63a59c7d26f923bf83596ead73b2c440aa0af67ed6c6958f9c1ebdd1a89",
+        "e22fdf2a1a9cbc6909a764c28771ef9c6a0fe8eac383106b08e94bd7878dd042",
     "specs/render/card-runtime.md":
         "67e70ed2ebb021946e6292211d70cab6a524e6c711765c230ab145d7079796bd",
     # Complete-content review of the MathJax card runtime and synthetic review fixture.
