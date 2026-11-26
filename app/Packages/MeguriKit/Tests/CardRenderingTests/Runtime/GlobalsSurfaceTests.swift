@@ -383,7 +383,14 @@ extension WebKitSuites.CardRuntimeSuites {
 
         @Test func dollarsAndOrdinaryCardsDoNotLoadMath() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
-                try await page.showPresentedQuestion(#"<p id="m">$x^2$ and $$y$$ cost $5</p>"#)
+                try await page.showPresentedQuestion(#"""
+                    <p id="m">$x^2$ and $$y$$ cost $5</p>
+                    <script>void '\\(literal script\\)';</script>
+                    <script type="text/plain">\(literal data\)</script>
+                    <style>/* \(literal CSS\) */</style><textarea>\(literal source\)</textarea>
+                    <pre>\[literal block\]</pre><code>\(literal code\)</code>
+                    <noscript>\(fallback\)</noscript><select><option>\(choice\)</option></select>
+                    """#)
                 #expect(try await page.string("document.getElementById('m').textContent") == "$x^2$ and $$y$$ cost $5")
                 #expect(try await page.bool("document.querySelector('mjx-container') === null"))
                 #expect(!harness.media.requests.contains { $0.path.contains("/mathjax/") })
@@ -428,6 +435,39 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: ["alignat", "alignat*", "alignedat", "alignedat[t]", "xalignat", "xalignat*", "xxalignat"], [false, true])
+        func amsAlignmentPairsAreBoundedBeforeAllocation(variant: String, throughMacro: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let name = variant == "alignedat[t]" ? "alignedat" : variant
+                let placement = variant == "alignedat[t]" ? "[t]" : ""
+                func side(pairs: Int) -> String {
+                    let count = throughMacro ? "#1" : String(pairs)
+                    let environment = "\\begin{\(name)}\(placement){\(count)}a&=b&c&=d\\end{\(name)}"
+                    let tex = throughMacro ? "\\def\\cardalignment#1{\(environment)}\\cardalignment{\(pairs)}" : environment
+                    return "<div id='m'>\\[\(tex)\\]</div>"
+                }
+                // Ordinary two-pair inputs retain their normal rendering.
+                try await page.showPresentedQuestion(side(pairs: 2))
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && !document.querySelector('#m [data-mml-node=merror]')"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+
+                // A modest declaration just beyond the cap, with no large body.
+                try await page.announce(card: 83, generation: 2)
+                try await page.showPresentedAnswer(side(pairs: 65))
+                #expect(try await page.bool("document.querySelector('#m [data-mml-node=merror]') !== null && document.getElementById('qa').style.opacity === '1'"))
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0.card == 83 && $0.generation == 2 && $0.side == "answer"
+                        && ($0["message"] as? String)?.contains("MeguriAlignmentLimit") == true
+                }, "\(harness.diagnostics.map(\.body))")
+
+                try await page.announce(card: 84, generation: 3)
+                try await page.showPresentedQuestion(side(pairs: 2))
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && !document.querySelector('#m [data-mml-node=merror]')"))
+                #expect(!harness.diagnostics.contains { $0.card == 84 })
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
         @Test func mathIgnoresSavedMenuSettingsWithoutChangingThem() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 let settings = #"{"enrich":true,"speech":true,"braille":true,"assistiveMml":false,"inTabOrder":true,"renderer":"CHTML"}"#
@@ -454,15 +494,152 @@ extension WebKitSuites.CardRuntimeSuites {
                 default:
                     harness.media.hold("/_anki/mathjax/tex-svg.js")
                 }
-                try await page.showPresentedQuestion(#"<p id="m">\(x\)</p>"#)
+                try await page.showPresentedQuestion(#"""
+                    <p id="m">\(x\)</p><script>
+                    onUpdateHook.push(async function () {
+                      var results = await Promise.allSettled([MathJax.startup.promise, MathJax.typesetPromise()]);
+                      window.__mathRejected = results.every(function (result) { return result.status === 'rejected'; });
+                    });
+                    </script>
+                    """#)
                 #expect(try await page.string("document.getElementById('qa').style.opacity") == "1")
                 #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" })
                 #expect(try await page.bool("typeof MathJax.typeset === 'function' && typeof MathJax.typesetPromise === 'function' && typeof MathJax.typesetClear === 'function'"))
-                #expect(try await page.bool("await MathJax.startup.promise.then(function () { return false; }, function () { return true; })"))
-                #expect(try await page.bool("await MathJax.typesetPromise().then(function () { return false; }, function () { return true; })"))
+                #expect(try await page.bool("window.__mathRejected === true"))
                 #expect(try await page.bool("require('anki/reviewer').onUpdateHook === onUpdateHook"))
                 try await page.showPresentedAnswer("<p>Still reviewable</p>")
                 #expect(try await page.string("document.getElementById('qa').textContent") == "Still reviewable")
+            }
+        }
+
+        /// Release the actual held URL task only after the deadline and page
+        /// reuse. Startup and in-render autoload/glyph requests cover both sides
+        /// of the engine's readiness boundary.
+        @Test(arguments: ["entry", "startup-extension", "autoload-extension", "glyph"])
+        func lateMathDeliveryCannotTouchTheReusedSide(load: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let path: String
+                let math: String
+                switch load {
+                case "startup-extension":
+                    path = "/_anki/mathjax/a11y/assistive-mml.js"
+                    math = #"\(x\)"#
+                case "autoload-extension":
+                    path = "/_anki/mathjax/input/tex/extensions/cancel.js"
+                    math = #"\(\cancel{x}\)"#
+                case "glyph":
+                    path = "/_anki/mathjax/font/svg/dynamic/fraktur.js"
+                    math = #"\(\mathfrak{\imath}\)"#
+                default:
+                    path = "/_anki/mathjax/tex-svg.js"
+                    math = #"\(x\)"#
+                }
+                harness.media.hold(path)
+                try await page.announce(card: 71, generation: 1)
+                try await page.showPresentedQuestion("""
+                    <p id="m">\(math)</p><script>
+                    window.__mathAPI = MathJax;
+                    window.__cardRequire = require;
+                    // Includes a retained facade and a second queued request.
+                    onUpdateHook.push(async function () {
+                      await Promise.allSettled([
+                        __mathAPI.typesetPromise(), __mathAPI.typesetPromise([document.getElementById('m')])
+                      ]);
+                    });
+                    </script>
+                    """)
+                #expect(harness.media.requests(for: path).count == 1)
+                #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" && $0.card == 71 && $0.generation == 1 })
+                try await page.announce(card: 72, generation: 2)
+                try await page.showPresentedAnswer("<p id='current'>Still reviewable</p>")
+                let diagnostics = harness.diagnostics.count
+                harness.media.release(path)
+                try await page.run("await MathJax.startup.promise; await MathJax.whenReady(function () {});")
+                #expect(try await page.string("document.getElementById('qa').textContent") == "Still reviewable")
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#qa mjx-container')"))
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"))
+                #expect(try await page.bool("require === __cardRequire && require('anki/reviewer').onUpdateHook === onUpdateHook"))
+                #expect(try await page.bool("typeof MathJax.typeset === 'function' && typeof MathJax.typesetPromise === 'function' && typeof MathJax.typesetClear === 'function'"))
+                #expect(try await page.bool("MathJax.config.startup.typeset === false && MathJax.config.options.enableMenu === false"))
+                #expect(try await page.bool("await MathJax.config.loader.require('https://unbundled.invalid/component.js').then(function () { return false; }, function () { return true; })"))
+                #expect(harness.diagnostics.count == diagnostics, "\(harness.diagnostics.map(\.body))")
+                #expect(harness.remote.requests.isEmpty)
+                #expect(try await page.bool("performance.getEntriesByType('resource').every(function (entry) { return entry.name.startsWith('meguri-media://media/'); })"))
+                // Startup can recover, and the retained template API still works.
+                try await page.announce(card: 73, generation: 3)
+                try await page.showPresentedQuestion(#"""
+                    <p id="next">\(z+1\)</p><script>
+                    onUpdateHook.push(function () { return __mathAPI.typesetPromise([document.getElementById('next')]); });
+                    </script>
+                    """#)
+                #expect(try await page.bool("document.querySelector('#next mjx-container svg path') !== null"))
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
+                #expect(harness.diagnostics.count == diagnostics)
+            }
+        }
+
+        @Test(arguments: ["tex-svg.js", "a11y/assistive-mml.js"])
+        func lateMathEvaluationErrorsAreNotAttributedToTheNewSide(component: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let path = "/_anki/mathjax/" + component
+                harness.media.hold(path)
+                try await page.announce(card: 74, generation: 1)
+                try await page.showPresentedQuestion(#"<p>\(x\)</p>"#)
+                #expect(harness.media.requests(for: path).count == 1)
+                #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" && $0.card == 74 })
+                try await page.announce(card: 75, generation: 2)
+                try await page.showPresentedAnswer("<p>Current ordinary side</p>")
+                let diagnostics = harness.diagnostics.count
+                harness.media.add(path, text: "window.__lateEvaluated = true; throw new Error('Synthetic late component exception');")
+                harness.media.release(path)
+                try await harness.until("late component execution") { try await page.bool("window.__lateEvaluated === true") }
+                #expect(try await page.string("document.getElementById('qa').textContent") == "Current ordinary side")
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && typeof MathJax.typesetPromise === 'function'"))
+                #expect(try await page.bool("require('anki/reviewer').onUpdateHook === onUpdateHook"))
+                #expect(harness.diagnostics.count == diagnostics, "\(harness.diagnostics.map(\.body))")
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
+        @Test(arguments: ["malformed", "autoload", "glyph"])
+        func resolvedMathErrorsReportTheirOriginAndKeepReviewWorking(failure: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x\)</p>"#)
+                #expect(harness.diagnostics.isEmpty)
+                let math: String
+                let source: String
+                switch failure {
+                case "autoload":
+                    math = #"\(\cancel{x}\)"#
+                    source = "input/tex/extensions/cancel.js"
+                    harness.media.servesRuntime = false // Real 404 from the harness.
+                case "glyph":
+                    math = #"\(\mathfrak{\imath}\)"#
+                    source = "font/svg/dynamic/fraktur.js"
+                    harness.media.servesRuntime = false
+                default:
+                    math = #"\(\frac{1}\)"#
+                    source = "tex-svg.js"
+                }
+                try await page.announce(card: 81, generation: 9)
+                try await page.showPresentedAnswer("<p id='bad'>\(math)</p>")
+                #expect(try await page.string("document.getElementById('qa').style.opacity") == "1")
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0.card == 81 && $0.generation == 9 && $0.side == "answer"
+                        && ($0["source"] as? String)?.hasSuffix(source) == true
+                }, "\(harness.diagnostics.map(\.body))")
+                if failure == "malformed" {
+                    #expect(try await page.bool("document.querySelector('#bad [data-mml-node=merror]') !== null"))
+                    #expect(harness.diagnostics.contains { ($0["message"] as? String)?.contains("Missing") == true })
+                    #expect(!harness.diagnostics.contains { ($0["message"] as? String)?.contains("[object Object]") == true })
+                } else {
+                    #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/" + source })
+                }
+                try await page.announce(card: 82, generation: 10)
+                try await page.showPresentedQuestion("<p>Next ordinary card</p>")
+                #expect(try await page.string("document.getElementById('qa').textContent") == "Next ordinary card")
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"))
+                #expect(!harness.diagnostics.contains { $0.card == 82 })
             }
         }
 

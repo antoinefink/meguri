@@ -135,11 +135,13 @@ extension WebKitSuites {
 
         @Test func bundledMathRoutesAreConfinedAndNeverUseCollectionMedia() async throws {
             let fixture = MediaFixture()
-            for path in ["tex-svg.js", "input/tex/extensions/ams.js", "input/tex/extensions/mhchem.js", "a11y/assistive-mml.js",
-                         "fonts/mathjax-mhchem-font-extension/svg.js", "fonts/mathjax-bbm-font-extension/svg.js",
-                         "fonts/mathjax-bboldx-font-extension/svg.js", "fonts/mathjax-dsfont-font-extension/svg.js"] {
-                let asset = try #require(CardRuntime.asset(at: "mathjax/" + path))
-                let task = try await Self.answer(URLRequest(url: URL(string: "meguri-media://media/_anki/mathjax/" + path)!), fixture: fixture)
+            let paths = CardRuntime.assetPaths.filter { $0.hasPrefix("mathjax/") }
+            #expect(paths.count == 85)
+            // Runs against Bundle.module on both Mac and the hosted iOS suite.
+            for path in paths {
+                let asset = try #require(CardRuntime.asset(at: path))
+                #expect(!asset.data.isEmpty, "\(path)")
+                let task = try await Self.answer(URLRequest(url: URL(string: "meguri-media://media/_anki/" + path)!), fixture: fixture)
                 #expect(task.response?.statusCode == 200)
                 #expect(task.response?.value(forHTTPHeaderField: "Content-Type") == "text/javascript; charset=utf-8")
                 #expect(task.body == asset.data)

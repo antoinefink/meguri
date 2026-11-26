@@ -527,6 +527,7 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private var files: [String: File] = [:]
     private var delays: [String: Duration] = [:]
     private var held: Set<String> = []
+    private var heldResponses: [ObjectIdentifier: (path: String, respond: () -> Void)] = [:]
     /// Answers nothing at all (C7.4's remote origin).
     var holdsEverything = false
     var servesRuntime = false
@@ -544,8 +545,19 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     /// Answers `path` only after `delay`.
     func delay(_ path: String, by delay: Duration) { delays[path] = delay }
 
-    /// Never answers `path`.
+    /// Holds `path` until explicitly released (or forever).
     func hold(_ path: String) { held.insert(path) }
+
+    /// Delivers pending responses too, so tests exercise late script execution
+    /// after a caller's deadline and reuse of the same page.
+    func release(_ path: String) {
+        held.remove(path)
+        let pending = heldResponses.filter { $0.value.path == path }
+        for (id, response) in pending {
+            heldResponses.removeValue(forKey: id)
+            response.respond()
+        }
+    }
 
     func requests(for path: String) -> [Request] { requests.filter { $0.path == path } }
 
@@ -558,8 +570,12 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
         requests.append(Request(path: path, time: ProcessInfo.processInfo.systemUptime))
         let id = ObjectIdentifier(task)
         active.insert(id)
-        if holdsEverything || held.contains(path) { return }
+        if holdsEverything { return }
         let range = task.request.value(forHTTPHeaderField: "Range")
+        if held.contains(path) {
+            heldResponses[id] = (path, { [weak self] in self?.respond(task, url: url, path: path, range: range) })
+            return
+        }
         if let delay = delays[path] {
             Task { @MainActor in
                 try? await Task.sleep(for: delay)
@@ -572,6 +588,7 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
         active.remove(ObjectIdentifier(task))
+        heldResponses.removeValue(forKey: ObjectIdentifier(task))
     }
 
     private func respond(_ task: any WKURLSchemeTask, url: URL, path: String, range: String?) {

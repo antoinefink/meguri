@@ -320,6 +320,11 @@
     }
     const value = event.error;
     const filename = event.filename;
+    if (filename && call(stringIndexOf, filename, mathRoot) === 0) {
+      mathError(value === undefined || value === null ? event.message : value,
+        mathOwner || mathStartupOwner, filename);
+      return;
+    }
     report({
       kind: "exception",
       message: describe(value === undefined || value === null ? event.message : value),
@@ -1110,9 +1115,27 @@
   const mathRoot = "meguri-media://media/_anki/mathjax/";
   let mathLoading = null;
   let mathEngine = null;
+  let mathTypeset = null;
+  let mathClear = null;
+  let mathOwner = null;
+  let mathStartupOwner = null;
 
-  function mathError(error) {
-    report({ kind: "math", message: describe(error), phase: "typeset" });
+  function mathError(error, update, source) {
+    // Late work belongs to its requesting side, never the page's next user.
+    if (!update || update !== latest) return;
+    updateSignal("error", update, {
+      kind: "math", message: describe(error), phase: "typeset", source: source || mathRoot + "tex-svg.js",
+    });
+  }
+
+  function mathStartup() {
+    const update = latest;
+    const waiting = mathDeadline(loadMath(), 8000);
+    then(waiting, noop, function (error) {
+      if (update) update.mathFailed = true;
+      mathError(error, update);
+    });
+    return waiting;
   }
 
   function mathDeadline(work, milliseconds) {
@@ -1147,19 +1170,21 @@
           throw new ErrorCtor("Unbundled MathJax component refused");
         }
       } catch (error) { reject(error); return; }
+      const owner = mathOwner || mathStartupOwner;
       const script = call(createElement, doc, "script");
       let finished = false;
       const finish = function (error) {
         if (finished) return;
         finished = true;
-        call(clearTimeoutFn, win, timer);
         const parent = call(parentNodeOf, script);
         if (parent) call(removeChild, parent, script);
-        if (error) reject(error); else resolve();
+        if (error) {
+          mathError(error, owner, url.href);
+          reject(error);
+        } else resolve();
       };
-      const timer = call(setTimeoutFn, win, function () {
-        finish(new ErrorCtor("Bundled MathJax component timed out"));
-      }, 4000);
+      // Removing a classic script cannot cancel execution. Keep its constrained
+      // configuration and real completion alive; only callers have deadlines.
       call(nativeAdd, script, "load", function () { finish(); });
       call(nativeAdd, script, "error", function () { finish(new ErrorCtor("Bundled MathJax component failed")); });
       call(setAttribute, script, "src", url.href);
@@ -1167,8 +1192,41 @@
     });
   }
 
+  function limitMathAlignments(engine) {
+    // Version-pinned application integration; the combined tex-svg bundle
+    // already registered AMS. Replacing AmsMethods alone misses its stored
+    // function references. Guard the registered environment parser instead.
+    if (engine.version !== "4.1.3") throw new ErrorCtor("Unsupported bundled MathJax version");
+    const tex = engine._.input.tex;
+    const environments = tex.MapHandler.MapHandler.getMap("AMSmath-environment");
+    const parseEnvironment = environments.parser;
+    const alignAt = tex.ams.AmsMethods.AmsMethods.AlignAt;
+    const xalignAt = tex.ams.AmsMethods.AmsMethods.XalignAt;
+    const TeXError = tex.TexError.default;
+    environments.parser = function (parser, name, method, args) {
+      if (method === alignAt || method === xalignAt) {
+        // Read the same argument AMS will use, including alignedat's optional
+        // placement, then rewind. Macro expansion has already reached this
+        // parser. Leave syntax validation and ordinary inputs to upstream.
+        const position = parser.i;
+        try {
+          const command = "\\begin{" + name + "}";
+          if (name === "alignedat") parser.GetBrackets(command);
+          const pairs = parser.GetArgument(command);
+          if (call(regexpExec, /^[0-9]+$/, pairs) && +pairs > 64) {
+            throw new TeXError("MeguriAlignmentLimit", "At most 64 alignment pairs are allowed");
+          }
+        } finally {
+          parser.i = position;
+        }
+      }
+      return call(parseEnvironment, this, parser, name, method, args);
+    };
+  }
+
   function loadMath() {
     if (mathLoading) return mathLoading;
+    mathStartupOwner = latest;
     // tex-svg contains the base font and menu constructor. Disable saved
     // menu preferences for this document only, before its constructor runs.
     // In particular enableMenu:false alone does not stop mergeUserSettings.
@@ -1188,11 +1246,19 @@
         typeset: false,
         ready: function () {
           const engine = win.MathJax;
+          limitMathAlignments(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
             mergeUserSettings() {}
           };
           engine.startup.defaultReady();
+          mathEngine = engine;
+          mathTypeset = engine.typesetPromise;
+          mathClear = engine.typesetClear;
+          // Keep template calls bounded and side-scoped after startup too.
+          engine.typeset = mathFacade.typeset;
+          engine.typesetPromise = mathFacade.typesetPromise;
+          engine.typesetClear = mathFacade.typesetClear;
         },
       },
       // Templates can make several requests while the first script is in flight.
@@ -1201,6 +1267,14 @@
       typesetClear: mathFacade.typesetClear,
       tex: mathFacade.tex,
       options: {
+        compileError: function (document, item, error) {
+          mathError(error, mathOwner);
+          document.compileError(item, error);
+        },
+        typesetError: function (document, item, error) {
+          mathError(error, mathOwner);
+          document.typesetError(item, error);
+        },
         enableMenu: false,
         menuOptions: { settings: {
           enrich: false, speech: false, braille: false,
@@ -1211,12 +1285,12 @@
       },
     };
     // This getter is only for templates before the script executes. Upstream
-    // creates a separate startup object with its own promise. Never assign our
-    // loading promise to that object, and require a real engine below before
-    // awaiting it (a script load event also fires after a JS evaluation error).
-    defineProperty(configuration.startup, "promise", { get: function () { return mathLoading; } });
+    // creates a separate startup object with its own promise. Capture that
+    // original before exposing bounded template waits below (a script load
+    // event also fires after a JS evaluation error).
+    defineProperty(configuration.startup, "promise", { get: mathStartup });
     win.MathJax = configuration;
-    const startup = promise(function (resolve, reject) {
+    mathLoading = promise(function (resolve, reject) {
       configuration.loader.failed = reject;
       then(then(loadMathScript(mathRoot + "tex-svg.js"), function () {
         const engine = win.MathJax;
@@ -1227,44 +1301,80 @@
         if (!engine.typeset) engine.typeset = mathFacade.typeset;
         if (!engine.typesetPromise) engine.typesetPromise = mathFacade.typesetPromise;
         if (!engine.typesetClear) engine.typesetClear = mathFacade.typesetClear;
-        return engine.startup.promise;
+        const startup = engine.startup.promise;
+        // The bundle resolves startup via promiseResolve, not this property.
+        // Keep the original privately, while template waits remain bounded.
+        defineProperty(engine.startup, "promise", { get: mathStartup });
+        return then(startup, function () {
+          mathStartupOwner = null;
+          return engine;
+        });
       }), resolve, reject);
     });
-    mathLoading = then(mathDeadline(startup, 8000), function () {
-      mathEngine = win.MathJax;
-      return mathEngine;
-    }, function (error) {
-      win.MathJax = mathFacade;
-      throw error;
-    });
-    // A template may read startup.promise without awaiting it.
-    then(mathLoading, noop, mathError);
+    then(mathLoading, noop, noop);
     return mathLoading;
   }
 
   function requestMath(elements) {
-    // Upstream typesetPromise serializes document work through whenReady.
-    const work = then(loadMath(), function (engine) { return engine.typesetPromise(elements); });
-    then(work, noop, mathError);
-    return work;
+    const update = latest;
+    const targets = elements || [findQA()];
+    let expired = false;
+    const work = then(loadMath(), function (engine) {
+      return engine.whenReady(async function () {
+        if (expired || update !== latest) return;
+        mathOwner = update;
+        try {
+          await call(mathTypeset, engine, targets);
+        } finally {
+          mathOwner = null;
+          if (expired || update !== latest) call(mathClear, engine, targets);
+        }
+      });
+    });
+    const waiting = mathDeadline(work, 8000);
+    then(waiting, noop, function (error) {
+      expired = true;
+      if (update) update.mathFailed = true;
+      mathError(error, update);
+    });
+    return waiting;
   }
 
   const mathFacade = {
     tex: {
       inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]],
       processEscapes: false, packages: { "[+]": ["ams", "mhchem"] },
+      formatError: function (jax, error) {
+        // TeXError is not an Error subclass in this release. Preserve its
+        // original id/message rather than reporting "[object Object]".
+        mathError(error.id + ": " + error.message, mathOwner);
+        return jax.formatError(error);
+      },
     },
     typeset: function typeset(elements) { requestMath(elements); },
     typesetPromise: function typesetPromise(elements) { return requestMath(elements); },
-    typesetClear: function typesetClear(elements) { if (mathEngine) mathEngine.typesetClear(elements); },
+    typesetClear: function typesetClear(elements) { if (mathClear) call(mathClear, mathEngine, elements); },
     startup: {},
   };
-  defineProperty(mathFacade.startup, "promise", { get: function () { return loadMath(); } });
+  defineProperty(mathFacade.startup, "promise", { get: mathStartup });
+
+  function mathText(node) {
+    if (call(nodeTypeOf, node) === 3) return call(characterData, node);
+    // The bundle's default skipped tags. Inspect the live tree without
+    // cloning custom elements or media just to detect literal delimiters.
+    if (call(nodeTypeOf, node) === 1
+        && call(stringIndexOf, ",script,noscript,style,textarea,pre,code,math,select,option,mjx-container,",
+          "," + call(localNameOf, node) + ",") >= 0) return "";
+    let text = "";
+    for (let child = call(firstChildOf, node); child; child = call(nextSiblingOf, child)) text += mathText(child);
+    return text;
+  }
 
   function typesetSide(qa) {
-    const text = call(textContentOf.get, qa) || "";
-    const hasMath = call(stringIndexOf, text, "\\(") >= 0 || call(stringIndexOf, text, "\\[") >= 0;
-    if (!hasMath) return null;
+    // A template already exhausted this side's math wait; still reveal it.
+    if (latest && latest.mathFailed) return null;
+    const text = mathText(qa);
+    if (call(stringIndexOf, text, "\\(") < 0 && call(stringIndexOf, text, "\\[") < 0) return null;
     return then(requestMath([qa]), noop, noop);
   }
 
@@ -1289,9 +1399,18 @@
       // Release MathItems before their source nodes leave the document.
       if (mathEngine) {
         try {
-          await mathEngine.whenReady();
-          mathEngine.typesetClear([qa]);
-        } catch (error) { mathError(error); }
+          const oldQA = qa;
+          const cleanup = mathEngine.whenReady(function () { call(mathClear, mathEngine, [oldQA]); });
+          if (mathOwner) {
+            // Timed-out rendering may resume and rescan its target. Let it
+            // finish against the detached old node, then clear its MathItems.
+            qa = call(cloneNode, oldQA, false);
+            call(replaceChild, call(parentNodeOf, oldQA), qa, oldQA);
+            then(cleanup, noop, function (error) { mathError(error, update); });
+          } else {
+            await cleanup;
+          }
+        } catch (error) { mathError(error, update); }
       }
       // 5. Insert.
       held = [];
