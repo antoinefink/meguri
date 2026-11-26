@@ -244,9 +244,9 @@ main:focus { outline: none; }
 .browse-page [disabled] { opacity: .65; cursor: default; }
 @media (min-width: 75rem) {
   .browse-show-detail .browse-split { grid-template-columns: 17rem minmax(0, 1fr); }
-  .browse-show-detail .browse-columns, .browse-show-detail .browse-cell-deck, .browse-show-detail .browse-cell-match:not(.browse-cell-unavailable) { display: none; }
+  .browse-show-detail .browse-columns, .browse-show-detail .browse-cell-deck { display: none; }
   .browse-show-detail .browse-result { grid-template-columns: minmax(0, 1fr) auto; column-gap: .5rem; padding: .5rem .75rem; font-size: .9rem; }
-  .browse-show-detail .browse-cell-unavailable { grid-column: 1 / -1; }
+  .browse-show-detail .browse-cell-match { grid-column: 1 / -1; font-size: .8rem; }
   .browse-show-detail .browse-cell-template { font-size: .8rem; color: var(--muted); }
 }
 @media (max-width: 74.999rem) {

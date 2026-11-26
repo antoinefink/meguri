@@ -242,7 +242,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
       setDetail(null); setFields({}); setTags(""); setConfirmDelete(false); setOutcome({ text: "Note and its cards deleted." });
       void readPage(currentScope.current, null, true, restoreThrough, "Note and its cards deleted.");
       focusSearch();
-    } catch (caught) { fail(caught, setDeleteError); }
+    } catch (caught) { fail(caught, text => deleteDialog.current?.open ? setDeleteError(text) : setOutcome({ error: true, text })); }
     finally { writing.current = false; if (alive.current) setBusy(false); }
   }
   const disabled = busy || blocked;
@@ -268,8 +268,11 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   useLayoutEffect(() => { if (conflict) banner.current?.focus(); }, [conflict]);
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if ((event.target as HTMLElement).closest("input, textarea, select, dialog")) return;
+    const target = event.target as HTMLElement;
+    // The search box clears itself on Escape; selects and the dialog own their keys.
+    if (target.closest("dialog, select, #browse-query")) return;
     if (event.key === "Escape" && cardOpen) { event.preventDefault(); back(); return; }
+    if (target.closest("input, textarea")) return;
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && detail && !disabled) {
       const card = event.key === "ArrowDown" ? next : previous;
       if (card) { event.preventDefault(); step(card, "heading"); }
@@ -343,7 +346,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
             {detail && <aside className="browse-info-pane" aria-labelledby="browse-info-title"><h3 id="browse-info-title">Card info</h3><dl className="browse-info"><dt>Card ID</dt><dd>{detail.card.card_id}</dd><dt>Note ID</dt><dd>{detail.note.note_id}</dd><dt>Template</dt><dd>{detail.card.template}</dd><dt>Deck</dt><dd>{detail.card.deck}</dd></dl></aside>}
           </div>
           <div className="browse-bottom-bar">{!conflict && loadServerCopy}{saveButton}</div>
-          {detail && <dialog ref={deleteDialog} className="browse-dialog" aria-labelledby="browse-delete-title" onClose={() => { setConfirmDelete(false); if (!conflict) deleteTrigger.current?.focus(); }}>
+          {detail && <dialog ref={deleteDialog} className="browse-dialog" aria-labelledby="browse-delete-title" onCancel={event => { if (busy) event.preventDefault(); }} onClose={() => { setConfirmDelete(false); if (conflict) banner.current?.focus(); else deleteTrigger.current?.focus(); }}>
             <h2 id="browse-delete-title">Delete “{title}”?</h2>
             <p>This removes the note and {siblings === 1 ? "its only card" : `all ${siblings} of its cards`}. Your devices receive the deletion when they sync.</p>
             {deleteError && <p role="alert" className="error">{deleteError}</p>}

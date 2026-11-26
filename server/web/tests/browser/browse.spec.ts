@@ -503,7 +503,7 @@ test("wide Browse lists at full width, then keeps the results as a rail beside t
   const before = await page.locator(".browse-results").evaluate(el => el.scrollTop); expect(before).toBeGreaterThan(0);
   await target.click(); await expect(page.getByLabel("Example", { exact: true })).toBeVisible();
   await expect(target).toHaveAttribute("aria-current", "true"); await expect(target).toBeInViewport();
-  await expect(target.locator(".browse-cell-deck")).toBeHidden(); await expect(columns).toBeHidden();
+  await expect(target.locator(".browse-cell-deck")).toBeHidden(); await expect(columns).toBeHidden(); await expect(target.locator("mark")).toHaveText("aprovechar");
   await expect(page.getByLabel("Search note fields")).toBeVisible(); await page.screenshot({ path: "/out/browse-wide-card.png" });
   await page.getByRole("button", { name: "All cards" }).click();
   await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(target).toBeFocused();
@@ -574,4 +574,16 @@ for (const [width, height] of [[390, 844], [900, 800]] as const) test(`below the
   const sidebar = await page.locator('[data-slot="sidebar"]').boundingBox(), bar = await page.locator(".browse-bottom-bar").boundingBox();
   if (width > 768) expect(bar!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("Escape from a note field returns to the list, and a pending delete cannot be cancelled", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  await page.getByLabel("Example", { exact: true }).press("Escape");
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(rows(page).first()).toBeFocused();
+  await rows(page).first().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete “el viaje”?" });
+  const held = barrier(); state.writeGate = held.promise; state.writeError = true;
+  await dialog.getByRole("button", { name: "Delete note", exact: true }).click(); await expect.poll(() => state.writesStarted).toBe(1);
+  await page.keyboard.press("Escape"); await expect(dialog).toBeVisible();
+  held.release(); await expect(dialog.getByRole("alert")).toBeVisible(); expect(state.writes).toHaveLength(1);
 });

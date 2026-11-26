@@ -146,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/browse.tsx": {
-        "bytes": 29699,
-        "sha256": "0fdba79f1fcf698bff56c0591492577eea5056dc5b13cf89afe9e02cfaa90682"
+        "bytes": 30025,
+        "sha256": "5fc7f9d4240624daf80a72aac8ccfd7160140696cb7c391bd5dcb2c02531aa8a"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -186,8 +186,8 @@
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 22992,
-        "sha256": "01b95c7628651cbe0401bbb5df3c623dfe5980eaefdd97ae5fd2a63d65d471ed"
+        "bytes": 22934,
+        "sha256": "2f2cd42bbd0f8f21305d1c87832bb93341246b4b6a101e4cf38ae83683a7dc1b"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -218,8 +218,8 @@
         "sha256": "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad"
       },
       "tests/browser/browse.spec.ts": {
-        "bytes": 49251,
-        "sha256": "22ff413d3fd71c2357e247c963ff32d5ca86bb58aa03f5a4a8b155fd5b8bd363"
+        "bytes": 50345,
+        "sha256": "c85ab581e557f5c6deffa65d4ddc69c4eb9eb0bf2f18393f22db57ee3fae16ff"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,

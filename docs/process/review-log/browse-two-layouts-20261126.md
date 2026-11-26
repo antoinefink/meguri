@@ -20,3 +20,11 @@ The simplification pass (shared icon and scope helpers, one Save and Load server
 - `server/web/src/style.css` — `01b95c7628651cbe0401bbb5df3c623dfe5980eaefdd97ae5fd2a63d65d471ed`
 - `server/web/AGENTS.md` — `e2914f8ba8237ed9ba58cef06b35b51ad875e02e0192dd53b59808e05388c7b6`
 - `server/web/scripts/audit-assessment.json` — `9ab8f116176d337a8fe06da25519342f3cb6f2954194060adf832e8b5f753650`
+
+Review feedback on the pull request led to four changes: the narrow list keeps the search match line while a card is open (W12 requires each result to show it), Escape returns to the list from note fields, a pending delete cannot be cancelled and a late failure reaches the page message, and the W12 wording edit was reverted because specs are written only in the spec-writer role. `sync-web-check` and `sync-web-verify` (116 tests) passed. The independent reviewer read the complete revised files and approved these exact bytes; `specs/servers/meguri-sync-web.md` is back to its admitted bytes.
+
+- `docs/plans/2026-11-26-0903-feat-browse-two-layouts-plan.md` — `b57b679c7c2ad0b0a60fbbb7f849125fe8f1f52b24e0ace28c9391bd8234a9f2`
+- `server/web/src/browse.tsx` — `5fc7f9d4240624daf80a72aac8ccfd7160140696cb7c391bd5dcb2c02531aa8a`
+- `server/web/src/style.css` — `2f2cd42bbd0f8f21305d1c87832bb93341246b4b6a101e4cf38ae83683a7dc1b`
+- `server/web/tests/browser/browse.spec.ts` — `c85ab581e557f5c6deffa65d4ddc69c4eb9eb0bf2f18393f22db57ee3fae16ff`
+- `server/web/scripts/audit-assessment.json` — `4f5a8e59bdb0ba8c2f5d3f12be8059071126e84e4bb8b2ae670e24cbb8f1bcc2`
