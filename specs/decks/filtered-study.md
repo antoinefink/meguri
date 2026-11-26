@@ -34,11 +34,16 @@ Create or edit with no matches reports that no eligible cards matched and preser
 
 ## F3. Study with rescheduling
 
-Study the selected filtered deck by its stored membership. Imported and locally built decks use the same queue. Within each queue, the build positions give the due order. Keep intraday priority, learn-ahead and mix rules. New siblings retain their gathered order.
+Study the selected filtered deck by its stored membership. Imported and locally built decks use the same queue. Within each queue, the build positions give the due order. Use the filtered deck’s default mix for both new and interday learning cards. Keep intraday priority and learn-ahead rules. Among eligible intraday cards those with previous attempts precede those without, then due order applies. New siblings retain their gathered order.
 
 For scheduling, read the card type, home preset, memory state and home deck's desired retention. Read the original due when it is nonzero, otherwise read the current due. For an early review, the due day in `sched/fsrs-transitions#T3` is the effective due, even when it exceeds today. T2 supplies the elapsed days since the last review to FSRS. The build position is an ordering value. It cannot replace the home due in this calculation (R702).
 
 Apply the selected normal transition. When the result is review, return the card to its home deck, clear both original fields and save the newly computed schedule. When the result is learning or relearning, retain temporary membership and save the next due in both due fields, so Empty will retain that progress. Normal answer effects apply, including review history, sibling handling, undo and the counters for the deck in which the answer was given (`sched/presets#D4`). An early review writes review-log type 3 with its scheduling factor. A review on time or late writes type 1. Learning and relearning use their own normal log types.
+
+Two examples distinguish build order from presentation and home due from temporary due.
+
+- The first search takes new cards N1, N2. The second takes intraday learning card L1 and review card R1, in that order. Each card has a different note and a positive home due. Assume no other cards, sibling burying off and limits sufficient for all four. Their new positions are −100000, −99999, −99998 and −99997 respectively. The initial rescheduling queue presents L1, N1, R1, N2. In preview the initial order is N1, N2, L1, R1 because all four enter queue 2.
+- On day 100, a review card with interval 10 and home due 105 has elapsed 5 days in its current review state, even at build position −100000. With the home preset's maximum interval set to one day, Good returns it home with interval 1, due 101, and both original fields cleared. Its log has type 3, previous interval 10, new interval 1 and a positive scheduling factor. A control with home due 100 has elapsed 10 days and writes type 1 after Good. The home FSRS passing-interval rules apply in both cases.
 
 ## F4. Preview without rescheduling
 
@@ -61,7 +66,16 @@ Start from a normal deck. Scope every search to the selected deck and descendant
 | Preview recent new cards | Both `is:new` and `added:N`, oldest note first, preview. |
 | Study by state or tags | Select a card limit and one of four modes below. Include any selected inclusion tag and exclude every selected exclusion tag, using literal tag operands and the normal hierarchical tag search. With no inclusions all otherwise eligible cards qualify. |
 
-For the first two choices, reset stale daily counters to today before applying the delta. Apply the same delta to existing parents only when `applyAllParentLimits` is enabled. Never change child counters or the shared preset. Keep the positive delta as the selected deck's next suggested extension (`extend_new` or `extend_review`). Negative deltas reduce today's allowance. Display available uncapped new or review cards for the deck and its children. Keep the current deck selected and refresh its counts. Rollover expires the adjustment normally.
+For the first two choices the input accepts every integer from −99,999 through 99,999, including zero. Reset stale daily counters to today before applying the delta. Apply the same delta to existing parents only when `applyAllParentLimits` is enabled. Never change child counters or the shared preset. Keep the positive delta as the selected deck's next suggested extension (`extend_new` or `extend_review`). Negative deltas reduce today's allowance. Display available uncapped new or review cards for the deck and its children. Keep the current deck selected and refresh its counts. Rollover expires the adjustment normally.
+
+Example with a daily new limit of 10, sufficient cards and no other limiting deck or review limit:
+
+| Adjustment | New studied | New remaining | Suggested next increase |
+|---|---:|---:|---:|
+| Initial state | 8 | 2 | — |
+| +5 | 3 | 7 | 5 |
+| −2 after that increase | 5 | 5 | 5 |
+| +5 on the following day before any study | −5 | 15 | 5 |
 
 For day-based searches use a ceiling of 99,999 cards, with N initially 1. The forgotten-days range is 1–30. For state/tag study the initial limit is 100. New cards use `is:new` in oldest-note order with rescheduling. Due cards use `is:due` in due order with rescheduling. Previously introduced cards use `-is:new` in random order with rescheduling. All cards use random order and preview. On successful state/tag study save that source deck's included and excluded tag lists in its auxiliary config (`customStudyIncludeTags`, `customStudyExcludeTags`). A failed or cancelled operation leaves the saved choices untouched.
 
