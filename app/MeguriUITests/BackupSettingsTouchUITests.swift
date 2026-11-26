@@ -184,14 +184,9 @@ final class BackupSettingsTouchUITests: XCTestCase {
                            "All four rows, including Interval, retain native height parity")
         }
 
-        // Reset the same inert fixture once after measuring Monthly, then move
-        // forward in form order. Missing virtualized fields are known to be later.
-        app.terminate()
-        app.launch()
-        XCTAssertTrue(app.buttons["settings.backups.create"].firstMatch.waitForExistence(timeout: 10))
         // Coordinates near the right edge put the caret after the existing
         // digits. app.typeText cannot implicitly focus a queried field. Each
-        // assertion proves its visible live draft before the next focus change;
+        // independent launch proves the edge tap focuses and edits its live draft;
         // production persistence is covered by the real collection journeys.
         try editAtEdge("interval", old: "30", new: "31", top: true, in: app)
         try editAtEdge("daily", old: "12", new: "11", top: false, in: app)
@@ -281,6 +276,10 @@ final class BackupSettingsTouchUITests: XCTestCase {
     }
 
     private func editAtEdge(_ name: String, old: String, new: String, top: Bool, in app: XCUIApplication) throws {
+        // Relaunch the same synthetic fixture so no edit inherits a responder.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["settings.backups.create"].firstMatch.waitForExistence(timeout: 10))
         let window = app.windows.containing(.collectionView, identifier: "settings.backups.content").firstMatch
         let input = window.collectionViews["settings.backups.content"].textFields["settings.backups.limit.\(name)"].firstMatch
         reveal(input, in: app)
@@ -288,6 +287,7 @@ final class BackupSettingsTouchUITests: XCTestCase {
         let rect = input.frame
         let point = CGPoint(x: rect.maxX - 2, y: top ? rect.minY + 2 : rect.maxY - 2)
         XCTAssertGreaterThan(abs(point.y - rect.midY), 11, "Tap outside the old 22-point text target")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "A fresh launch must have no software keyboard before tapping \(name)")
         tap(point, in: window)
         app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count) + new)
         XCTAssertTrue(wait(timeout: 5) { input.value as? String == new }, "The edge tap must focus and edit \(name) exactly")

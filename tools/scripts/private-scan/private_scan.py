@@ -843,7 +843,7 @@ PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/BackupRestoreWindowUITests.swift":
         "db612f779e0f9ff95d15e17fe64ecd417cb43f407094eff797d8fb8bf73ea94a",
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
-        "b18449ab368a57caf36977ae617dd8bde3069fa0b0d625beef41f3f4bad737f0",
+        "1008ab6ea30b0e807559cb31dc915677e7db0438e66364e34aed9040cd1a2e18",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
