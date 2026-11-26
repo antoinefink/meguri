@@ -156,7 +156,7 @@ fn c9_rapid_same_card_postimages_commit_in_order_without_extra_cache_contributio
 
 #[test]
 fn malformed_membership_refuses_session_prediction_and_answer_without_journal_or_write() {
-    use meguri_engine::{OpSource, OpSpec, decks::filtered::{self, Definition, Term}, sched::queue::QueueProvider};
+    use meguri_engine::{EngineError, OpSource, OpSpec, decks::filtered::{self, Definition, Term}, sched::queue::QueueProvider, session::PeekResult};
     use meguri_model::ids::DeckId;
     use meguri_sched::states::fsrs_glue::FsrsCache;
     use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StampMode, Table};
@@ -228,8 +228,22 @@ fn malformed_membership_refuses_session_prediction_and_answer_without_journal_or
 
             if let Some(polled) = polled { assert!(polled.is_err(), "{mode:?}"); }
             assert!(answer.is_err(), "malformed answer admitted: {mode:?}: {answer:?}");
-            assert!(peek.is_err(), "malformed peek shown: {mode:?}");
-            assert!(queue.is_err(), "malformed queue head predicted: {mode:?}");
+            if mode.is_some() {
+                let expected = EngineError::InvalidArgument {
+                    message: "invalid filtered card home deck".into(),
+                };
+                assert_eq!(peek.err(), Some(expected.clone()), "malformed peek shown: {mode:?}");
+                assert_eq!(queue.err(), Some(expected), "malformed queue head predicted: {mode:?}");
+            } else {
+                // Fresh ordinary gather excludes nonzero odid. The stale
+                // shown session above must still reject admission.
+                assert!(matches!(peek, Ok(PeekResult::Empty)), "malformed peek shown: {mode:?}: {peek:?}");
+                let (queue, states) = queue.unwrap_or_else(|error| panic!("ordinary gather refused: {error:?}"));
+                assert!(queue.value.main.is_empty());
+                assert!(queue.value.learning.is_empty());
+                assert!(queue.value.presentation().is_empty());
+                assert!(states.is_none(), "malformed queue head predicted: {mode:?}");
+            }
             assert!(h.logs().is_empty());
             assert_eq!(images(), before);
             assert_eq!(h.collection.last_seq(), seq);
