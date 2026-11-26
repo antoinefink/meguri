@@ -228,48 +228,46 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupConfiguration(root)
         let service = BackupServiceProbe()
-        // Off has no cloud policy to acknowledge Quit. The configured-policy
-        // refusal and real quit-command ACK paths belong to the shutdown suite.
-        let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
-            configuration: nil, defaults: nil)
+        // Off has no cloud policy to acknowledge Quit. Keep startup inert:
+        // sync and study-preparation writes have their own regression suites.
+        let backend = SyncOwnerFake()
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend },
+            defaults: nil, cloudConfigured: false)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
-        // Force study preparation's real Ready transition to follow the initial
-        // Opened call, rather than racing it while opening suppresses renewal.
-        let preparationGate = SyncOwnerGate()
-        var preparation = try #require(owner.studyPreparation.environment)
-        let startPreparation = preparation.start
-        preparation.start = {
-            await preparationGate.hold()
-            return try await startPreparation()
-        }
-        owner.studyPreparation.environment = preparation
-        let startup = Task { await owner.start() }
+        owner.studyPreparation.runsUnprompted = false
+        await owner.start()
         do {
-            await preparationGate.waitUntilHeld()
-            let openLimit = ContinuousClock.now.advanced(by: .seconds(4))
-            while !owner.deckActionsReady, ContinuousClock.now < openLimit {
-                try await Task.sleep(for: .milliseconds(1))
-            }
-            try #require(owner.deckActionsReady)
-            #expect(await service.triggers == [.opened])
-            preparationGate.release()
-            await startup.value
-            let renewalLimit = ContinuousClock.now.advanced(by: .seconds(4))
-            while await service.triggers.count < 2, ContinuousClock.now < renewalLimit {
-                try await Task.sleep(for: .milliseconds(1))
-            }
+            // Join actual setup before taking the baseline. With no preparatory
+            // writes there is no later Ready transition waiting on a real job.
+            await sync.waitForInputs()
+            await owner.studyPreparation.waitForJob()
+            await owner.waitForLifecycle()
             await owner.backupTrigger.drain()
-            try #require(owner.state == .ready)
-            #expect(sync.providerState?.selection == .localOnly)
-            #expect(await service.triggers == [.opened, .opened])
+            let startupState = owner.state
+            let startupLifecycle = try await CoreCollectionService().lifecycle()
+            let startupTriggers = await service.triggers
+            let startupDeadline = owner.backupTrigger.deadlineMilliseconds
+            let startupDecks = try await CoreDeckService().allDeckNames()
+            try #require(startupState == .ready)
+            #expect(startupLifecycle == .ready(generation: owner.generation))
+            #expect(!owner.studyPreparation.running && !sync.settings.enabled)
+            #expect(!startupTriggers.isEmpty)
+            #expect(startupTriggers.allSatisfy { $0 == .opened })
+            #expect(startupDeadline == nil)
+            let baseline = startupTriggers.count
+
             await service.configureDue(deadline: nil, held: true)
             var automaticEnded = false
             let automatic = Task { await owner.backupTrigger.run(.deadline); automaticEnded = true }
             await service.waitForStart()
+            let deadlineOperation = try #require(await service.dueOperation)
+            let heldTriggers = await service.triggers
+            #expect(Array(heldTriggers.dropFirst(baseline)) == [.deadline])
             var quit: Task<Bool, Never>?
             var quitEnded = false
+            let began = ContinuousClock.now
             let lease: UInt64?
             if quitting {
                 lease = nil
@@ -279,39 +277,79 @@ extension ReviewCollectionStartupTests {
                     return result
                 }
             } else {
-                // Keep the collection's UInt64 lease token for both expiries.
-                let token: UInt64? = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
-                lease = token
+                // Expire synchronously, before the queued background path can dispatch.
+                lease = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
                 owner.backgroundTaskExpired(try #require(lease))
             }
-            do { try await service.waitForOperationCancellation() }
-            catch { await service.release(); await automatic.value; _ = await quit?.value; throw error }
-            #expect(!automaticEnded && !quitEnded)
+            do {
+                try await service.waitForOperationCancellation()
+                let cancellingOperation = await service.dueOperation
+                let cancellingTriggers = await service.triggers
+                let cancellingLifecycle = try await CoreCollectionService().lifecycle()
+                // This read requires the live collection: cancellation must not
+                // suspend or close it while the service still owns the result.
+                let cancellingDecks = try await CoreDeckService().allDeckNames()
+                #expect(cancellingOperation === deadlineOperation)
+                #expect(Array(cancellingTriggers.dropFirst(baseline)) == [.deadline])
+                #expect(cancellingLifecycle == startupLifecycle)
+                #expect(cancellingDecks == startupDecks)
+                #expect(!automaticEnded && !quitEnded && !backend.closed)
+            } catch {
+                await service.release(); await automatic.value; _ = await quit?.value
+                throw error
+            }
             await service.release(); await automatic.value
             #expect(automaticEnded)
             if let quit {
-                try #require(await quit.value)
-                #expect(quitEnded)
-                #expect(await service.triggers == [.opened, .opened, .deadline, .quit])
-            }
-            else {
+                let closed = await quit.value
+                let quitDuration = began.duration(to: .now)
+                let quitTriggers = await service.triggers
+                let quitOperation = try #require(await service.dueOperation)
+                let closedLifecycle = try await CoreCollectionService().lifecycle()
+                try #require(closed)
+                #expect(quitEnded && quitDuration < .seconds(5))
+                #expect(Array(quitTriggers.dropFirst(baseline)) == [.deadline, .quit])
+                #expect(quitOperation !== deadlineOperation)
+                #expect(closedLifecycle == .noCollection)
+            } else {
                 await owner.waitForLifecycle()
-                // Both genuine startup Opened events count; expiry adds no Background.
-                #expect(await service.triggers == [.opened, .opened, .deadline])
+                let backgroundTriggers = await service.triggers
+                // The expired lease dispatches no Background maintenance.
+                #expect(Array(backgroundTriggers.dropFirst(baseline)) == [.deadline])
                 owner.setForeground(true)
                 await owner.waitForLifecycle()
-                #expect(await service.triggers == [.opened, .opened, .deadline, .opened])
+                await owner.backupTrigger.drain()
+                let resumedTriggers = await service.triggers
+                let resumed = Array(resumedTriggers.dropFirst(backgroundTriggers.count))
+                // Resume may also deliver Ready; every resulting call is Opened.
+                #expect(!resumed.isEmpty && resumed.allSatisfy { $0 == .opened })
                 await service.configureDue(deadline: nil, held: true)
                 let foreground = Task { await owner.backupTrigger.run(.opened) }
                 await service.waitForStart()
-                owner.backgroundTaskExpired(try #require(lease)) // Stale expiry must not cancel new work.
-                try await service.requireOperationNotCancelled()
+                do {
+                    let foregroundOperation = try #require(await service.dueOperation)
+                    #expect(foregroundOperation !== deadlineOperation)
+                    owner.backgroundTaskExpired(try #require(lease))
+                    try await service.requireOperationNotCancelled()
+                    let afterStaleExpiration = await service.dueOperation
+                    #expect(afterStaleExpiration === foregroundOperation)
+                } catch {
+                    await service.release(); await foreground.value
+                    throw error
+                }
                 await service.release(); await foreground.value
-                #expect(await service.triggers == [.opened, .opened, .deadline, .opened, .opened])
-                try #require(await owner.close())
+                try await service.requireOperationNotCancelled()
+                let foregroundTriggers = await service.triggers
+                #expect(Array(foregroundTriggers.dropFirst(resumedTriggers.count)) == [.opened])
+                let closed = await owner.close()
+                let finalTriggers = await service.triggers
+                let closedLifecycle = try await CoreCollectionService().lifecycle()
+                try #require(closed)
+                #expect(Array(finalTriggers.dropFirst(foregroundTriggers.count)) == [.background])
+                #expect(closedLifecycle == .noCollection)
             }
         } catch {
-            preparationGate.release(); await service.release(); await startup.value
+            await service.release()
             _ = await owner.close(); throw error
         }
     }
