@@ -1,6 +1,5 @@
 #if os(macOS)
 import AppKit
-import ApplicationServices
 import Foundation
 import XCTest
 
@@ -582,56 +581,21 @@ import XCTest
     }
 
     private func zoomControls(in window: XCUIElement) -> XCUIElementQuery {
-        window.menuButtons.matching(NSPredicate(
-            format: "identifier == %@ AND (title == %@ OR label == %@)", "io.zoom", "Zoom", "Zoom"))
+        window.menuButtons.matching(identifier: "io.zoom")
     }
 
     private func recordFitDisplay(in window: XCUIElement) {
         let controls = zoomControls(in: window)
-        check(controls.count == 1, "expected one native io.zoom menu button titled or labelled Zoom")
+        check(controls.count == 1, "expected one native io.zoom menu button")
         guard controls.count == 1 else { return }
         let zoom = controls.firstMatch
         check(zoom.identifier == "io.zoom", "Zoom menu keeps its own identifier: \(zoom.identifier)")
-        // The AX title names the menu Zoom; AppKit does not duplicate the
-        // visible Fit caption as a static-text child. Native help conveys state.
-        check(wait { nativeZoomHelp(in: window) == "Fit: the image is fitted to the canvas." },
-              "native Zoom help exposes the current Fit state")
+        // AppKit can expose the accessibility label as the native menu title.
+        check(wait { zoom.title == "Zoom, Fit" || zoom.label == "Zoom, Fit" },
+              "native Zoom title or label exposes the current Fit state")
         let value = zoom.value as? String
         check(value?.contains("%") == true, "io.zoom keeps its numeric percent AX value: \(String(describing: value))")
         check(value.flatMap(Self.zoomPercent) != nil, "Zoom AX percentage parses as a number")
-    }
-
-    private func nativeZoomHelp(in window: XCUIElement) -> String? {
-        guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: inputBundleIdentifier)
-            .first(where: { !$0.isTerminated }) else { return nil }
-        func read(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
-            guard AXUIElementSetMessagingTimeout(node, 0.1) == .success else { return nil }
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(node, attribute as CFString, &value) == .success else { return nil }
-            return value
-        }
-        let application = AXUIElementCreateApplication(running.processIdentifier)
-        guard let windows = read(application, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
-        let windowID = window.identifier
-        let roots = windows.filter { read($0, kAXIdentifierAttribute) as? String == windowID }
-        guard roots.count == 1 else { return nil }
-        // Read native AXHelp, which XCTest's public element attributes omit.
-        // Visit only the current disposable editor window, with bounded traversal.
-        var pending = roots.map { ($0, 0) }, visited = 0
-        let deadline = Date().addingTimeInterval(2)
-        while visited < 2048, Date() < deadline, let (node, depth) = pending.popLast() {
-            visited += 1
-            if read(node, kAXIdentifierAttribute) as? String == "io.zoom",
-               read(node, kAXRoleAttribute) as? String == kAXMenuButtonRole,
-               read(node, kAXTitleAttribute) as? String == "Zoom" ||
-                read(node, kAXDescriptionAttribute) as? String == "Zoom" {
-                return read(node, kAXHelpAttribute) as? String
-            }
-            if depth < 48, let children = read(node, kAXChildrenAttribute) as? [AXUIElement] {
-                pending.append(contentsOf: children.map { ($0, depth + 1) })
-            }
-        }
-        return nil
     }
 
     private static func zoomPercent(_ value: String) -> Double? {

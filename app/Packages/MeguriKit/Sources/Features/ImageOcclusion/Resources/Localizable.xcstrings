@@ -21,6 +21,16 @@
         }
       }
     },
+    "io.zoom.fit.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom, Fit"
+          }
+        }
+      }
+    },
     "io.zoom.fit.help": {
       "localizations": {
         "en": {

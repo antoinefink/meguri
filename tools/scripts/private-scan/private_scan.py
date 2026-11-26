@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
-    "app/MeguriUITests/IOAddEditUITests.swift": "c46e6dca3af898ba074b68ad0fa8026d93c3a6c03f0ee1599a3317083ecea338",
+    "app/MeguriUITests/IOAddEditUITests.swift": "a32aa567e6c188acba98352f79984429346f9841f430b3f224b57ae020fed649",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
