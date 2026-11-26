@@ -1538,6 +1538,43 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func directFontLoadRejectionReportsWhileStaleMathIsAwaiting() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.announce(card: 131, generation: 1)
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                let path = "/_anki/mathjax/font/svg/dynamic/fraktur.js"
+                harness.media.hold(path)
+                harness.media.respondNotFound(path)
+                defer { harness.media.release(path) }
+                try await page.announce(card: 131, generation: 2)
+                try await page.showAnswer(#"<p>\(𝔄\)</p>"#)
+                try await harness.until("stale render requested held glyph") {
+                    !harness.media.requests(for: path).isEmpty
+                }
+                try await page.announce(card: 132, generation: 3)
+                try await page.showPresentedQuestion("<p id='current'>Replacement card</p>")
+                // A separate already-failed descriptor gives B a deterministic
+                // direct rejection while A's actual glyph file remains held.
+                try await page.run("""
+                    const font = MathJax.startup.document.outputJax.font;
+                    font.loadDynamicFile({ file: 'fraktur', failed: true });
+                    """)
+                try await harness.until("direct font rejection on replacement card") {
+                    harness.diagnostics.contains { $0.card == 132 }
+                }
+                let errors = harness.diagnostics.filter { $0.card == 132 }
+                #expect(errors.count == 1, "\(harness.diagnostics.map(\.body))")
+                #expect(errors.allSatisfy {
+                    $0.generation == 3 && $0.side == "question" && $0["kind"] as? String == "rejection"
+                        && $0["phase"] as? String == "later"
+                        && $0["message"] as? String == "Error: dynamic file 'fraktur' failed to load"
+                }, "\(harness.diagnostics.map(\.body))")
+                #expect(try await page.string("document.getElementById('current').textContent") == "Replacement card")
+                #expect(harness.media.requests(for: path).count == 1)
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
         // MARK: GS11, R514
 
         @Test func jQueryIsTheUpstreamRelease() async throws {

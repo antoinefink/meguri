@@ -89,6 +89,7 @@
   const errorEventMessage = getter(ErrorEvent.prototype, "message");
   const errorEventLine = getter(ErrorEvent.prototype, "lineno");
   const errorEventColumn = getter(ErrorEvent.prototype, "colno");
+  const rejectionReason = getter(PromiseRejectionEvent.prototype, "reason");
   const abortedGetter = getter(AbortSignal.prototype, "aborted");
 
   const getElementById = Document.prototype.getElementById;
@@ -358,7 +359,12 @@
   });
 
   call(nativeAdd, win, "unhandledrejection", function (event) {
-    report({ kind: "rejection", message: describe(event.reason), phase: "later" });
+    const reason = call(rejectionReason, event);
+    const owner = isObject(reason) && call(weakMapGet, mathFontReasons, reason);
+    // Only exact loader reasons have provenance. Leave the event available to
+    // card listeners, and leave unrelated (even identically worded) Errors alone.
+    if (owner && owner !== (latest && latest.mathToken)) return;
+    report({ kind: "rejection", message: describe(reason), phase: "later" });
   });
 
   // ---------------------------------------------------------------------------
@@ -1145,6 +1151,7 @@
   let mathOwner = null;
   let mathStartupOwner = null;
   const mathEvaluationErrors = new WeakMapCtor();
+  const mathFontReasons = new WeakMapCtor();
   const mathCancelled = new ErrorCtor("MathJax typesetting cancelled");
   mathCancelled.name = "AbortError";
   let mathCard = null;
@@ -1547,15 +1554,30 @@
           };
           engine.startup.defaultReady();
           const font = engine.startup.document.outputJax.font;
-          const loadDynamicFile = font.loadDynamicFile;
-          font.loadDynamicFile = function (...args) {
-            const work = call(loadDynamicFile, this, ...args);
-            // 4.1.3 getChar/getDelimiter throw a retry carrying this promise;
-            // error rendering can discard it. Observe only this font's loads
-            // (including mhchem), preserving the original promise for callers.
-            then(work, noop, noop);
-            return work;
-          };
+          // In 4.1.3 only these synchronous SVG font lookups throw a retry
+          // Error carrying the exact dynamic-font promise. Error rendering can
+          // discard it; observe that promise without changing upstream's loader
+          // or the retry object received by its original awaiters.
+          for (const name of ["getChar", "getDelimiter"]) {
+            const lookup = font[name];
+            font[name] = function (...args) {
+              const token = mathOwner && mathOwner.mathToken;
+              try {
+                return call(lookup, this, ...args);
+              } catch (error) {
+                if (error instanceof ErrorCtor && error.retry instanceof PromiseCtor) {
+                  then(error.retry, noop, function (reason) {
+                    // Retain only a side identity, never its update or markup.
+                    // Page work before the first side has no render owner.
+                    if (token && isObject(reason) && !call(weakMapGet, mathFontReasons, reason)) {
+                      call(weakMapSet, mathFontReasons, reason, token);
+                    }
+                  });
+                }
+                throw error;
+              }
+            };
+          }
           mathEngine = engine;
           trackMathTeX(engine);
           mathCard = latest && latest.identity ? latest.identity.card : null;
@@ -1788,6 +1810,7 @@
   }
 
   async function runUpdate(update) {
+    update.mathToken = createObject(null);
     latest = update;
     if (update.side !== null) side = update.side;
     else update.side = side;
