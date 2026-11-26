@@ -206,6 +206,9 @@ public final class NoteTypesModel {
     public let preview: NoteTypePreview
     /// D3: the service and its binding, read at Save (and for the button's title).
     @ObservationIgnored public var service: @MainActor () -> NoteTypeSaveService = { .other }
+    /// W12/D3: deletion alone can run locally with a confirmed absent binding.
+    /// Nil from the read means unknown, busy, or an upload/setup still pending.
+    @ObservationIgnored public var deletionService: (@MainActor () async -> NoteTypeSaveService?)?
     /// Whether a collection exists to read: false on first run, before one
     /// is created, imported or synced (N18.3).
     @ObservationIgnored public var hasCollection: @MainActor () -> Bool = { true }
@@ -1242,7 +1245,9 @@ public final class NoteTypesModel {
                       names.count > 1, let name = names.first(where: { $0.id == id })?.name else { return }
                 let counts = try await backend.typeCounts(id)
                 guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
-                askDeletion(.init(notetypeId: id, name: name, counts: counts, service: service()))
+                let deletionService = await readDeletionService()
+                guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
+                askDeletion(.init(notetypeId: id, name: name, counts: counts, service: deletionService ?? service()))
             } catch {
                 guard self.epoch == epoch else { return }
                 failure = .notSaved
@@ -1252,7 +1257,16 @@ public final class NoteTypesModel {
 
     public var canConfirmDeletion: Bool {
         guard let shown = deletionQuestion, !confirming, writable(), !leaving else { return false }
-        return shown.service != service() || shown.service == .other || (meguriSync != nil && meguriSyncState == .ready)
+        // A setup-required sheet must be able to refresh: its binding may now
+        // be absent. Only the checked read below can admit a local removal.
+        return shown.service != service() || shown.service == .other
+            || (meguriSync != nil && (meguriSyncState == .ready || meguriSyncState == .notSetUp))
+    }
+
+    private func readDeletionService() async -> NoteTypeSaveService? {
+        if let deletionService { return await deletionService() }
+        if service() == .other { return .other }
+        return meguriSync != nil && meguriSyncState == .ready ? .meguriSync : nil
     }
 
     public func confirmDeletion() {
@@ -1272,7 +1286,8 @@ public final class NoteTypesModel {
                 }
                 let counts = try await backend.typeCounts(shown.notetypeId)
                 guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
-                let currentService = service()
+                guard let currentService = await readDeletionService() else { return }
+                guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
                 if counts.notes > shown.counts.notes || counts.cards > shown.counts.cards || currentService != shown.service || name != shown.name {
                     askDeletion(.init(notetypeId: shown.notetypeId, name: name, counts: counts, service: currentService))
                     return
@@ -1299,6 +1314,11 @@ public final class NoteTypesModel {
             return
         }
         if question.service == .meguriSync { checkReachability(fresh: fresh) }
+        else {
+            reachabilityToken &+= 1
+            reachabilityTask?.cancel()
+            meguriUnreachable = false
+        }
     }
 
     private func submitDeletion(_ shown: DeletionQuestion, reachable: Bool) async {
@@ -1348,7 +1368,7 @@ public final class NoteTypesModel {
         switch error as? BridgeError {
         case .notetypeStructureRefused(.removalLossesChanged(let notes, let cards))?:
             askDeletion(.init(notetypeId: shown.notetypeId, name: shown.name,
-                              counts: .init(notes: notes, cards: cards), service: service()))
+                              counts: .init(notes: notes, cards: cards), service: shown.service))
         case .notetypeStructureRefused(.lastNotetype)?:
             reloadList()
             failure = .notSaved

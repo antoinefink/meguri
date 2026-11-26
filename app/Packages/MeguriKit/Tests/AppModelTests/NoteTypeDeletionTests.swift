@@ -5,6 +5,13 @@ import Testing
 
 @MainActor private final class RemovalSync: NoteTypesMeguriSync {
     var noteTypeSyncState: NoteTypeSyncState = .ready
+    var bindingPresent: Bool? = true
+    func deletionService() async -> NoteTypeSaveService? {
+        guard noteTypeSyncState != .busy, noteTypeSyncState != .uploadPending,
+              let bindingPresent else { return nil }
+        if !bindingPresent { return .other }
+        return noteTypeSyncState == .ready ? .meguriSync : nil
+    }
     var reachable = true
     var result: NoteTypeSyncSaveResult = .saved(uploaded: true)
     var error: BridgeError?
@@ -129,19 +136,114 @@ import Testing
         #expect(model.deletionQuestion?.service == .other && backend.removals.isEmpty)
     }
 
-    @Test(arguments: [NoteTypeSyncState.notSetUp, .busy, .uploadPending])
+    @Test(arguments: [NoteTypeSyncState.busy, .uploadPending])
     func meguriChosenWithoutReadyAdmissionNeverFallsBackToLocal(_ state: NoteTypeSyncState) async {
         let (model, backend) = await open()
         let sync = RemovalSync()
         sync.noteTypeSyncState = state
+        sync.bindingPresent = false
         model.meguriSync = sync
         model.service = { .meguriSync }
+        model.deletionService = { await sync.deletionService() }
         model.delete(7)
         await model.settle()
         #expect(!model.canConfirmDeletion)
         model.confirmDeletion()
         await model.settle()
         #expect(backend.removals.isEmpty && sync.requests.isEmpty)
+    }
+
+    @Test func selectedMeguriWithoutABindingDeletesLocally() async {
+        let (model, backend) = await open()
+        let sync = RemovalSync()
+        sync.noteTypeSyncState = .notSetUp
+        sync.bindingPresent = false
+        model.meguriSync = sync
+        model.service = { .meguriSync }
+        model.deletionService = { await sync.deletionService() }
+        model.delete(7)
+        await model.settle()
+        #expect(model.deletionQuestion?.service == .other && model.canConfirmDeletion)
+        model.confirmDeletion()
+        await model.settle()
+        #expect(backend.removals == [.init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31)])
+        #expect(sync.requests.isEmpty && model.failure == nil)
+    }
+
+    @Test(arguments: [true, false])
+    func bindingAvailabilityChangesReconfirmInBothDirections(_ initiallyBound: Bool) async {
+        let (model, backend) = await open()
+        let sync = RemovalSync()
+        sync.bindingPresent = initiallyBound
+        sync.noteTypeSyncState = initiallyBound ? .ready : .notSetUp
+        model.meguriSync = sync
+        model.service = { .meguriSync }
+        model.deletionService = { await sync.deletionService() }
+        model.delete(7)
+        await model.settle()
+        #expect(model.deletionQuestion?.service == (initiallyBound ? .meguriSync : .other))
+        sync.bindingPresent = !initiallyBound
+        sync.noteTypeSyncState = initiallyBound ? .notSetUp : .ready
+        backend.removalCounts = .init(notes: 19, cards: 30)
+        model.confirmDeletion()
+        await model.settle()
+        #expect(model.deletionQuestion?.service == (initiallyBound ? .other : .meguriSync))
+        #expect(model.deletionQuestion?.counts == backend.removalCounts)
+        #expect(backend.removals.isEmpty && sync.requests.isEmpty)
+        model.confirmDeletion()
+        await model.settle()
+        let accepted = NotetypeRemoval(notetypeId: 7, confirmedNotes: 19, confirmedCards: 30)
+        #expect(backend.removals == (initiallyBound ? [accepted] : []))
+        #expect(sync.requests.map { $0.0 } == (initiallyBound ? [] : [accepted]))
+    }
+
+    @Test(arguments: [true, false])
+    func unknownOrStaleBindingNeverCountsAsOff(_ unknown: Bool) async {
+        let (model, backend) = await open()
+        let sync = RemovalSync()
+        sync.noteTypeSyncState = .notSetUp
+        sync.bindingPresent = unknown ? nil : true
+        model.meguriSync = sync
+        model.service = { .meguriSync }
+        model.deletionService = { await sync.deletionService() }
+        model.delete(7)
+        await model.settle()
+        model.confirmDeletion()
+        await model.settle()
+        #expect(model.deletionQuestion?.service == .meguriSync)
+        #expect(backend.removals.isEmpty && sync.requests.isEmpty)
+    }
+
+    @Test func bindingReadAfterRecountUsesTheNewAvailability() async {
+        let (model, backend) = await open()
+        let sync = RemovalSync()
+        model.meguriSync = sync
+        model.service = { .meguriSync }
+        model.deletionService = { await sync.deletionService() }
+        model.delete(7)
+        await model.settle()
+        backend.beforeRemovalCounts = {
+            sync.bindingPresent = false
+            sync.noteTypeSyncState = .notSetUp
+        }
+        model.confirmDeletion()
+        await model.settle()
+        #expect(model.deletionQuestion?.service == .other)
+        #expect(backend.removals.isEmpty && sync.requests.isEmpty)
+    }
+
+    @Test func collectionReplacementDuringBindingReadCannotRemove() async {
+        let (model, backend) = await open()
+        model.delete(7)
+        await model.settle()
+        model.deletionService = {
+            await Task.yield()
+            model.invalidate()
+            return .other
+        }
+        model.confirmDeletion()
+        await model.settle()
+        #expect(model.deletionQuestion == nil && backend.removals.isEmpty)
     }
 
     @Test(arguments: [true, false])

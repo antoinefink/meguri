@@ -455,6 +455,13 @@ public final class ReviewCollection: ChangeFanoutSink {
         if let noteTypesOwner { return noteTypesOwner }
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
+        value.deletionService = { [weak self] in
+            guard let self else { return nil }
+            let sync = self.sync, generation = self.generation
+            let service = await sync.noteTypeDeletionService()
+            guard self.sync === sync, self.generation == generation else { return nil }
+            return service
+        }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
         value.hasCollection = { [weak self] in self?.hasCollection ?? false }
         // W9: the preview binds the collection's media as review does; its toggle stays on the device.
@@ -485,12 +492,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// shows the welcome (N18.3). The sections that read a collection (Browse,
     /// Note Types) are not offered until one is created, imported or synced.
     public var hasCollection: Bool { state != .noFile }
-    /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
-    /// Whether the binding is ready is read in the background and can be
-    /// unknown for a moment, so choosing Meguri Sync is enough here: a
-    /// structural save then runs as MP7's job, or, without a ready binding,
-    /// the sheet says to set Meguri Sync up; it never runs on this device
-    /// alone while the server may hold the collection.
+    /// Schema saves keep their setup gate. W12 deletion separately reads the
+    /// current coordinator's binding, so confirmed unbound counts as Off.
     var noteTypeSaveService: NoteTypeSaveService {
         sync.providerState?.selection == .meguri ? .meguriSync : .other
     }
