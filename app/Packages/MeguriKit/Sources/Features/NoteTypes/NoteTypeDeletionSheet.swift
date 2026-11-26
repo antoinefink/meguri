@@ -180,6 +180,7 @@ private struct DeletionAlertHost: NSViewRepresentable {
         private var alert: NSAlert?
         private var shown: NoteTypesModel.DeletionQuestion?
         private var observers: [NSObjectProtocol] = []
+        private var escapeMonitor: Any?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -238,15 +239,25 @@ private struct DeletionAlertHost: NSViewRepresentable {
             confirm.keyEquivalent = ""
             confirm.isEnabled = presentation.canConfirm
             // Keep the first Cancel button as AppKit's Return default.
-            // NSAlert supplies Escape cancellation for its Cancel button.
             cancel.keyEquivalent = "\r"
             self.alert = alert
             shown = question
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak alert] event in
+                MainActor.assumeIsolated {
+                    guard let self, let alert, self.alert === alert,
+                          event.window === alert.window, event.keyCode == 53,
+                          event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                          let cancel = alert.buttons.first, cancel.isEnabled else { return event }
+                    cancel.performClick(nil)
+                    return nil
+                }
+            }
             alert.beginSheetModal(for: window) { [weak self] response in
                 guard let self else { return }
                 // Programmatic dismissal has no model side effects. In
                 // particular it must never cancel an asynchronously renewed ask.
                 if self.alert === alert {
+                    self.removeEscapeMonitor()
                     self.alert = nil
                     self.shown = nil
                     if let current = self.presentation, current.question == question,
@@ -259,7 +270,13 @@ private struct DeletionAlertHost: NSViewRepresentable {
             }
         }
 
+        private func removeEscapeMonitor() {
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+            escapeMonitor = nil
+        }
+
         func dismiss() {
+            removeEscapeMonitor()
             guard let alert else { return }
             self.alert = nil
             shown = nil
@@ -267,6 +284,7 @@ private struct DeletionAlertHost: NSViewRepresentable {
         }
 
         isolated deinit {
+            removeEscapeMonitor()
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
         }
     }
