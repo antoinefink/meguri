@@ -24,3 +24,5 @@ Plancheck reviewed the complete `core/crates/meguri-engine/src/decks/custom_stud
 Plancheck reviewed all 1,586 lines of `docs/design/native-interface-contract.md`, including the revised menu and key bindings. It contains public product decisions, examples and repo references. Its verified SHA-256 is `5f81c9b56335f87958c5d53bba3dd4dbe770cccda8bc1764b89f9aa182286dbe`.
 
 The keyboard shortcut and saved-state feedback changed the form. Independent reviewer planinterop examined its complete 13,239 bytes. The verified public digest for `FilteredStudyForm.swift` is `3c7cd4ebb07a6408449ccebce59ae624fb41be4ae044bf03a39e784821442310`.
+
+Planinterop reviewed all 179 entries, including translator comments and plural variants, in `app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings`. The orchestrator verified the public catalog's 51,185 bytes and SHA-256 `6b96ea5123988e28e5a4a8a79187594ffeb5ef0ff85ee2f7871821dff1e16275`.

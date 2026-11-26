@@ -405,6 +405,7 @@
       }
     },
     "Custom Study…": {
+      "comment": "Finished normal-deck review action opening Custom Study; absent for filtered decks.",
       "localizations": {
         "en": {
           "stringUnit": {

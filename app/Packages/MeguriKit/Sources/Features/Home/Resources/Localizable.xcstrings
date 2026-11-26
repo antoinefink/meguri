@@ -1326,6 +1326,7 @@
       }
     },
     "Create Filtered Deck": {
+      "comment": "Title of the form for a new saved filtered search.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1336,6 +1337,7 @@
       }
     },
     "Edit Filtered Deck": {
+      "comment": "Title of the form for an existing filtered search.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1346,6 +1348,7 @@
       }
     },
     "Custom Study": {
+      "comment": "Title of the normal deck’s custom study form.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1356,6 +1359,7 @@
       }
     },
     "Save and Build": {
+      "comment": "Default action: save the filtered definition and gather eligible cards.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1366,6 +1370,7 @@
       }
     },
     "Apply": {
+      "comment": "Default action in Custom Study: apply the selected study choice.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1376,6 +1381,7 @@
       }
     },
     "Try Again": {
+      "comment": "Retry reading the study form’s settings after a load failure.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1386,6 +1392,7 @@
       }
     },
     "First Search": {
+      "comment": "Section title for the first filtered-deck search term.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1396,6 +1403,7 @@
       }
     },
     "Second Search": {
+      "comment": "Section title for the optional second filtered-deck search term.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1406,6 +1414,7 @@
       }
     },
     "Use a second search": {
+      "comment": "Toggle enabling a second independently limited filtered search.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1416,6 +1425,7 @@
       }
     },
     "Reschedule cards": {
+      "comment": "Toggle selecting scheduled study instead of schedule-preserving preview.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1426,6 +1436,7 @@
       }
     },
     "Again (seconds)": {
+      "comment": "Preview delay in seconds after the Again answer.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1436,6 +1447,7 @@
       }
     },
     "Hard (seconds)": {
+      "comment": "Preview delay in seconds after the Hard answer.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1446,6 +1458,7 @@
       }
     },
     "Good (seconds)": {
+      "comment": "Preview delay in seconds after the Good answer.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1456,6 +1469,7 @@
       }
     },
     "Preview preserves each card’s home schedule. A zero delay finishes the card; Easy always finishes.": {
+      "comment": "Footer explaining the filtered deck’s preview delays and schedule preservation.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1466,6 +1480,7 @@
       }
     },
     "Oldest review first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1476,6 +1491,7 @@
       }
     },
     "Random": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1486,6 +1502,7 @@
       }
     },
     "Shortest interval first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1496,6 +1513,7 @@
       }
     },
     "Longest interval first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1506,6 +1524,7 @@
       }
     },
     "Most lapses first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1516,6 +1535,7 @@
       }
     },
     "Oldest note first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1526,6 +1546,7 @@
       }
     },
     "Due first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1536,6 +1557,7 @@
       }
     },
     "Newest note first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1546,6 +1568,7 @@
       }
     },
     "Lowest retrievability first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1556,6 +1579,7 @@
       }
     },
     "Highest retrievability first": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1566,6 +1590,7 @@
       }
     },
     "Relative overdueness": {
+      "comment": "Filtered-search card gathering order option; the choice affects which cards enter the deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1576,6 +1601,7 @@
       }
     },
     "Unknown order": {
+      "comment": "Fallback title for a stored filtered-search order this app cannot name.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1586,6 +1612,7 @@
       }
     },
     "Card limit": {
+      "comment": "Maximum number of cards to gather for a study search.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1596,6 +1623,7 @@
       }
     },
     "Order": {
+      "comment": "Picker label for the order used to gather matching cards.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1606,6 +1634,7 @@
       }
     },
     "Adjust today’s new limit": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1616,6 +1645,7 @@
       }
     },
     "Adjust today’s review limit": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1626,6 +1656,7 @@
       }
     },
     "Forgotten cards": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1636,6 +1667,7 @@
       }
     },
     "Review ahead": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1646,6 +1678,7 @@
       }
     },
     "Preview recent new cards": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1656,6 +1689,7 @@
       }
     },
     "Study by state or tags": {
+      "comment": "Custom Study mode option for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1666,6 +1700,7 @@
       }
     },
     "New cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1676,6 +1711,7 @@
       }
     },
     "Due cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1686,6 +1722,7 @@
       }
     },
     "Previously introduced cards": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1696,6 +1733,7 @@
       }
     },
     "All cards (preview)": {
+      "comment": "Card eligibility option in Custom Study by state or tags.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1706,6 +1744,7 @@
       }
     },
     "Available cards before daily limits": {
+      "comment": "Count of eligible cards before the normal deck’s daily limits.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1716,6 +1755,7 @@
       }
     },
     "Change in today’s limit": {
+      "comment": "Signed adjustment to today’s new or review allowance.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1726,6 +1766,7 @@
       }
     },
     "Days": {
+      "comment": "Number of days used by the chosen custom study mode.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1736,6 +1777,7 @@
       }
     },
     "Choose 1–30 days.": {
+      "comment": "Range guidance for the forgotten-cards custom study mode.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1746,6 +1788,7 @@
       }
     },
     "Positive changes allow more cards today. Negative changes reduce today’s allowance.": {
+      "comment": "Footer explaining signed daily-limit adjustments.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1756,6 +1799,7 @@
       }
     },
     "Preview preserves each card’s home schedule.": {
+      "comment": "Footer for custom study modes that preview without rescheduling.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1766,6 +1810,7 @@
       }
     },
     "Card state": {
+      "comment": "Picker label for the eligibility state in custom study by state or tags.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1776,6 +1821,7 @@
       }
     },
     "Include tags": {
+      "comment": "Input for literal tags, one per line; match any included tag.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1786,6 +1832,7 @@
       }
     },
     "Exclude tags": {
+      "comment": "Input for literal tags, one per line; exclude every listed tag.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1796,6 +1843,7 @@
       }
     },
     "Enter one complete tag per line. Match any included tag and exclude every excluded tag. Leave inclusions blank to include all tags.": {
+      "comment": "Footer explaining literal tag matching in Custom Study.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1806,6 +1854,7 @@
       }
     },
     "Couldn’t read study settings. Try again.": {
+      "comment": "Inline study-form load failure; retry leaves the draft intact.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1816,6 +1865,7 @@
       }
     },
     "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first.": {
+      "comment": "Inline study-form write refusal with editable inputs.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1826,6 +1876,7 @@
       }
     },
     "The change was saved. Close this sheet to continue.": {
+      "comment": "Committed study change whose result cannot be recovered; do not repeat the write.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1836,6 +1887,7 @@
       }
     },
     "The change was saved. Refresh decks to continue.": {
+      "comment": "Committed study change awaiting a successful deck refresh.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1846,6 +1898,7 @@
       }
     },
     "Couldn’t Update Study Deck": {
+      "comment": "Alert title for a failed current foreground study-deck operation.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1856,6 +1909,7 @@
       }
     },
     "Try again, or edit the search and card limits.": {
+      "comment": "Recovery message for a failed study-deck operation.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1866,6 +1920,7 @@
       }
     },
     "Edit Filtered Deck…": {
+      "comment": "Command opening the saved filtered-search definition.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1876,6 +1931,7 @@
       }
     },
     "Create Filtered Deck…": {
+      "comment": "Command opening a new filtered-search definition.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1886,6 +1942,7 @@
       }
     },
     "Custom Study…": {
+      "comment": "Command opening custom study choices for a normal deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1896,6 +1953,7 @@
       }
     },
     "Rebuild": {
+      "comment": "Command gathering cards again with the filtered deck’s saved definition.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1906,6 +1964,7 @@
       }
     },
     "Empty": {
+      "comment": "Command returning all filtered-deck members to their home decks.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1916,6 +1975,7 @@
       }
     },
     "Browse Cards": {
+      "comment": "Deck command opening Browse with the core’s exact deck scope.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1926,6 +1986,7 @@
       }
     },
     "Deck Statistics": {
+      "comment": "Deck command opening statistics for this deck.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1936,11 +1997,45 @@
       }
     },
     "Deck": {
+      "comment": "Label for the source normal deck in Custom Study.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Deck"
+          }
+        }
+      }
+    },
+    "Save Empty Deck": {
+      "comment": "Explicit consent to save this exact filtered definition with no eligible cards.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Empty Deck"
+          }
+        }
+      }
+    },
+    "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged.": {
+      "comment": "Filtered-search refusal before explicit empty-save consent; the existing deck is kept.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged."
+          }
+        }
+      }
+    },
+    "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged.": {
+      "comment": "Custom Study refusal when no eligible cards match; the existing session is kept.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged."
           }
         }
       }

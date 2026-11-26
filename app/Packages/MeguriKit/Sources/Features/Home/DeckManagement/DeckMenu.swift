@@ -2,8 +2,8 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-/// The deck's long-press and right-click menu (N20.2): Study and Add Note,
-/// then Rename…, New Subdeck… and Deck Options…, then Delete Deck. A filtered deck takes
+/// The deck's long-press and right-click menu (N20.2): study and inspection,
+/// study setup, deck management, then deletion. A filtered deck takes
 /// neither notes nor subdecks; its settings edit the saved search definition.
 struct DeckMenu: View {
     let collection: ReviewCollection
@@ -35,6 +35,20 @@ struct DeckMenu: View {
                 .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
                 .accessibilityIdentifier("home.deckMenu.addNote.\(deck.id)")
             }
+            if collection.deckImportBrowseAvailable {
+                Button { collection.filteredStudy.browseCards(deck.id) } label: {
+                    Label { Text("Browse Cards", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
+                }
+                .disabled(!collection.filteredStudy.canPresent)
+                .accessibilityIdentifier("home.deckMenu.browse.\(deck.id)")
+            }
+            if let show = collection.showDeckStatistics {
+                Button { show(deck.id) } label: {
+                    Label { Text("Deck Statistics", bundle: .module) } icon: { Image(systemName: "chart.bar.xaxis") }
+                }
+                .disabled(!collection.filteredStudy.canPresent)
+                .accessibilityIdentifier("home.deckMenu.statistics.\(deck.id)")
+            }
         }
         // A separator, not a Section: a section's header item took the
         // items' identifiers away in the Mac's context menu.
@@ -43,12 +57,19 @@ struct DeckMenu: View {
             FilteredDeckActions(collection: collection, deck: deck.id)
             Divider()
         } else {
-            Button { collection.filteredStudy.custom(deck.id) } label: { Text("Custom Study…", bundle: .module) }
-                .disabled(!collection.filteredStudy.canCustom(deck.id))
-                .accessibilityIdentifier("home.deckMenu.customStudy.\(deck.id)")
-            Button { collection.filteredStudy.create(deck: deck.id) } label: { Text("Create Filtered Deck…", bundle: .module) }
-                .disabled(!collection.filteredStudy.canPresent)
-                .accessibilityIdentifier("home.deckMenu.createFilteredDeck.\(deck.id)")
+            Button { collection.filteredStudy.custom(deck.id) } label: {
+                Label { Text("Custom Study…", bundle: .module) } icon: { Image(systemName: "slider.horizontal.3") }
+            }
+            .disabled(!collection.filteredStudy.canCustom(deck.id))
+            .accessibilityIdentifier("home.deckMenu.customStudy.\(deck.id)")
+            Button { collection.filteredStudy.create(deck: deck.id) } label: {
+                Label { Text("Create Filtered Deck…", bundle: .module) } icon: { Image(systemName: "line.3.horizontal.decrease") }
+            }
+            #if os(macOS)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            #endif
+            .disabled(!collection.filteredStudy.canPresent)
+            .accessibilityIdentifier("home.deckMenu.createFilteredDeck.\(deck.id)")
             Divider()
         }
         Group {
@@ -76,21 +97,6 @@ struct DeckMenu: View {
                 .disabled(!collection.deckOptions.canOpen(deckID: deck.id))
                 .accessibilityIdentifier("home.deckMenu.options.\(deck.id)")
             }
-        }
-        Divider()
-        if collection.deckImportBrowseAvailable {
-            Button { collection.filteredStudy.browseCards(deck.id) } label: {
-                Label { Text("Browse Cards", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
-            }
-            .disabled(!collection.filteredStudy.canPresent)
-            .accessibilityIdentifier("home.deckMenu.browse.\(deck.id)")
-        }
-        if let show = collection.showDeckStatistics {
-            Button { show(deck.id) } label: {
-                Label { Text("Deck Statistics", bundle: .module) } icon: { Image(systemName: "chart.bar") }
-            }
-            .disabled(!collection.filteredStudy.canPresent)
-            .accessibilityIdentifier("home.deckMenu.statistics.\(deck.id)")
         }
         Divider()
         Button(role: .destructive) {

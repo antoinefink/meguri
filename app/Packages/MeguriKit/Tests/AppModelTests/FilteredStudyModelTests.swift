@@ -296,6 +296,30 @@ import Testing
         #expect(owner.navigation.section == .browse && owner.navigation.browseSearch == service.scope)
     }
 
+    @Test(arguments: ["current", "navigation", "sheet", "notReady", "replacement", "invalidated", "unavailable"], [false, true])
+    func browseCompletionRequiresItsCurrentReadyRoute(change: String, failing: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        let gate = FilteredStudyGate(); service.scopeGate = gate
+        service.scopeError = failing ? .internal("Scope read failed") : nil
+        owner.deckImportBrowseAvailable = true
+        model.browseCards(1); await gate.entered()
+        #expect(model.busy && service.generations == [11])
+        switch change {
+        case "navigation": owner.navigation.show(.settings)
+        case "sheet": owner.navigation.present(.collectionExport)
+        case "notReady": owner.receiveLifecycle(.opening)
+        case "replacement": owner.receiveLifecycle(.ready(generation: 12))
+        case "invalidated": model.invalidate()
+        case "unavailable": owner.deckImportBrowseAvailable = false
+        default: break
+        }
+        gate.release(); await model.waitForOperation()
+        #expect(!model.busy)
+        #expect(model.operationFailed == (change == "current" && failing))
+        #expect((owner.navigation.section == .browse) == (change == "current" && !failing))
+        if change != "current" || failing { #expect(owner.navigation.browseSearch.isEmpty) }
+    }
+
     private func makeOwner(_ service: FilteredStudySpy) async -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
@@ -322,8 +346,13 @@ import Testing
     var saveError: BridgeError?
     var customError: BridgeError?
     var mutationError: BridgeError?
+    var scopeGate: FilteredStudyGate?
+    var scopeError: BridgeError?
     func deckScope(deck: Int64, generation: UInt64) async throws(BridgeError) -> String {
-        generations.append(generation); return scope
+        generations.append(generation)
+        await scopeGate?.hold()
+        if let scopeError { throw scopeError }
+        return scope
     }
     var refuse = true
     var saveGate: FilteredStudyGate?
@@ -383,4 +412,45 @@ import Testing
         await withCheckedContinuation { continuation = $0 }
     }
     func release() { continuation?.resume(); continuation = nil }
+}
+
+// Lifecycle work uses the serialized real-service owner, in a disposable synthetic
+// collection, so a background transition never touches another suite’s SDK.
+extension ReviewCollectionStartupTests {
+    @Test(arguments: [false, true])
+    func browseFailureWhileHiddenOrResumingNeverPublishesAnAlert(resume: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
+        let service = FilteredStudySpy(), gate = FilteredStudyGate()
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"), filteredStudyService: service)
+        do {
+            await owner.start()
+            owner.entry.inspect(try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg")))
+            await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+            try #require(owner.state == .ready)
+            if owner.policy != .ok { await owner.enableFsrs() }
+            owner.navigation.dismissSheet()
+            owner.deckImportBrowseAvailable = true
+            service.scopeGate = gate; service.scopeError = .internal("Scope read failed")
+            let model = owner.filteredStudy
+            model.browseCards(1); await gate.entered()
+            owner.setForeground(false)
+            if resume { owner.setForeground(true) }
+            #expect(resume ? owner.resuming : !owner.foreground)
+            gate.release(); await model.waitForOperation()
+            #expect(!model.operationFailed && owner.navigation.section != .browse)
+            await owner.waitForLifecycle()
+            #expect(!model.operationFailed, "The suppressed failure cannot appear after lifecycle completion")
+            #expect(await owner.close())
+        } catch {
+            gate.release(); await owner.filteredStudy.waitForOperation()
+            _ = await owner.close()
+            throw error
+        }
+    }
 }

@@ -98,17 +98,26 @@ public final class FilteredStudyModel {
     }
     public func browseCards(_ deck: Int64) {
         guard canPresent, let owner, owner.deckImportBrowseAvailable else { return }
-        let expected = owner.generation, intent = owner.navigation.intentRevision
-        busy = true
+        revision &+= 1
+        let expected = owner.generation, intent = owner.navigation.intentRevision, revision = revision
+        busy = true; operationFailed = false
         task = Task {
             defer { busy = false; task = nil }
+            // Content can be absent while a read runs. Only the operation that
+            // still owns the foreground route may navigate or publish an alert.
+            func current() -> Bool {
+                self.revision == revision && !Task.isCancelled && busy &&
+                    owner.generation == expected && owner.navigation.intentRevision == intent &&
+                    owner.foreground && !owner.resuming && owner.browseReadable &&
+                    owner.deckImportBrowseAvailable && owner.navigation.sheet == nil
+            }
             do {
                 let search = try await service.deckScope(deck: deck, generation: expected)
-                guard owner.generation == expected, owner.navigation.intentRevision == intent else { return }
+                guard current() else { return }
                 owner.navigation.browseSearch = search
                 owner.navigation.select(.section(.browse))
             } catch {
-                if owner.generation == expected, owner.navigation.intentRevision == intent { operationFailed = true }
+                if current() { operationFailed = true }
             }
         }
     }

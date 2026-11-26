@@ -204,9 +204,18 @@ import XCTest
             XCTAssertEqual(try browseIDs("cid:" + card, count: 1, app: app, bundle: bundle), [card])
             let row = element(app, "browse.results.table").outlineRows.firstMatch
             row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
-            if !element(app, "cardInfo.row.card_id").exists {
+            // A cleared search removes Card Info's content, not its inspector.
+            // Never toggle an already-open pane just because its next card is loading.
+            if !element(app, "browse.inspector").exists {
                 app.typeKey("i", modifierFlags: [.command, .option])
             }
+            let tabs = element(app, "browse.inspector.tabs")
+            XCTAssertTrue(tabs.waitForExistence(timeout: 10), "Inspector remains visible between searches")
+            let info = tabs.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Info")).firstMatch
+            XCTAssertTrue(info.waitForExistence(timeout: 10))
+            func infoSelected() -> Bool { info.isSelected || (info.value as? Int) == 1 || (info.value as? String) == "1" }
+            if !infoSelected() { info.click() }
+            XCTAssertTrue(wait { infoSelected() }, "Info tab is selected independently of its loading content")
             XCTAssertTrue(wait { self.element(app, "cardInfo.row.card_id").value as? String == card })
             var values: [String: String] = [:]
             for key in ["card_id", "deck", "due", "interval", "stability", "difficulty", "card_type", "reviews", "lapses"] {
@@ -216,9 +225,47 @@ import XCTest
                 XCTAssertFalse(value.isEmpty, key)
                 values[key] = value
             }
+            values["raw.schedule"] = try rawSchedule(card, app: app, bundle: bundle)
             result[card] = values
         }
         return result
+    }
+
+    /// C8's existing user export reads the stored row. Compare exact schedule
+    /// values, including ease, remaining steps and data's FSRS s/d/lrt, without
+    /// modification/sync stamps or preview review-log rows that legitimately change.
+    private func rawSchedule(_ card: String, app: XCUIApplication, bundle: String) throws -> String {
+        let copy = element(app, "cardInfo.copyDebug")
+        let scroll = app.scrollViews.matching(identifier: "cardInfo.card").firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        for _ in 0..<20 {
+            if copy.exists && copy.isHittable { break }
+            scroll.scroll(byDeltaX: 0, deltaY: -400)
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        defer { pasteboard.clearContents() }
+        let previousChange = pasteboard.changeCount
+        try click("cardInfo.copyDebug", app: app, bundle: bundle)
+        XCTAssertTrue(wait { pasteboard.changeCount != previousChange && pasteboard.string(forType: .string) != nil },
+                      "Wait for this card's asynchronous debug export")
+        let json = try XCTUnwrap(pasteboard.string(forType: .string))
+        let dump = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let row = try XCTUnwrap(dump["card"] as? [String: Any])
+        XCTAssertEqual((row["id"] as? NSNumber)?.stringValue, card, "Debug export belongs to the selected card")
+        var schedule: [String: Any] = [:]
+        for key in ["id", "nid", "did", "ord", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "left", "odue", "odid", "data"] {
+            schedule[key] = try XCTUnwrap(row[key], "Stored schedule column " + key)
+        }
+        // Both reads are made at home, before assignment or after release.
+        XCTAssertEqual((row["odid"] as? NSNumber)?.int64Value, 0)
+        XCTAssertEqual((row["odue"] as? NSNumber)?.int64Value, 0)
+        let data = try XCTUnwrap(row["data"] as? String)
+        let memory = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any])
+        for key in ["s", "d", "lrt"] {
+            XCTAssertNotNil(memory[key], "Synthetic reviewed cards exercise stored " + key)
+        }
+        return String(decoding: try JSONSerialization.data(withJSONObject: schedule, options: [.sortedKeys]), as: UTF8.self)
     }
 
     private func launch() throws -> (XCUIApplication, String) {
@@ -245,6 +292,9 @@ import XCTest
         try app.bringToFront(bundleIdentifier: bundle)
     }
     @discardableResult private func selectDeck(_ name: String, app: XCUIApplication, bundle: String) throws -> XCUIElement {
+        // Browse owns a different sidebar. Restore the native Home/Today section
+        // before asking its deck tree for a row, including after schedule reads.
+        try click("shell.root.sidebar.home", app: app, bundle: bundle)
         let rows = app.descendants(matching: .any).matching(NSPredicate(format:
             "(identifier BEGINSWITH %@ OR identifier BEGINSWITH %@) AND label == %@",
             HomeControls.rowPrefix, HomeControls.sidebarPrefix, name))

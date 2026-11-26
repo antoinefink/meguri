@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
+        "6b96ea5123988e28e5a4a8a79187594ffeb5ef0ff85ee2f7871821dff1e16275",
     "core/crates/meguri-engine/src/decks/custom_study.rs":
         "73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166",
     "app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift":
