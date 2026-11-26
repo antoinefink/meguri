@@ -1,6 +1,8 @@
 @testable import CardRendering
 import Foundation
+import QuartzCore
 import Testing
+import WebKit
 
 /// `render/preview` V12 for the Note Types preview: a replay command plays
 /// only right after a click or tap on the card, so a card script that calls
@@ -28,6 +30,31 @@ extension WebKitSuites {
     /// with no click or tap on the card, is dropped and recorded; the same
     /// command right after a tap goes to the audio controller.
     @Suite struct PreviewTapGatePairTests {
+        @Test func previewMathIsReadyOnBothFaces() async throws {
+            let fixture = MediaFixture()
+            let configuration = CardWebConfiguration(store: .nonPersistent(), mediaNeedsGesture: true)
+            let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved(), platform: .mac)
+            pair.playNeedsTap = true
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let update = try await pair.prepare(CardPayload(cardID: 41,
+                question: #"\(a^2+b^2=c^2\)"#, answer: #"\[c=\sqrt{a^2+b^2}\]"#))
+            let prepared = pair.idle
+            #expect(prepared.settled)
+            let front = try await prepared.webView.callAsyncJavaScript(
+                "return document.querySelectorAll('#qa mjx-container svg').length;", arguments: [:], in: nil, contentWorld: .page)
+            #expect(front as? Int == 1)
+            CATransaction.begin()
+            _ = try pair.present(update)
+            CATransaction.commit()
+            _ = try await pair.showAnswer()
+            let back = try await pair.current.webView.callAsyncJavaScript(
+                "return document.querySelectorAll('#qa mjx-container[display=\"true\"] svg').length;", arguments: [:], in: nil, contentWorld: .page)
+            #expect(back as? Int == 1)
+            #expect(pair.diagnostics.templateErrors.isEmpty)
+        }
+
         @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))
         func aScriptsReplayCommandWithoutATapPlaysNothing() async throws {
             let fixture = MediaFixture()

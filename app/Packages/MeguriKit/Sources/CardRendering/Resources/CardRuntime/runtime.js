@@ -55,6 +55,7 @@
   const setAdd = Set.prototype.add;
 
   const setTimeoutFn = win.setTimeout;
+  const clearTimeoutFn = win.clearTimeout;
   const requestFrame = win.requestAnimationFrame;
   const scrollToFn = win.scrollTo;
   const performanceNow = Performance.prototype.now;
@@ -1103,6 +1104,170 @@
     return await woken;
   }
 
+  // Offline MathJax. The facade preserves the template API before first use;
+  // ordinary cards fetch no math assets. Only upstream bundled components may
+  // be loaded, including autoloaded TeX packages and dynamic SVG glyphs.
+  const mathRoot = "meguri-media://media/_anki/mathjax/";
+  let mathLoading = null;
+  let mathEngine = null;
+
+  function mathError(error) {
+    report({ kind: "math", message: describe(error), phase: "typeset" });
+  }
+
+  function mathDeadline(work, milliseconds) {
+    return promise(function (resolve, reject) {
+      const timer = call(setTimeoutFn, win, function () {
+        reject(new ErrorCtor("Bundled MathJax timed out"));
+      }, milliseconds);
+      then(work, function (value) {
+        call(clearTimeoutFn, win, timer);
+        resolve(value);
+      }, function (error) {
+        call(clearTimeoutFn, win, timer);
+        reject(error);
+      });
+    });
+  }
+
+  function loadMathScript(path) {
+    return promise(function (resolve, reject) {
+      let url;
+      try {
+        url = new URLCtor(path, mathRoot);
+        // The Swift manifest admits the exact release files. Here constrain
+        // requests to that immutable directory, including on the harness host.
+        // URL normalizes dot segments; encoded separators/dots are refused too.
+        const root = new URLCtor(mathRoot);
+        if (url.protocol !== root.protocol || url.host !== root.host
+            || url.search || url.hash || url.username || url.password
+            || call(stringIndexOf, url.pathname, root.pathname) !== 0
+            || call(stringIndexOf, url.pathname, "%") !== -1
+            || call(stringIndexOf, url.pathname, "\\") !== -1) {
+          throw new ErrorCtor("Unbundled MathJax component refused");
+        }
+      } catch (error) { reject(error); return; }
+      const script = call(createElement, doc, "script");
+      let finished = false;
+      const finish = function (error) {
+        if (finished) return;
+        finished = true;
+        call(clearTimeoutFn, win, timer);
+        const parent = call(parentNodeOf, script);
+        if (parent) call(removeChild, parent, script);
+        if (error) reject(error); else resolve();
+      };
+      const timer = call(setTimeoutFn, win, function () {
+        finish(new ErrorCtor("Bundled MathJax component timed out"));
+      }, 4000);
+      call(nativeAdd, script, "load", function () { finish(); });
+      call(nativeAdd, script, "error", function () { finish(new ErrorCtor("Bundled MathJax component failed")); });
+      call(setAttribute, script, "src", url.href);
+      call(appendChild, call(documentHead, doc), script);
+    });
+  }
+
+  function loadMath() {
+    if (mathLoading) return mathLoading;
+    // tex-svg contains the base font and menu constructor. Disable saved
+    // menu preferences for this document only, before its constructor runs.
+    // In particular enableMenu:false alone does not stop mergeUserSettings.
+    const configuration = {
+      loader: {
+        paths: {
+          mathjax: call(stringSlice, mathRoot, 0, -1),
+          fonts: "[mathjax]/fonts",
+          "mathjax-newcm": "[mathjax]/font",
+        },
+        load: ["[tex]/ams", "[tex]/mhchem", "a11y/assistive-mml"],
+        // Never pass Meguri's window.require to the upstream component loader.
+        // The release's other require references are guarded Node-only paths.
+        require: loadMathScript,
+      },
+      startup: {
+        typeset: false,
+        ready: function () {
+          const engine = win.MathJax;
+          const Menu = engine._.ui.menu.Menu.Menu;
+          engine.config.options.MenuClass = class extends Menu {
+            mergeUserSettings() {}
+          };
+          engine.startup.defaultReady();
+        },
+      },
+      // Templates can make several requests while the first script is in flight.
+      typeset: mathFacade.typeset,
+      typesetPromise: mathFacade.typesetPromise,
+      typesetClear: mathFacade.typesetClear,
+      tex: mathFacade.tex,
+      options: {
+        enableMenu: false,
+        menuOptions: { settings: {
+          enrich: false, speech: false, braille: false,
+          assistiveMml: true, inTabOrder: false,
+        } },
+        enableExplorer: false, enableEnrichment: false,
+        enableSpeech: false, enableBraille: false, enableAssistiveMml: true,
+      },
+    };
+    // This getter is only for templates before the script executes. Upstream
+    // creates a separate startup object with its own promise. Never assign our
+    // loading promise to that object, and require a real engine below before
+    // awaiting it (a script load event also fires after a JS evaluation error).
+    defineProperty(configuration.startup, "promise", { get: function () { return mathLoading; } });
+    win.MathJax = configuration;
+    const startup = promise(function (resolve, reject) {
+      configuration.loader.failed = reject;
+      then(then(loadMathScript(mathRoot + "tex-svg.js"), function () {
+        const engine = win.MathJax;
+        if (engine.version !== "4.1.3" || !engine.startup || !engine.startup.promise) {
+          throw new ErrorCtor("Bundled MathJax did not initialize");
+        }
+        // Until startup installs the real methods, preserve template calls.
+        if (!engine.typeset) engine.typeset = mathFacade.typeset;
+        if (!engine.typesetPromise) engine.typesetPromise = mathFacade.typesetPromise;
+        if (!engine.typesetClear) engine.typesetClear = mathFacade.typesetClear;
+        return engine.startup.promise;
+      }), resolve, reject);
+    });
+    mathLoading = then(mathDeadline(startup, 8000), function () {
+      mathEngine = win.MathJax;
+      return mathEngine;
+    }, function (error) {
+      win.MathJax = mathFacade;
+      throw error;
+    });
+    // A template may read startup.promise without awaiting it.
+    then(mathLoading, noop, mathError);
+    return mathLoading;
+  }
+
+  function requestMath(elements) {
+    // Upstream typesetPromise serializes document work through whenReady.
+    const work = then(loadMath(), function (engine) { return engine.typesetPromise(elements); });
+    then(work, noop, mathError);
+    return work;
+  }
+
+  const mathFacade = {
+    tex: {
+      inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]],
+      processEscapes: false, packages: { "[+]": ["ams", "mhchem"] },
+    },
+    typeset: function typeset(elements) { requestMath(elements); },
+    typesetPromise: function typesetPromise(elements) { return requestMath(elements); },
+    typesetClear: function typesetClear(elements) { if (mathEngine) mathEngine.typesetClear(elements); },
+    startup: {},
+  };
+  defineProperty(mathFacade.startup, "promise", { get: function () { return loadMath(); } });
+
+  function typesetSide(qa) {
+    const text = call(textContentOf.get, qa) || "";
+    const hasMath = call(stringIndexOf, text, "\\(") >= 0 || call(stringIndexOf, text, "\\[") >= 0;
+    if (!hasMath) return null;
+    return then(requestMath([qa]), noop, noop);
+  }
+
   async function runUpdate(update) {
     latest = update;
     if (update.side !== null) side = update.side;
@@ -1121,6 +1286,13 @@
       setOpacity(qa, "0");
       // 4. Video release.
       releaseVideos(qa);
+      // Release MathItems before their source nodes leave the document.
+      if (mathEngine) {
+        try {
+          await mathEngine.whenReady();
+          mathEngine.typesetClear([qa]);
+        } catch (error) { mathError(error); }
+      }
       // 5. Insert.
       held = [];
       call(innerHTMLSetter, qa, StringCtor(update.html));
@@ -1129,6 +1301,10 @@
       await walkScripts(qa);
       // 7. Update hooks.
       await runHooks(updateHooks, "update-hook");
+      // Scripts and hooks can add math. Finish it before reveal/settled on
+      // reviewer faces and previews alike; math failures still reveal the side.
+      const mathReady = typesetSide(findQA());
+      if (mathReady) await mathReady;
       // 8. Show.
       qa = findQA();
       setOpacity(qa, "1");
@@ -1381,14 +1557,7 @@
       return resolved(undefined);
     },
   };
-  win.MathJax = {
-    typeset: function typeset() {},
-    typesetPromise: function typesetPromise() {
-      return resolved(undefined);
-    },
-    typesetClear: function typesetClear() {},
-    startup: { promise: resolved(undefined) },
-  };
+  win.MathJax = mathFacade;
   if (isMac) {
     win.ankiPlatform = "desktop";
     defineProperty(win, "pycmd", { value: pycmd, writable: true, enumerable: true, configurable: false });

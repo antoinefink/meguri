@@ -571,14 +571,9 @@ U68 adds `anki.imageOcclusion` and `anki.setupImageCloze`. There are no other me
 
 ### C10.8 `MathJax`
 
-A plain object (R515, R563):
+Owner override (2026-11-26, supersedes the card-runtime no-op in R515/R563 and D6): a lazy `MathJax` template API exists from page start. First math/API use loads unmodified bundled MathJax 4.1.3, real AMS and mhchem, accessible MathML and SVG glyph components, exclusively from the bundled origin. Speech, enrichment, explorer and menu components are disabled.
 
-- `MathJax.typeset(elements)` returns `undefined` and changes nothing;
-- `MathJax.typesetPromise(elements)` returns an already-resolved promise and changes nothing;
-- `MathJax.typesetClear(elements)` returns `undefined`;
-- `MathJax.startup.promise` is an already-resolved promise.
-
-It exists from the start in every page. Meguri never loads MathJax and never typesets. `\(…\)` and `\[…\]` stay as plain text in the side (C15 D6).
+Both faces and previews typeset `\(…\)` inline and `\[…\]` display math after side scripts/update hooks and before reveal/settled. Dollars remain ordinary text. Side replacement clears old MathItems. Startup/typesetting failures are reported without blocking review; ordinary cards fetch no MathJax assets. Once started the upstream template API is available, including `typeset`, `typesetPromise`, `typesetClear` and `startup.promise`. Before startup, `typeset` requests asynchronous typesetting, `typesetPromise` and `startup.promise` await the real runtime. Field editing and stored input stay literal.
 
 ### C10.9 jQuery
 
@@ -663,7 +658,7 @@ Each difference has its own test (R1889). The test names are suggestions in the 
 | D3 | R480 | card `<button>`s get the desktop UI button look | WebKit's default button look plus the margin | `BaseCSSTests.buttonKeepsPlatformAppearance` |
 | D4 | R506 | `ease1`–`ease4`, `edit`, `more` act | ignored and logged | `GlobalsSurfaceTests.pycmdIgnoresOtherCommands` |
 | D5 | R513, R505 | `ankiPlatform`, `pycmd`, `bridgeCommand` exist | iOS and iPadOS: undefined (AnkiMobile's environment) | `GlobalsSurfaceTests.iosHasNoDesktopBridge` |
-| D6 | R515, R563 | MathJax is loaded when a side contains `\(…\)` or `\[…\]` and typesets it; `MathJax` is undefined before that | never loaded; the stub always exists; source text stays | `GlobalsSurfaceTests.mathJaxStubResolves`, `GlobalsSurfaceTests.mathSourceStaysVisible` |
+| D6 | R515, R563 | MathJax is loaded when a side contains `\(…\)` or `\[…\]` and typesets it; `MathJax` is undefined before that | superseded by owner: bundled runtime typesets; lazy API exists before first use (C10.8) | `GlobalsSurfaceTests.mathJaxTemplateAPIProducesRealDOM`, `GlobalsSurfaceTests.mathFinishesBeforeShownAndReplacementClearsItems` |
 | D7 | R445, R465 | a side's scripts run when it is displayed | a pre-rendered question's scripts run while hidden, and its shown hooks at display; media is held (C8.2); Web Audio, speech and timers are not held | `SideUpdateTests.shownHooksWaitForPresent`, `SideUpdateTests.autoplayHeldUntilPresent` |
 | D8 | R516 | `_queueAction`, `_emulateMobile`, `_blockDefaultDragDropBehavior` are globals | not defined | `GlobalsSurfaceTests.globalsMatchAllowlist` |
 | D9 | R467 | waits for `load`/`error` of every `src` script, so a non-fetched `src` script (unknown `type`, `nomodule`) stops the reviewer for good | does not wait for scripts the engine will not fetch | `ScriptSemanticsTests.unfetchedScriptDoesNotBlock` |
@@ -787,8 +782,8 @@ These 13 positive and 17 negative forms were observed by the prepared WebKit tes
 | GS7 | iPhone: `typeof pycmd`, `typeof bridgeCommand`, `typeof ankiPlatform`, `require("anki/bridgecommand")` | `undefined` ×3; throws |
 | GS8 | Mac: `ankiPlatform`, `typeof webkit` | `"desktop"`, `"undefined"` |
 | GS8b | iOS handler inventory, valid replay string, invalid strings/internal messages and subframe attempts; repeat on Mac | iOS exposes only `cb` and `meguri`; the valid replay selects one AV entry, other operations are refused; Mac has no `webkit`; card code cannot reach isolated handlers |
-| GS9 | `await MathJax.typesetPromise()`, `await MathJax.startup.promise`, `MathJax.typeset()` | resolve, resolve, `undefined` |
-| GS10 | side `<p>\(x^2\) and \[y\]</p>` | the paragraph's text is exactly `\(x^2\) and \[y\]` after the update |
+| GS9 | `MathJax.typesetPromise()`, `MathJax.startup.promise`, `MathJax.typesetClear()` | real bundled runtime and rendered SVG/accessible MathML; cleared MathItems |
+| GS10 | inline/display TeX, AMS, mhchem, dynamic glyph, dollar text and side replacement | typeset before shown; dollars remain literal; replacement releases old MathItems |
 | GS11 | `$.fn.jquery`, `$ === jQuery` | `"3.7.1"`, `true` |
 | GS12 | `anki.mutateNextCardStates("k", t)` with a spy `t` | resolves `undefined`; `t` never called |
 | GS13 | AE18, page part: a front whose script, only when `typeof pycmd !== "undefined"`, hides `#qa` and calls `pycmd("ans")` | Mac: an `ans` `command` signal; iPhone: no exception, `#qa` shown with the question |

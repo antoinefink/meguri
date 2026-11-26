@@ -344,26 +344,125 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
-        // MARK: GS9, D6, R515
+        // MARK: GS9, GS10: offline MathJax (owner supersedes C10.8/D6)
 
-        @Test func mathJaxStubResolves() async throws {
+        @Test func mathJaxTemplateAPIProducesRealDOM() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
-                let result = try await page.run(
-                    """
-                    var a = await MathJax.typesetPromise([document.body]);
-                    var b = await MathJax.startup.promise;
-                    return [String(a), String(b), String(MathJax.typeset()), String(MathJax.typesetClear())].join(",");
-                    """)
-                #expect(result as? String == "undefined,undefined,undefined,undefined")
+                try await page.showPresentedQuestion(#"""
+                    <p id="m">\(x^2\)</p><script>
+                    (function () {
+                      var api = MathJax;
+                      var cardRequire = require;
+                      onUpdateHook.push(function () { return api.typesetPromise([document.getElementById('m')]); });
+                      onUpdateHook.push(async function () {
+                        await MathJax.startup.promise;
+                        await api.typesetPromise([document.getElementById('m')]);
+                        document.getElementById('m').dataset.requireIntact = String(
+                          require === cardRequire && require('anki/reviewer').onUpdateHook === onUpdateHook);
+                      });
+                    })();
+                    </script>
+                    """#)
+                #expect(try await page.bool("document.querySelector('#m mjx-container svg path') !== null"))
+                #expect(try await page.bool("MathJax.version === '4.1.3'"))
+                #expect(try await page.string("document.getElementById('m').dataset.requireIntact") == "true")
+                #expect(try await page.string("Array.from(MathJax.startup.document.math)[0].math") == "x^2")
+                #expect(try await page.bool("document.querySelector('#m mjx-assistive-mml math') !== null"))
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.run("await MathJax.startup.promise; MathJax.typesetClear([document.getElementById('m')]);")
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"))
+                for path in ["https://unbundled.invalid/component.js", "meguri-media://other/_anki/mathjax/tex-svg.js",
+                             "../runtime.js", "%2e%2e/runtime.js", "tex-svg.js?remote=1", "tex-svg.js#fragment",
+                             "meguri-media://user:password@media/_anki/mathjax/tex-svg.js"] {
+                    let refused = try await page.run("try { await MathJax.config.loader.require(path); return false; } catch (_) { return true; }", ["path": path])
+                    #expect(refused as? Bool == true, "Loader must refuse \(path)")
+                }
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
 
-        // MARK: GS10, D6, R563
-
-        @Test func mathSourceStaysVisible() async throws {
+        @Test func dollarsAndOrdinaryCardsDoNotLoadMath() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
-                try await page.showPresentedQuestion(#"<p id="m">\(x^2\) and \[y\]</p>"#)
-                #expect(try await page.string(#"document.getElementById("m").textContent"#) == #"\(x^2\) and \[y\]"#)
+                try await page.showPresentedQuestion(#"<p id="m">$x^2$ and $$y$$ cost $5</p>"#)
+                #expect(try await page.string("document.getElementById('m').textContent") == "$x^2$ and $$y$$ cost $5")
+                #expect(try await page.bool("document.querySelector('mjx-container') === null"))
+                #expect(!harness.media.requests.contains { $0.path.contains("/mathjax/") })
+                #expect(harness.remote.requests.isEmpty)
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: CardRuntime.Platform.allCases)
+        func mathFinishesBeforeShownAndReplacementClearsItems(platform: CardRuntime.Platform) async throws {
+            try await WebTestHarness.withPage(platform: platform, log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"""
+                    <div id="inline">\(x^2+1\)</div>
+                    <div id="ams">\[\begin{aligned}a&=b+c\\d&=e-f\end{aligned}\]</div>
+                    <div id="chem">\(\ce{2H2 + O2 -> 2H2O}\)</div>
+                    <div id="glyph">\(\mathfrak{M}\)</div>
+                    <p id="dollars">$x$ and $$y$$</p><div id="hook"></div>
+                    <script>
+                    onUpdateHook.push(function () { document.getElementById('hook').textContent = '\\(z^3\\)'; });
+                    onShownHook.push(function () {
+                      document.getElementById('hook').dataset.rendered = String(document.querySelectorAll('#qa mjx-container svg').length);
+                    });
+                    </script>
+                    """#)
+                #expect(try await page.string("document.getElementById('hook').dataset.rendered") == "5")
+                #expect(try await page.bool("document.querySelector('#ams mjx-container[display=\"true\"]') !== null"))
+                #expect(try await page.bool("document.querySelector('#chem svg path') !== null && document.querySelector('#glyph svg path') !== null"))
+                #expect(try await page.bool("document.querySelector('#qa [data-mml-node=merror]') === null"))
+                #expect(try await page.string("document.getElementById('dollars').textContent") == "$x$ and $$y$$")
+                #expect(harness.media.requests.contains { $0.path.hasPrefix("/_anki/mathjax/font/svg/dynamic/") })
+                #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/input/tex/extensions/mhchem.js" })
+                #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/fonts/mathjax-mhchem-font-extension/svg.js" })
+                #expect(try await page.bool("performance.getEntriesByType('resource').every(function (entry) { return entry.name.startsWith('meguri-media://media/'); })"))
+                #expect(harness.remote.requests.isEmpty)
+                #expect(!harness.media.requests.contains { $0.path.contains("/sre/") || $0.path.contains("/speech") || $0.path.contains("/explorer") })
+                try await page.showPresentedAnswer(#"<p id="answer">\[\int_0^1 x^2\,dx=\frac{1}{3}\]</p>"#)
+                #expect(try await page.bool("document.querySelector('#answer mjx-container svg path') !== null && !document.getElementById('inline')"))
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.showPresentedQuestion("<p>Next ordinary card</p>")
+                #expect(try await page.bool("document.querySelector('#qa mjx-container') === null && Array.from(MathJax.startup.document.math).length === 0"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func mathIgnoresSavedMenuSettingsWithoutChangingThem() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let settings = #"{"enrich":true,"speech":true,"braille":true,"assistiveMml":false,"inTabOrder":true,"renderer":"CHTML"}"#
+                try await page.run("localStorage.setItem('MathJax-Menu-Settings', settings);", ["settings": settings])
+                try await page.showPresentedQuestion(#"<p id="m">\(x+1\)</p><textarea id="source">\(x+1\)</textarea>"#)
+                #expect(try await page.string("localStorage.getItem('MathJax-Menu-Settings')") == settings)
+                #expect(try await page.bool("MathJax.config.startup.typeset === false && MathJax.startup.document.options.enableMenu === false"))
+                #expect(try await page.bool("(function (s) { return !s.enrich && !s.speech && !s.braille && s.assistiveMml && !s.inTabOrder && s.renderer === 'SVG'; })(MathJax.startup.document.menu.settings)"))
+                #expect(try await page.bool("document.querySelector('#m mjx-container svg path') !== null && document.querySelector('#m mjx-assistive-mml math') !== null"))
+                #expect(try await page.string("document.getElementById('source').value") == #"\(x+1\)"#)
+                #expect(try await page.bool("performance.getEntriesByType('resource').every(function (entry) { return entry.name.startsWith('meguri-media://media/'); })"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: ["entry-timeout", "entry-exception", "extension-timeout"])
+        func missingBundledMathStillRevealsAndAcceptsTheNextSide(failure: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                switch failure {
+                case "entry-exception":
+                    harness.media.add("/_anki/mathjax/tex-svg.js", text: "throw new Error('Synthetic MathJax evaluation failure');")
+                case "extension-timeout":
+                    harness.media.hold("/_anki/mathjax/a11y/assistive-mml.js")
+                default:
+                    harness.media.hold("/_anki/mathjax/tex-svg.js")
+                }
+                try await page.showPresentedQuestion(#"<p id="m">\(x\)</p>"#)
+                #expect(try await page.string("document.getElementById('qa').style.opacity") == "1")
+                #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" })
+                #expect(try await page.bool("typeof MathJax.typeset === 'function' && typeof MathJax.typesetPromise === 'function' && typeof MathJax.typesetClear === 'function'"))
+                #expect(try await page.bool("await MathJax.startup.promise.then(function () { return false; }, function () { return true; })"))
+                #expect(try await page.bool("await MathJax.typesetPromise().then(function () { return false; }, function () { return true; })"))
+                #expect(try await page.bool("require('anki/reviewer').onUpdateHook === onUpdateHook"))
+                try await page.showPresentedAnswer("<p>Still reviewable</p>")
+                #expect(try await page.string("document.getElementById('qa').textContent") == "Still reviewable")
             }
         }
 

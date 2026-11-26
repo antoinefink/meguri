@@ -67,10 +67,9 @@ final class WebTestHarness {
         // base element (R520), so a page under /_anki/ would send
         // `import("./_m.js")` there.
         media.add("/", text: document, "text/html")
-        for path in CardRuntime.assetPaths {
-            let asset = CardRuntime.asset(at: path)!
-            media.add(CardRuntime.assetPrefix + path, asset.data, asset.mimeType)
-        }
+        // Serve production resources on demand; ordinary test pages never
+        // read the MathJax inventory or its multi-megabyte component data.
+        media.servesRuntime = true
         remote.holdsEverything = true
 
         let configuration = WKWebViewConfiguration()
@@ -530,6 +529,7 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private var held: Set<String> = []
     /// Answers nothing at all (C7.4's remote origin).
     var holdsEverything = false
+    var servesRuntime = false
     private(set) var requests: [Request] = []
     private var active: Set<ObjectIdentifier> = []
 
@@ -577,7 +577,9 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private func respond(_ task: any WKURLSchemeTask, url: URL, path: String, range: String?) {
         // A stopped task must never be answered: WebKit raises an exception.
         guard active.remove(ObjectIdentifier(task)) != nil else { return }
-        guard let file = files[path] else {
+        let runtimeAsset = servesRuntime && path.hasPrefix(CardRuntime.assetPrefix)
+            ? CardRuntime.asset(at: String(path.dropFirst(CardRuntime.assetPrefix.count))) : nil
+        guard let file = files[path] ?? runtimeAsset.map({ File(data: $0.data, mimeType: $0.mimeType) }) else {
             send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
             return
         }

@@ -835,6 +835,13 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content review of the MathJax card runtime and synthetic review fixture.
+    'app/MeguriUITests/OfflineMathJaxUITests.swift':
+        'e02c0d415b4ac26e8f0ed32b9ca4fedcccadfb6724281e42596eb9fe0fdbe779',
+    'app/Packages/MeguriKit/Sources/CardRendering/CardRuntime.swift':
+        'b4970e0687cd87ad6ac677372988d99b4c4e92635d4967791f7cd353d9373edd',
+    'core/crates/meguri-testkit/fixtures/recipes/mathjax-review.yaml':
+        'ca0d86921d1421da97300218b40385098271f7d344b5bc8e6551fe0590387650',
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",

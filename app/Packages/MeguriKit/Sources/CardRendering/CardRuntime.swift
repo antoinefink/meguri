@@ -116,12 +116,108 @@ public nonisolated enum CardRuntime {
     /// The asset served at `path` under `assetPrefix` (`"runtime.js"` for
     /// `/_anki/runtime.js`), or nil when there is none.
     public static func asset(at path: String) -> Asset? {
-        guard let (file, mimeType) = assets[path] else { return nil }
-        return Asset(data: Resources.data(file), mimeType: mimeType)
+        if let (file, mimeType) = assets[path] {
+            return Asset(data: Resources.data(file), mimeType: mimeType)
+        }
+        guard path.hasPrefix("mathjax/"), mathAssetPaths.contains(path),
+              let root = Bundle.module.url(forResource: "mathjax", withExtension: nil),
+              let data = try? Data(contentsOf: root.appending(path: String(path.dropFirst(8)))) else { return nil }
+        return Asset(data: data, mimeType: "text/javascript")
     }
 
-    /// The paths `asset(at:)` serves.
-    public static var assetPaths: [String] { assets.keys.sorted() }
+    /// The paths `asset(at:)` serves, including lazy extension and glyph routes.
+    public static var assetPaths: [String] { (Array(assets.keys) + Array(mathAssetPaths)).sorted() }
+
+    // Exact unmodified 4.1.3 release inventory. No runtime directory walks,
+    // filename remapping, or collection-media fallback. Bundle's resource
+    // lookup handles both macOS Contents/Resources and iOS flat bundles.
+    private static let mathAssetPaths: Set<String> = Set("""
+        a11y/assistive-mml.js
+        font/svg/dynamic/PUA.js
+        font/svg/dynamic/accents-b-i.js
+        font/svg/dynamic/accents.js
+        font/svg/dynamic/arabic.js
+        font/svg/dynamic/arrows.js
+        font/svg/dynamic/braille-d.js
+        font/svg/dynamic/braille.js
+        font/svg/dynamic/calligraphic.js
+        font/svg/dynamic/cherokee.js
+        font/svg/dynamic/cyrillic-ss.js
+        font/svg/dynamic/cyrillic.js
+        font/svg/dynamic/devanagari.js
+        font/svg/dynamic/double-struck.js
+        font/svg/dynamic/fraktur.js
+        font/svg/dynamic/greek-ss.js
+        font/svg/dynamic/greek.js
+        font/svg/dynamic/hebrew.js
+        font/svg/dynamic/latin-b.js
+        font/svg/dynamic/latin-bi.js
+        font/svg/dynamic/latin-i.js
+        font/svg/dynamic/latin.js
+        font/svg/dynamic/marrows.js
+        font/svg/dynamic/math.js
+        font/svg/dynamic/monospace-ex.js
+        font/svg/dynamic/monospace-l.js
+        font/svg/dynamic/monospace.js
+        font/svg/dynamic/mshapes.js
+        font/svg/dynamic/phonetics-ss.js
+        font/svg/dynamic/phonetics.js
+        font/svg/dynamic/sans-serif-b.js
+        font/svg/dynamic/sans-serif-bi.js
+        font/svg/dynamic/sans-serif-ex.js
+        font/svg/dynamic/sans-serif-i.js
+        font/svg/dynamic/sans-serif-r.js
+        font/svg/dynamic/sans-serif.js
+        font/svg/dynamic/script.js
+        font/svg/dynamic/shapes.js
+        font/svg/dynamic/symbols-b-i.js
+        font/svg/dynamic/symbols.js
+        font/svg/dynamic/variants.js
+        fonts/mathjax-bbm-font-extension/svg.js
+        fonts/mathjax-bboldx-font-extension/svg.js
+        fonts/mathjax-dsfont-font-extension/svg.js
+        fonts/mathjax-mhchem-font-extension/svg.js
+        input/tex/extensions/action.js
+        input/tex/extensions/ams.js
+        input/tex/extensions/amscd.js
+        input/tex/extensions/autoload.js
+        input/tex/extensions/bbm.js
+        input/tex/extensions/bboldx.js
+        input/tex/extensions/bbox.js
+        input/tex/extensions/begingroup.js
+        input/tex/extensions/boldsymbol.js
+        input/tex/extensions/braket.js
+        input/tex/extensions/bussproofs.js
+        input/tex/extensions/cancel.js
+        input/tex/extensions/cases.js
+        input/tex/extensions/centernot.js
+        input/tex/extensions/color.js
+        input/tex/extensions/colortbl.js
+        input/tex/extensions/colorv2.js
+        input/tex/extensions/configmacros.js
+        input/tex/extensions/dsfont.js
+        input/tex/extensions/empheq.js
+        input/tex/extensions/enclose.js
+        input/tex/extensions/extpfeil.js
+        input/tex/extensions/fontsizev3.js
+        input/tex/extensions/gensymb.js
+        input/tex/extensions/html.js
+        input/tex/extensions/mathtools.js
+        input/tex/extensions/mhchem.js
+        input/tex/extensions/newcommand.js
+        input/tex/extensions/noerrors.js
+        input/tex/extensions/noundefined.js
+        input/tex/extensions/physics.js
+        input/tex/extensions/require.js
+        input/tex/extensions/tagformat.js
+        input/tex/extensions/textcomp.js
+        input/tex/extensions/textmacros.js
+        input/tex/extensions/unicode.js
+        input/tex/extensions/units.js
+        input/tex/extensions/upgreek.js
+        input/tex/extensions/verb.js
+        tex-svg.js
+        """.split(separator: "\n").map { "mathjax/" + String($0) })
 
     private static let assets: [String: (file: String, mimeType: String)] = [
         "base.css": ("base.css", "text/css"),

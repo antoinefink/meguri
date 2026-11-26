@@ -12,7 +12,7 @@ What every card page loads (specs/render/card-runtime.md, U66): `page.html` (ske
 - **Handler properties are per world.** `onclick` set in the page world reads `null` from the interaction world: the registry reads them in the page world.
 - **Page-world handlers:** only iOS `cb` (native registers it). `meguriCard` and `meguriVisible` exist in the interaction world only; the Mac page world has no `window.webkit`.
 - **The page document loads at the media origin root** (`meguri-media://media/`), not under `/_anki/`: WebKit resolves `import()` in inline scripts against the document URL and ignores `<base>`, so a page at `/_anki/page.html` sends `import("./_m.js")` to `/_anki/_m.js` (R520). Assets stay under `/_anki/`. The S2 decision record and spec C2.1 agree.
-- **No Anki assets** (R1960). Only upstream jQuery 3.7.1, unmodified (hash in `THIRD_PARTY_NOTICES.md`).
+- **No Anki assets** (R1960). Upstream jQuery 3.7.1 and MathJax 4.1.3 are unmodified. MathJax is lazy, offline and confined to the bundled component allowlist; editor/storage TeX stays literal. The owner's offline-MathJax instruction supersedes C10.8/D6's no-op.
 - **`base.css` values are exact text** (C4); do not normalize colours. The order is Meguri's (tokens alphabetical, flags descending, rules grouped): reorder again if the similarity scan flags a region. The Mac focus rule's selector is `.isMac:not(:root)`, not the descendant form, which matched an Anki stylesheet's text (U66-E1): same elements and specificity, which `BaseCSSTests` pins. The Mac's WebKit drops `-webkit-text-size-adjust` (no text autosizing); iOS applies it.
 
 ## Channel (C14)

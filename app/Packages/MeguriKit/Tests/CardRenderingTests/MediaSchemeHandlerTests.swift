@@ -132,6 +132,32 @@ extension WebKitSuites {
             request.setValue(nil, forHTTPHeaderField: "Range")
             #expect(try await Self.answer(request, fixture: fixture).body == Data("arrival".utf8))
         }
+
+        @Test func bundledMathRoutesAreConfinedAndNeverUseCollectionMedia() async throws {
+            let fixture = MediaFixture()
+            for path in ["tex-svg.js", "input/tex/extensions/ams.js", "input/tex/extensions/mhchem.js", "a11y/assistive-mml.js",
+                         "fonts/mathjax-mhchem-font-extension/svg.js", "fonts/mathjax-bbm-font-extension/svg.js",
+                         "fonts/mathjax-bboldx-font-extension/svg.js", "fonts/mathjax-dsfont-font-extension/svg.js"] {
+                let asset = try #require(CardRuntime.asset(at: "mathjax/" + path))
+                let task = try await Self.answer(URLRequest(url: URL(string: "meguri-media://media/_anki/mathjax/" + path)!), fixture: fixture)
+                #expect(task.response?.statusCode == 200)
+                #expect(task.response?.value(forHTTPHeaderField: "Content-Type") == "text/javascript; charset=utf-8")
+                #expect(task.body == asset.data)
+            }
+            for path in ["mathjax/input/tex/extensions/texhtml.js", "mathjax/input/tex/extensions/setoptions.js",
+                         "mathjax/../runtime.js", "mathjax/font/svg/dynamic/../../tex-svg.js", "mathjax/tex-svg.js/extra",
+                         "mathjax/LICENSE", "mathjax/a11y/speech.js", "mathjax/no.js", "mathjax/%74ex-svg.js"] {
+                #expect(CardRuntime.asset(at: path) == nil, "\(path)")
+            }
+            fixture.add("/no.js", Data("collection fallback forbidden".utf8), "text/javascript")
+            for path in ["no.js", "input/tex/extensions/texhtml.js", "input/tex/extensions/setoptions.js", "a11y/speech.js"] {
+                let task = try await Self.answer(URLRequest(url: URL(string: "meguri-media://media/_anki/mathjax/" + path)!), fixture: fixture)
+                #expect(task.response?.statusCode == 404 && task.body.isEmpty)
+            }
+            let glyphs = CardRuntime.assetPaths.filter { $0.hasPrefix("mathjax/font/svg/dynamic/") }
+            #expect(!glyphs.isEmpty)
+            for path in glyphs { #expect(CardRuntime.asset(at: path)?.mimeType == "text/javascript") }
+        }
         @Test func stopRevokesAlreadyPendingRangeDelivery() async throws {
             let fixture = MediaFixture()
             fixture.add("/large.bin", Data(repeating: 42, count: 2_000_000), "")
