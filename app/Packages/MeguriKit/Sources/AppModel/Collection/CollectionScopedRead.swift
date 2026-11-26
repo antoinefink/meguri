@@ -16,8 +16,17 @@ public nonisolated struct CollectionScopedRead<Value: Sendable>: Sendable {
     /// replacement. Both probes must be Ready: a replacement during any of the
     /// intervening reads discards the entire result, even if names/IDs match.
     static func read<Value: Sendable>(
-        lifecycle: () async throws -> CollectionLifecycle = { try await CoreCollectionService().lifecycle() },
-        _ read: () async throws -> Value
+        _ read: @MainActor () async throws -> Value
+    ) async throws -> CollectionScopedRead<Value> {
+        let lifecycle: @MainActor () async throws -> CollectionLifecycle = {
+            try await CoreCollectionService().lifecycle()
+        }
+        return try await self.read(lifecycle: lifecycle, read)
+    }
+
+    static func read<Value: Sendable>(
+        lifecycle: @MainActor () async throws -> CollectionLifecycle,
+        _ read: @MainActor () async throws -> Value
     ) async throws -> CollectionScopedRead<Value> {
         guard case .ready(let before) = try await lifecycle(), before != 0 else {
             throw BridgeError.unavailable(reason: "Collection scope is unavailable")
