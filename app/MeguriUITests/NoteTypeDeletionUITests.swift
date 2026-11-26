@@ -85,8 +85,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 20))
         let sidebar = app.outlines.containing(.any, identifier: row.identifier).firstMatch
         XCTAssertTrue(sidebar.exists, "The production sidebar owns the fixture row: \(row.debugDescription)")
-        let search = try sidebarSearch(app, sidebar: sidebar)
-        XCTAssertTrue(waitUntil { search.isHittable }, "Sidebar search: \(search.debugDescription)")
+        let search = try MacBrowseSidebar(app: app).searchField()
         search.click()
         app.typeKey("a", modifierFlags: .command)
         search.typeText(reverseName)
@@ -159,22 +158,6 @@ final class NoteTypeDeletionUITests: XCTestCase {
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
-    }
-
-    private func sidebarSearch(_ app: XCUIApplication, sidebar: XCUIElement) throws -> XCUIElement {
-        var matches: [XCUIElement] = []
-        XCTAssertTrue(waitUntil {
-            let bounds = sidebar.frame
-            let toolbarFields = app.toolbars.searchFields.allElementsBoundByIndex.map(\.frame)
-            matches = app.windows.firstMatch.searchFields.allElementsBoundByIndex.filter {
-                let frame = $0.frame
-                return !frame.isEmpty && frame.minX >= bounds.minX && frame.maxX <= bounds.maxX
-                    && !toolbarFields.contains(frame)
-            }
-            return matches.count == 1
-        }, "Require one native search within the production sidebar's horizontal bounds, outside the toolbar. "
-           + "Sidebar: \(sidebar.debugDescription); search fields: \(app.windows.firstMatch.searchFields.debugDescription)")
-        return try XCTUnwrap(matches.first)
     }
 
     private func openDeleteMenu(_ app: XCUIApplication, row: XCUIElement, identifier: String,

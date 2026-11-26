@@ -58,14 +58,18 @@ import XCTest
         XCTAssertTrue(waitUntil { self.count(app) == whole && !self.status(app).contains(" of ") })
         try click(app, tag, bundle)
         XCTAssertTrue(waitUntil { self.count(app) == matching && self.status(app).contains(" of ") })
-        let search = app.searchFields.element(boundBy: 0)
+        let search = try MacBrowseSidebar(app: app).searchField()
+        XCTAssertEqual(search.value as? String, "es", "Launch filters the sidebar, not the toolbar query")
         try click(app, search, bundle)
         try key(app, "a", bundle, modifiers: .command)
         try key(app, .delete, bundle)
-        XCTAssertTrue(waitUntil { (search.value as? String ?? "").isEmpty || search.value as? String == search.placeholderValue },
-                      "the search field receives Backspace")
+        XCTAssertTrue(waitUntil {
+            guard let value = search.value as? String else { return false }
+            return value.isEmpty || value == search.placeholderValue
+        }, "the sidebar search field receives Backspace")
         try app.bringToFront(bundleIdentifier: bundle)
         search.typeText("es")
+        XCTAssertTrue(waitUntil { search.value as? String == "es" }, "The sidebar field receives text")
         XCTAssertTrue(tag.waitForExistence(timeout: 10))
         assertTagSurvives(app, tag, count: matching)
 
@@ -99,10 +103,11 @@ import XCTest
         try click(app, browse, bundle)
         XCTAssertTrue(waitUntil { self.count(app) > 0 && !self.status(app).contains("Searching") })
         let whole = count(app)
-        let search = app.searchFields.element(boundBy: 0)
+        let search = try MacBrowseSidebar(app: app).searchField()
         try click(app, search, bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         search.typeText("es")
+        XCTAssertTrue(waitUntil { search.value as? String == "es" }, "The sidebar field receives text")
         XCTAssertTrue(element(app, "browse.sidebar.tag.es").waitForExistence(timeout: 10))
         return (app, bundle, whole)
     }
