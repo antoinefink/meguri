@@ -88,7 +88,8 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
         // read returns synchronously, so renewal can race that dismissal.
         // Require the new native question without opening another menu.
         assertSampleConfirmation(app, notes: 413, cards: 788)
-        XCTAssertFalse(alert.staticTexts[sampleMessage(notes: 412, cards: 786)].exists)
+        let expected = sampleMessage(notes: 412, cards: 786)
+        XCTAssertFalse(alert.staticTexts.matching(NSPredicate(format: "label == %@", expected)).firstMatch.exists)
         capture(app, "touch-note-type-delete-renewed-native-alert")
         alert.buttons["Cancel"].tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
@@ -107,8 +108,10 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
         let app = try launchDeletionSample(largestText: true)
         assertSampleConfirmation(app, notes: 412, cards: 786)
         let alert = app.alerts.firstMatch
-        let message = alert.staticTexts[sampleMessage(notes: 412, cards: 786)]
-        let scroll = alert.scrollViews.containing(.staticText, identifier: message.label).firstMatch
+        let expected = sampleMessage(notes: 412, cards: 786)
+        let predicate = NSPredicate(format: "label == %@", expected)
+        let message = alert.staticTexts.matching(predicate).firstMatch
+        let scroll = alert.scrollViews.containing(predicate).firstMatch
         let viewport = scroll.exists ? scroll : alert
         XCTAssertTrue(viewport.frame.intersects(message.frame), "The warning starts in the native viewport")
         XCTAssertGreaterThanOrEqual(message.frame.minY, viewport.frame.minY - 1,
@@ -184,7 +187,8 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
     private func assertSampleConfirmation(_ app: XCUIApplication, notes: Int, cards: Int) {
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 20))
-        XCTAssertTrue(alert.staticTexts[sampleMessage(notes: notes, cards: cards)].waitForExistence(timeout: 10),
+        let expected = sampleMessage(notes: notes, cards: cards)
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label == %@", expected)).firstMatch.waitForExistence(timeout: 10),
                       "The native alert must show the fresh losses and every sync/backup paragraph")
         XCTAssertEqual(app.alerts.count, 1)
         XCTAssertTrue(alert.staticTexts["Delete “Vocabulary”?"].exists)
