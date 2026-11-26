@@ -76,6 +76,7 @@ import Testing
             "notetypes/cards/preview-hidden",
             "notetypes/cards/styling",
             "notetypes/cards/typical",
+            "notetypes/delete/meguri-sync",
             "notetypes/fields/edited",
             "notetypes/fields/inspector-hidden",
             "notetypes/fields/typical",

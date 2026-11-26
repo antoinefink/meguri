@@ -30,8 +30,8 @@ struct PresentationHost: ViewModifier {
         // The intent still reserves collection input, but has its own native window.
         if navigation.sheet == .backupRestore { return nil }
         if features.nativeMacWorkspace, case .add = navigation.sheet { return nil }
-        if navigation.sheet == .noteTypeSave, features.noteTypeDeletionModel?.deletionQuestion != nil { return nil }
         #endif
+        if navigation.sheet == .noteTypeSave, features.noteTypeDeletionModel?.deletionQuestion != nil { return nil }
         if deckNameBesideList, case .deckName = navigation.sheet { return nil }
         return navigation.sheet
     }
@@ -60,13 +60,13 @@ struct PresentationHost: ViewModifier {
             .onChange(of: opensRestoreWindow, initial: true) { _, requested in
                 if requested { openWindow(id: BackupRestoreWindowLayout.id) }
             }
+            #endif
             .background {
                 if let model = features.noteTypeDeletionModel {
                     NoteTypeDeletionConfirmation(model: model,
                         isPresented: isActive && navigation.sheetHost == host && navigation.sheet == .noteTypeSave)
                 }
             }
-            #endif
             .sheet(item: binding(cover: false)) { sheet in presented(sheet) }
             #if os(iOS)
             .fullScreenCover(item: binding(cover: true)) { sheet in presented(sheet) }
