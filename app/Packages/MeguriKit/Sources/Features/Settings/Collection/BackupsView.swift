@@ -589,7 +589,9 @@ struct BackupRestoreContent: View {
         Button(action: refresh) {
             Text("Try Again", bundle: .module)
                 #if os(iOS)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                // Reserve for compact sheet presentation scaling.
+                .frame(minWidth: ControlMetrics.minimumTarget,
+                       minHeight: ControlMetrics.minimumTarget + (horizontalSizeClass == .compact ? Spacing.xxSmall : 0))
                 .contentShape(Rectangle())
                 #endif
         }
