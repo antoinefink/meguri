@@ -24,8 +24,8 @@
         "sha256": "316b418dfc6173f5c5e6dd4f08b25c2ebe3f44ec99677f1655b1b60b11ed02bd"
       },
       "AGENTS.md": {
-        "bytes": 895,
-        "sha256": "847e3146fdc8b8cd99167dabf13c492ccd16373113b015813dc61142672e72b8"
+        "bytes": 1184,
+        "sha256": "e2914f8ba8237ed9ba58cef06b35b51ad875e02e0192dd53b59808e05388c7b6"
       },
       "DEPENDENCIES.md": {
         "bytes": 16990,
@@ -146,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/browse.tsx": {
-        "bytes": 30479,
-        "sha256": "2d5e21502ebb5c850d922a18b742fee33300bcdc6ff126d18ed833ba432bc711"
+        "bytes": 29699,
+        "sha256": "0fdba79f1fcf698bff56c0591492577eea5056dc5b13cf89afe9e02cfaa90682"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -186,8 +186,8 @@
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 23024,
-        "sha256": "cb87d2475ac77d53db3fbe6ea2d0c51fb9e7dfcc4b858193007882e09a4d5ee8"
+        "bytes": 22992,
+        "sha256": "01b95c7628651cbe0401bbb5df3c623dfe5980eaefdd97ae5fd2a63d65d471ed"
       },
       "src/ui.tsx": {
         "bytes": 4952,

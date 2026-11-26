@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 import { asError, browseApi, errorMessage } from "./api";
 import type { BrowseCard, BrowseCatalog, BrowseDetail, BrowseScope, BrowseWrite } from "./api";
 import { Button, Field, FieldLabel, Input, Outcome } from "./ui";
 import type { OutcomeValue } from "./ui";
 
+type OpenFocus = "field" | "heading" | "keep";
 const initialScope: BrowseScope = { query: "", field: null, deck_id: null };
 export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigation }: {
   accountId: string; sessionLoss: () => void; refreshIdentity: () => void;
@@ -22,7 +23,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   const [blocked, setBlocked] = useState(false), [deleteError, setDeleteError] = useState<string | null>(null);
   const [detailFresh, setDetailFresh] = useState(true), [pagesChecked, setPagesChecked] = useState(0);
   const committedReplay = useRef<AbortController | null>(null);
-  const restoreRowFocus = useRef(false), openFocus = useRef<"field" | "heading" | "keep">("field");
+  const restoreRowFocus = useRef(false), openFocus = useRef<OpenFocus>("field");
   const deleteDialog = useRef<HTMLDialogElement>(null), deleteTrigger = useRef<HTMLButtonElement>(null);
   const examinedThrough = useRef<string | null>(null);
   const alive = useRef(true), locked = useRef(false), writing = useRef(false);
@@ -41,7 +42,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     window.addEventListener("beforeunload", unload);
     return () => { guardNavigation(null); window.removeEventListener("beforeunload", unload); };
   }, []);
-  function fail(caught: unknown) {
+  function fail(caught: unknown, report = (text: string) => setOutcome({ error: true, text })) {
     if (!alive.current || locked.current) return;
     const error = asError(caught);
     if (error.status === 401) { locked.current = true; sessionLoss(); return; }
@@ -51,9 +52,8 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
       setOutcome({ error: true, text: "The signed-in account changed. Browse has been cleared. Open Browse again after your identity refreshes." });
       refreshIdentity(); return;
     }
-    // A conflict is explained by the banner in the card area.
     if (error.code === "browse_conflict") { setConflict(true); setConfirmDelete(false); }
-    else setOutcome({ error: true, text: errorMessage(error) });
+    else report(errorMessage(error));
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -123,8 +123,6 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     void readPage(scope);
   }, [scope]);
   useLayoutEffect(() => {
-    // The full list and the rail have different row geometry: only the full
-    // list's offset is restored; the rail keeps the open row in view.
     if (!detail && !adding) {
       if (list.current) list.current.scrollTop = scroll.current;
       if (restoreRowFocus.current) focusResult();
@@ -144,8 +142,8 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     const input = target === "field" && matchField.current ? Array.from(editor.current?.querySelectorAll<HTMLTextAreaElement>("textarea") ?? []).find(el => el.dataset.field === matchField.current) : null;
     (input ?? heading.current)?.focus();
   }, [detail?.card.card_id, adding]);
-  async function open(card: BrowseCard, discard = false, focus: "field" | "heading" | "keep" = "field") {
-    if (locked.current || writing.current || (!discard && !mayLeave())) return;
+  async function open(card: BrowseCard, focus: OpenFocus = "field") {
+    if (locked.current || writing.current || !mayLeave()) return;
     detailRequest.current?.abort(); const controller = new AbortController(); detailRequest.current = controller;
     stopList(true); restoreRowFocus.current = false;
     if (!detail && !adding) {
@@ -244,17 +242,12 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
       setDetail(null); setFields({}); setTags(""); setConfirmDelete(false); setOutcome({ text: "Note and its cards deleted." });
       void readPage(currentScope.current, null, true, restoreThrough, "Note and its cards deleted.");
       focusSearch();
-    } catch (caught) {
-      const error = asError(caught);
-      // The open modal makes the page outcome unreachable; keep other failures in it.
-      if (alive.current && !locked.current && error.status !== 401 && error.code !== "stale_authority" && error.code !== "browse_conflict") setDeleteError(errorMessage(error));
-      else fail(caught);
-    }
+    } catch (caught) { fail(caught, setDeleteError); }
     finally { writing.current = false; if (alive.current) setBusy(false); }
   }
   const disabled = busy || blocked;
   const editorDisabled = disabled || opening;
-  const open_ = !!detail || adding;
+  const cardOpen = !!detail || adding;
   const searching = scope.query !== "";
   const position = detail ? cards.findIndex(card => card.card_id === detail.card.card_id) : -1;
   const neighbour = (step: 1 | -1) => {
@@ -276,37 +269,38 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if ((event.target as HTMLElement).closest("input, textarea, select, dialog")) return;
-    if (event.key === "Escape" && open_) { event.preventDefault(); back(); return; }
+    if (event.key === "Escape" && cardOpen) { event.preventDefault(); back(); return; }
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && detail && !disabled) {
       const card = event.key === "ArrowDown" ? next : previous;
-      if (card) { event.preventDefault(); void open(card, false, "heading"); }
+      if (card) { event.preventDefault(); step(card, "heading"); }
     }
   }
-  const save_ = adding
-    ? <Button type="submit" form="browse-note-form" disabled={editorDisabled || conflict || !newDeck || !newType}>{busy ? "Saving…" : "Create note"}</Button>
-    : <Button type="submit" form="browse-note-form" disabled={editorDisabled || conflict || !dirty}>{busy ? "Saving…" : "Save changes"}</Button>;
-  const reload = detail && !conflict && <Button variant="outline" disabled={disabled} onClick={() => void open(detail.card)}>Load server copy</Button>;
-  return <div className={`browse-page ${open_ ? "browse-show-detail" : ""}`} onKeyDown={onKeyDown}>
-    <div className="page-heading"><h1>Browse</h1><Button disabled={disabled || !catalog} onClick={add}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M12 5v14M5 12h14" /></svg>Add note</Button></div>
+  // Holding a step key must not restart the request for the card already opening.
+  function step(card: BrowseCard, focus: OpenFocus) { if (!(opening && listFocus.current === card.card_id)) void open(card, focus); }
+  const scopeWith = (change: Partial<BrowseScope>) => ({ query, field: field || null, deck_id: deck || null, ...change });
+  const saveButton = <Button type="submit" form="browse-note-form" disabled={editorDisabled || conflict || (adding ? !newDeck || !newType : !dirty)}>{busy ? "Saving…" : adding ? "Create note" : "Save changes"}</Button>;
+  const loadServerCopy = detail && <Button variant="outline" disabled={disabled} onClick={() => void open(detail.card)}>Load server copy</Button>;
+  return <div className={`browse-page ${cardOpen ? "browse-show-detail" : ""}`} onKeyDown={onKeyDown}>
+    <div className="page-heading"><h1>Browse</h1><Button disabled={disabled || !catalog} onClick={add}><Icon><path d="M12 5v14M5 12h14" /></Icon>Add note</Button></div>
     <Outcome value={outcome} />
     {blocked ? <p>Use the account navigation to reopen Browse.</p> : <>
-      <form className="browse-toolbar" role="search" onSubmit={event => { event.preventDefault(); if (!busy) { setOutcome(null); changeScope({ query, field: field || null, deck_id: deck || null }); } }}>
+      <form className="browse-toolbar" role="search" onSubmit={event => { event.preventDefault(); if (!busy) { setOutcome(null); changeScope(scopeWith({})); } }}>
         <div className="browse-query">
-          <Button type="submit" variant="outline" className="browse-icon-button" aria-label="Search" title="Search" disabled={disabled}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg></Button>
+          <Button type="submit" variant="outline" className="browse-icon-button" aria-label="Search" title="Search" disabled={disabled}><Icon><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></Icon></Button>
           <label htmlFor="browse-query" className="sr-only">Search note fields</label>
           <input id="browse-query" type="search" placeholder="Search note fields" value={query} maxLength={1024} onChange={event => setQuery(event.target.value)} />
-          {query && <Button variant="outline" className="browse-icon-button browse-clear" aria-label="Clear search" title="Clear search" disabled={disabled} onClick={() => { setQuery(""); setOutcome(null); changeScope({ query: "", field: field || null, deck_id: deck || null }); document.getElementById("browse-query")?.focus(); }}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M6 6l12 12M18 6L6 18" /></svg></Button>}
+          {query && <Button variant="outline" className="browse-icon-button browse-clear" aria-label="Clear search" title="Clear search" disabled={disabled} onClick={() => { setQuery(""); setOutcome(null); changeScope(scopeWith({ query: "" })); document.getElementById("browse-query")?.focus(); }}><Icon><path d="M6 6l12 12M18 6L6 18" /></Icon></Button>}
         </div>
-        <div className="browse-filter"><label htmlFor="browse-field">Field</label><select id="browse-field" value={field} onChange={event => { setField(event.target.value); if (!busy) changeScope({ query, field: event.target.value || null, deck_id: deck || null }); }} disabled={disabled || !catalog}>
+        <div className="browse-filter"><label htmlFor="browse-field">Field</label><select id="browse-field" value={field} onChange={event => { setField(event.target.value); if (!busy) changeScope(scopeWith({ field: event.target.value || null })); }} disabled={disabled || !catalog}>
           <option value="">All fields</option>{[...new Set(catalog?.note_types.flatMap(nt => nt.field_names) ?? [])].map(name => <option key={name}>{name}</option>)}</select></div>
-        <div className="browse-filter"><label htmlFor="browse-deck">Deck</label><select id="browse-deck" value={deck} onChange={event => { setDeck(event.target.value); if (!busy) changeScope({ query, field: field || null, deck_id: event.target.value || null }); }} disabled={disabled || !catalog}>
+        <div className="browse-filter"><label htmlFor="browse-deck">Deck</label><select id="browse-deck" value={deck} onChange={event => { setDeck(event.target.value); if (!busy) changeScope(scopeWith({ deck_id: event.target.value || null })); }} disabled={disabled || !catalog}>
           <option value="">All decks</option>{catalog?.decks.map(d => <option disabled={!!d.unavailable} value={d.deck_id} key={d.deck_id}>{d.name}</option>)}</select></div>
       </form>
       <p role="status" className="browse-status">{loading ? `Loading cards… (${pagesChecked} pages checked)` : opening ? "Opening card…" : `${cards.length} cards shown${cursor ? ", more available" : ""}.`}</p>
       <div className="browse-split">
         <div className={`browse-list-pane ${searching ? "browse-searching" : ""}`}>
           <div className="browse-columns" aria-hidden="true"><span>Note</span><span>Card</span><span>Deck</span>{searching && <span>Match</span>}</div>
-          <div className="browse-results" ref={list} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) restoreRowFocus.current = false; }} onScroll={event => { if (!open_ && event.currentTarget.offsetParent !== null) scroll.current = event.currentTarget.scrollTop; }}>
+          <div className="browse-results" ref={list} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) restoreRowFocus.current = false; }} onScroll={event => { if (!cardOpen && event.currentTarget.offsetParent !== null) scroll.current = event.currentTarget.scrollTop; }}>
             <ul aria-label="Cards">{cards.map(card => <li key={card.card_id}><button type="button" data-card={card.card_id} className="browse-result" aria-current={detail?.card.card_id === card.card_id ? "true" : undefined} disabled={disabled} onClick={() => { if (card.unavailable) setOutcome({ error: true, text: card.unavailable }); else void open(card); }}>
               <span className="browse-cell-title">{card.title || "Untitled note"}</span>
               <span className="browse-cell-template"><span className="sr-only">, </span>{card.template}</span>
@@ -318,12 +312,12 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
             {cursor && <div className="browse-more"><Button variant="outline" disabled={loading || disabled} onClick={() => void readPage(scope, cursor, false)}>{searching ? "Search further" : "Load more cards"}</Button></div>}
           </div>
         </div>
-        {open_ && <section className="browse-editor" ref={editor} aria-labelledby="browse-card-title">
+        {cardOpen && <section className="browse-editor" ref={editor} aria-labelledby="browse-card-title">
           <div className="browse-card-head">
-            <div className="browse-card-nav"><Button className="browse-back" variant="outline" disabled={busy} onClick={back}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M14 7l-5 5 5 5" /></svg>All cards</Button>
+            <div className="browse-card-nav"><Button variant="outline" disabled={busy} onClick={back}><Icon><path d="M14 7l-5 5 5 5" /></Icon>All cards</Button>
             {detail && <div className="browse-step">
-              <Button variant="outline" className="browse-icon-button" aria-label="Previous card" title="Previous card (↑)" disabled={disabled || !previous} onClick={() => previous && void open(previous, false, "keep")}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M7 14l5-5 5 5" /></svg></Button>
-              <Button variant="outline" className="browse-icon-button" aria-label="Next card" title="Next card (↓)" disabled={disabled || !next} onClick={() => next && void open(next, false, "keep")}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M7 10l5 5 5-5" /></svg></Button>
+              <Button variant="outline" className="browse-icon-button" aria-label="Previous card" title="Previous card (↑)" disabled={disabled || !previous} onClick={() => previous && step(previous, "keep")}><Icon><path d="M7 14l5-5 5 5" /></Icon></Button>
+              <Button variant="outline" className="browse-icon-button" aria-label="Next card" title="Next card (↓)" disabled={disabled || !next} onClick={() => next && step(next, "keep")}><Icon><path d="M7 10l5 5 5-5" /></Icon></Button>
             </div>}</div>
             <div className="browse-card-title">
               <h2 id="browse-card-title" ref={heading} tabIndex={-1}>{title}</h2>
@@ -331,13 +325,13 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
             </div>
             <div className="browse-head-actions">
               {adding && <Button variant="outline" disabled={busy} onClick={back}>Cancel</Button>}
-              {detail && <Button ref={deleteTrigger} variant="outline" className="browse-icon-button browse-delete" aria-label="Delete note" title="Delete note" disabled={editorDisabled || conflict || dirty || !detailFresh} onClick={() => setConfirmDelete(true)}><svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg></Button>}
-              <span className="browse-wide-only">{reload}{save_}</span>
+              {detail && <Button ref={deleteTrigger} variant="outline" className="browse-icon-button browse-delete" aria-label="Delete note" title="Delete note" disabled={editorDisabled || conflict || dirty || !detailFresh} onClick={() => setConfirmDelete(true)}><Icon><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></Icon></Button>}
+              <span className="browse-wide-only">{!conflict && loadServerCopy}{saveButton}</span>
             </div>
           </div>
           {conflict && <div ref={banner} tabIndex={-1} role="alert" className="outcome error browse-banner">
             {adding ? <><p>The collection changed. Your draft is still here. Copy any values you need, then reload Browse to get the current collection choices.</p><Button variant="outline" onClick={() => { if (mayLeave()) location.reload(); }}>Reload Browse</Button></>
-              : <><p>This note changed after you opened it. Your draft is still here, but it can’t be saved over the newer copy. Copy anything you want to keep, then load the server copy.</p>{detail && <Button variant="outline" disabled={disabled} onClick={() => void open(detail.card)}>Load server copy</Button>}</>}
+              : <><p>This note changed after you opened it. Your draft is still here, but it can’t be saved over the newer copy. Copy anything you want to keep, then load the server copy.</p>{loadServerCopy}</>}
           </div>}
           <div className="browse-card-body">
             <form id="browse-note-form" className="stack browse-note-form" onSubmit={event => void save(event)}>
@@ -348,9 +342,9 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
             </form>
             {detail && <aside className="browse-info-pane" aria-labelledby="browse-info-title"><h3 id="browse-info-title">Card info</h3><dl className="browse-info"><dt>Card ID</dt><dd>{detail.card.card_id}</dd><dt>Note ID</dt><dd>{detail.note.note_id}</dd><dt>Template</dt><dd>{detail.card.template}</dd><dt>Deck</dt><dd>{detail.card.deck}</dd></dl></aside>}
           </div>
-          <div className="browse-bottom-bar">{reload}{save_}</div>
+          <div className="browse-bottom-bar">{!conflict && loadServerCopy}{saveButton}</div>
           {detail && <dialog ref={deleteDialog} className="browse-dialog" aria-labelledby="browse-delete-title" onClose={() => { setConfirmDelete(false); if (!conflict) deleteTrigger.current?.focus(); }}>
-            <h2 id="browse-delete-title">Delete “{detail.card.title || "Untitled note"}”?</h2>
+            <h2 id="browse-delete-title">Delete “{title}”?</h2>
             <p>This removes the note and {siblings === 1 ? "its only card" : `all ${siblings} of its cards`}. Your devices receive the deletion when they sync.</p>
             {deleteError && <p role="alert" className="error">{deleteError}</p>}
             <div className="actions"><Button variant="outline" disabled={busy} onClick={() => setConfirmDelete(false)}>Cancel</Button><Button variant="destructive" disabled={busy || opening || dirty || !detailFresh} onClick={() => void remove()}>Delete note</Button></div>
@@ -362,3 +356,4 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
 }
 // Markup and media references read better in a code face; judged from the server copy.
 function codeLike(value: string | undefined) { return !!value && /<\/?[a-z][^>]*>|\[sound:|&[a-z#0-9]+;/i.test(value); }
+function Icon({ children }: { children: ReactNode }) { return <svg aria-hidden="true" viewBox="0 0 24 24" className="browse-icon">{children}</svg>; }

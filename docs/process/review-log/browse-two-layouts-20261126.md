@@ -13,3 +13,10 @@ An independent non-author reviewer read the complete candidates, including the s
 - `server/web/src/style.css` — `cb87d2475ac77d53db3fbe6ea2d0c51fb9e7dfcc4b858193007882e09a4d5ee8`
 - `server/web/tests/browser/browse.spec.ts` — `22ff413d3fd71c2357e247c963ff32d5ca86bb58aa03f5a4a8b155fd5b8bd363`
 - `server/web/tests/browser/browse-real.spec.ts` — `3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad`
+
+The simplification pass (shared icon and scope helpers, one Save and Load server copy element, delete failures routed through the shared error handler, a guard against restarting an opening card) and the web input note changed these files. `sync-web-check` and `sync-web-verify` (115 tests) passed again on them. The independent reviewer read the complete revised files and approved these exact bytes.
+
+- `server/web/src/browse.tsx` — `0fdba79f1fcf698bff56c0591492577eea5056dc5b13cf89afe9e02cfaa90682`
+- `server/web/src/style.css` — `01b95c7628651cbe0401bbb5df3c623dfe5980eaefdd97ae5fd2a63d65d471ed`
+- `server/web/AGENTS.md` — `e2914f8ba8237ed9ba58cef06b35b51ad875e02e0192dd53b59808e05388c7b6`
+- `server/web/scripts/audit-assessment.json` — `9ab8f116176d337a8fe06da25519342f3cb6f2954194060adf832e8b5f753650`

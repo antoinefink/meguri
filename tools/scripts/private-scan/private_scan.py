@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
     "server/web/tests/browser/browse-real.spec.ts":
         "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad",
     "server/web/src/browse.tsx":
-        "2d5e21502ebb5c850d922a18b742fee33300bcdc6ff126d18ed833ba432bc711",
+        "0fdba79f1fcf698bff56c0591492577eea5056dc5b13cf89afe9e02cfaa90682",
     "server/tests/browse.rs":
         "d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
@@ -1215,7 +1215,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/upstream-records.json':
         "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385",
     'server/web/src/style.css':
-        "cb87d2475ac77d53db3fbe6ea2d0c51fb9e7dfcc4b858193007882e09a4d5ee8",
+        "01b95c7628651cbe0401bbb5df3c623dfe5980eaefdd97ae5fd2a63d65d471ed",
     'server/web/src/app.tsx':
         "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69",
     'server/web/tests/browser/accounts.spec.ts':
