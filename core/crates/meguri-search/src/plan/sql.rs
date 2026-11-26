@@ -145,10 +145,17 @@ pub fn is_pattern_error(kind: &ErrorKind) -> bool {
 /// ordering (U84 adds it).
 pub(super) fn statement(mode: SearchMode, rows: Rows, predicate: &str) -> String {
     let select = match (mode, rows) {
-        (SearchMode::Cards, Rows::Cards) => "SELECT c.id FROM cards c",
-        (SearchMode::Cards, _) => "SELECT c.id FROM cards c JOIN notes n ON n.id = c.nid",
-        (SearchMode::Notes, Rows::Notes) => "SELECT n.id FROM notes n",
-        (SearchMode::Notes, _) => "SELECT DISTINCT n.id FROM cards c JOIN notes n ON n.id = c.nid",
+        (SearchMode::Cards, _) => "SELECT c.id",
+        (SearchMode::Notes, Rows::Notes) => "SELECT n.id",
+        (SearchMode::Notes, _) => "SELECT DISTINCT n.id",
     };
-    format!("{select} WHERE {predicate}")
+    format!("{select} FROM {} WHERE {predicate}", from_clause(mode, rows))
+}
+
+pub(super) fn from_clause(mode: SearchMode, rows: Rows) -> &'static str {
+    match (mode, rows) {
+        (SearchMode::Cards, Rows::Cards) => "cards c",
+        (SearchMode::Notes, Rows::Notes) => "notes n",
+        _ => "cards c JOIN notes n ON n.id = c.nid",
+    }
 }

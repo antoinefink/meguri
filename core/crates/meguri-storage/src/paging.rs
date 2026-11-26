@@ -80,7 +80,10 @@ pub struct NoteIdentity {
 
 /// One filtered-study term evaluated against the connection's live rows.
 pub struct FilteredGather<'a> {
-    pub search_sql: &'a str,
+    /// FROM tables/joins and WHERE expression from the search compiler,
+    /// never raw search input. These use the compiler's `c`/`n` aliases.
+    pub search_from: &'a str,
+    pub search_predicate: &'a str,
     pub search_params: &'a [Cell],
     pub filtered: &'a [DeckId],
     pub order: u32,
@@ -391,7 +394,7 @@ pub trait ReadRows: sealed::Connected {
     /// scope after releasing prior members. Eligibility wraps the complete
     /// search, so OR operands cannot escape it.
     fn filtered_card_ids(&self, gather: FilteredGather<'_>) -> Result<Vec<CardId>, StorageError> {
-        let FilteredGather { search_sql, search_params, filtered, order, limit, today, now, salt } = gather;
+        let FilteredGather { search_from, search_predicate, search_params, filtered, order, limit, today, now, salt } = gather;
         let key = match order {
             0 => "(SELECT max(r.id) FROM revlog r WHERE r.cid = c.id) ASC".to_owned(),
             1 => format!("fnvhash(c.id, {salt}) ASC"),
@@ -408,7 +411,7 @@ pub trait ReadRows: sealed::Connected {
         let mut params = search_params.to_vec();
         params.push(Cell::text(crate::search_rows::json_list(&filtered.iter().map(|d| d.0).collect::<Vec<_>>())));
         let sql = format!(
-            "SELECT c.id FROM cards c WHERE c.id IN ({search_sql}) AND c.queue >= 0 AND c.odid = 0 \
+            "SELECT c.id FROM {search_from} WHERE ({search_predicate}) AND c.queue >= 0 AND c.odid = 0 \
              AND c.did NOT IN (SELECT value FROM json_each(?{})) \
              ORDER BY {key}, fnvhash(c.id, c.mod) ASC LIMIT {limit}", params.len());
         self.search_card_ids(&sql, &params)
@@ -729,6 +732,25 @@ pub trait ReadRows: sealed::Connected {
         .iter()
         .map(|row| Card::from_cells(row).map_err(StorageError::from))
         .collect()
+    }
+
+    /// At most 250 card ids of a deck (`did` or `odid`), ascending by id.
+    /// Keyset traversal remains valid while the writer returns members home.
+    /// No lower bound on the first page, including a stored `i64::MIN` id.
+    fn deck_card_ids_page(&self, id: DeckId, after: Option<CardId>) -> Result<Vec<CardId>, StorageError> {
+        // Keep the partial odid index available for ordinary deck ids, and
+        // a direct id lower bound on subsequent pages (no nullable OR).
+        let membership = if id.0 == 0 { "did = ?1 OR odid = ?1" }
+            else { "did = ?1 OR (odid = ?1 AND odid != 0)" };
+        let mut params = vec![Cell::Integer(id.0)];
+        let bound = if let Some(after) = after {
+            params.push(Cell::Integer(after.0));
+            "AND id > ?2"
+        } else { "" };
+        let sql = format!("SELECT id FROM cards WHERE ({membership}) {bound} ORDER BY id LIMIT 250");
+        Ok(self.connection().prepare_cached(&sql)?.query_map(params_from_iter(&params), |row| {
+            row.get::<_, i64>(0).map(CardId)
+        })?.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// A page of the ids of the deck's cards (`did` or `odid`, so its cards

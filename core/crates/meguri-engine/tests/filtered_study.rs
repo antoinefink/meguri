@@ -206,6 +206,52 @@ fn preview_return_restores_zero_and_nonzero_days_for_empty_rebuild_and_delete() 
 }
 
 #[test]
+fn paged_members_all_return_home_after_reopen_and_one_undo_restores_them() {
+    for rebuild in [false, true] {
+        let mut h = common::fresh(); let home = source(&h, "Paged home");
+        // More than two 250-id pages, including a partial final page.
+        let cards = (0..513).map(|i| {
+            let mut c = new_card(); c.card_type = CardType::Review; c.queue = CardQueue::Review;
+            c.due = if i % 2 == 0 { 0 } else { 103 }; c.interval = 21;
+            c
+        }).collect();
+        let ids = seed(&h, home, cards);
+        let target = filtered::save(&h.collection, None,
+            definition("Paged preview", &format!("did:{}", home.0), 513, 5, false), false).unwrap().value;
+        let repeats = ids.clone();
+        h.collection.run(OpSpec::named("paged_preview_repeat_fixture", OpSource::UserNonUndoable), move |ctx| {
+            for id in repeats {
+                let mut c = ctx.scope().card(id)?.unwrap();
+                c.queue = CardQueue::Preview; c.due = (NOW_MS / 1000 + 60) as i32;
+                ctx.scope().put(&c)?;
+            }
+            if rebuild {
+                let mut deck = ctx.scope().deck(target)?.unwrap();
+                let DeckKind::Filtered(ref mut f) = deck.kind.kind else { panic!() };
+                f.search_terms[0].search = "cid:1".into();
+                ctx.scope().put(&deck)?;
+            }
+            Ok(())
+        }).unwrap();
+        h.engine.close().unwrap();
+        h.collection = h.engine.open_raw(&h.path, common::open_config(&h.clock)).unwrap();
+        assert_eq!(members(&h, target).len(), 513);
+        let before = ids.iter().map(|id| image(&h, *id)).collect::<Vec<_>>();
+        if rebuild { filtered::rebuild(&h.collection, target).unwrap(); }
+        else { filtered::empty(&h.collection, target).unwrap(); }
+        assert!(members(&h, target).is_empty());
+        // Inspect persisted rows, including members beyond the first page.
+        for (i, id) in ids.iter().enumerate() {
+            let c = row(&h, *id);
+            assert_eq!((c.deck_id, c.original_deck_id, c.original_due, c.queue, c.due, c.interval),
+                (home, DeckId(0), 0, CardQueue::Review, if i % 2 == 0 { 0 } else { 103 }, 21));
+        }
+        h.collection.undo(UndoScope::Global).unwrap();
+        assert_eq!(ids.iter().map(|id| image(&h, *id)).collect::<Vec<_>>(), before);
+    }
+}
+
+#[test]
 fn custom_tag_literals_hierarchy_remembered_choices_rollback_and_undo() {
     let h = common::fresh();
     let home = source(&h, "Scope\"*::OR"); let child = source(&h, "Scope\"*::OR::Child"); let other = source(&h, "Other");

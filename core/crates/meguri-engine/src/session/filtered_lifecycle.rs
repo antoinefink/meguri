@@ -1,22 +1,28 @@
 //! Before-acceptance identity for U1 lifecycle operations, independent of C12.
 use crate::{EngineError, OpSpec, Seq, undo::names};
-use meguri_model::{card::Card, ids::DeckId};
+use meguri_model::{card::Card, changes::{ChangeKind, DeckChange}, ids::DeckId};
 use meguri_sched::session::token::StateToken;
 use meguri_storage::{Journal, Record, Table};
 use sha2::{Digest, Sha256};
 use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 
 /// Cloned into each reader snapshot under the commit lock. Only lifecycle
-/// commits replace the shared map; ordinary answers and edits keep it intact.
+/// commits and deck deletions replace the shared map; ordinary answers and
+/// edits keep it intact. The executor survives file replacement, which resets
+/// this state before any reader of the new generation opens.
 #[derive(Clone, Default)]
 pub(crate) struct FilteredLifecycle(Arc<BTreeMap<DeckId, Seq>>);
 
 impl FilteredLifecycle {
-    pub(crate) fn record(&mut self, seq: Seq, decks: BTreeSet<DeckId>) {
-        if !decks.is_empty() {
+    pub(crate) fn record(&mut self, seq: Seq, decks: BTreeSet<DeckId>, changes: &[DeckChange]) {
+        let removed = || changes.iter().filter(|d| d.kind == ChangeKind::Removed).map(|d| d.id);
+        if !decks.is_empty() || removed().any(|id| self.0.contains_key(&id)) {
             let revisions = Arc::make_mut(&mut self.0);
             for deck in decks {
                 revisions.insert(deck, seq);
+            }
+            for deck in removed() {
+                revisions.remove(&deck);
             }
         }
     }
@@ -49,4 +55,24 @@ pub(crate) fn affected(spec: &OpSpec, journal: Option<&Journal>) -> Result<BTree
         }
     }
     Ok(decks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deleting_a_deck_retires_only_its_revision_and_preserves_snapshot_tokens() {
+        let mut live = FilteredLifecycle::default();
+        let deleted = DeckId(10);
+        let other = DeckId(11);
+        live.record(Seq(1), [deleted, other].into_iter().collect(), &[]);
+        let snapshot = live.clone();
+        let token = [0; 32];
+        live.record(Seq(2), BTreeSet::new(), &[DeckChange { id: deleted, kind: ChangeKind::Removed }]);
+        assert!(!live.0.contains_key(&deleted));
+        assert_eq!(live.token(token, deleted), FilteredLifecycle::default().token(token, deleted));
+        assert_ne!(snapshot.token(token, deleted), live.token(token, deleted));
+        assert_eq!(snapshot.token(token, other), live.token(token, other));
+    }
 }

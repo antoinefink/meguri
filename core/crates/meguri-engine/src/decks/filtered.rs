@@ -8,28 +8,22 @@ use meguri_storage::{ReadRows, WriteScope};
 
 pub fn return_home_in(scope: &mut WriteScope<'_>, id: DeckId) -> Result<(), EngineError> {
     let preview = matches!(super::require(scope, id)?.kind.kind, meguri_model::proto::deck::DeckKind::Filtered(ref f) if !f.reschedule);
-    for mut card in scope.cards_of_deck(id)? {
-        let zero_review = preview && card.card_type == CardType::Review && card.queue == CardQueue::Preview
-            && card.original_due == 0 && scope.deck(card.original_deck_id)?.is_some_and(|d| !super::is_filtered(&d));
-        if card.original_deck_id.0 != 0 {
-            card.deck_id = card.original_deck_id;
-            card.original_deck_id = DeckId(0);
+    let mut after = None;
+    loop {
+        let ids = scope.deck_card_ids_page(id, after)?;
+        if ids.is_empty() { break; }
+        after = ids.last().copied();
+        for card_id in ids {
+            let mut card = scope.card(card_id)?.ok_or_else(|| invalid("Missing filtered member"))?;
+            let zero_review = preview && card.original_deck_id.0 != 0
+                && card.card_type == CardType::Review && card.queue == CardQueue::Preview
+                && card.original_due == 0 && scope.deck(card.original_deck_id)?.is_some_and(|d| !super::is_filtered(&d));
             if zero_review {
                 card.due = 0;
-            } else if card.original_due != 0 {
-                card.due = card.original_due;
             }
-            card.original_due = 0;
-            if card.queue.stored() >= 0 {
-                card.queue = match card.card_type {
-                    CardType::New => CardQueue::New,
-                    CardType::Review => CardQueue::Review,
-                    CardType::Learning | CardType::Relearning if card.due > 1_000_000_000 => CardQueue::Learning,
-                    _ => CardQueue::InterdayLearning,
-                };
-            }
+            meguri_sched::model::card_sched::return_from_filtered(&mut card);
+            scope.put_card_forced(&card)?;
         }
-        scope.put_card_forced(&card)?;
     }
     Ok(())
 }
@@ -114,7 +108,8 @@ pub(super) fn gather_in(scope: &mut WriteScope<'_>, id: DeckId, context: &Search
     let mut count = 0usize;
     for (term, plan) in f.search_terms.iter().zip(plans) {
         let ids = scope.filtered_card_ids(FilteredGather {
-            search_sql: plan.sql(), search_params: &cells(plan.params()), filtered: &filtered,
+            search_from: plan.from_sql(), search_predicate: plan.predicate_sql(),
+            search_params: &cells(plan.params()), filtered: &filtered,
             order: term.order as u32, limit: term.limit, today: context.today, now: context.now, salt,
         })?;
         for card_id in ids {

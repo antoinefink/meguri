@@ -602,7 +602,7 @@ fn run_op<T>(
         shared.undo.safety_commit_pending();
         let reservation = shared.stream.reserve();
         *last = reservation.seq();
-        shared.filtered_lifecycle.lock().unwrap().record(*last, filtered_decks);
+        shared.filtered_lifecycle.lock().unwrap().record(*last, filtered_decks, &committed.1.changes.decks);
         shared.coverage.commit_finished(
             shared,
             collection.writer(),
@@ -979,6 +979,9 @@ impl TaskBody for ReplaceTask {
             // any op of the new generation, also when the reopen fails
             // (engine/undo M6).
             shared.undo.reset(DisabledReason::ClearedByOneWay);
+            // ExecShared survives replacement, but these deck ids belong to
+            // the retired file. Readers are closed and the writer is drained.
+            *shared.filtered_lifecycle.lock().unwrap() = Default::default();
         }
         let reopen = env.reopen;
         let local_binding = reopen.binding();
