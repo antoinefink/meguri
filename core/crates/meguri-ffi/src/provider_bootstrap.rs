@@ -334,7 +334,7 @@ impl ProviderConnection {
             Err(error) => failure(error),
         }
     }
-    fn access(&self, credentials: ProviderCredentials) -> Result<MeguriAccess, MeguriBootstrapError> {
+    pub(super) fn access(&self, credentials: ProviderCredentials) -> Result<MeguriAccess, MeguriBootstrapError> {
         let expected = information(&self.inner);
         if credentials.connection.reference != expected.reference || credentials.connection.revision != expected.revision
             || credentials.connection.endpoint != expected.endpoint { return Err(MeguriBootstrapError::ConnectionChanged); }

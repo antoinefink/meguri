@@ -3,7 +3,7 @@
 //! the user confirmed, upload), and Upload… finishes one whose upload is
 //! pending. The job is advanced by its caller, one phase at a time: wait for
 //! the phase's job to end, then advance again.
-use super::normal::{ProviderRoundRefusal, ProviderRoundResult, access_for, round_result};
+use super::normal::{ProviderRoundRefusal, ProviderRoundResult, round_result};
 use super::{ProviderConnection, ProviderCredentials, ProviderOwner};
 use crate::deck_import::{DeckImportApplyOutcome, DeckImportConfirmation, DeckImportOptions, DeckImportSession};
 use crate::mutations::MutationSummary;
@@ -13,7 +13,7 @@ use crate::notetype_structure::{NotetypeRemoval, NotetypeRemoved, NotetypeRestor
 use crate::{CoreError, callback, jobs};
 use meguri_engine::notetypes::{change::{self, ChangeNotetype}, remove::{self, RemoveNotetype},
     restore::{self, RestoreNotetype}, structure::{self, StructureDraft}};
-use meguri_host::{DeckImportAnswer, MeguriAccessSource, MeguriBootstrapError, MeguriStructureOutcome, MeguriStructureRefusal,
+use meguri_host::{DeckImportAnswer, MeguriAccessSource, MeguriStructureOutcome, MeguriStructureRefusal,
     MeguriStructureStage, MeguriStructureStep, MeguriStructureStop, MeguriStructureTask,
     MeguriStructureUploadOutcome, MeguriStructureWork, MeguriUploadPending};
 use meguri_model::ids::NotetypeId;
@@ -213,8 +213,11 @@ fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost)
 }
 impl ProviderConnection {
     fn structure_access(&self, credentials: ProviderCredentials) -> MeguriAccessSource {
-        let (owner, inner) = (self.owner.clone(), self.inner.clone());
-        Arc::new(move || access_for(&owner, &inner, credentials.clone()).map_err(|_| MeguriBootstrapError::ConnectionChanged))
+        // Like bootstrap, retain this Host and connection across the upload's
+        // own activation. The task gates ordinary phases by its starting
+        // generation and media by its exact retained operation/publication.
+        let connection = ProviderConnection { owner: self.owner.clone(), inner: self.inner.clone() };
+        Arc::new(move || connection.access(credentials.clone()))
     }
     fn structure_start(&self, start: Result<Arc<MeguriStructureTask>, MeguriStructureRefusal>, saved: Saved,
         import: Option<DeckImportAnswer>) -> ProviderStructureStart {
@@ -232,19 +235,37 @@ impl ProviderConnection {
     pub fn start_structure_save(&self, credentials: ProviderCredentials, op: ProviderStructureOp, reachable: bool)
         -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_save");
-        self.owner.validate()?;
-        let Some((work, saved, import)) = work(op, &self.owner.host)? else {
-            return Ok(ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed });
-        };
-        let start = self.owner.host.start_meguri_structure_save(self.structure_access(credentials), work, reachable);
-        Ok(self.structure_start(start, saved, import))
+        self.start_structure_save_on(credentials, op, reachable, self.owner.generation.0)
+    }
+    /// Use the generation of the sheet/question's originating collection,
+    /// even when credentials or the provider connection were awaited later.
+    pub fn start_structure_save_for_generation(&self, credentials: ProviderCredentials, op: ProviderStructureOp,
+        reachable: bool, generation: u64) -> Result<ProviderStructureStart, CoreError> {
+        callback::enter("ProviderConnection.start_structure_save_for_generation");
+        self.start_structure_save_on(credentials, op, reachable, generation)
     }
     /// MP7 step 5's Upload…: no round and no further question.
     pub fn start_structure_upload(&self, credentials: ProviderCredentials) -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_upload");
         self.owner.validate()?;
-        let start = self.owner.host.start_meguri_structure_upload(self.structure_access(credentials));
+        let start = self.owner.host.start_meguri_structure_upload_for_generation(self.owner.generation, self.structure_access(credentials));
         Ok(self.structure_start(start, Saved::default(), None))
+    }
+}
+impl ProviderConnection {
+    fn start_structure_save_on(&self, credentials: ProviderCredentials, op: ProviderStructureOp,
+        reachable: bool, generation: u64) -> Result<ProviderStructureStart, CoreError> {
+        self.owner.validate()?;
+        let generation = meguri_engine::Generation(generation);
+        // Check before op preparation as well as at the host's actual lane
+        // admission; neither is allowed to follow a newer connection to B.
+        self.owner.host.collection_for_generation(generation)?;
+        let Some((work, saved, import)) = work(op, &self.owner.host)? else {
+            return Ok(ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed });
+        };
+        let start = self.owner.host.start_meguri_structure_save_for_generation(generation,
+            self.structure_access(credentials), work, reachable);
+        Ok(self.structure_start(start, saved, import))
     }
 }
 #[uniffi::export]

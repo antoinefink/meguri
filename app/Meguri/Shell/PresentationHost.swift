@@ -1,5 +1,6 @@
 import AppModel
 import Home
+import NoteTypes
 import SwiftUI
 
 /// Presents `AppNavigation.sheet` over the current screen (R25): Add, deck
@@ -19,6 +20,7 @@ struct PresentationHost: ViewModifier {
         guard isActive, navigation.sheetHost == host else { return nil }
         #if os(macOS)
         if features.nativeMacWorkspace, case .add = navigation.sheet { return nil }
+        if navigation.sheet == .noteTypeSave, features.noteTypeDeletionModel?.deletionQuestion != nil { return nil }
         #endif
         if deckNameBesideList, case .deckName = navigation.sheet { return nil }
         return navigation.sheet
@@ -44,6 +46,14 @@ struct PresentationHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            #if os(macOS)
+            .background {
+                if let model = features.noteTypeDeletionModel {
+                    NoteTypeDeletionConfirmation(model: model,
+                        isPresented: isActive && navigation.sheetHost == host && navigation.sheet == .noteTypeSave)
+                }
+            }
+            #endif
             .sheet(item: binding(cover: false)) { sheet in presented(sheet) }
             #if os(iOS)
             .fullScreenCover(item: binding(cover: true)) { sheet in presented(sheet) }

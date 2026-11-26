@@ -2,6 +2,18 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+The tag and note type deletion branch passed 44 focused Swift tests
+(`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
+(`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed
+all four cases (`ui-test/20261126T071556Z-86434`). The macOS tag menu
+journeys passed both cases (`ui-test/20261126T073941Z-29697`).
+Both Mac note type alert entry points passed together. The list test
+verified Return, Escape, Cancel, deletion and Undo restoring 90 notes and
+180 cards (`ui-test/20261126T080259Z-77935`). The three TLS scenarios
+also passed from the FFI integration target (`core-test/20261126T080852Z-89165`).
+The branch's independent review is in
+[the deletion review log](review-log/delete-tags-note-types-20261126.md).
+
 Last complete gate: `gate/20261116T005859Z-94440`, clean `35323460b`.
 Keep integration base `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 Its result records 26 passing jobs, 11 failed jobs, one error and pending work.

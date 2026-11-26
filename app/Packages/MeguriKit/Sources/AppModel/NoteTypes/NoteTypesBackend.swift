@@ -12,12 +12,16 @@ import Foundation
     func read(_ id: Int64) async throws -> NotetypeRecord
     /// The note type's notes and cards (the detail's subtitle).
     func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts
+    /// The names and loss counts used by one deletion question, in one generation.
+    func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead>
     /// W3.1, per stored field ordinal.
     func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts
     /// `notetypes/draft-save` D2.
     func summary(_ draft: NotetypeStructureDraft) async throws -> NotetypeDraftSummary
     /// S1's op with the confirmed losses; `progress` gets (completed, total).
     func save(_ draft: NotetypeStructureDraft, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws
+    /// S12; progress counts cards, without a total.
+    func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws
     /// `notetypes/validation` V5.
     func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck
     /// `render/template-syntax` T11.1 per text.
@@ -38,6 +42,27 @@ import Foundation
     func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited
 }
 
+extension NoteTypesBackend {
+    public func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        // Scripted backends have no engine. Production supplies a checked scope.
+        let names = try await list()
+        let counts = try await typeCounts(id)
+        return .init(value: .init(names: names, counts: counts), generation: 0)
+    }
+    /// Read-only test backends cannot accidentally remove anything.
+    public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        throw BridgeError.invalidArgument("Note type removal is unavailable")
+    }
+}
+
+public nonisolated struct NotetypeDeletionRead: Sendable {
+    public let names: [NotetypeName]
+    public let counts: NotetypeRemovalCounts
+    public init(names: [NotetypeName], counts: NotetypeRemovalCounts) {
+        self.names = names; self.counts = counts
+    }
+}
+
 /// The section's backend over CoreBridge. A job whose task is cancelled
 /// (the person moved on) is cancelled in the core too.
 @MainActor public final class CoreNoteTypesBackend: NoteTypesBackend {
@@ -49,6 +74,13 @@ import Foundation
     public func read(_ id: Int64) async throws -> NotetypeRecord { try await service.readNotetype(id: id) }
     public func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts {
         try await run { try await self.service.startNotetypeRemovalCounts(notetypeId: id) }
+    }
+    public func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        try await CollectionGenerationRead.read {
+            let names = try await self.list()
+            let counts = try await self.typeCounts(id)
+            return .init(names: names, counts: counts)
+        }
     }
     public func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts {
         try await run { try await self.service.startNotetypeFieldContentCounts(notetypeId: id) }
@@ -63,6 +95,17 @@ import Foundation
         }
         defer { reports.cancel() }
         // A save is never cancelled by leaving the section: it runs to its end (D5 step 5).
+        _ = try await job.value()
+    }
+    public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        guard let generation = request.expectedGeneration, generation != 0 else {
+            throw BridgeError.invalidArgument("Note type removal requires a collection scope")
+        }
+        let job = try await service.startNotetypeRemoval(request)
+        let reports = Task { @MainActor in
+            for await report in job.job.progress { progress(report.completed, nil) }
+        }
+        defer { reports.cancel() }
         _ = try await job.value()
     }
     public func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck {

@@ -49,6 +49,8 @@ private struct WalkReviewDestination: View {
 /// fixtures and test-hook routes pass their own.
 struct ShellFeatures {
     var nativeMacWorkspace = false
+    /// W12: the Mac deletion alert is hosted directly on the route's window.
+    var noteTypeDeletionModel: NoteTypesModel?
     /// N14.1: the sidebar's first row and the detail with no deck selected are Today.
     var todayRoot = false
     /// What an unfolded iPhone shows beside the deck list before a deck is picked (N14.1).
@@ -77,6 +79,7 @@ struct ShellFeatures {
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
     /// N22.7: a note type's page pushed over the Note Types list (iPad).
     var noteType: (Int64, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
+    var tags: () -> AnyView = { AnyView(EmptyView()) }
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     /// N17.2: Import opens the file picker on the presenting window, before any sheet.
     var collectionEntry: CollectionEntryCoordinator?
@@ -117,6 +120,7 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
+        features.noteTypeDeletionModel = collection.noteTypes
         #endif
         // N21.1: Today, then Statistics (N25.1) and Browse on the Mac; Note Types under them
         // (N22.1). The iPad's Browse row waits for its own layout; W14: Note Types has a sidebar
@@ -170,6 +174,7 @@ struct ShellFeatures {
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         #if os(iOS)
         features.noteType = { id, _ in AnyView(NoteTypePage(model: collection.noteTypes, id: id)) }
+        features.tags = { AnyView(CollectionTagsView(collection: collection)) }
         #endif
         features.deckOptions = { deck, navigation in
             AnyView(DeckOptionsPage(model: collection.deckOptions) { navigation.popDeckOptions(deck) })
@@ -247,6 +252,7 @@ struct SectionDestinationView: View {
         case deckPage(DeckID)
         case deckOptions(DeckID)
         case noteType(Int64)
+        case tags
         case settingsPage(SettingsPage)
 
         /// The screen a pushed destination shows.
@@ -255,6 +261,7 @@ struct SectionDestinationView: View {
             case let .deckPage(deck): self = .deckPage(deck)
             case let .deckOptions(deck): self = .deckOptions(deck)
             case .noteTypes: self = .root(.noteTypes)
+            case .tags: self = .tags
             case .noteType(let id): self = .noteType(id)
             case .settingsPage(let page): self = .settingsPage(page)
             }
@@ -271,6 +278,7 @@ struct SectionDestinationView: View {
         case let .deckPage(deck): features.deckPage(deck, navigation)
         case let .deckOptions(deck): features.deckOptions(deck, navigation)
         case let .noteType(id): features.noteType(id, navigation)
+        case .tags: features.tags()
         case let .settingsPage(page): features.settingsPage(page)
         }
     }

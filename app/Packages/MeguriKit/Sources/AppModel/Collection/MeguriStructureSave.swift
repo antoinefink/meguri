@@ -9,6 +9,9 @@ nonisolated public protocol MeguriStructureJobService: Sendable {
     func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
                                onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
         async throws -> MeguriStructureOutcome
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriStructureOutcome
     /// Step 5's Upload….
     func uploadNotetypeStructure(onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
         async throws -> MeguriStructureOutcome
@@ -22,6 +25,10 @@ nonisolated public protocol MeguriStructureJobService: Sendable {
 }
 
 nonisolated extension MeguriStructureJobService {
+    public func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                        onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriStructureOutcome { .refused(.notReady) }
+
     /// Fakes that run no import: the job does not start.
     func importDeckPackage(_ session: DeckImportSession, options: DeckImportOptions, confirmation: DeckImportConfirmation,
                            reachable: Bool,
@@ -40,6 +47,12 @@ nonisolated struct CoreMeguriStructureJobs: MeguriStructureJobService {
         async throws -> MeguriStructureOutcome {
         guard let round else { return .refused(.notReady) }
         return try await round.saveNotetypeStructure(draft, reachable: reachable) { stage, job in onStage(stage, job.progress) }
+    }
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriStructureOutcome {
+        guard let round else { return .refused(.notReady) }
+        return try await round.removeNotetypeStructure(request, reachable: reachable) { stage, job in onStage(stage, job.progress) }
     }
     func uploadNotetypeStructure(onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
         async throws -> MeguriStructureOutcome {

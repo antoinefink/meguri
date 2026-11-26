@@ -56,15 +56,15 @@ public struct SettingsView: View {
                         }
                     }
                     .frame(width: proxy.size.width / 3)
-                    NavigationStack {
-                        if section == "backups" { BackupsView(collection: collection) }
-                        else {
-                            Form {
-                                if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
-                                else { SyncSettingsSections(collection: collection, draft: draft) }
-                            }
-                            .formStyle(.grouped)
+                    // Value links use the shell's stack and AppNavigation, including
+                    // when the window changes between the tab and sidebar layouts.
+                    if section == "backups" { BackupsView(collection: collection) }
+                    else {
+                        Form {
+                            if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
+                            else { SyncSettingsSections(collection: collection, draft: draft) }
                         }
+                        .formStyle(.grouped)
                     }
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
@@ -197,6 +197,16 @@ struct SettingsCollectionFilesSection: View {
                 Label { Text("To a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
             }
             #else
+            if let collection, collection.hasCollection {
+                NavigationLink(value: Destination.noteTypes) {
+                    Text("Note Types", bundle: .module)
+                }
+                .accessibilityIdentifier("settings.root.noteTypes")
+                NavigationLink(value: Destination.tags) {
+                    Text("Tags", bundle: .module)
+                }
+                .accessibilityIdentifier("settings.root.tags")
+            }
             // N15.1: plain rows, as the system's Settings has for an action that opens a sheet.
             Button(action: importCollection) { Text("Import…", bundle: .module) }
                 .disabled(!canImport)

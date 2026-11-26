@@ -430,6 +430,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
     }
 
+    var browseMutationBusy: Bool { browseOwner?.tagDeletion.busy == true || browseOwner?.commands.busy == true }
     private var browseOwner: BrowseModel?
     /// Browse (U270): its query, sidebar rows and counts, above the layout
     /// switch, so leaving Browse and coming back keeps them (`browser/workspace` V1).
@@ -441,6 +442,11 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         if let browseOwner { return browseOwner }
         let value = BrowseModel(backend: CoreBrowseBackend(), store: BrowseDeviceStore(defaults: configuration.deviceDefaults))
         value.ready = { [weak self] in self?.browseReadable ?? false }
+        value.generation = { [weak self] in self?.generation ?? 0 }
+        value.tagDeletion.stepRecorded = { [weak self] seq, title in
+            self?.collectionUndo.name(step: seq, title, ordered: true)
+        }
+        value.tagDeletion.refreshUndo = { [weak self] in await self?.collectionUndo.refreshNow() }
         value.takeEntrySearch = { [weak self] in
             guard let self, !self.navigation.browseSearch.isEmpty else { return nil }
             defer { self.navigation.browseSearch = "" }
@@ -463,6 +469,18 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             self.noteTypes.selection = id
             self.navigation.select(.section(.noteTypes))
         }
+        value.canDeleteNoteType = { [weak self] in self?.noteTypes.canRequestDeletion ?? false }
+        value.deleteNoteType = { [weak self] id in
+            guard let self else { return }
+            let generation = self.generation
+            Task { @MainActor in
+                guard await self.browse.inspector.flushForBackground() != false,
+                      self.generation == generation, self.noteTypes.canRequestDeletion else { return }
+                self.navigation.select(.section(.noteTypes))
+                self.noteTypes.appear()
+                self.noteTypes.delete(id)
+            }
+        }
         browseOwner = value
         return value
     }
@@ -484,6 +502,13 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         if let noteTypesOwner { return noteTypesOwner }
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
+        value.deletionService = { [weak self] in
+            guard let self else { return nil }
+            let sync = self.sync, generation = self.generation
+            let service = await sync.noteTypeDeletionService()
+            guard self.sync === sync, self.generation == generation else { return nil }
+            return service
+        }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
         value.hasCollection = { [weak self] in self?.hasCollection ?? false }
         // W9: the preview binds the collection's media as review does; its toggle stays on the device.
@@ -499,6 +524,14 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         value.dismissQuestion = { [weak self] in
             if self?.navigation.sheet == .noteTypeSave { self?.navigation.dismissSheet() }
         }
+        value.didDelete = { [weak self] id in
+            guard let self else { return }
+            // Touch returns to the actual list after deleting its open page.
+            let path = self.navigation.path(.noteTypes)
+            if let index = path.firstIndex(of: .noteType(id)) {
+                self.navigation.setPath(Array(path.prefix(index)), for: .noteTypes)
+            }
+        }
         noteTypesOwner = value
         return value
     }
@@ -506,12 +539,8 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     /// shows the welcome (N18.3). The sections that read a collection (Browse,
     /// Note Types) are not offered until one is created, imported or synced.
     public var hasCollection: Bool { state != .noFile }
-    /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
-    /// Whether the binding is ready is read in the background and can be
-    /// unknown for a moment, so choosing Meguri Sync is enough here: a
-    /// structural save then runs as MP7's job, or, without a ready binding,
-    /// the sheet says to set Meguri Sync up; it never runs on this device
-    /// alone while the server may hold the collection.
+    /// Schema saves keep their setup gate. W12 deletion separately reads the
+    /// current coordinator's binding, so confirmed unbound counts as Off.
     var noteTypeSaveService: NoteTypeSaveService {
         sync.providerState?.selection == .meguri ? .meguriSync : .other
     }
@@ -567,12 +596,12 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         return layout == .sidebar || !decks.isEmpty
     }
     func collectionUndoFailed() { error = "Couldn’t undo or redo that change. Try again." }
-    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?) -> Bool {
+    func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, ignoringUndoReservation: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld,
               !opening, !starting, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
-              review == nil, navigation.review == nil, undoOwner?.busy != true,
+              review == nil, navigation.review == nil, (ignoringUndoReservation || undoOwner?.busy != true),
               entryOwner?.busy != true, entryOwner?.pickerPresented != true, entryOwner?.preview == nil,
               exportOwner?.busy != true,
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
@@ -3227,6 +3256,14 @@ private nonisolated struct LaunchCollectionClock: CollectionClock {
         running = sync
         defer { if running === sync { running = nil } }
         return try await sync.saveNotetypeStructure(draft, reachable: reachable, progress: progress)
+    }
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        guard let sync = owner?.sync else { return .notSaved }
+        running = sync
+        defer { if running === sync { running = nil } }
+        return try await sync.removeNotetypeStructure(request, reachable: reachable, progress: progress)
     }
     func cancelNotetypeStructureSave() { running?.cancelNotetypeStructureSave() }
 }

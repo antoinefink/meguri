@@ -56,3 +56,6 @@ pub mod maintenance_ffi;
 #[cfg(feature = "test-hooks")]
 #[path = "physical_review_rows.rs"]
 pub mod physical_review_rows;
+#[cfg(feature = "test-hooks")]
+#[path = "provider_structure_production.rs"]
+pub mod provider_structure_production;

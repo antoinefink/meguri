@@ -180,7 +180,7 @@ impl CoreHost {
             _ => Ok(()),
         }
     }
-    fn check_meguri_bootstrap_operation(&self, connection: &MeguriConnection, id: &OperationId) -> Result<()> {
+    pub(crate) fn check_meguri_bootstrap_operation(&self, connection: &MeguriConnection, id: &OperationId) -> Result<()> {
         self.check_meguri_bootstrap(connection)?;
         let intent = self.provider_authority().meguri_bootstrap_intent().ok_or(MeguriReadyRefusal::NoIntent)?;
         if intent.operation() != id || intent.connection() != connection { return Err(MeguriReadyRefusal::OperationMismatch.into()); }

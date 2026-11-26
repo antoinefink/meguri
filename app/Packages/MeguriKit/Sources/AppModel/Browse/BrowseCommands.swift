@@ -270,7 +270,10 @@ public final class BrowseCommands {
 
     /// The rows can take a command: a list that is not released, no other
     /// command running, no question open.
+    @ObservationIgnored var otherWorkBusy: @MainActor () -> Bool = { false }
+
     private func available(_ rows: Set<Int>?) -> Bool {
+        guard !otherWorkBusy() else { return false }
         guard let list = results.list, !list.released, !results.isDimmed else { return false }
         return !busy && deleteQuestion == nil && sheet == nil && findReplaceSheet == nil && findDuplicatesSheet == nil && ready()
     }
@@ -279,7 +282,7 @@ public final class BrowseCommands {
     /// Find and Replace… or Find Duplicates…, which need no selection.
     public var unavailable: BrowseUnavailable? {
         guard let list = results.list, !list.released, !results.isDimmed else { return .searching }
-        if busy || deleteQuestion != nil || sheet != nil || findReplaceSheet != nil || findDuplicatesSheet != nil { return .busy }
+        if busy || otherWorkBusy() || deleteQuestion != nil || sheet != nil || findReplaceSheet != nil || findDuplicatesSheet != nil { return .busy }
         return ready() ? nil : .notReady
     }
 

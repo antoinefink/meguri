@@ -84,6 +84,8 @@ nonisolated public enum Destination: Hashable, Codable, Sendable {
     /// Note Types, pushed from Settings or from Browse's ⋯ menu in the tab
     /// layout (R18).
     case noteTypes
+    /// Touch collection management, reached from Settings alongside Note Types.
+    case tags
     /// iPad: one note type's page, pushed over the Note Types list (N22.7).
     case noteType(Int64)
     case settingsPage(SettingsPage)

@@ -144,6 +144,7 @@ extension TestHooks {
             features.todayRoot = true
             #if os(macOS)
             features.nativeMacWorkspace = true
+            features.noteTypeDeletionModel = model
             features.availableSections = [.home, .noteTypes]
             #else
             features.availableSections = [.home, .noteTypes, .settings]
