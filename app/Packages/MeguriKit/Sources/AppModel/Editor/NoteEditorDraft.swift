@@ -116,12 +116,16 @@ public final class NoteEditorDraft {
     /// Native state survives switching between fields and masks and layout changes.
     public var showsMaskEditor = true
     public var hostFieldsHeld = false
+    /// Image tickets stay stale after a binding changes away and back, even
+    /// before an observation callback has had a chance to run.
+    public private(set) var occlusionImageRevision: UInt64 = 0
     public var occlusionAddRefused = false
     /// The caller already checked its retained host's identity and admission.
     /// Page commits never address these fields, including an outstanding flush.
     public func acceptHostField(_ value: String, at index: Int) {
         guard !hostFieldsHeld, hostFields.contains(index), fields.indices.contains(index),
               fields[index].target != value else { return }
+        if index == occlusionRoles?.image { occlusionImageRevision &+= 1 }
         fields[index].target = value
         fields[index].changed = value != fields[index].opened
         occlusionAddRefused = false
@@ -223,6 +227,7 @@ public final class NoteEditorDraft {
         var reloaded: [Int] = []
         for index in fields.indices where !pendingFields.contains(index) && fields[index].target == fields[index].baseline {
             guard fields[index].baseline != values[index] else { continue }
+            if index == occlusionRoles?.image { occlusionImageRevision &+= 1 }
             fields[index].baseline = values[index]; fields[index].target = values[index]; fields[index].opened = values[index]
             fields[index].changed = false
             reloaded.append(index)

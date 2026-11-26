@@ -10,6 +10,25 @@ import UniformTypeIdentifiers
 @Observable @MainActor
 final class OcclusionImageSession {
     private nonisolated struct FetchFailure: Error { let cause: String }
+    private struct SourceBinding: Equatable {
+        let host: ObjectIdentifier
+        let draft: UUID
+        let generation: UInt64
+        let note: Int64?
+        let notetype: NotetypeRecord
+        let roles: OcclusionFieldRoles?
+        let image: String?
+        let revision: UInt64
+
+        init(_ host: FieldEditorHost) {
+            self.host = ObjectIdentifier(host)
+            draft = host.draft.identity; generation = host.draft.generation
+            note = host.draft.noteID; notetype = host.draft.notetype
+            roles = host.draft.occlusionRoles
+            image = roles.map { host.draft.values[$0.image] }
+            revision = host.draft.occlusionImageRevision
+        }
+    }
     @ObservationIgnored private weak var focusHost: FieldEditorHost?
     private(set) var image: OcclusionImageInput? {
         willSet { if newValue != nil { focusHost?.preserveTextFocusForMaskActivation() } }
@@ -31,6 +50,8 @@ final class OcclusionImageSession {
     private var task: Task<Void, Never>?
     private var request = UUID()
     private var sourceRequest: ImageSourceRequest?
+    private var sourceBinding: SourceBinding?
+    @ObservationIgnored private(set) var draftObservation: Task<Void, Never>?
     private var providerProgress: Progress?
     private var providerCandidates: [(NSItemProvider, String)] = []
     var completion: Task<Void, Never>? { task }
@@ -41,32 +62,28 @@ final class OcclusionImageSession {
         cancel(); busy = true; error = nil
         let source = ImageSourceRequest()
         sourceRequest = source
+        sourceBinding = SourceBinding(host)
+        watchAdmission(host, source: source)
         watchDraft(host, source: source)
         return request
     }
     func receiveBitmap(_ data: Data?, ticket: UUID, host: FieldEditorHost, photo: Bool = false) {
         guard request == ticket else { return }
-        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
-            cancelSource(ticket: ticket); return
-        }
+        guard currentSource(ticket: ticket, host: host) else { return }
         busy = false
         if let data { chooseBitmap(data, host: host, photo: photo) }
         else { cancelSource(ticket: ticket) }
     }
     func receiveFile(_ url: URL?, ticket: UUID, host: FieldEditorHost) {
         guard request == ticket else { return }
-        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
-            cancelSource(ticket: ticket); return
-        }
+        guard currentSource(ticket: ticket, host: host) else { return }
         busy = false
         if let url { chooseFile(url, host: host) } else { cancelSource(ticket: ticket) }
     }
     func loadBitmap(ticket: UUID, host: FieldEditorHost,
                     load: @escaping @Sendable () async throws -> Data?) {
         guard request == ticket else { return }
-        guard sourceRequest?.isCancelled == false, host.acceptsHostInput else {
-            cancelSource(ticket: ticket); return
-        }
+        guard currentSource(ticket: ticket, host: host) else { return }
         task = Task {
             do {
                 let bytes = try await load()
@@ -82,9 +99,9 @@ final class OcclusionImageSession {
     }
     func sourceFailed(_ message: String, ticket: UUID, host: FieldEditorHost) {
         guard request == ticket else { return }
-        let report = sourceRequest?.isCancelled == false && host.acceptsHostInput
+        guard currentSource(ticket: ticket, host: host) else { return }
         cancel()
-        if report { error = message }
+        error = message
     }
 
     func chooseProvider(_ providers: [NSItemProvider], host: FieldEditorHost) -> Bool {
@@ -105,15 +122,13 @@ final class OcclusionImageSession {
 
     private func loadProvider(at index: Int,
                               ticket: UUID, host: FieldEditorHost) {
-        guard request == ticket, sourceRequest?.isCancelled == false, host.acceptsHostInput else { return }
+        guard currentSource(ticket: ticket, host: host) else { return }
         guard index < providerCandidates.count else { busy = false; error = IONoteText.noPasteImage; return }
         let (provider, type) = providerCandidates[index]
         providerProgress = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
             Task { @MainActor in
                 guard self.request == ticket else { return }
-                guard self.sourceRequest?.isCancelled == false, host.acceptsHostInput else {
-                    self.cancelSource(ticket: ticket); return
-                }
+                guard self.currentSource(ticket: ticket, host: host) else { return }
                 self.providerProgress = nil
                 guard let data else {
                     self.loadProvider(at: index + 1, ticket: ticket, host: host); return
@@ -146,8 +161,7 @@ final class OcclusionImageSession {
     private func prepareProvider(at index: Int, ticket: UUID, host: FieldEditorHost,
                                  prepare: @escaping @Sendable (Bool) async throws -> OcclusionImageInput) {
         guard let source = sourceRequest, let roles = host.draft.occlusionRoles else { return }
-        let original = host.draft.values[roles.image]
-        let current = { self.request == ticket && !source.isCancelled && host.acceptsHostInput && host.draft.values[roles.image] == original }
+        let current = { self.currentSource(ticket: ticket, host: host) }
         task = Task {
             let prepared: OcclusionImageInput
             do {
@@ -195,6 +209,8 @@ final class OcclusionImageSession {
 
     func cancel() {
         sourceRequest?.cancel(); sourceRequest = nil
+        sourceBinding = nil
+        draftObservation?.cancel(); draftObservation = nil
         providerProgress?.cancel(); providerProgress = nil
         providerCandidates = []
         request = UUID(); task?.cancel(); task = nil; busy = false; gettingMedia = false
@@ -290,13 +306,16 @@ final class OcclusionImageSession {
         guard host.acceptsHostInput, !busy, let roles = host.draft.occlusionRoles else { return }
         focusHost = host
         cancel(); busy = true; error = nil; fetchFailure = nil; sourceRequest = source
+        sourceBinding = SourceBinding(host)
+        watchAdmission(host, source: source)
         watchDraft(host, source: source)
-        let expected = request, original = host.draft.values[roles.image]
-        let current = { self.request == expected && !source.isCancelled && host.acceptsHostInput && host.draft.values[roles.image] == original }
+        let expected = request
+        let current = { self.currentSource(ticket: expected, host: host) }
         task = Task {
             defer { if request == expected { busy = false; gettingMedia = false; task = nil } }
             do {
                 let png = (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false
+                guard current(), !Task.isCancelled else { return }
                 let preparation = Task.detached { try await prepare(png) }
                 let prepared = try await withTaskCancellationHandler {
                     try await preparation.value
@@ -327,6 +346,7 @@ final class OcclusionImageSession {
         let stored = try await source.add(name: prepared.name, bytes: prepared.bytes, generation: host.draft.generation)
         guard current(), !Task.isCancelled else { return }
         sourceRequest = nil
+        sourceBinding = nil
         providerCandidates = []
         let field = OcclusionImageField.html(name: stored)
         host.setHostField(field, at: roles.image)
@@ -335,18 +355,45 @@ final class OcclusionImageSession {
         replacing = false
     }
 
-    private func watchDraft(_ host: FieldEditorHost, source: ImageSourceRequest) {
+    private func currentSource(ticket: UUID, host: FieldEditorHost) -> Bool {
+        guard request == ticket else { return false }
+        guard sourceRequest?.isCancelled == false, host.acceptsHostInput,
+              sourceBinding == SourceBinding(host) else {
+            cancelSource(ticket: ticket); return false
+        }
+        return true
+    }
+
+    private func watchAdmission(_ host: FieldEditorHost, source: ImageSourceRequest) {
         // Observation invalidates synchronously, before a changed draft can
-        // admit an already queued writer. UI completion checks alone are late.
+        // admit an already queued writer. Track only admission and the actual
+        // image revision here: unrelated field edits must not cancel a source.
         withObservationTracking {
             _ = host.acceptsHostInput
-            _ = host.draft.notetype
-            _ = host.draft.values
+            _ = host.draft.occlusionImageRevision
         } onChange: { [weak self] in
             source.cancel()
             Task { @MainActor [weak self] in
                 guard self?.sourceRequest === source else { return }
                 self?.cancel()
+            }
+        }
+    }
+
+    private func watchDraft(_ host: FieldEditorHost, source: ImageSourceRequest) {
+        withObservationTracking {
+            _ = SourceBinding(host)
+        } onChange: { [weak self, weak host] in
+            // Array observation fires for every field, and fires before its
+            // mutation. Compare after it, then re-arm against the ORIGINAL
+            // binding. Every completion also checks it without waiting here.
+            MainActor.assumeIsolated {
+                guard let self, self.sourceRequest === source else { return }
+                self.draftObservation = Task { @MainActor [weak self, weak host] in
+                    guard let self, let host, self.sourceRequest === source else { return }
+                    guard self.currentSource(ticket: self.request, host: host) else { return }
+                    self.watchDraft(host, source: source)
+                }
             }
         }
     }

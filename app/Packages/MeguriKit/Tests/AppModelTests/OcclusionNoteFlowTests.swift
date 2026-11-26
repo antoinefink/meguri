@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import ImageIO
 @testable import ImageOcclusion
+import Observation
 import Testing
 import UniformTypeIdentifiers
 import WebKit
@@ -224,7 +225,89 @@ import UIKit
 }
 
 // Runtime and actual collection checks join the existing serialized owners.
+@Observable @MainActor
+private final class OcclusionSourceOwner {
+    var draft: UUID?
+}
+
 extension FieldEditorTests {
+    @Test(arguments: [false, true])
+    func pendingImageSourceKeepsMetadataEditsButRejectsChangedImageAndOwner(customRoles: Bool) async throws {
+        let type = OcclusionFieldFlowTests.type(tags: customRoles ? [3, 2, 1, 0, 4] : [0, 1, 2, 3, 4])
+        let roles = try #require(OcclusionFieldRoles(notetype: type))
+        var values = Array(repeating: "", count: type.fields.count)
+        values[roles.occlusions] = OcclusionFieldFlowTests.first
+        values[roles.image] = "<img src=\"original.png\">"
+        let draft = try NoteEditorDraft(editing: .init(id: 7, notetypeId: type.id,
+            fields: values, tags: [], guid: "g"), notetype: type,
+            deck: OcclusionFieldFlowTests.deck, generation: 1)
+        let owner = OcclusionSourceOwner(); owner.draft = draft.identity
+        let host = try FieldEditorHost(draft: draft, isCurrent: { owner.draft == draft.identity })
+        defer { host.shutDown() }
+        try await host.start()
+        let session = host.occlusionImage
+        let ticket = try #require(session.reserveSource(host: host))
+        let result = AsyncStream<Void>.makeStream()
+        defer { result.continuation.finish() }
+        let failure = CocoaError(.fileReadCorruptFile)
+        session.loadBitmap(ticket: ticket, host: host) {
+            for await _ in result.stream { }
+            throw failure
+        }
+        let completion = try #require(session.completion)
+        let revision = draft.occlusionImageRevision
+        // Each commit invalidates the array observation. Join its callback so
+        // the next edit deterministically exercises the re-armed observation.
+        for (ord, text) in [(roles.header, "edited header"), (4, "edited comments"),
+                            (roles.backExtra, "edited extra"), (roles.header, "new header")] {
+            try await draft.accept([.init(ord: ord, html: text, unchanged: false)], ifCurrent: { true })
+            let observation = try #require(session.draftObservation)
+            await observation.value
+            #expect(session.busy && session.error == nil && draft.values[ord] == text)
+            #expect(draft.occlusionImageRevision == revision && draft.values[roles.image] == values[roles.image])
+        }
+        result.continuation.finish()
+        await completion.value
+        #expect(!session.busy && session.error == failure.localizedDescription)
+        #expect(draft.values[roles.image] == values[roles.image])
+
+        for reloading in [false, true] {
+            let stale = try #require(session.reserveSource(host: host))
+            for image in ["<img src=\"changed.png\">", values[roles.image]] {
+                if reloading {
+                    var stored = draft.values; stored[roles.image] = image
+                    _ = draft.reloadUnchanged(stored: stored, tags: draft.tags)
+                } else { host.setHostField(image, at: roles.image) }
+            }
+            let obsoleteObservation = session.draftObservation
+            // No actor hop: a completion must reject even an away/back edit
+            // before either queued cancellation or snapshot comparison runs.
+            session.receiveBitmap(Data(), ticket: stale, host: host)
+            session.sourceFailed("stale failure", ticket: stale, host: host)
+            #expect(!session.busy && session.completion == nil && session.error == nil)
+            #expect(draft.values[roles.image] == values[roles.image])
+            let newer = try #require(session.reserveSource(host: host))
+            await obsoleteObservation?.value
+            #expect(session.busy && session.error == nil)
+            session.cancelSource(ticket: newer)
+        }
+
+        let departed = try #require(session.reserveSource(host: host))
+        owner.draft = UUID(); owner.draft = draft.identity
+        session.sourceFailed("departed owner", ticket: departed, host: host)
+        #expect(!session.busy && session.error == nil)
+        let next = try NoteEditorDraft(generation: 1, notetype: type, deck: OcclusionFieldFlowTests.deck)
+        let nextHost = try FieldEditorHost(draft: next, isCurrent: { owner.draft == next.identity })
+        defer { nextHost.shutDown() }
+        owner.draft = next.identity
+        try await nextHost.start()
+        let nextTicket = try #require(nextHost.occlusionImage.reserveSource(host: nextHost))
+        session.receiveFile(nil, ticket: departed, host: nextHost)
+        session.receiveBitmap(Data(), ticket: departed, host: host)
+        #expect(nextHost.occlusionImage.busy && !next.hasChanges && session.error == nil)
+        nextHost.occlusionImage.cancelSource(ticket: nextTicket)
+    }
+
     @Test func pendingImageSourcesRefuseFlushWithoutLosingAcquisitionOrMarkingTheDraftDirty() async throws {
         for editing in [false, true] {
             let type = OcclusionFieldFlowTests.type()
@@ -288,7 +371,8 @@ extension FieldEditorTests {
         }
     }
 
-    @Test func unreadableMasksLeaveMetadataEditableAndTheirSourceByteIdentical() async throws {
+    @Test(arguments: [false, true])
+    func unreadableMasksLeaveMetadataEditableAndTheirSourceByteIdentical(browsing: Bool) async throws {
         let type = OcclusionFieldFlowTests.type()
         let malformed = "{{c1::image-occlusion:rect:left=broken}}  <br/>"
         let draft = try NoteEditorDraft(editing: .init(id: 7, notetypeId: type.id,
@@ -296,25 +380,51 @@ extension FieldEditorTests {
             notetype: type, deck: OcclusionFieldFlowTests.deck, generation: 1)
         #expect(throws: (any Error).self) { try occlusionHasNumberedMask(malformed) }
         let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        host.browsing = browsing
         defer { host.shutDown() }
         try await host.start()
+        let masks = try #require(host.maskSession)
+        let readingError = try #require(host.occlusionReadingError)
+        #expect(!readingError.isEmpty && masks.readingError == readingError && !masks.isReadable)
+        #expect(IONoteText.unreadableMasks(readingError, copying: false).contains(readingError))
+        #if os(macOS)
+        #expect(host.usesOcclusionForm == !browsing && host.maskEditorVisible == !browsing)
+        #else
+        #expect(!host.usesOcclusionForm && !host.maskEditorVisible)
+        #endif
+        #expect(draft.showsMaskEditor && !host.acceptsMaskInput)
+        masks.setMode(!masks.hideAll); masks.undo(); masks.redo()
+        host.drawNewMasks() // Edit must never replace unreadable stored masks.
+        #expect(masks.field == malformed && !masks.isDirty && !masks.canUndo && !masks.canRedo)
+        #expect(!host.occlusionImage.startsNewMasks && !masks.isReadable)
         try await host.flush(hold: true)
         #expect(draft.patch() == nil && draft.values[0] == malformed)
         try await host.release()
-        draft.showsMaskEditor = false
-        try await host.setMode(.html, ord: 2)
-        try #require(try await Self.replaceSource(host, ord: 2, value: "edited header"))
+        if !host.usesOcclusionForm { draft.showsMaskEditor = false }
+        host.showFields(host.usesOcclusionForm || !host.maskEditorVisible)
+        #expect(!host.webView.isHidden && host.acceptsHostInput)
+        for (ord, value) in [(2, "edited header"), (3, "edited extra"), (4, "edited comments")] {
+            try await host.setMode(.html, ord: ord)
+            try #require(try await Self.replaceSource(host, ord: ord, value: value))
+        }
+        host.setNativeTags(["kept", "edited"])
         try await host.flush(hold: true)
-        #expect(draft.patch()?.fields == [2: "edited header"] && draft.values[0] == malformed)
-        #expect(draft.tags == ["kept"])
+        #expect(draft.patch()?.fields == [2: "edited header", 3: "edited extra", 4: "edited comments"])
+        #expect(draft.patch()?.tags == ["kept", "edited"] && draft.tags == ["kept", "edited"])
+        #expect(draft.values[0] == malformed && draft.values[1] == "<img src=\"missing.png\">")
+        #expect(host.maskSession === masks && masks.field == malformed && !masks.isReadable)
+        #expect(host.occlusionReadingError == readingError && !host.acceptsMaskInput)
+        #expect(host.maskEditorVisible == host.usesOcclusionForm)
     }
-    @Test func hostCachesStrictReadingAcrossUnrelatedEditsAndRefreshesOnActualReload() async throws {
+    @Test(arguments: [false, true])
+    func hostCachesStrictReadingAcrossUnrelatedEditsAndRefreshesOnActualReload(browsing: Bool) async throws {
         let type = OcclusionFieldFlowTests.type()
         let original = OcclusionFieldFlowTests.first + " \t<br/>"
         let draft = try NoteEditorDraft(editing: .init(id: 7, notetypeId: type.id,
             fields: [original, "", "header", "extra", "comments"], tags: [], guid: "g"),
             notetype: type, deck: OcclusionFieldFlowTests.deck, generation: 1)
         let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        host.browsing = browsing
         defer { host.shutDown() }
         try await host.start()
         let session = try #require(host.maskSession)
@@ -324,6 +434,7 @@ extension FieldEditorTests {
             #expect(host.maskSession === session)
         }
         draft.showsMaskEditor = false
+        #expect(host.maskEditorVisible == host.usesOcclusionForm)
         try await host.setMode(.html, ord: 2)
         try #require(try await Self.replaceSource(host, ord: 2, value: "new header"))
         try await host.flush(hold: false)
@@ -334,10 +445,12 @@ extension FieldEditorTests {
         try await host.reload(fields: ords)
         #expect(host.maskSession === session && host.occlusionReadingError != nil)
         draft.showsMaskEditor = true
-        #expect(!host.maskEditorVisible && draft.values[0] == malformed)
+        #expect(host.maskEditorVisible == host.usesOcclusionForm && draft.values[0] == malformed)
+        #expect(!session.isReadable && !host.acceptsMaskInput)
         stored[0] = original
         try await host.reload(fields: draft.reloadUnchanged(stored: stored, tags: []))
         #expect(host.maskEditorVisible && host.occlusionReadingError == nil && session.field == original)
+        #expect(session.isReadable)
     }
 
     @Test func hostMasksSurviveAConversionAlreadyOutstandingInWebKit() async throws {
