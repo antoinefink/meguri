@@ -821,16 +821,23 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 - One menu per deck row: right-click on Mac, long press on touch. Its groups, in order:
 
-| Group | Item | Symbol | Mac key | Filtered deck |
+| Group | Item | Symbol | Mac command key | Decks |
 |---|---|---|---|---|
-| 1 | Study | `play` | ⌘R | shown |
-| 1 | Add Note | `square.and.pencil` | | absent |
-| 2 | Rename… | `pencil` | ⇧⌘R | shown |
-| 2 | New Subdeck… | `folder.badge.plus` | | absent |
-| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | opens Edit Filtered Deck |
-| 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
+| 1 | Study | `play` | ⌘R | both kinds |
+| 1 | Add Note | `square.and.pencil` | | normal |
+| 1 | Browse Cards | `magnifyingglass` | | both kinds where Browse is available |
+| 1 | Deck Statistics | `chart.bar.xaxis` | | both kinds where Statistics is available |
+| 2 | Custom Study… | `slider.horizontal.3` | | normal |
+| 2 | Create Filtered Deck… | `line.3.horizontal.decrease` | ⇧⌘F | normal |
+| 2 | Edit Filtered Deck… | `pencil` | ⌥⌘O | filtered |
+| 2 | Rebuild | `arrow.clockwise` | ⌥⌘R | filtered |
+| 2 | Empty | `tray` | | filtered |
+| 3 | Rename… | `pencil` | ⇧⌘R | both kinds |
+| 3 | New Subdeck… | `folder.badge.plus` | | normal |
+| 3 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | normal |
+| 4 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | both kinds |
 
-- A filtered deck's menu exposes Study, Edit Filtered Deck, Rebuild and Empty alongside its Browse, Statistics, Rename and Delete actions. Custom Study is available from the normal deck page and its finished state (`decks/filtered-study#F6`).
+- The normal deck page and finished state also offer Custom Study (`decks/filtered-study#F6`).
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -877,7 +884,7 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
-| Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
+| Deck | Deck Options… or Edit Filtered Deck… | ⌥⌘O | a deck is shown outside review and the main window owns the command. Open the preset for a normal deck or the search definition for a filtered deck (N20.9). |
 | Note | Edit Note | ⌘E | in review, a card is presented, on either side, and nothing else owns the keys (N20.8); in Browse, N21.8 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
@@ -937,7 +944,7 @@ The English text of the screens above. "New" marks text not used before this rou
 
 Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operation is `decks/decks` D8; its summary D8.5.
 
-- Entries: the deck menu's Delete Deck (N20.2, third group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
+- Entries: the deck menu's Delete Deck (N20.2, final group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
 - Delete Deck first reads D8.5's summary for the deck. With `cards` 0 the deck is deleted at once, with no question: an empty deck, and a filtered deck, whose cards return home (D9). With `cards` 1 or more Meguri asks first. After the user confirms, the summary is read again right before the delete; when it differs from the one the question showed and `cards` is 1 or more, Meguri asks again with the new counts instead of deleting. A delete that asked nothing reads it the same way, so a card added after a zero-card read is asked about. A new generation in between ends the delete with nothing written. Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the delete passes the counts of the last summary read before it as its confirmed losses: when that recheck has `cards` 1 or more it equals the confirmed question's, since a differing recheck with cards asks again; when it has `cards` 0 (nothing was asked, or the cards left after a question) its own counts are passed (`decks/decks` D8 step 6), so an arrival between that read and the commit that raises a count is no longer deleted without the core refusing: the core refuses with `LossesChanged` and the new counts, writing nothing. The check is by count: when one card leaves and another arrives, the count stays equal and the arriving card is deleted without having been shown (`decks/decks` D8 step 6, Comparison). Meguri then treats those counts as a fresh read: with `cards` 1 or more it shows the question again, in the same place, with the new message line; with `cards` 0 it deletes at once with the new counts. So a card that raises `cards` is always shown before it is deleted, but a deck that raises `decks` is shown only when the refusal's `cards` is 1 or more: when it is 0 (an empty subdeck added after a zero-card read, or a card leaving as an empty subdeck arrives), the subdeck is deleted without a question, as an empty subdeck present at a zero-card read would be. That refusal shows no `Couldn’t Delete` alert.
 - The question: the title `Delete “<name>”?` with the deck's last name component, and one message line from the subdecks (S = `decks` − 1, the deck's descendants) and C = `cards`:
 
@@ -989,7 +996,7 @@ Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A; then `review.q
 
 Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the save input and the strings are `sched/deck-options` O17 and `decks/deck-options-strings` K10. Extended 2026-11-25 at the user's request: Display Order and New Preset join this native page; the other Advanced sections remain deferred.
 
-- Entries: the deck menu's Deck Options… (`gearshape`, group 2 after New Subdeck…, normal decks only; N20.2), Deck › Deck Options… (⌥⌘O, N20.4), the O key on the deck list and the deck page (`decks/deck-list` H9.2) and the finished state's Deck Options link (H5.2). Not offered during a review in this version: the Deck menu is disabled then (N20.4), and the review menu's item comes with the review menu.
+- On a normal deck, the row menu's Deck Options… (`gearshape`, group 3), Deck › Deck Options… (⌥⌘O), the O key in the deck list or page, and the finished state's Deck Options link open the preset form (N20.2, N20.4, H5.2 and H9.2). On a filtered deck, the row menu’s Edit Filtered Deck… in group 2, Deck › Edit Filtered Deck… (⌥⌘O) and O open the search definition (`decks/filtered-study#F1`). Deck menu commands are disabled during review. The review menu owns its separate card actions.
 - One grouped form:
   1. no header: **Preset**, a menu picker of the collection's presets, each listed as `decks/deck-options-strings` K6 gives it ("Default (used by 6 decks)"); the row shows the chosen preset's name. Footer: "Used by N decks. Changes apply to all of them.", or "Used by this deck only." when N is 1, with N the count the picker shows (`sched/deck-options` O6.1).
      **New Preset…** sits beside the picker, stacking below it when width requires. It opens a native name form (Name, Cancel, Create) with a short footer explaining built-in defaults and the later Save. Blank or whitespace-only input cannot be submitted. The core draft supplies the canonical name, selected staged preset and defaults (O6.3); no collection write happens before Save. Staged presets show a use count of zero.
