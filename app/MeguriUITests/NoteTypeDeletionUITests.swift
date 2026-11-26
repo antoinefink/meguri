@@ -12,6 +12,8 @@ final class NoteTypeDeletionUITests: XCTestCase {
     private let basicID = "1884308400000"
     private let clozeID = "1884308400002"
     private let reverseName = "Meguri Basic and Reverse"
+    private let basicWindowTitle = "Meguri Basic – 178 notes · 178 cards"
+    private let reverseWindowTitle = "Meguri Basic and Reverse – 90 notes · 180 cards"
 
     func testListDeleteConfirmsRealCountsCancelsDeletesAndUndoes() throws {
         let (app, bundle) = try launch()
@@ -24,9 +26,8 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertTrue(remaining.exists)
         XCTAssertTrue(noteTypeRow(app, id: clozeID).exists)
         XCTAssertEqual(listRows(app).count, 3, "The typical-1 recipe has exactly three note types")
-        select(remaining, in: app, heading: "Meguri Basic")
-        select(target, in: app, heading: reverseName)
-        assertHeading(app, "90 notes · 180 cards")
+        select(remaining, in: app, windowTitle: basicWindowTitle)
+        select(target, in: app, windowTitle: reverseWindowTitle)
         capture(app.windows.firstMatch, "note-type-delete-list-before")
 
         let action = try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete",
@@ -64,7 +65,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
         XCTAssertEqual(listRows(app).count, 2)
         // The freshly selected remaining type has its real detail, not the
         // removed type's fields or a stranded selection.
-        assertHeading(app, "Meguri Basic")
+        assertWindowTitle(app, basicWindowTitle)
         XCTAssertTrue(element(app, "noteTypes.fields.table").waitForExistence(timeout: 10))
         capture(app.windows.firstMatch, "note-type-delete-remaining-type-selected")
 
@@ -74,8 +75,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
         undo.click()
         XCTAssertTrue(element(app, identifier).waitForExistence(timeout: 30))
         XCTAssertEqual(listRows(app).count, 3)
-        select(target, in: app, heading: reverseName)
-        assertHeading(app, "90 notes · 180 cards")
+        select(target, in: app, windowTitle: reverseWindowTitle)
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app) // Undo restored both notes and their cards.
         capture(app.windows.firstMatch, "note-type-delete-undo-restored-counts")
@@ -110,8 +110,7 @@ final class NoteTypeDeletionUITests: XCTestCase {
         let target = noteTypeRow(app, id: reverseID)
         XCTAssertTrue(target.waitForExistence(timeout: 10), "Cancel keeps the target in Note Types")
         XCTAssertEqual(listRows(app).count, 3)
-        select(target, in: app, heading: reverseName)
-        assertHeading(app, "90 notes · 180 cards")
+        select(target, in: app, windowTitle: reverseWindowTitle)
         // Reopen here to read fresh counts after Cancel, then leave without a write.
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app)
@@ -152,19 +151,19 @@ final class NoteTypeDeletionUITests: XCTestCase {
                       "Expected exact text \(expected): \(element.debugDescription)")
     }
 
-    private func assertHeading(_ app: XCUIApplication, _ expected: String) {
-        let toolbar = app.windows.firstMatch.toolbars
-        let heading = toolbar.staticTexts.matching(NSPredicate(
-            format: "label == %@ OR value == %@ OR title == %@", expected, expected, expected)).firstMatch
-        XCTAssertTrue(heading.waitForExistence(timeout: 20), "Expected full heading \(expected): \(toolbar.debugDescription)")
+    private func assertWindowTitle(_ app: XCUIApplication, _ expected: String) {
+        let window = app.windows["main"]
+        XCTAssertTrue(window.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitUntil { window.title == expected },
+                      "Expected exact window title \(expected): \(window.debugDescription)")
     }
 
-    private func select(_ row: XCUIElement, in app: XCUIApplication, heading: String) {
+    private func select(_ row: XCUIElement, in app: XCUIApplication, windowTitle: String) {
         press(row, in: app)
         // Selection belongs to the native outline row, not its truncated text.
         let selected = app.outlineRows.containing(.any, identifier: row.identifier).firstMatch
         XCTAssertTrue(waitUntil { selected.exists && selected.isSelected }, "Expected selected note type \(row.identifier)")
-        assertHeading(app, heading)
+        assertWindowTitle(app, windowTitle)
     }
 
     private func listRows(_ app: XCUIApplication) -> XCUIElementQuery {
