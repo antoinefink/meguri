@@ -2,6 +2,9 @@ import CoreBridge
 import Foundation
 import Testing
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 @testable import AppModel
 @testable import Editor
 
@@ -17,6 +20,68 @@ extension FieldEditorTests {
         return .init(id: id, name: "Form \(id)", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [], originalStockKind: 0)
     }
     private static let deck = DeckNameEntry(id: 9, fullName: "Languages::Daily", filtered: false)
+
+    #if os(macOS)
+    @Test(arguments: [false, true])
+    func manyFieldMacFormOpensAtTheSizedViewport(_ editing: Bool) async throws {
+        let type = Self.form((0..<24).map { "Field \($0)" })
+        let values = (0..<24).map { "Synthetic \($0)" }
+        let draft = try editing
+            ? NoteEditorDraft(editing: .init(id: 5, notetypeId: type.id, fields: values, tags: [], guid: "g"),
+                              notetype: type, deck: Self.deck, generation: 1)
+            : NoteEditorDraft(generation: 1, notetype: type, deck: Self.deck, values: values)
+        var host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        defer { host.shutDown() }
+        BrowseFieldEditingTests.installProbe(host)
+        // Production starts the page before SwiftUI mounts and sizes the web view.
+        try #require(host.webView.frame == .zero)
+        try await host.start()
+        try #require(try await host.webView.callAsyncJavaScript("return innerWidth === 0 && innerHeight === 0;",
+            contentWorld: .page) as? Bool == true, "exercise eager focus at zero viewport")
+        let window = EditorFormTestWindow(contentRect: CGRect(x: -30_000, y: -30_000, width: 500, height: 240),
+                                          styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host.webView
+        host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 240)
+        window.makeFirstResponder(host.webView)
+        defer { window.contentView = nil; window.close() }
+
+        func checkOpening() async throws {
+            let checks = try #require(try await host.webView.callAsyncJavaScript("""
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('No sized viewport frames within 2 s')), 2000);
+                    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+                        clearTimeout(timeout); resolve();
+                    })));
+                });
+                const root = testFieldRoots.find(root => root.host.isConnected);
+                const box = document.querySelector('.fieldBoundary'), rect = box.getBoundingClientRect();
+                const style = getComputedStyle(box), ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+                return {
+                    sizedScrollableViewport: innerWidth === 500 && innerHeight === 240 && document.scrollingElement.scrollHeight > innerHeight,
+                    firstFieldFocused: root.activeElement === root.querySelector('meguri-field-content'),
+                    boxVisible: rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth,
+                    outlineVisible: ring > 0 && rect.top - ring >= 0 && rect.bottom + ring <= innerHeight &&
+                        rect.left - ring >= 0 && rect.right + ring <= innerWidth
+                };
+                """, contentWorld: BrowseFieldEditingTests.world) as? [String: Bool])
+            // Before the repair the opening selection reveal clips the first box
+            // or its outline. No test-driven focus or scrolling repairs that state.
+            for (name, passed) in checks { #expect(passed, "Opening form: \(name)") }
+        }
+        try await checkOpening()
+        if !editing {
+            // Type changes and acknowledged adds open a new draft in this page.
+            let changed = try draft.replacingSelection(notetype: Self.form((0..<18).map { "Changed \($0)" }, id: 78), deck: Self.deck)
+            for next in [changed, try changed.nextAfterAcknowledgedAdd()] {
+                try await host.flush(hold: true)
+                host = try #require(host.successor(for: next, isCurrent: { true }) as? FieldEditorHost)
+                try await host.start()
+                try await checkOpening()
+            }
+        }
+    }
+    #endif
 
     @Test func addWaitsForContentInTheFirstField() throws {
         let blank = try NoteEditorDraft(generation: 1, notetype: Self.form(["Front", "Back"]), deck: Self.deck)
@@ -137,3 +202,10 @@ extension FieldEditorTests {
         page.shutDown()
     }
 }
+
+#if os(macOS)
+@MainActor private final class EditorFormTestWindow: NSWindow {
+    override var isVisible: Bool { true }
+    override var occlusionState: NSWindow.OcclusionState { .visible }
+}
+#endif

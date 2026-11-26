@@ -131,15 +131,41 @@
         if (field.mode === "html") field.sourceCaret = [field.source.selectionStart, field.source.selectionEnd];
         else field.caret = range(field);
     }
-    function focus(field) {
+    function focus(field, preventScroll = false) {
+        openingField = null;
         if (!field || field.collapsed || field.hidden || held) return;
-        active(field).focus();
+        active(field).focus({preventScroll});
         if (field.mode === "html") {
             const [start, end] = field.sourceCaret ?? [field.source.value.length, field.source.value.length];
             field.source.setSelectionRange(start, end);
         } else {
             selectRange(field, validRange(field, field.caret) ? field.caret : range(field));
         }
+    }
+    let openingField = null;
+    function revealOpeningField() {
+        const field = openingField;
+        if (!field || !innerWidth || !innerHeight) return;
+        // Selection reveal can follow focus, including focus at zero frame.
+        // Wait for layout at the real viewport, without polling for a mount.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (openingField !== field || !innerWidth || !innerHeight) return;
+            openingField = null;
+            const focused = field.mode === "html" ? document.activeElement === field.source :
+                document.activeElement === field.root.host && field.root.activeElement === field.rich;
+            if (held || !focused) return;
+            const box = (field.mode === "html" ? field.source : field.host);
+            const rect = box.getBoundingClientRect(), style = getComputedStyle(box);
+            const ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+            // Only a first box that fits in full at the top. Tall content keeps
+            // WebKit's native caret reveal instead of revealing the whole box.
+            if (rect.top + scrollY - ring >= 0 && rect.bottom + scrollY + ring <= innerHeight) window.scrollTo(0, 0);
+        }));
+    }
+    window.addEventListener("resize", revealOpeningField);
+    window.addEventListener("blur", () => { openingField = null; });
+    for (const type of ["pointerdown", "wheel", "keydown", "beforeinput"]) {
+        document.addEventListener(type, () => { openingField = null; }, {capture: true, passive: true});
     }
     function historyState(field) {
         void emit("historyState", {ord: field.ord, canUndo: field.undo.length > 0, canRedo: field.redo.length > 0});
@@ -363,6 +389,7 @@
     function wire(field, input) {
         input.addEventListener("focus", () => { current = field; void emit("focus", {ord: field.ord, mode: field.mode}); });
         input.addEventListener("blur", () => {
+            if (openingField === field) openingField = null;
             if (current === field) current = null;
             saveCaret(field); field.lastKind = null; commit(field, "blur"); void emit("blur", {ord: field.ord});
         });
@@ -709,6 +736,7 @@
                 typeof message.options.closeHTMLTags !== "boolean" || typeof message.options.shrinkImages !== "boolean") throw new Error("Invalid openNote");
             message.fields.forEach(validateField);
             if (message.fields.some((value, index) => index > 0 && value.ord <= message.fields[index - 1].ord)) throw new Error("Invalid field order");
+            openingField = null;
             for (const field of fields) clearTimeout(field.timer);
             loadId = message.loadId; seq = 0; current = null;
             browsing = message.mode === "browse";
@@ -717,7 +745,13 @@
             document.documentElement.classList.toggle("inspector", browsing);
             held = true; container.replaceChildren(); fields = message.fields.map(value => makeField(value, message.mode));
             held = false; container.inert = false;
-            focus(fields.find(field => field.ord === message.focus));
+            const first = fields.find(field => !field.hidden && !field.collapsed);
+            const target = fields.find(field => field.ord === message.focus);
+            const opening = target && target === first && ["add", "edit"].includes(message.mode) &&
+                document.documentElement.classList.contains("mac");
+            const box = opening && (target.mode === "html" ? target.source : target.host);
+            focus(target, opening && innerHeight > 0 && box.getBoundingClientRect().height < innerHeight);
+            if (opening) { openingField = target; revealOpeningField(); }
             await emit("loaded");
             return {loadId};
         }
