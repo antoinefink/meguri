@@ -1017,9 +1017,11 @@ public final class BrowseModel {
     /// hold thousands of tags; a sidebar redraw must not walk it again).
     public func filteredTags(_ filter: BrowseSidebarFilter, rootMatched: Bool) -> [BrowseSidebarFilter.Node<TagNode>] {
         guard filter.isOn else { return [] }
+        // Cache hits must still subscribe the view to tree replacements.
+        let tree = tags
         let key = filter.text + (rootMatched ? "\u{0}root" : "")
         if let cache = filteredTagsCache, cache.text == key, cache.revision == tagsRevision { return cache.nodes }
-        let nodes = filter.tree(tags, label: \.name, children: \.children, rootMatched: rootMatched)
+        let nodes = filter.tree(tree, label: \.name, children: \.children, rootMatched: rootMatched)
         filteredTagsCache = (key, tagsRevision, nodes)
         return nodes
     }
