@@ -70,6 +70,7 @@ struct BackupsContent: View {
                         .accessibilityIdentifier("settings.backups.created")
                 }
                 if let error = presentation.failure { BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: false) }
+                if let error = presentation.listFailure { BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false) }
                 if case .uncertain = presentation.backupPublication {
                     Text("The backup’s publication could not be confirmed. Check the backup folder before trying again.", bundle: .module)
                 }
@@ -187,6 +188,9 @@ struct BackupRestoreContent: View {
     private var selectedEntry: BackupEntry? {
         presentation.entries.first { $0.name == selectedName && !unavailable($0) }
     }
+    private var showsListFailure: Bool {
+        presentation.work != .restore && !presentation.loading && presentation.entries.isEmpty && presentation.listFailure != nil
+    }
     var body: some View {
         NavigationStack {
             VStack {
@@ -198,6 +202,20 @@ struct BackupRestoreContent: View {
                         .accessibilityLabel(Text("Loading Backups…", bundle: .module))
                         .accessibilityValue(Text("In progress", bundle: .module))
                         .accessibilityIdentifier("settings.backups.loading")
+                } else if showsListFailure, let error = presentation.listFailure {
+                    ScrollView {
+                        ContentUnavailableView {
+                            Label { Text("Unable to Load Backups", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
+                        } description: {
+                            BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("settings.backups.listFailure")
+                        } actions: {
+                            Button(action: refresh) { Text("Try Again", bundle: .module) }
+                                .accessibilityIdentifier("settings.backups.retry")
+                        }
+                        restoreNotices
+                    }
                 } else if presentation.entries.isEmpty {
                     ContentUnavailableView {
                         Label { Text("No Backups Yet", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
@@ -228,19 +246,7 @@ struct BackupRestoreContent: View {
                         }
                     }
                 }
-                if let error = presentation.failure {
-                    BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: true)
-                        .padding()
-                        .accessibilityIdentifier("settings.backups.failure")
-                }
-                if let safety = presentation.safetyBackup {
-                    Text("Safety copy: \(safety)", bundle: .module).font(.caption)
-                        .accessibilityIdentifier("settings.backups.safetyCopy")
-                }
-                if case .uncertain = presentation.backupPublication {
-                    Text("The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing.", bundle: .module)
-                        .padding()
-                }
+                if !showsListFailure { restoreNotices }
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.backups.restoreContent")
@@ -268,6 +274,27 @@ struct BackupRestoreContent: View {
             } message: { Text(confirmationMessage, bundle: .module) }
         }
         .interactiveDismissDisabled(presentation.busy || confirmation)
+    }
+    @ViewBuilder private var restoreNotices: some View {
+        if !showsListFailure, let error = presentation.listFailure {
+            BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false)
+                .padding()
+                .accessibilityIdentifier("settings.backups.listFailure")
+        }
+        if let error = presentation.failure {
+            BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain,
+                              restore: presentation.failureWork == .restore)
+                .padding()
+                .accessibilityIdentifier("settings.backups.failure")
+        }
+        if let safety = presentation.safetyBackup {
+            Text("Safety copy: \(safety)", bundle: .module).font(.caption)
+                .accessibilityIdentifier("settings.backups.safetyCopy")
+        }
+        if case .uncertain = presentation.backupPublication {
+            Text("The safety copy’s publication could not be confirmed. Keep recovery files and reopen Meguri before continuing.", bundle: .module)
+                .padding()
+        }
     }
     private func unavailable(_ entry: BackupEntry) -> Bool {
         entry.kind == .serverCopyUnverified || presentation.rejectedNames.contains(entry.name)

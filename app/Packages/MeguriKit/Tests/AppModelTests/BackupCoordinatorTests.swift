@@ -12,6 +12,9 @@ actor BackupServiceProbe: MaintenanceService {
     var dueOperation: MaintenanceOperation?
     var restoreOperation: MaintenanceOperation?
     var refusal: MaintenanceFailure?
+    var listFailure: MaintenanceError?
+    var limitsFailure: MaintenanceError?
+    var limitEditFailure: MaintenanceError?
     var deadline: Int64?
     var held = false
     var started = false
@@ -20,6 +23,9 @@ actor BackupServiceProbe: MaintenanceService {
     var beforeRestore: (@Sendable () async -> Void)?
     func configure(entries: [BackupEntry], refusal: MaintenanceFailure? = nil) {
         self.entries = entries; self.refusal = refusal
+    }
+    func configureReadFailures(list: MaintenanceError? = nil, limits: MaintenanceError? = nil, editLimit: MaintenanceError? = nil) {
+        listFailure = list; limitsFailure = limits; limitEditFailure = editLimit
     }
     func configureDue(deadline: Int64?, held: Bool = false) {
         self.deadline = deadline; self.held = held; started = false
@@ -67,10 +73,17 @@ actor BackupServiceProbe: MaintenanceService {
         }
         throw BridgeError.internal("Automatic maintenance operation was not cancelled")
     }
-    func listBackups() async throws -> [BackupEntry] { entries }
-    func backupLimits() async throws -> BackupLimits { limits }
+    func listBackups() async throws -> [BackupEntry] {
+        if let listFailure { throw listFailure }
+        return entries
+    }
+    func backupLimits() async throws -> BackupLimits {
+        if let limitsFailure { throw limitsFailure }
+        return limits
+    }
     func setBackupLimits(_ limits: BackupLimits) async throws -> Bool { self.limits = limits; written.append(limits); return true }
     func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits {
+        if let limitEditFailure { throw limitEditFailure }
         switch patch {
         case .daily(let value): limits.daily = value
         case .weekly(let value): limits.weekly = value
@@ -107,6 +120,43 @@ actor BackupServiceProbe: MaintenanceService {
     private func entry(_ day: UInt8, kind: BackupKind = .backup) -> BackupEntry {
         BackupEntry(name: "backup-2030-01-\(day)-09.00.00.colpkg", kind: kind,
             wallTime: .init(year: 2030, month: 1, day: day, hour: 9, minute: 0, second: 0), sizeBytes: 1234)
+    }
+    @Test func listFailureIsDistinctFromSuccessfulEmptyReadsAndLimitErrors() async {
+        let host = BackupHostProbe(), service = BackupServiceProbe()
+        let model = BackupCoordinator(host: host, service: service)
+        await service.configureReadFailures(list: .io("Synthetic list read failure"))
+        await model.openedRestore()
+        #expect(model.entries.isEmpty && model.listFailure == .io("Synthetic list read failure"))
+        #expect(model.failure == nil && model.failureWork == nil)
+        await service.configureReadFailures(limits: .collectionUnavailable)
+        await model.refresh()
+        // Status always fails in this probe. Neither auxiliary read makes
+        // a successful empty list into a list-load or restore failure.
+        #expect(model.entries.isEmpty && model.listFailure == nil && model.failure == nil)
+        #expect(model.status == nil && model.limits == nil)
+        await service.configureReadFailures(editLimit: .diskFull)
+        await model.refresh()
+        await model.editLimit(.weekly, value: 4)
+        #expect(model.failure == .diskFull && model.failureWork == nil && model.listFailure == nil)
+    }
+    @Test func listRefreshFailurePreservesRestoreFailureAndRecoveryFacts() async throws {
+        let host = BackupHostProbe(), service = BackupServiceProbe(), selected = entry(2)
+        let model = BackupCoordinator(host: host, service: service)
+        let restoreCause = MaintenanceError.io("Synthetic final-step failure")
+        let listCause = MaintenanceError.io("Synthetic list read failure")
+        await service.configure(entries: [selected], refusal: .init(cause: restoreCause,
+            candidateActive: true, generation: 2, safetyBackup: "kept-predecessor.colpkg"))
+        await service.beforeRestore { await service.configureReadFailures(list: listCause) }
+        await model.openedRestore()
+        let restore = try #require(model.restoreConfirmed(name: selected.name))
+        await restore.value
+        #expect(model.entries.map(\.name) == [selected.name])
+        #expect(model.listFailure == listCause && model.failure == restoreCause && model.failureWork == .restore)
+        #expect(model.candidateActive && model.safetyBackup == "kept-predecessor.colpkg" && !model.restoreCompleted)
+        await service.configureReadFailures()
+        await model.refresh()
+        #expect(model.listFailure == nil && model.failure == restoreCause && model.failureWork == .restore)
+        #expect(model.candidateActive && model.safetyBackup == "kept-predecessor.colpkg")
     }
     @Test func offlineListSkipsUnverifiedAndRestoresTheSelectedOlderName() async throws {
         let host = BackupHostProbe(), service = BackupServiceProbe()

@@ -79,7 +79,7 @@ public enum BackupsPreview: PreviewStates {
         case .typical: .init(entries: entries, provider: .localOnly)
         case .overflow:
             .init(entries: entries, rejectedNames: [entries[3].name], provider: .meguri)
-        case .error: .init(failure: .io("Synthetic unreadable backup folder"))
+        case .error: .init(listFailure: .io("Synthetic unreadable backup folder"))
         case .loading: .init(loading: true)
         }
     }

@@ -1,5 +1,16 @@
 # Backups production rendering evidence handoff
 
+List-read failure repair (native verification pending): the restore error fixture
+now models a list-load error separately from operation failures. With no entries,
+the sheet shows “Unable to Load Backups”, its typed explanation and one Try Again
+action in a native ScrollView. The explanation keeps its full vertical size to
+address the reported compact-touch accessibility truncation. A successful empty
+read retains “No Backups Yet”. Restore failures, activation and safety disclosures
+remain available, including when a subsequent list refresh fails. The explanation
+uses `settings.backups.listFailure`; existing action and entry identifiers remain.
+The runner did not build, test or render this correction. Recheck the focused
+BackupCoordinatorTests, BackupsAccessibilityTests and affected native matrix cells.
+
 Scope: `settings.backups` (U163a), `package/backups` B2/B6/B7,
 `package/backup-triggers` T8, R1964, R1970–R1972, R1977–R1982.
 

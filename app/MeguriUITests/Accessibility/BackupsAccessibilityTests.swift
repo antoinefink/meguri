@@ -79,12 +79,24 @@ final class BackupsAccessibilityTests: XCTestCase {
                             XCTAssertEqual(app.buttons["settings.backups.cancel"].firstMatch.label, "Cancel")
                             XCTAssertTrue(app.buttons["settings.backups.cancel"].firstMatch.isEnabled)
                             if state == "empty" || state == "error" {
+                                let emptyTitle = app.staticTexts["No Backups Yet"].firstMatch
+                                let emptyExplanation = app.staticTexts["Create a backup on this device, or check the configured backup folder."].firstMatch
+                                let errorTitle = app.staticTexts["Unable to Load Backups"].firstMatch
+                                let errorExplanation = app.staticTexts["The backup could not be read or written. Check file access and free space, then try again."].firstMatch
+                                XCTAssertEqual(emptyTitle.exists, state == "empty")
+                                XCTAssertEqual(emptyExplanation.exists, state == "empty")
+                                XCTAssertEqual(errorTitle.exists, state == "error")
+                                XCTAssertEqual(errorExplanation.exists, state == "error")
+                                if state == "error" {
+                                    if try self.reach(errorTitle, in: app) { try audit("list failure heading") }
+                                    if try self.reach(errorExplanation, in: app) { try audit("list failure explanation") }
+                                    XCTAssertFalse(app.staticTexts["The backup was not restored. Try another backup or resolve the problem and try again."].exists)
+                                }
                                 let retry = app.buttons["settings.backups.retry"].firstMatch
+                                if state == "error", try self.reach(retry, in: app) { try audit("list failure retry") }
+                                XCTAssertEqual(app.buttons.matching(identifier: "settings.backups.retry").count, 1)
                                 XCTAssertEqual(retry.label, "Try Again")
                                 XCTAssertTrue(retry.isEnabled)
-                                if state == "error" {
-                                    XCTAssertTrue(app.staticTexts["The backup could not be read or written. Check file access and free space, then try again."].exists)
-                                }
                             } else if state == "loading" {
                                 let progress = app.progressIndicators["settings.backups.loading"].firstMatch
                                 XCTAssertTrue(progress.exists)
@@ -99,7 +111,9 @@ final class BackupsAccessibilityTests: XCTestCase {
                                     let sizes: [Int64] = [28_400_000, 27_900_000, 27_800_000, 27_600_000]
                                     let size = sizes[index].formatted(.byteCount(style: .file).locale(Locale(identifier: "en_US")))
                                     XCTAssertTrue(row.label.contains(size))
-                                    XCTAssertEqual(row.isSelected, index == (state == "overflow" ? 1 : 0))
+                                    // Native List may put isSelected on an ancestor. Check
+                                    // the exact entry's AX value for both selection outcomes.
+                                    XCTAssertEqual(row.value as? String, index == (state == "overflow" ? 1 : 0) ? "Selected" : "Not selected")
                                     if index == 1 { XCTAssertTrue(row.label.contains("Server copy")) }
                                     if index == 2 || (index == 3 && state == "overflow") {
                                         XCTAssertTrue(row.label.contains("Can’t be restored"))

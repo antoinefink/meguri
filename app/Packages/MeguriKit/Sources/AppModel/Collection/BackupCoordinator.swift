@@ -34,6 +34,8 @@ public final class BackupCoordinator {
     public private(set) var progress: CoreProgress?
     public private(set) var created: ImportBackupReceipt?
     public private(set) var failure: MaintenanceError?
+    public private(set) var failureWork: Work?
+    public private(set) var listFailure: MaintenanceError?
     public private(set) var candidateActive = false
     public private(set) var activationUncertain = false
     public private(set) var safetyBackup: String?
@@ -72,6 +74,7 @@ public final class BackupCoordinator {
             let values = try await service.listBackups()
             guard read == loadRevision, expected == ownership, generation == host.backupGeneration else { return }
             entries = values
+            listFailure = nil
             selectEligible()
             // A damaged host can still list/restore even when config/status reads fail.
             let readStatus = try? await service.status()
@@ -82,7 +85,7 @@ public final class BackupCoordinator {
             if !limitsWereSaving, !savingLimits, limitsRead == limitsRevision { limits = readLimits }
         } catch {
             guard read == loadRevision, expected == ownership else { return }
-            failure = Self.cause(error)
+            listFailure = Self.cause(error)
         }
     }
 
@@ -94,7 +97,7 @@ public final class BackupCoordinator {
 
     public func openedRestore() async {
         guard !busy else { return }
-        failure = nil; candidateActive = false; restoreCompleted = false
+        failure = nil; failureWork = nil; candidateActive = false; restoreCompleted = false
         rejectedNames.removeAll(); selectedName = nil
         await refresh()
     }
@@ -138,7 +141,7 @@ public final class BackupCoordinator {
                 // already advanced the collection generation while this awaited.
                 candidateActive = true; safetyBackup = restored.safetyBackup
                 let completion = await host.finishBackupRestore(candidateActive: true, generation: restored.generation)
-                guard completion.ready else { failure = .collectionUnavailable; return }
+                guard completion.ready else { failure = .collectionUnavailable; failureWork = .restore; return }
                 await refresh()
                 restoreCompleted = true
                 host.backupRestoreSucceeded()
@@ -182,8 +185,9 @@ public final class BackupCoordinator {
     func collectionChanged() {
         ownership &+= 1; loadRevision &+= 1; loading = false
         entries = []; selectedName = nil; limits = nil; status = nil; created = nil
+        listFailure = nil
         rejectedNames.removeAll()
-        if work != .restore { failure = nil }
+        if work != .restore { failure = nil; failureWork = nil }
     }
 
     public func editLimit(_ field: LimitField, value: UInt32) async {
@@ -205,11 +209,11 @@ public final class BackupCoordinator {
         do {
             let confirmed = try await service.updateBackupLimit(patch)
             if expected == ownership { limits = confirmed }
-        } catch { if expected == ownership { failure = Self.cause(error) } }
+        } catch { if expected == ownership { failure = Self.cause(error); failureWork = nil } }
     }
 
     private func begin(_ work: Work) {
-        self.work = work; progress = nil; failure = nil; candidateActive = false; activationUncertain = false
+        self.work = work; progress = nil; failure = nil; failureWork = nil; candidateActive = false; activationUncertain = false
         safetyBackup = nil; backupPublication = .unpublished; created = nil
         cancellationRequested = false; restoreCompleted = false
     }
@@ -222,6 +226,7 @@ public final class BackupCoordinator {
     }
     private func record(_ error: any Error) {
         failure = Self.cause(error)
+        failureWork = work
         if let typed = error as? MaintenanceFailure {
             candidateActive = typed.candidateActive; safetyBackup = typed.safetyBackup ?? typed.restored?.safetyBackup
             backupPublication = typed.backupPublication

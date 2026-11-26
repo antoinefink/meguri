@@ -18,6 +18,8 @@ struct BackupsPresentation {
     let work: BackupCoordinator.Work?
     let created: Receipt?
     let failure: MaintenanceError?
+    let failureWork: BackupCoordinator.Work?
+    let listFailure: MaintenanceError?
     let candidateActive: Bool
     let activationUncertain: Bool
     let safetyBackup: String?
@@ -41,6 +43,8 @@ struct BackupsPresentation {
         work: BackupCoordinator.Work? = nil,
         created: Receipt? = nil,
         failure: MaintenanceError? = nil,
+        failureWork: BackupCoordinator.Work? = nil,
+        listFailure: MaintenanceError? = nil,
         candidateActive: Bool = false,
         activationUncertain: Bool = false,
         safetyBackup: String? = nil,
@@ -62,6 +66,8 @@ struct BackupsPresentation {
         self.work = work
         self.created = created
         self.failure = failure
+        self.failureWork = failureWork
+        self.listFailure = listFailure
         self.candidateActive = candidateActive
         self.activationUncertain = activationUncertain
         self.safetyBackup = safetyBackup
@@ -81,7 +87,8 @@ struct BackupsPresentation {
             lastBackupMilliseconds: model.status?.lastBackup?.instantMilliseconds,
             lastBackupUnavailable: model.status?.failures.contains(where: { $0.field == .lastBackup }) == true || (model.status == nil && !model.loading),
             loading: model.loading, work: model.work, created: model.created.map { Receipt(name: $0.name, sizeBytes: $0.sizeBytes) },
-            failure: model.failure, candidateActive: model.candidateActive, activationUncertain: model.activationUncertain,
+            failure: model.failure, failureWork: model.failureWork, listFailure: model.listFailure,
+            candidateActive: model.candidateActive, activationUncertain: model.activationUncertain,
             safetyBackup: model.safetyBackup, backupPublication: model.backupPublication,
             canCreate: model.canCreate, canOpenRestore: model.canOpenRestore, canEditLimits: model.canEditLimits,
             canExport: collection.collectionExport.canPresent && !model.busy, canCancel: model.canCancel,

@@ -241,6 +241,16 @@
         }
       }
     },
+    "Unable to Load Backups": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to Load Backups"
+          }
+        }
+      }
+    },
     "No Backups Yet": {
       "localizations": {
         "en": {
