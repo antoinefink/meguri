@@ -97,7 +97,14 @@ public struct BrowseSidebar<Header: View>: View {
             model.appear()
         }
         .onDisappear { model.disappear() }
-        #if !os(macOS)
+        #if os(macOS)
+        .onChange(of: navigation?.macSidebarSelectionID) { _, intent in
+            // The header Button can request Browse without writing List's binding.
+            // Clear its old filter target while the getter supplies the pending row.
+            guard intent != nil, navigation?.macSidebarSelection == .section(.browse) else { return }
+            forgetKeyRow()
+        }
+        #else
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
         #endif
         // The rows shown changed: Return and Space never act on a row out of sight.
@@ -176,6 +183,10 @@ public struct BrowseSidebar<Header: View>: View {
             // Browse and filter selections supersede departure and follow the
             // model's existing key-row and deletion-selection clearing path.
             navigation?.cancelMacSidebarSelection()
+            if rows == model.listSelection {
+                forgetKeyRow()
+                return
+            }
             deletionSelection.changed(from: selection, to: rows, byKey: Self.byKey(),
                                       commandClick: Self.click() == .command)
             captureDeletionTarget()

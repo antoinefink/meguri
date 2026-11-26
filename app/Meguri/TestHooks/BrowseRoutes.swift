@@ -56,6 +56,7 @@ extension TestHooks {
             let cards = switch state {
             case .emptyCollection: 0
             case .large: 150_000
+            case .keyboardTarget: 30
             default: 1_204
             }
             let session = SampleSearchSession(cards: cards, fails: state == .error)
