@@ -1,4 +1,5 @@
 //! Multi-answer C8 production sessions, with every rating probed through U44.
+mod common;
 mod session_support;
 use meguri_engine::{
     UndoScope,
@@ -151,4 +152,89 @@ fn c9_rapid_same_card_postimages_commit_in_order_without_extra_cache_contributio
             .reps,
         8
     );
+}
+
+#[test]
+fn malformed_membership_refuses_session_prediction_and_answer_without_journal_or_write() {
+    use meguri_engine::{OpSource, OpSpec, decks::filtered::{self, Definition, Term}, sched::queue::QueueProvider};
+    use meguri_model::ids::DeckId;
+    use meguri_sched::states::fsrs_glue::FsrsCache;
+    use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StampMode, Table};
+    use std::{fs, sync::Arc};
+
+    for mode in [None, Some(false), Some(true)] {
+        for head_first in [false, true] {
+            let h = Harness::new(1);
+            let card = h.cards[0];
+            let deck = if let Some(reschedule) = mode {
+                filtered::save(&h.collection, None, Definition {
+                    name: "Malformed membership".into(),
+                    terms: vec![Term { search: format!("cid:{}", card.0), limit: 1, order: 5 }],
+                    reschedule,
+                    ..Definition::default()
+                }, false).unwrap().value
+            } else {
+                DeckId(1)
+            };
+            let meguri_engine::session::StartResult::Started { session_id, head, .. } =
+                h.review.start(deck, None).unwrap() else { panic!("valid fixture refused") };
+            let shown = &head.items[0];
+            h.settle();
+
+            // Delay only the observer: admission must inspect current storage,
+            // even while the old valid card remains in the shown queue.
+            let gate = common::Gate::new();
+            let held = gate.clone();
+            h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
+                if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
+            })));
+            h.collection.run(OpSpec::named("malformed session membership", OpSource::Maintenance)
+                .stamp(StampMode::Raw), move |ctx| {
+                    // Match U44's negative-home fixture, including an existing
+                    // normal row at -1; an unchecked home lookup succeeds.
+                    let mut home = ctx.scope().deck(DeckId(1))?.unwrap();
+                    home.id = if mode.is_some() { DeckId(-1) } else { DeckId(2) };
+                    home.name = "Other home".into();
+                    ctx.scope().put(&home)?;
+                    let mut row = ctx.scope().card(card)?.unwrap();
+                    row.original_deck_id = home.id;
+                    ctx.scope().put(&row)?;
+                    Ok(())
+                }).unwrap();
+            gate.wait_entered();
+            // Establish D8 before measuring answer-owned writes; the queue
+            // label query below uses the normal maintenance prelude.
+            h.collection.check_rollover().unwrap();
+
+            let images = || {
+                let r = h.collection.reader(ReaderRole::Query).unwrap();
+                (r.card(card).unwrap().unwrap().to_cells(),
+                 r.deck_rows().unwrap().iter().map(Record::to_cells).collect::<Vec<_>>(),
+                 r.row_image(Table::Col, &RowKey::Id(1)).unwrap())
+            };
+            let before = images();
+            let seq = h.collection.last_seq();
+            let journal = h.collection.path().parent().unwrap().join("meguri-pending-answers.jsonl");
+            let journal_before = fs::read(&journal).unwrap();
+            let polled = head_first.then(|| h.review.head(session_id, 3));
+            let answer = h.review.answer(session_id, card, Rating::Easy, shown.state_token,
+                EpochMillis(h.clock.now_ms()), 100);
+            let peek = h.review.peek_first_card(deck);
+            let queue = QueueProvider::default().queue_with_head_states(
+                &h.collection, Some(deck), &mut FsrsCache::default());
+            h.review.observe_hook_for_testing(None);
+            gate.open();
+            h.settle();
+
+            if let Some(polled) = polled { assert!(polled.is_err(), "{mode:?}"); }
+            assert!(answer.is_err(), "malformed answer admitted: {mode:?}: {answer:?}");
+            assert!(peek.is_err(), "malformed peek shown: {mode:?}");
+            assert!(queue.is_err(), "malformed queue head predicted: {mode:?}");
+            assert!(h.logs().is_empty());
+            assert_eq!(images(), before);
+            assert_eq!(h.collection.last_seq(), seq);
+            assert_eq!(fs::read(&journal).unwrap(), journal_before);
+            h.review.end(session_id).unwrap();
+        }
+    }
 }

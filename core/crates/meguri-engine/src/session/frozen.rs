@@ -3,7 +3,7 @@ use crate::{EngineError, sched::answer::AnswerRequest};
 use meguri_model::{card::Card, clock::UtcOffset, ids::CardId, time::EpochMillis};
 use meguri_sched::{
     answer::Rating,
-    model::{card_sched::CardSched, deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
+    model::{deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
     queue::Kind,
     states::{
         engine::{AnswerState, ReviewState, RevlogPreview, State},
@@ -262,14 +262,11 @@ pub(crate) fn inputs_without_revlogs(
     models: &mut FsrsCache,
     removed: &[i64],
 ) -> Result<Inputs, EngineError> {
-    let home = rows
-        .deck(CardSched::new(card).home_deck())?
-        .ok_or_else(|| error("missing home"))?;
+    let (home, filtered) = crate::sched::answer::membership(rows, card)?;
     let meguri_model::proto::deck::DeckKind::Normal(normal) = &home.kind.kind else {
         return Err(error("non-normal home"));
     };
     let preset = PresetView::for_config(rows, meguri_model::ids::DeckConfigId(normal.config_id))?;
-    let filtered = meguri_sched::states::filtered::options(rows, card)?;
     let preview = filtered.as_ref().is_some_and(|d| !d.reschedule);
     if !preview {
         models.model(&preset)

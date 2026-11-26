@@ -2211,7 +2211,11 @@ fn filtered_member(
     } else {
         rows.card(id)?
     };
-    Ok(card.is_some_and(|c| c.deck_id == deck && c.original_deck_id.0 != 0))
+    let Some(card) = card.filter(|c| c.deck_id == deck) else {
+        return Ok(false);
+    };
+    let (_, filtered) = answer::membership(rows, &card)?;
+    Ok(filtered.is_some())
 }
 
 // The projected note and card feed both the key and actual U62 payload,

@@ -638,6 +638,19 @@ fn home(
     rows: &impl ReadRows,
     card: &Card,
 ) -> Result<(PresetView, meguri_model::deck::Deck, Option<FilteredDeck>), EngineError> {
+    let (deck, filtered) = membership(rows, card)?;
+    let DeckKind::Normal(normal) = &deck.kind.kind else {
+        return Err(state_error("InFilteredDeck"));
+    };
+    Ok((PresetView::for_config(rows, DeckConfigId(normal.config_id))?, deck, filtered))
+}
+
+/// Resolve only validated membership, before prediction or optimistic admission.
+/// No scheduling model, history or queue gather is needed for this check.
+pub(crate) fn membership(
+    rows: &impl ReadRows,
+    card: &Card,
+) -> Result<(meguri_model::deck::Deck, Option<FilteredDeck>), EngineError> {
     let deck = rows
         .deck(card.deck_id)?
         .ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
@@ -661,10 +674,13 @@ fn home(
     } else {
         deck
     };
-    let DeckKind::Normal(normal) = &deck.kind.kind else {
+    if deck.id.0 <= 0 {
+        return Err(invalid("invalid card home deck"));
+    }
+    let DeckKind::Normal(_) = &deck.kind.kind else {
         return Err(state_error("InFilteredDeck"));
     };
-    Ok((PresetView::for_config(rows, DeckConfigId(normal.config_id))?, deck, filtered))
+    Ok((deck, filtered))
 }
 
 pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResult<AnswerResult>, EngineError> {
