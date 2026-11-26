@@ -481,6 +481,39 @@ fn missing_preset_uses_factory_and_invalid_deck_filter_and_preset_refuse_atomica
     assert_eq!(images(&h), before);
 }
 #[test]
+fn ordinary_home_override_and_filtered_negative_home_refuse_on_the_current_snapshot() {
+    for (filtered, home_id) in [(false, DeckId(2)), (true, DeckId(-1))] {
+        let (h, id, _) = setup();
+        let mut request = answer::predict(&h.collection, id, &mut FsrsCache::default(), None)
+            .unwrap()
+            .answer(Rating::Good, 0);
+        h.collection.run(OpSpec::named("invalid membership", OpSource::Maintenance), move |ctx| {
+            use meguri_model::proto::deck::{DeckKind, DeckKindMessage, FilteredDeck};
+            let mut current = ctx.scope().deck(DeckId(1))?.unwrap();
+            let mut home = current.clone();
+            home.id = home_id;
+            home.name = "Other home".into();
+            ctx.scope().put(&home)?;
+            if filtered {
+                let mut definition = FilteredDeck::default();
+                definition.reschedule = true;
+                current.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(definition)));
+                ctx.scope().put(&current)?;
+            }
+            let mut card = ctx.scope().card(id)?.unwrap();
+            card.original_deck_id = home_id;
+            ctx.scope().put(&card)?;
+            Ok(())
+        }).unwrap();
+        request.state_token = h.collection.reader(ReaderRole::Query).unwrap()
+            .row_digest(Table::Cards, &RowKey::Id(id.0)).unwrap().unwrap();
+        let before = images(&h);
+        assert!(answer::predict(&h.collection, id, &mut FsrsCache::default(), None).is_err());
+        assert!(answer::answer(&h.collection, request).is_err());
+        assert_eq!(images(&h), before);
+    }
+}
+#[test]
 fn marker_precedes_burial_and_legacy_creation_offset_stays_absent() {
     let (h, id, sibling) = setup();
     raw(&h, "DELETE FROM config WHERE key IN ('creationOffset','lastUnburied')");

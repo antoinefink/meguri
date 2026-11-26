@@ -7,7 +7,7 @@ use meguri_model::{
     card::{Card, CardQueue, CardType},
     config::ConfigEntry,
     ids::{CardId, DeckConfigId, RevlogId},
-    proto::deck::DeckKind,
+    proto::deck::{DeckKind, FilteredDeck},
     time::{EpochMillis, EpochSecs},
     usn::Usn,
 };
@@ -543,7 +543,7 @@ pub fn predict(
             let cache = cache.filter(|c| c.is_current(collection));
             let mut prediction = if let Some(c) = &cache {
                 let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
-                let (preset, _) = home(&**rows, &card)?;
+                let (preset, _, _) = home(&**rows, &card)?;
                 c.with_chooser(collection, &card, &preset, |chooser| {
                     predict_in(
                         &**rows,
@@ -575,15 +575,15 @@ pub(crate) fn predict_in(
     chooser: Option<&mut dyn meguri_sched::states::interval_limits::FuzzedDayChooser>,
 ) -> Result<Prediction, EngineError> {
     let card = rows.card(id)?.ok_or_else(|| missing(Table::Cards, id.0))?;
-    let (preset, home) = home(rows, &card)?;
+    let (preset, home, filtered) = home(rows, &card)?;
     let normal = match &home.kind.kind {
         DeckKind::Normal(n) => n,
         _ => return Err(state_error("InFilteredDeck")),
     };
     let retention = DeckSched::new(Some(normal), &home.common).retention(preset.fields().desired_retention);
-    let preview = meguri_sched::states::filtered::options(rows, &card)?.is_some_and(|d| !d.reschedule);
+    let preview = filtered.as_ref().filter(|d| !d.reschedule);
     let mut history = Vec::new();
-    if !preview && card.card_type != CardType::New && card.data.memory_state.is_none() {
+    if preview.is_none() && card.card_type != CardType::New && card.data.memory_state.is_none() {
         rows.visit_fsrs_histories(
             &meguri_storage::queries::revlog_fsrs::HistorySelection::Cards(vec![id]),
             |_, found| -> Result<(), StorageError> {
@@ -592,7 +592,7 @@ pub(crate) fn predict_in(
             },
         )?;
     }
-    let memory = if preview {
+    let memory = if preview.is_some() {
         card.data.memory_state
     } else {
         meguri_sched::memory::resolve::on_the_fly(models, &preset, &card, &history, next_day_at)
@@ -615,7 +615,11 @@ pub(crate) fn predict_in(
         short_term_with_steps: cfg.fsrs_short_term_with_steps()?,
         learn_ahead: cfg.collapse_time()?,
     };
-    let states = meguri_sched::states::filtered::next_states(rows, models, &input, chooser).map_err(state_error)?;
+    let states = if let Some(definition) = preview {
+        meguri_sched::states::filtered::preview_states(definition, input.learn_ahead)
+    } else {
+        meguri_sched::states::engine::next_states(models, &input, chooser).map_err(state_error)?
+    };
     let state_token = rows
         .row_digest(Table::Cards, &RowKey::Id(id.0))?
         .ok_or_else(|| missing(Table::Cards, id.0))?;
@@ -630,14 +634,37 @@ pub(crate) fn predict_in(
     })
 }
 
-fn home(rows: &impl ReadRows, card: &Card) -> Result<(PresetView, meguri_model::deck::Deck), EngineError> {
+fn home(
+    rows: &impl ReadRows,
+    card: &Card,
+) -> Result<(PresetView, meguri_model::deck::Deck, Option<FilteredDeck>), EngineError> {
     let deck = rows
-        .deck(meguri_sched::model::card_sched::CardSched::new(card).home_deck())?
+        .deck(card.deck_id)?
         .ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
+    let filtered = match &deck.kind.kind {
+        DeckKind::Normal(_) => {
+            if card.original_deck_id.0 != 0 {
+                return Err(invalid("ordinary card has a home deck override"));
+            }
+            None
+        }
+        DeckKind::Filtered(definition) => {
+            if card.original_deck_id.0 <= 0 || card.original_deck_id == card.deck_id {
+                return Err(invalid("invalid filtered card home deck"));
+            }
+            Some(definition.clone())
+        }
+    };
+    let deck = if filtered.is_some() {
+        rows.deck(card.original_deck_id)?
+            .ok_or_else(|| missing(Table::Decks, card.original_deck_id.0))?
+    } else {
+        deck
+    };
     let DeckKind::Normal(normal) = &deck.kind.kind else {
         return Err(state_error("InFilteredDeck"));
     };
-    Ok((PresetView::for_config(rows, DeckConfigId(normal.config_id))?, deck))
+    Ok((PresetView::for_config(rows, DeckConfigId(normal.config_id))?, deck, filtered))
 }
 
 pub fn answer(collection: &Collection, request: AnswerRequest) -> Result<OpResult<AnswerResult>, EngineError> {
@@ -746,8 +773,7 @@ pub(crate) fn apply_in(
         .scope()
         .card(request.card)?
         .ok_or_else(|| missing(Table::Cards, request.card.0))?;
-    let (preset, deck) = home(ctx.scope(), &card)?;
-    let filtered = meguri_sched::states::filtered::options(ctx.scope(), &card)?;
+    let (preset, deck, filtered) = home(ctx.scope(), &card)?;
     let preview = filtered.as_ref().is_some_and(|deck| !deck.reschedule);
     if preview != matches!(request.current, State::Preview { .. }) {
         return Err(invalid("filtered study mode changed"));
