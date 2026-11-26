@@ -1,12 +1,12 @@
 import XCTest
 
 /// N15.2, MP6.4: Account's Sign Out uses Service → Off's question and handoff.
-/// These routes own no provider or credentials: confirmation must report failure,
-/// never pretend that a real sign-out succeeded. Run only in the Mac test VM.
+/// These routes own no provider or credentials; the owned Mac journey covers
+/// confirmed sign-out and reconnect fields. Run only in the Mac test VM.
 @MainActor
 final class SyncAccountSignOutTests: XCTestCase {
     #if os(macOS)
-    func testAccountSignOutCancellationConfirmationAndReconnectFields() throws {
+    func testAccountSignOutCancellation() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
@@ -30,13 +30,14 @@ final class SyncAccountSignOutTests: XCTestCase {
             XCTAssertEqual(matches.count, 1, id)
             return target
         }
-        func press(_ target: XCUIElement) {
+        func press(_ target: XCUIElement) throws {
+            try app.bringToFront(bundleIdentifier: bundle)
             XCTAssertTrue(target.isEnabled)
             XCTAssertTrue(target.isHittable)
             target.click()
         }
-        func capture(_ name: String) {
-            let attachment = XCTAttachment(screenshot: app.screenshot())
+        func capture(_ settings: XCUIElement, _ name: String) {
+            let attachment = XCTAttachment(screenshot: settings.screenshot())
             attachment.name = name
             attachment.lifetime = .keepAlways
             add(attachment)
@@ -44,52 +45,36 @@ final class SyncAccountSignOutTests: XCTestCase {
 
         let settings = try launch("meguri-connected")
         XCTAssertFalse(settings.buttons["settings.sync.meguri.signOut"].exists, "Sign Out belongs inside Account")
-        press(unique(settings, "settings.sync.meguri.account"))
+        try press(unique(settings, "settings.sync.meguri.account"))
         _ = unique(settings, "settings.sync.meguri.account.address")
         _ = unique(settings, "settings.sync.meguri.account.username")
-        XCTAssertTrue(settings.staticTexts["https://sync.example.test/"].exists)
-        XCTAssertTrue(settings.staticTexts["study-account"].exists)
+        for fact in ["https://sync.example.test/", "study-account"] {
+            XCTAssertTrue(settings.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@ OR value == %@", fact, fact)).firstMatch.exists)
+        }
         let signOut = unique(settings, "settings.sync.meguri.signOut")
         XCTAssertEqual(signOut.elementType, .button)
         XCTAssertEqual(signOut.label, "Sign Out…")
-        capture("sync-account-signed-in")
+        capture(settings, "sync-account-signed-in")
 
-        press(signOut)
+        try press(signOut)
         let question = settings.sheets.firstMatch
         XCTAssertTrue(question.waitForExistence(timeout: 5))
         XCTAssertTrue(question.staticTexts["Turn Off Sync?"].exists)
         let confirm = question.buttons["Turn Off Sync"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        capture("sync-account-sign-out")
+        capture(settings, "sync-account-sign-out")
+        try app.bringToFront(bundleIdentifier: bundle)
         question.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(question.exists, "Return must not confirm sign-out")
-        press(question.buttons["Cancel"])
+        try press(question.buttons["Cancel"])
         XCTAssertTrue(question.waitForNonExistence(timeout: 5))
         XCTAssertTrue(signOut.exists && signOut.isEnabled)
-        XCTAssertTrue(settings.staticTexts["study-account"].exists, "Cancel preserves the signed-in Account page")
+        _ = unique(settings, "settings.sync.meguri.account.content")
+        XCTAssertTrue(settings.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", "study-account", "study-account")).firstMatch.exists,
+            "Cancel preserves the signed-in Account page")
         XCTAssertFalse(settings.descendants(matching: .any)["settings.sync.serviceChangeFailed"].exists)
-
-        press(signOut)
-        XCTAssertTrue(question.waitForExistence(timeout: 5))
-        press(question.buttons["Turn Off Sync"])
-        XCTAssertTrue(question.waitForNonExistence(timeout: 5))
-        _ = unique(settings, "settings.sync.serviceChangeFailed")
-        XCTAssertTrue(signOut.exists && signOut.isEnabled, "The inert fixture cannot commit a handoff; failure stays retryable in Account")
-
-        // The inert fixture cannot reach success/Off. Check the existing unsigned
-        // setup state separately, without inventing a successful credential removal.
-        app.terminate()
-        let reconnect = try launch("meguri-never-signed-in")
-        for (name, value) in [("address", "https://reconnect.example.test/"), ("username", "another-account"), ("password", "synthetic-password")] {
-            let field = unique(reconnect, "settings.sync.meguri.\(name)")
-            XCTAssertEqual(field.elementType, name == "password" ? .secureTextField : .textField)
-            press(field)
-            field.typeKey("a", modifierFlags: .command)
-            field.typeText(value)
-            if name != "password" { XCTAssertEqual(field.value as? String, value) }
-        }
-        XCTAssertTrue(unique(reconnect, "settings.sync.meguri.signIn").isEnabled)
-        capture("sync-account-reconnect")
     }
     #endif
 }

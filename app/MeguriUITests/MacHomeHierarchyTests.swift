@@ -316,8 +316,8 @@ final class MacHomeHierarchyTests: XCTestCase {
                 return availableSync() && automatic.exists && automatic.isEnabled && automatic.isHittable
                     && (automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1))
             }, "Require a fresh successful collection/media round and available controls before turning sync off")
-            // V27.5, T19.2: Off is the one way out. It asks once, names the removed
-            // sign-in, and its destructive button is not the default.
+            // V27.5, T19.2: the Off picker asks once and its destructive button
+            // is not the default. Cancel keeps the connected Sync pane usable.
             try choose("Off")
             // T21.1: a system alert; its buttons are found by label.
             let offSheets = settings.sheets
@@ -331,16 +331,55 @@ final class MacHomeHierarchyTests: XCTestCase {
             offSheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
             XCTAssertTrue(offSheet.exists, "Return must not turn sync off")
             XCTAssertEqual(picker.value as? String, "Meguri Sync")
+            try click(offSheet.buttons["Cancel"], app: app, bundle: bundle)
+            XCTAssertTrue(offSheet.waitForNonExistence(timeout: 10))
+            waitForJourney({ availableSync() }, "Cancelling Off must preserve the usable connected Sync pane")
+            XCTAssertEqual(picker.value as? String, "Meguri Sync")
+
+            // N15.2: Account's Sign Out commits the actual owned handoff. While
+            // Account is pushed, query its controls rather than the parent picker.
+            let account = unique(settings, "settings.sync.meguri.account")
+            actionable(account)
+            try click(account, app: app, bundle: bundle)
+            let accountPage = unique(settings, "settings.sync.meguri.account.content")
+            _ = unique(accountPage, "settings.sync.meguri.account.address")
+            _ = unique(accountPage, "settings.sync.meguri.account.username")
+            let signOut = unique(accountPage, "settings.sync.meguri.signOut")
+            XCTAssertEqual(signOut.elementType, .button)
+            XCTAssertEqual(signOut.label, "Sign Out…")
+            actionable(signOut)
+            try click(signOut, app: app, bundle: bundle)
+            XCTAssertTrue(offSheet.waitForExistence(timeout: 10))
+            XCTAssertEqual(offSheets.count, 1)
+            XCTAssertTrue(offSheet.staticTexts["Turn Off Sync?"].exists)
+            XCTAssertTrue(offConfirm.waitForExistence(timeout: 10))
             actionable(offConfirm)
             try click(offConfirm, app: app, bundle: bundle)
-            waitForJourney({
-                settings.sheets.count == 0 && picker.exists && picker.isEnabled && picker.value as? String == "Off"
+            XCTAssertTrue(accountPage.waitForNonExistence(timeout: 60), "Successful sign-out must return from Account")
+            func offIsReady() -> Bool {
+                settings.sheets.count == 0 && picker.exists && picker.isEnabled && picker.isHittable && picker.value as? String == "Off"
                     && settings.staticTexts["Choose a service to sync this collection."].exists
                     && ["settings.sync.meguri.signIn", "settings.sync.meguri.account", "settings.sync.syncNow",
                         "settings.sync.status", "settings.sync.automatic", "settings.sync.troubleshooting"].allSatisfy {
                         settings.descendants(matching: .any).matching(identifier: $0).count == 0
                     }
-            }, "Owned provider journey cleanup-pending")
+            }
+            waitForJourney({ offIsReady() }, "Account sign-out must return to the usable Off service picker")
+            try choose("Meguri Sync")
+            XCTAssertEqual(settings.sheets.count, 0)
+            meguriForm()
+            // Exercise native editing without a second sign-in or screenshots
+            // containing the disposable journey's credentials.
+            for (name, value) in [("address", "https://reconnect.example.test/"),
+                                  ("username", "another-account"), ("password", "synthetic-password")] {
+                try enter(value, id: "settings.sync.meguri.\(name)")
+                if name != "password" {
+                    XCTAssertEqual(unique(settings, "settings.sync.meguri.\(name)").value as? String, value)
+                }
+            }
+            actionable(unique(settings, "settings.sync.meguri.signIn"))
+            try choose("Off")
+            waitForJourney({ offIsReady() }, "Owned provider journey cleanup-pending")
             journeyCleanup.pending = false
         }
         try app.bringToFront(bundleIdentifier: bundle)
