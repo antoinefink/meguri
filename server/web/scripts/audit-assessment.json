@@ -218,8 +218,8 @@
         "sha256": "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad"
       },
       "tests/browser/browse.spec.ts": {
-        "bytes": 50345,
-        "sha256": "c85ab581e557f5c6deffa65d4ddc69c4eb9eb0bf2f18393f22db57ee3fae16ff"
+        "bytes": 50509,
+        "sha256": "699320082bad2ef596d5c2f0a28cd52882928052309200261cba7004458b0ee9"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,

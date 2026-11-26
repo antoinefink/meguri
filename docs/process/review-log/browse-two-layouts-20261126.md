@@ -28,3 +28,8 @@ Review feedback on the pull request led to four changes: the narrow list keeps t
 - `server/web/src/style.css` — `2f2cd42bbd0f8f21305d1c87832bb93341246b4b6a101e4cf38ae83683a7dc1b`
 - `server/web/tests/browser/browse.spec.ts` — `c85ab581e557f5c6deffa65d4ddc69c4eb9eb0bf2f18393f22db57ee3fae16ff`
 - `server/web/scripts/audit-assessment.json` — `4f5a8e59bdb0ba8c2f5d3f12be8059071126e84e4bb8b2ae670e24cbb8f1bcc2`
+
+The two test-strength gaps left open on the pull request were closed: the narrow Save-bar test scrolls to the top and requires the whole bar in view, and the arrow-key test checks that no card detail was read while typing. `sync-web-check` and `sync-web-verify` (116 tests) passed. The independent reviewer read both complete files and approved these exact bytes.
+
+- `server/web/tests/browser/browse.spec.ts` — `699320082bad2ef596d5c2f0a28cd52882928052309200261cba7004458b0ee9`
+- `server/web/scripts/audit-assessment.json` — `0363d86db300f75ad4f04e5bd80f86446ad140f972498fdbf6db41f69272b4f6`

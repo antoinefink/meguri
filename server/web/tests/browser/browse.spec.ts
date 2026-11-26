@@ -519,7 +519,7 @@ test("wide Browse lists at full width, then keeps the results as a rail beside t
 });
 
 test("cards step with previous, next and arrow keys and show their card info", async ({ page, baseURL }) => {
-  await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
   const spanish = page.getByLabel("Spanish", { exact: true });
   await expect(spanish).toHaveValue("el viaje"); await expect(page.getByText("201", { exact: true })).toBeVisible(); await expect(page.getByText("101", { exact: true })).toBeVisible();
   await expect(page.getByLabel("English", { exact: true })).toHaveClass(/browse-code/); await expect(page.getByLabel("Example", { exact: true })).not.toHaveClass(/browse-code/);
@@ -527,8 +527,9 @@ test("cards step with previous, next and arrow keys and show their card info", a
   await expect(previous).toBeDisabled(); await next.click(); await expect(spanish).toHaveValue("aprovechar"); await expect(next).toBeFocused();
   await page.getByRole("heading", { name: "aprovechar" }).focus(); await page.keyboard.press("ArrowDown");
   await expect(spanish).toHaveValue("la oportunidad"); await expect(page.getByRole("heading", { name: "la oportunidad" })).toBeFocused(); await expect(next).toBeDisabled();
+  const reads = state.detailReads;
   await page.getByLabel("Example", { exact: true }).focus(); await page.keyboard.press("ArrowUp"); await expect(spanish).toHaveValue("la oportunidad");
-  await page.getByLabel("Example", { exact: true }).fill("draft");
+  await page.getByLabel("Example", { exact: true }).fill("draft"); expect(state.detailReads).toBe(reads);
   page.once("dialog", dialog => void dialog.dismiss()); await previous.click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("draft");
   page.once("dialog", dialog => void dialog.accept()); await previous.click(); await expect(spanish).toHaveValue("aprovechar");
   await page.getByRole("heading", { name: "aprovechar" }).focus(); await page.keyboard.press("ArrowUp"); await expect(spanish).toHaveValue("el viaje");
@@ -570,7 +571,8 @@ for (const [width, height] of [[390, 844], [900, 800]] as const) test(`below the
   await search(page, "aprovechar"); await expect(rows(page).first().locator("mark")).toBeVisible(); await page.screenshot({ path: `/out/browse-narrow-${width}-list.png` });
   await rows(page).first().click(); await expect(page.getByLabel("Search note fields")).toBeHidden(); await expect(rows(page).first()).toBeHidden();
   await page.getByLabel("Example", { exact: true }).fill("edited");
-  const save = page.getByRole("button", { name: "Save changes" }); await expect(save).toBeInViewport(); await page.screenshot({ path: `/out/browse-narrow-${width}-card.png` }); await expect(page.getByRole("button", { name: "Load server copy" })).toBeInViewport();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const save = page.getByRole("button", { name: "Save changes" }); await expect(save).toBeInViewport({ ratio: 1 }); await page.screenshot({ path: `/out/browse-narrow-${width}-card.png` }); await expect(page.getByRole("button", { name: "Load server copy" })).toBeInViewport({ ratio: 1 });
   const sidebar = await page.locator('[data-slot="sidebar"]').boundingBox(), bar = await page.locator(".browse-bottom-bar").boundingBox();
   if (width > 768) expect(bar!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
