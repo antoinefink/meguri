@@ -1,8 +1,13 @@
 //! Latest-format package publication: collection-only P11 and opt-in file-export P15.
 pub mod apkg;
 pub mod backup;
+mod deck_export;
+mod deck_export_media;
 mod export_capture;
 mod file_export;
+pub use deck_export::{
+    DeckExportOptions, DeckExportPlan, preflight_deck_export_from_live, write_deck_export_from_live,
+};
 pub use export_capture::ExportSourceValidation;
 pub use file_export::{
     MediaCollectionExportPlan, MediaCollectionExportWritten, preflight_media_collection_export_from_live,

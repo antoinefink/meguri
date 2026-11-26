@@ -1837,6 +1837,7 @@ dependencies = [
  "meguri-testkit",
  "meguri-text",
  "proptest",
+ "regex",
  "serde",
  "serde_json",
  "sha1",

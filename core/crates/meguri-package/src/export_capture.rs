@@ -78,6 +78,13 @@ pub struct ExportSourceValidation {
     excluded: InventoryHash,
     protected: Vec<PathBuf>,
     retained: RetainedTree,
+    // Deck exports resolve only referenced names. The journal supplies case
+    // fallback spellings, never payload paths or hashes.
+    referenced: Option<ReferencedMedia>,
+}
+struct ReferencedMedia {
+    names: BTreeSet<String>,
+    variants: BTreeMap<String, Vec<String>>,
 }
 #[derive(Default, PartialEq, Eq)]
 struct InventoryHash {
@@ -498,9 +505,54 @@ impl ExportSourceValidation {
             excluded: InventoryHash::default(),
             protected,
             retained: RetainedTree::new(),
+            referenced: None,
         };
         proof.retained =
             proof.read_retained(check, &mut ProtectedBudget::new(PROTECTED_LIMITS), &mut BTreeSet::new())?;
+        let (files, excluded) = proof.scan(check)?;
+        proof.files = files;
+        proof.excluded = excluded;
+        proof.validate(check)?;
+        Ok(proof)
+    }
+    pub(crate) fn referenced(
+        directory: &Path,
+        protected: Vec<PathBuf>,
+        names: BTreeSet<String>,
+        check: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self> {
+        cancelled(check)?;
+        let parent = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .open(directory)
+            .map_err(source_io)?;
+        let root = if names.is_empty() {
+            None
+        } else {
+            match open_at(&parent, OsStr::new("collection.media"), true) {
+                Ok(root) => Some(root),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(source_io(e)),
+            }
+        };
+        let variants = if names.is_empty() || root.is_none() {
+            BTreeMap::new()
+        } else {
+            let result = meguri_storage::media::export::tracked_export_variants(directory, &names, check);
+            cancelled(check)?;
+            result?
+        };
+        let mut proof = Self {
+            directory: directory.to_owned(),
+            parent,
+            root,
+            files: Vec::new(),
+            excluded: InventoryHash::default(),
+            protected,
+            retained: RetainedTree::new(),
+            referenced: Some(ReferencedMedia { names, variants }),
+        };
         let (files, excluded) = proof.scan(check)?;
         proof.files = files;
         proof.excluded = excluded;
@@ -519,6 +571,9 @@ impl ExportSourceValidation {
             .map_err(source_io)?;
         if identity(&bound_parent.metadata()?) != identity(&self.parent.metadata()?) {
             return Err(fresh());
+        }
+        if self.referenced.as_ref().is_some_and(|r| r.names.is_empty()) {
+            return Ok(());
         }
         let bound = open_at(&self.parent, OsStr::new("collection.media"), true);
         match (&self.root, bound) {
@@ -579,6 +634,9 @@ impl ExportSourceValidation {
         budget: &mut ProtectedBudget,
         identities: &mut BTreeSet<(u64, u64)>,
     ) -> Result<RetainedTree> {
+        if self.referenced.is_some() {
+            return Ok(RetainedTree::new());
+        }
         cancelled(check)?;
         let name = OsStr::new("media.staging");
         match stat_at(&self.parent, name) {
@@ -698,6 +756,85 @@ impl ExportSourceValidation {
     ) -> Result<InventoryHash> {
         self.bound_root()?;
         let protected = self.protected_identities(check)?;
+        if let Some(references) = &self.referenced {
+            if let Some(root) = &self.root {
+                for name in &references.names {
+                    cancelled(check)?;
+                    let exact = stat_at(root, OsStr::new(name));
+                    let resolved = match exact {
+                        Ok(meta) => Some((OsString::from(name), meta)),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            let mut found = Vec::new();
+                            if let Some(variants) = references.variants.get(name) {
+                                for variant in variants {
+                                    cancelled(check)?;
+                                    if variant.is_empty()
+                                        || variant == "."
+                                        || variant == ".."
+                                        || variant.contains(['/', '\\', '\0'])
+                                    {
+                                        return Err(unsafe_entry("invalid tracked media component"));
+                                    }
+                                    match stat_at(root, OsStr::new(variant)) {
+                                        Ok(meta) if meta.is_file() => found.push((OsString::from(variant), meta)),
+                                        Ok(_) => {
+                                            return Err(entry_error(
+                                                OsStr::new(variant),
+                                                "MediaUnreadable: not a regular file",
+                                            ));
+                                        }
+                                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                                        Err(e) => return Err(source_io(e)),
+                                    }
+                                }
+                            }
+                            let key = name.to_lowercase();
+                            let preferred = found.iter().position(|(n, _)| n == OsStr::new(&key)).unwrap_or(0);
+                            if found.is_empty() {
+                                None
+                            } else {
+                                Some(found.swap_remove(preferred))
+                            }
+                        }
+                        Err(e) => return Err(source_io(e)),
+                    };
+                    let Some((original, meta)) = resolved else {
+                        continue;
+                    };
+                    if !meta.is_file() {
+                        return Err(entry_error(OsStr::new(name), "MediaUnreadable: not a regular file"));
+                    }
+                    if meguri_text::media_name::safe_media_name(name) != *name {
+                        return Err(entry_error(OsStr::new(name), "MediaNeedsCheck: unsafe name"));
+                    }
+                    if meta.stamp.length > u64::from(u32::MAX) {
+                        return Err(Error::ExportFormatLimit);
+                    }
+                    if protected.identities.contains(&meta.identity()) {
+                        return Err(entry_error(
+                            &original,
+                            "file aliases protected collection or export state",
+                        ));
+                    }
+                    let file = open_media(root, &original)?;
+                    if !file.metadata()?.is_file()
+                        || Stamp::of(&file.metadata()?) != meta.stamp
+                        || stat_at(root, &original)?.stamp != meta.stamp
+                    {
+                        return Err(fresh());
+                    }
+                    accept(MediaFile {
+                        original,
+                        normalized: Some(name.clone()),
+                        stamp: meta.stamp,
+                        sha1: [0; 20],
+                    })?;
+                }
+            }
+            protected.validate(self, check)?;
+            self.bound_root()?;
+            return Ok(InventoryHash::default());
+        }
         let mut excluded = InventoryHash::default();
         if let Some(root) = &self.root {
             let before = Stamp::of(&root.metadata()?);
@@ -897,6 +1034,33 @@ pub(crate) fn preflight(
     let output = writer::existing_directory(destination.parent().unwrap_or(Path::new(".")))?;
     let same = fs::metadata(context.collection_directory)?.dev() == fs::metadata(&output)?.dev();
     capacity(context, &output, capture, archive, same)
+}
+/// A11 step 7: the fresh database already exists, so only media capture is
+/// charged on its volume. Keep the complete archive bound on the output's.
+pub(crate) fn preflight_deck(
+    database: u64,
+    files: &[MediaFile],
+    destination: &Path,
+    context: &CollectionPackageWriteContext<'_>,
+) -> Result<()> {
+    let map = map_length(files)?;
+    let media = files.iter().try_fold(0, |n, f| add(n, u64::from(f.length())))?;
+    limits(database, files.len() as u64, map, media)?;
+    let mut archive = add(frame_bound(database)?, frame_bound(FIXED_RESERVE)?)?;
+    for f in files {
+        archive = add(archive, frame_bound(u64::from(f.length()))?)?;
+    }
+    archive = add(archive, frame_bound(map)?)?;
+    archive = add(
+        archive,
+        (files.len() as u64 + 4)
+            .checked_mul(512)
+            .ok_or(Error::ExportFormatLimit)?,
+    )?;
+    archive = add(archive, 64 * 1024)?;
+    let output = writer::existing_directory(destination.parent().unwrap_or(Path::new(".")))?;
+    let same = fs::metadata(context.collection_directory)?.dev() == fs::metadata(&output)?.dev();
+    capacity(context, &output, media, archive, same)
 }
 fn capacity(
     context: &CollectionPackageWriteContext<'_>,
