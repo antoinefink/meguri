@@ -137,6 +137,111 @@ final class AccessibilityHelperTests: XCTestCase {
         XCTAssertEqual(json["touchTargets"] as? [String], ["error: sample.deckOverview.retry is 64×18 pt; the minimum here is 44×44 pt (R1980)"])
     }
 
+    func testAnAuditWithoutAnElementReportsNotSuppliedWithoutLookup() throws {
+        var lookups = 0
+        let finding = AccessibilityAudit.capture(
+            Optional<Int>.none, variant: "default", auditType: "contrast", detail: "Contrast failed",
+            suppressions: [AuditSuppression(identifier: "", auditType: "contrast", reason: "synthetic")]
+        ) { _ in
+            lookups += 1
+            throw NSError(domain: "must.not.be.called", code: 1)
+        }
+        XCTAssertEqual(lookups, 0)
+        XCTAssertFalse(finding.suppressed)
+        XCTAssertEqual(finding.description, "default: contrast on an element without identifier (\"\", no element): Contrast failed")
+        var expected = unresolvedReportFields
+        expected["elementResolution"] = "notSupplied"
+        #if os(macOS)
+        XCTAssertFalse(finding.counts)
+        let status = "pass"
+        #else
+        XCTAssertTrue(finding.counts)
+        let status = "fail"
+        #endif
+        XCTAssertEqual(try resolutionReport(finding, status: status) as NSDictionary, expected as NSDictionary)
+    }
+
+    func testAResolvedAuditElementKeepsItsSnapshotAndReportFields() throws {
+        var lookups = 0
+        let finding = AccessibilityAudit.capture(
+            17, variant: "default", auditType: "contrast", detail: "Contrast failed",
+            suppressions: [AuditSuppression(identifier: "sample.retry", auditType: "contrast", reason: "synthetic")]
+        ) { element in
+            lookups += 1
+            XCTAssertEqual(element, 17)
+            return .init(identifier: "sample.retry", label: "Try Again", elementType: .button, frame: CGRect(x: 12, y: 34, width: 56, height: 78))
+        }
+        XCTAssertEqual(lookups, 1)
+        XCTAssertTrue(finding.suppressed)
+        XCTAssertFalse(finding.counts)
+        XCTAssertNil(finding.excluded)
+        XCTAssertEqual(finding.description, "default: contrast on sample.retry: Contrast failed")
+        let expected: [String: Any] = [
+            "state": "typical", "variant": "default", "identifier": "sample.retry", "label": "Try Again",
+            "element": "type \(XCUIElement.ElementType.button.rawValue) at 12,34 56×78", "auditType": "contrast",
+            "detail": "Contrast failed", "suppressed": true, "elementResolution": "resolved",
+        ]
+        XCTAssertEqual(try resolutionReport(finding, status: "pass") as NSDictionary, expected as NSDictionary)
+    }
+
+    func testAFailedAuditSnapshotReportsOnlyItsNSErrorDomainAndSignedCode() throws {
+        var lookups = 0
+        let finding = AccessibilityAudit.capture(
+            17, variant: "default", auditType: "contrast", detail: "Contrast failed",
+            suppressions: [AuditSuppression(identifier: "", auditType: "contrast", reason: "synthetic")]
+        ) { _ in
+            lookups += 1
+            throw NSError(domain: "meguri.synthetic.snapshot", code: -1977, userInfo: [
+                NSLocalizedDescriptionKey: "private localized description",
+                NSDebugDescriptionErrorKey: "private debug description",
+                "arbitraryPayload": ["secret": "private userInfo"],
+            ])
+        }
+        XCTAssertEqual(lookups, 1)
+        XCTAssertFalse(finding.suppressed)
+        XCTAssertEqual(finding.description, "default: contrast on an element without identifier (\"\", no element): Contrast failed")
+        var expected = unresolvedReportFields
+        expected["elementResolution"] = "snapshotFailed"
+        expected["snapshotErrorDomain"] = "meguri.synthetic.snapshot"
+        expected["snapshotErrorCode"] = -1977
+        #if os(macOS)
+        XCTAssertFalse(finding.counts)
+        let status = "pass"
+        #else
+        XCTAssertTrue(finding.counts)
+        let status = "fail"
+        #endif
+        let report = try resolutionReport(finding, status: status)
+        XCTAssertEqual(report["snapshotErrorCode"] as? Int, -1977)
+        XCTAssertEqual(report as NSDictionary, expected as NSDictionary)
+    }
+
+    private var unresolvedReportFields: [String: Any] {
+        var fields: [String: Any] = [
+            "state": "typical", "variant": "default", "identifier": "", "label": "", "element": "no element",
+            "auditType": "contrast", "detail": "Contrast failed", "suppressed": false,
+        ]
+        #if os(macOS)
+        fields["excluded"] = "a window element with neither identifier nor label, not the app's (U253's sweep)"
+        #endif
+        return fields
+    }
+
+    private func resolutionReport(_ finding: AuditFinding, status: String) throws -> [String: Any] {
+        let data = AccessibilityAudit.screenReportData("sample.deckOverview", states: [
+            .init(state: "typical", findings: [finding], touchTargets: []),
+        ])
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["status"] as? String, status)
+        let states = try XCTUnwrap(json["states"] as? [String: [String: Any]])
+        XCTAssertEqual(states["typical"]?["status"] as? String, status)
+        let findings = try XCTUnwrap(json["findings"] as? [[String: Any]])
+        XCTAssertEqual(findings.count, 1)
+        let nested = try XCTUnwrap(states["typical"]?["findings"] as? [[String: Any]])
+        XCTAssertEqual(nested as NSArray, findings as NSArray)
+        return try XCTUnwrap(findings.first)
+    }
+
     /// On the Mac, findings on the window's own elements (no identifier and
     /// no label, or `_XCUI:` controls) are listed, not failed; an element
     /// with an identifier or a label is the app's and fails. iOS fails every

@@ -63,11 +63,10 @@ import WebKit
         #expect(!draft.unchangedSinceLastAdd)
     }
 
-    @Test func unsupportedOcclusionAndObsoleteHostDoNotLoadOrReinterpretFields() async throws {
+    @Test func undersizedOcclusionAndObsoleteHostDoNotReinterpretFields() async throws {
         let deck = DeckNameEntry(id: 9, fullName: "Daily", filtered: false)
-        #expect(throws: (any Error).self) {
-            try NoteEditorDraft(generation: 1, notetype: Self.type(stockKind: 6), deck: deck)
-        }
+        let undersized = try NoteEditorDraft(generation: 1, notetype: Self.type(stockKind: 6), deck: deck)
+        #expect(undersized.occlusionRoles == nil && undersized.hostFields == [0])
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(), deck: deck, values: ["kept", "", ""])
         let host = try FieldEditorHost(draft: draft, isCurrent: { false })
         defer { host.shutDown() }
@@ -198,7 +197,8 @@ import WebKit
 
     static func replaceSource(_ host: FieldEditorHost, ord: Int, value: String) async throws -> Bool {
         let result = try await host.webView.callAsyncJavaScript("""
-            const source = document.querySelectorAll('textarea')[ord];
+            const source = [...document.querySelectorAll('textarea')].find(value => value.id === `editor.field.${ord}`);
+            if (!source) return false;
             const before = new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:value});
             if (!source.dispatchEvent(before)) return false;
             source.value = value;

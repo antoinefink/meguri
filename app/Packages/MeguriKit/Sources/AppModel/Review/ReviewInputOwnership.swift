@@ -12,6 +12,31 @@ public enum ReviewInputOwnership {
         cardFocused && !editing && !paused && !repeated
     }
     #if os(macOS)
+    /// Nil waits only for this editor to return the keys. A different window
+    /// or an inactive/busy presenter relinquishes the one-use request.
+    static func editedCardWindowReady(in view: CardPlatformView, presenter: NativeCardBehaviorPresenter) -> Bool? {
+        guard let window = view.window, NSApp?.isActive == true,
+              presenter.isAvailable, window.attachedSheet == nil, NSApp.modalWindow == nil,
+              RunLoop.current.currentMode != .eventTracking else { return false }
+        if NSApp.keyWindow?.identifier?.rawValue == "review.editCurrent.window" { return nil }
+        return window.isKeyWindow
+    }
+
+    /// Only repair the exact parked native page retained across this edit's
+    /// swap. Other responders (including WebKit input descendants) keep focus.
+    @discardableResult
+    static func restoreEditedCardResponder(in pair: CardPagePair) -> Bool {
+        guard let window = pair.current.webView.window,
+              pair.idle.webView.window === window,
+              window.firstResponder === pair.idle.webView else { return false }
+        // CardNativeWebView accepts native focus only with this ownership.
+        let owned = pair.ownsKeyboardFocus
+        pair.ownsKeyboardFocus = true
+        if window.makeFirstResponder(pair.current.webView) { return true }
+        pair.ownsKeyboardFocus = owned
+        return false
+    }
+
     /// Replay belongs to the active review window, including its native
     /// controls. Text input, sheets and menu tracking retain their keys.
     public static func replayFocused(in container: CardPlatformView) -> Bool {
@@ -36,12 +61,19 @@ public enum ReviewInputOwnership {
     /// Menu commands use exactly the card input admission boundary, including
     /// native focus, behavior dialogs, DOM editing and repeated key events.
     public static func admitsNativeCommand(_ model: ReviewCoordinator) -> Bool {
+        let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        return nativeCommandFocusAvailable(model) && !repeated
+    }
+
+    /// Persistent availability for scene registration. The current event's
+    /// repeat flag belongs to dispatch, and must never be stored in a scene's
+    /// focused value after that event has ended.
+    public static func nativeCommandFocusAvailable(_ model: ReviewCoordinator) -> Bool {
         guard let pair = model.pair, let pages = model.surface as? ReviewPages,
               pages.presenter.isAvailable else { return false }
-        let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
         // An open Edit Note form owns the keys like a sheet (N11.1).
         return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
-            paused: model.paused || model.editingNote, repeated: repeated)
+            paused: model.paused || model.editingNote, repeated: false)
     }
     #else
     /// The iPad menu bar's commands (N20.4) use the card host's admission:

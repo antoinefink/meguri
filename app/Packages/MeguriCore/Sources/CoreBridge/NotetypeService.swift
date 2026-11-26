@@ -98,6 +98,7 @@ public struct NotetypeMutation: Sendable, Hashable {
 
 public struct NotetypeField: Sendable, Hashable {
     public let ord: UInt32
+    public let tag: UInt32?
     public let id: Int64?
     public let name: String
     public let sticky: Bool
@@ -110,7 +111,8 @@ public struct NotetypeField: Sendable, Hashable {
     public let excludeFromSearch: Bool
     /// Protected from deletion (a Cloze or Image Occlusion field).
     public let preventDeletion: Bool
-    public init(ord: UInt32, id: Int64?, name: String, sticky: Bool, rtl: Bool, fontName: String, fontSize: UInt32, description: String, plainText: Bool, collapsed: Bool, excludeFromSearch: Bool, preventDeletion: Bool = false) {
+    public init(ord: UInt32, id: Int64?, name: String, sticky: Bool, rtl: Bool, fontName: String, fontSize: UInt32, description: String, plainText: Bool, collapsed: Bool, excludeFromSearch: Bool, preventDeletion: Bool = false, tag: UInt32? = nil) {
+        self.tag = tag
         self.preventDeletion = preventDeletion
         self.ord = ord
         self.id = id
@@ -125,6 +127,7 @@ public struct NotetypeField: Sendable, Hashable {
         self.excludeFromSearch = excludeFromSearch
     }
     init(_ value: MeguriCoreBindings.NotetypeField) {
+        tag = value.tag
         ord = value.ord
         id = value.id
         name = value.name
@@ -322,6 +325,11 @@ public protocol NotetypeService: Sendable {
 
 public actor CoreNotetypeService: NotetypeService {
     public init() {}
+    public func ensureImageOcclusionNotetype(expectedGeneration: UInt64) async throws(BridgeError) -> NotetypeMutation {
+        try await InteractiveLane.shared.call(.editorEnsureImageOcclusionNotetype) {
+            NotetypeMutation(try MeguriCoreBindings.editorEnsureImageOcclusionNotetype(expectedGeneration: expectedGeneration))
+        }
+    }
     public func notetypeNames() async throws(BridgeError) -> [NotetypeName] {
         try await MaintenanceLane.shared.call(.notetypeNames) { try MeguriCoreBindings.notetypeNames().map(NotetypeName.init) }
     }

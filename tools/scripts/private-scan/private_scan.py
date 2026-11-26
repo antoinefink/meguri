@@ -844,6 +844,16 @@ PUBLIC_ARTIFACTS = {
         "db612f779e0f9ff95d15e17fe64ecd417cb43f407094eff797d8fb8bf73ea94a",
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
         "1008ab6ea30b0e807559cb31dc915677e7db0438e66364e34aed9040cd1a2e18",
+    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift": "cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6",
+    "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "935861e65791369115fb3f0f901a97d0eed69cb673d50b210f24121af8c3179d",
+    "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
+    "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "45a381178815c391e3c2de3c62086fc3fdb1504d7d2f398216671137cb27cd45",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "8ffb2f13b36100a2f03c3a86f882a894df1a625a55bab5a164d2aec3937b2c87",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
+    "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "8b96c6fd445207b692c3b15a8803a479d071dc113d74b93a10d122e943a9bf9a",
+    "app/MeguriUITests/IOAddEditUITests.swift": "a32aa567e6c188acba98352f79984429346f9841f430b3f224b57ae020fed649",
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
@@ -946,7 +956,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '6223ffaf566d137f08ff2298c76f79ad55c20301c18e891ca6002a4d5397ee32',
+        'b29e66cc93e7eb31d8d0af1430ab57b9b2535331bfbe3314947a6f2df3ec51c7',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -963,6 +973,9 @@ PUBLIC_ARTIFACTS = {
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
+    'docs/process/review-log/mcp-automatic-media-20261123.md':
+        'ec6b73e380d5d8534b76613f23168cb36d3ef6b5a1b3287d773d5171ff000233',
     # Complete-content PUBLIC review: mcp-automatic-media, 2026-11-23.
     'server/src/mcp_transport/descriptors.rs':
         'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
@@ -978,8 +991,9 @@ PUBLIC_ARTIFACTS = {
         '9a46822ad1682fee5b4226c231efd779b9171e883e75610c1bb0276933c9536d',
     'server/src/collection/mcp/search_index.rs':
         '22ba70723d6e216a853814908300f82a1b8e7eecee8b90e82398b8dd92da27b8',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/mcp_service/authority_tests.rs':
-        'ce8b31f955e6aac28cf117bcb041cee67566273a6c6583bd560285c46b23a4bc',
+        '38f0a0354d502cceeca6c085126caa415f7144a0732e957d1f670166ddd319a9',
     # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
     'server/src/mcp_service/export.rs':
         '463edb515478d490e6d07a1010edada22a852bbd3c451000228d245ad35fca1d',
@@ -1003,8 +1017,9 @@ PUBLIC_ARTIFACTS = {
         '35fcbf999f5235196af4ae965cd2bf75b9482e5bfc83f16a566260f35d577522',
     'server/src/mcp_transport/mod.rs':
         '759e5513925799c9abc1f377d8b0bd6fba30c8ae20d9eb475f9ce24d30c56b42',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/mcp_transport/tests.rs':
-        '8d70b80220be300bab08739d2bc2bdfdf79e274f9dc6b1d833d3ada4ae5d546a',
+        'feebf05769e58fccc778a2d7c1c37cec59961269888dd69ebf7fcad88a33a4bb',
     'server/src/collection/mcp/tests.rs':
         '78ee3ea5c3baaeac36c969d1d284165afba8651aeba1301ad8119cdebd0e7ccd',
     'server/src/collection/mcp/tests/size_scaling.rs':
@@ -1104,9 +1119,9 @@ PUBLIC_ARTIFACTS = {
         '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
     # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
-        '2576b5eea8832dea7ddab4e88895497d7b5a119bc896f8cb2c0d2ccb6b24ff36',
+        '56e8aee5d42aec1c619bdf279c17454872a227f2a607bc0e8e554b7a379096f0',
     'docs/design/screen-inventory.yaml':
-        'b33bf7c5e36e81a305eb353917b2c660fd1e630f8817e24a44f381af44c6852d',
+        'db544245c2b2cbb67b545fbaabbe3e17b0dd52529299d14ac2735e5b81e574bb',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
@@ -1136,8 +1151,9 @@ PUBLIC_ARTIFACTS = {
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/README.md':
-        '39ee9aa5a30633b4e6fe148a8044450c34896b19a95e66dd72295f887d627d40',
+        'ee4041ab3f408901badd62dea2f688e18c265fef297775816158df4ee77d9d6e',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
@@ -1164,7 +1180,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: U163a checks reviewer, 2026-11-26.
     "docs/process/verification-status.md":
-        "5b4a0dd0f4e0ce0f2f4c3ce5f522556a700112a35784a212641a18aa33767f02",
+        "b00365c8c222e6937a7b7febef86b3c16488c0a52af74efaaec3e932812175a0",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1328,8 +1344,9 @@ PUBLIC_ARTIFACTS = {
         "b3b339bbf4952ca3a149323b191eeed5fa906b6ceba71c95c4d06579c5fb924b",
     "specs/servers/meguri-sync-web.md":
         "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     "specs/servers/meguri-collection-mcp.md":
-        "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
+        "eb25747d1e1cb4b4986a595d482bd07a9eddf08077c604d064c415dd2bbe8c0d",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
@@ -1383,8 +1400,9 @@ PUBLIC_ARTIFACTS = {
     # each entry admits only its exact path and complete reviewed bytes.
     'server/DEPENDENCIES.md':
         '33c9b563af531ec0b5cd6b02b0b43d3dec2c5db2aa025d7528a23a896ac79a23',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/error.rs':
-        '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
+        'b9262c4e82ce8c39f5590b12fb68f265b26283a138a10a6d14b458765fa626f4',
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
@@ -1536,7 +1554,7 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "f2dd76f61515c6986bab071d1dacfab42282e8bf41c832a56311252d64c2d1a7",
+        "31540954e8eceb04a368a5c27c1e6406d9f1043e234710997f103cb18782dcf2",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
         "f4cfb32a6987d170f6b435e40cb8ca839ac1887c14b753ca97bfb0f1ca959a30",

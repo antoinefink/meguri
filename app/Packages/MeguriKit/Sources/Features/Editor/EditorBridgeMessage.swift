@@ -26,6 +26,7 @@ struct EditorBridgeMessage {
         case "focusLeave": members = ["type", "loadId", "seq", "direction"]
         case "collapsedChanged": members = ["type", "loadId", "seq", "ord", "collapsed"]
         case "historyState": members = ["type", "loadId", "seq", "ord", "canUndo", "canRedo"]
+        case "occlusionFormLayout": members = ["type", "loadId", "seq", "imageTop", "imageHeight", "tagsTop", "height"]
         case "contentHeight": members = ["type", "loadId", "seq", "height"]
         case "flush": members = ["type", "loadId", "seq", "commits"]
         // Browse's inspector: where the caret is, and a media reference clicked.
@@ -70,6 +71,11 @@ struct EditorBridgeMessage {
         // A chip the note's own HTML imitates may have no name (null): ignored the same way.
         if type == "playMedia" || type == "openMedia" {
             guard body["name"] is String || body["name"] is NSNull else { throw EditorRuntimeError.invalidMessage }
+        }
+        if type == "occlusionFormLayout" {
+            for key in ["imageTop", "imageHeight", "tagsTop", "height"] {
+                guard let value = Self.number(body[key]), value >= 0 else { throw EditorRuntimeError.invalidMessage }
+            }
         }
         if type == "contentHeight" {
             guard let height = Self.number(body["height"]), height >= 0 else { throw EditorRuntimeError.invalidMessage }

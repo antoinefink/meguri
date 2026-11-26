@@ -4,6 +4,7 @@ import DesignSystem
 import Foundation
 import SwiftUI
 import Testing
+@testable import ImageOcclusion
 #if os(macOS)
 import AppKit
 #endif
@@ -17,6 +18,40 @@ import AppKit
 /// `shell.root`).
 @MainActor
 @Suite struct ShellSnapshotTests {
+    @Test func maskHistoryWorksWithoutWorkspaceContextAndRelinquishesFieldFocus() {
+        let session = MaskEditorSession(field: "", isEditing: false)
+        session.setReferenceSizeIfNeeded(imageSize: .init(width: 400, height: 400),
+            area: .init(width: 400, height: 400), displayScale: 1)
+        session.addBox(from: .init(x: 10, y: 10), to: .init(x: 80, y: 80))
+        session.addBox(from: .init(x: 100, y: 100), to: .init(x: 180, y: 180))
+        var focused = true
+        let mask = MaskEditorCommandContext(enabled: { command in
+            guard focused else { return false }
+            switch command {
+            case .undo: return session.canUndo
+            case .redo: return session.canRedo
+            default: return true
+            }
+        }, action: { command in
+            if command == .undo { session.undo() }
+            if command == .redo { session.redo() }
+        })
+        let history = NativeUndoCommands(context: nil, maskEditor: mask)
+        #expect(history.replacesUndo && history.enabled(redo: false))
+        history.perform(redo: false)
+        #expect(session.document.shapes.count == 1 && session.canUndo && session.canRedo)
+        #expect(history.enabled(redo: true))
+        history.perform(redo: true)
+        #expect(session.document.shapes.count == 2 && !session.canRedo)
+        // The canvas key consumes one step; the menu shares that dispatch.
+        #expect(mask.keyPressed(character: "z", modifiers: .command))
+        #expect(session.document.shapes.count == 1 && session.canUndo)
+        focused = false
+        #expect(!history.replacesUndo)
+        #expect(!mask.keyPressed(character: "z", modifiers: .command))
+        #expect(!NativeUndoCommands(context: nil, maskEditor: nil).replacesUndo)
+    }
+
     private func shellCells(on platform: SnapshotPlatform) -> [SnapshotCase] {
         MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" }
     }

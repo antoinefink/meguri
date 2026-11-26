@@ -22,4 +22,18 @@ struct NoteFormSelectionRows<NoteType: View, Deck: View>: View {
         .padding(Spacing.medium)
     }
 }
+/// Native rows inserted among the retained rich fields use the same label
+/// column and gap as the selection rows and the Mac field page.
+struct NoteFormFieldRow<Label: View, Content: View>: View {
+    @ViewBuilder let label: () -> Label
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: Spacing.xSmall) {
+            GridRow {
+                label().frame(width: 140, alignment: .trailing).padding(.top, Spacing.xxSmall)
+                content().frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+}
 #endif

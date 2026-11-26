@@ -2,8 +2,16 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
-Device backup and restore passed 37 focused Swift tests across six suites
-(`swift-test/20261126T102318Z-12557`). Four restore tests on a collection linked
+The macOS Option B image occlusion editor created two cards from two drawn
+masks. Moving one mask, saving, and reopening from Review retained both
+positions, the Header, and the tag. The ordinary-note keyboard reopen test
+also passed (`ui-test/20261126T151205Z-38579`). Nine Swift bridge tests
+and 15 Rust media tests passed, and the iOS Simulator build passed
+(`build-app/20261126T141020Z-4293`). [PR #232](https://github.com/antoinefink/meguri/pull/232)
+contains the four native screenshots and subsequent verification.
+
+Device backup and restore passed 38 focused Swift tests across six suites
+(`swift-test/20261126T165621Z-20752`). Four restore tests on a collection linked
 to Meguri Sync and 13 retention tests passed in the Rust core. The native
 journeys exercise cancellation, restoring an older backup and recovering the
 preceding collection from its safety copy. See the [backup verification

@@ -171,12 +171,20 @@ and reason. An optional typed `detail` field uses only these fixed labels:
 `mcp_queue`, `publication_gate`, `native_writer`, `collection_path`, `collection_pin`,
 `collection_storage`, `collection_worker`, `authority_storage`, `collection_open`,
 `collection_access`, `sqlite_open`, `sqlite_open_busy`, `sqlite_access`,
-`sqlite_access_busy`, `attachment_client`, `attachment_url`, `attachment_dns`,
+`sqlite_access_busy`, `attachment_client`, `attachment_url_length`,
+`attachment_url_characters`, `attachment_url_parse`, `attachment_url_scheme`,
+`attachment_url_host`, `attachment_url_port`, `attachment_url_userinfo`,
+`attachment_url_fragment`, `attachment_url_raw_at`, `attachment_dns`,
 `attachment_address`, `attachment_http_client`, `attachment_http_request`,
 `attachment_http_response`, `attachment_timeout`, `attachment_body`.
 The attachment labels identify the observed direct-acquisition stage, without
 including URLs, input hosts, filenames, headers, credentials, sizes, bytes or
 arbitrary error text. `prepare_media_upload` has its own operation label.
+`attachment_url_userinfo` means parsed credentials were present.
+`attachment_url_raw_at` means the third raw slash-separated URL segment contains
+`@`, checked after parsed userinfo and fragment validation. This segment can
+include a query when no slash follows the host, so this label does not imply
+credentials; it also covers empty userinfo normalized away by parsing.
 The `sqlite_*` labels identify directly observed SQLite
 failures; `*_busy` identifies BUSY/LOCKED. Phase labels for helpers that erased
 the cause make no claim about the underlying cause. Details never enter tool
