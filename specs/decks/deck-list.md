@@ -215,7 +215,7 @@ N20.3's form, with its Name and Parent Deck rows; `decks/decks#D19` composes the
 | Context | Active when |
 |---|---|
 | `decks.list` | the deck list (Home's deck list or the sidebar's deck tree) has keyboard focus, in any layout |
-| `decks.page` | a normal deck's page has keyboard focus (the page or one of its controls), and no text input on it has focus |
+| `decks.page` | the selected normal or filtered deck’s page has keyboard focus (the page or one of its controls), and no text input on it has focus |
 
 Keyboard focus is in one place at a time, so the two contexts are never active together, even when the sidebar layout shows the list beside the page. R200's conflict test lists each context's enabled set separately; a key bound in both (Return, S, O) is enabled in only one at a time.
 
@@ -256,7 +256,7 @@ These are interface differences. No golden shows them, so `conformance/deviation
 - A filtered deck has its own page and Study action (H3, H4).
 - Deck lists hide zero counts (N11.5, N13.2). Anki shows them dimmed (H2).
 - Anki redraws its deck list every 10 minutes; Meguri redraws only on its triggers (H2, R1854).
-- No Custom Study (R436) and no shared-deck "Reviews and Updates" link (H4).
+- The normal deck page and its finished state offer Custom Study (H4, `decks/filtered-study#F5`). Meguri omits the shared-deck "Reviews and Updates" link.
 - Descriptions are sanitized (R82). Anki inserts the HTML unchanged.
 - The deck search's create row replaces Anki's Add button (R27). Ctrl+1 to Ctrl+9 are not bound (H6.3).
 - The New Deck form starts with an empty Name and Parent Deck None. Anki pre-fills the current deck's name (H7). A name made only of U+001C to U+001F (with or without White_Space) creates `blank`; Anki creates nothing (H7).
