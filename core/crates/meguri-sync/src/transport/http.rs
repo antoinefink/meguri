@@ -31,7 +31,7 @@ pub(crate) struct EditorImageResponse {
 
 /// One explicitly selected HTTP(S) editor image. Keep this client separate
 /// from sync: GET, redirects and content decoding have different contracts.
-pub(crate) async fn get_editor_image(written_url: &str) -> Result<EditorImageResponse, SyncError> {
+pub(crate) async fn get_editor_image(written_url: &str, maximum_bytes: usize) -> Result<EditorImageResponse, SyncError> {
     use crate::remote_media::failure;
     let mut url = url::Url::parse(written_url).map_err(|e| failure(&e.to_string()))?;
     let client = reqwest::Client::builder()
@@ -64,9 +64,14 @@ pub(crate) async fn get_editor_image(written_url: &str) -> Result<EditorImageRes
         let header = |name| response.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
         let content_type = header("content-type");
         let encoding = header("content-encoding").trim().to_ascii_lowercase();
+        // This is only an early refusal: absent or inaccurate lengths must
+        // still pass the per-chunk check below. Never reserve from the header.
+        if response.content_length().is_some_and(|length| length > maximum_bytes as u64) {
+            return Err(crate::remote_media::size_failure());
+        }
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|e| failure(&chain(&e)))? {
-            bytes.extend_from_slice(&chunk);
+            crate::remote_media::append_bounded(&mut bytes, &chunk, maximum_bytes)?;
         }
         return Ok(EditorImageResponse { bytes, content_type, encoding });
     }
@@ -450,6 +455,62 @@ fn chain(err: &(dyn StdError + 'static)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Synthetic loopback responses only; accepts and request reads are bounded.
+    fn editor_response(response: Vec<u8>, limit: usize) -> Result<EditorImageResponse, SyncError> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/image", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(e) => panic!("loopback accept: {e}"),
+                }
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                head.push(byte[0]);
+                assert!(head.len() < 16384);
+            }
+            // An oversized declared length can make the client close early.
+            let _ = stream.write_all(&response);
+        });
+        let result = crate::transport::runtime::block_on(&meguri_engine::ThreadRegistry::new(),
+            &meguri_engine::CancelToken::new(), get_editor_image(&url, limit));
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn editor_encoded_body_limit_covers_declared_unknown_and_chunked_lengths() {
+        for length in [8, 9] {
+            for framing in ["declared", "unknown", "chunked"] {
+                let body = "x".repeat(length);
+                let suffix = match framing {
+                    "declared" => format!("Content-Length: {length}\r\n\r\n{body}"),
+                    "unknown" => format!("\r\n{body}"),
+                    // Two individually small chunks exceed the total limit at 9.
+                    _ => format!("Transfer-Encoding: chunked\r\n\r\n4\r\nxxxx\r\n{:x}\r\n{}\r\n0\r\n\r\n", length - 4, &body[4..]),
+                };
+                let result = editor_response(format!("HTTP/1.1 200 OK\r\nConnection: close\r\n{suffix}").into_bytes(), 8);
+                if length == 8 { assert_eq!(result.unwrap().bytes, body.as_bytes(), "{framing}"); }
+                else { assert_eq!(result.err(), Some(crate::remote_media::size_failure()), "{framing}"); }
+            }
+        }
+        // With no body sent, this must refuse from the header, before reading.
+        let result = editor_response(b"HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551615\r\n\r\n".to_vec(), 8);
+        assert_eq!(result.err(), Some(crate::remote_media::size_failure()));
+    }
 
     #[test]
     fn connect_failures_are_told_apart_by_their_cause() {

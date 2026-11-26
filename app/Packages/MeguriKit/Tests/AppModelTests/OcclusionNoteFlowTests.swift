@@ -17,10 +17,10 @@ import WebKit
     static let second = "{{c2::image-occlusion:ellipse:left=.6:top=.5:rx=.1:ry=.1:oi=1}}"
     static let label = "{{c0::image-occlusion:text:left=.2:top=.4:text=label:scale=1:oi=1}}"
     static let deck = DeckNameEntry(id: 1, fullName: "Default", filtered: false)
-    static func bitmap(width: Int = 4, type: UTType = .png) throws -> Data {
-        let context = try #require(CGContext(data: nil, width: width, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+    static func bitmap(width: Int = 4, height: Int = 2, type: UTType = .png) throws -> Data {
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(CGColor(gray: 0.5, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: 2))
+        context.setFillColor(CGColor(gray: 0.5, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         let bytes = NSMutableData()
         let destination = try #require(CGImageDestinationCreateWithData(bytes as CFMutableData, type.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, try #require(context.makeImage()), nil)
@@ -155,6 +155,35 @@ import WebKit
         #expect(system.width == 24 && system.height == 12)
         let kept = try await OcclusionImageInput.prepare(svg, name: "diagram.svg", asPNG: false)
         #expect(kept.bytes == svg && kept.name == "diagram.svg" && kept.size == CGSize(width: 24, height: 12))
+    }
+
+    @Test func bitmapPreviewFitsAnInjectedLimitWithoutUpscaling() throws {
+        let bytes = try Self.bitmap(width: 8, height: 4)
+        for (limit, width, height) in [(4, 4, 2), (8, 8, 4), (9, 8, 4)] {
+            let pixels = try OcclusionImageInput.decodeBitmap(bytes, maximumDimension: limit)
+            #expect(pixels.width == width && pixels.height == height)
+        }
+    }
+
+    @Test func largePreviewPreservesOriginalFileAndConversionOutput() async throws {
+        // A thin synthetic image exercises the production ceiling with only
+        // 128 KiB of source pixels, keeping the boundary fixture inexpensive.
+        let bytes = try Self.bitmap(width: 8192, height: 4)
+        let kept = try await OcclusionImageInput.prepare(bytes, name: "wide.png", asPNG: false)
+        #expect(kept.bytes == bytes && kept.name == "wide.png")
+        #expect(kept.size == CGSize(width: 4096, height: 2))
+        let converted = try await OcclusionImageInput.prepare(bytes, name: nil, asPNG: true)
+        #expect(converted.size == kept.size)
+        let original = try OcclusionImageInput.decodeBitmap(converted.bytes, maximumDimension: nil)
+        #expect(original.width == 8192 && original.height == 4)
+    }
+
+    @Test func svgPreviewFitsAnInjectedLimitAndKeepsProportions() async throws {
+        let svg = Data("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"4\"><rect width=\"8\" height=\"4\"/></svg>".utf8)
+        for (limit, width, height) in [(4, 4, 2), (8, 8, 4), (9, 8, 4)] {
+            let pixels = try await OcclusionSVGDecoder.decode(svg, maximumDimension: limit)
+            #expect(pixels.width == width && pixels.height == height)
+        }
     }
 }
 

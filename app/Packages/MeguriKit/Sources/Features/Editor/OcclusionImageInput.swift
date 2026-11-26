@@ -13,29 +13,36 @@ nonisolated struct OcclusionImageInput: Sendable {
     let pixels: CGImage
     var size: CGSize { CGSize(width: CGFloat(pixels.width), height: CGFloat(pixels.height)) }
 
-    static func decode(_ bytes: Data) async throws -> CGImage {
-        if let image = try? decodeBitmap(bytes) { return image }
-        return try await OcclusionSVGDecoder.decode(bytes)
+    // Use the mask editor's existing 4096 × 4096 raster budget for previews.
+    // ImageIO fits the source proportionally; stored file bytes stay original.
+    static let previewMaximumDimension = 4096
+
+    static func decode(_ bytes: Data, maximumDimension: Int? = OcclusionImageInput.previewMaximumDimension) async throws -> CGImage {
+        if let image = try? decodeBitmap(bytes, maximumDimension: maximumDimension) { return image }
+        return try await OcclusionSVGDecoder.decode(bytes, maximumDimension: maximumDimension)
     }
 
-    static func decodeBitmap(_ bytes: Data) throws -> CGImage {
-        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+    static func decodeBitmap(_ bytes: Data, maximumDimension: Int? = OcclusionImageInput.previewMaximumDimension) throws -> CGImage {
+        guard (maximumDimension ?? 1) > 0,
+              let source = CGImageSourceCreateWithData(bytes as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0,
               let pixels = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(width, height)
+                kCGImageSourceThumbnailMaxPixelSize: min(max(width, height), maximumDimension ?? max(width, height))
               ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
         return pixels
     }
 
     static func prepare(_ bytes: Data, name: String?, asPNG: Bool, maximumDimension: Int? = nil) async throws -> Self {
-        var pixels = try await decode(bytes)
         if let name, OcclusionImageField.isUsableName(name) {
-            return Self(name: name, bytes: bytes, pixels: pixels)
+            return Self(name: name, bytes: bytes, pixels: try await decode(bytes))
         }
+        // Conversion still honors P7's output-size setting, including Off.
+        // The preview ceiling must not silently reduce the written image.
+        var pixels = try await decode(bytes, maximumDimension: nil)
         if let maximumDimension, maximumDimension > 0, max(pixels.width, pixels.height) > maximumDimension {
             let scale = Double(maximumDimension) / Double(max(pixels.width, pixels.height))
             pixels = try render(pixels, width: max(1, Int((Double(pixels.width) * scale).rounded())),
@@ -52,7 +59,8 @@ nonisolated struct OcclusionImageInput: Sendable {
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         let data = output as Data
         let hash = Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        return Self(name: "paste-\(hash).\(asPNG ? "png" : "jpg")", bytes: data, pixels: pixels)
+        let preview = max(pixels.width, pixels.height) > previewMaximumDimension ? try await decode(data) : pixels
+        return Self(name: "paste-\(hash).\(asPNG ? "png" : "jpg")", bytes: data, pixels: preview)
     }
 
     private static func render(_ image: CGImage, width: Int, height: Int, opaque: Bool) throws -> CGImage {

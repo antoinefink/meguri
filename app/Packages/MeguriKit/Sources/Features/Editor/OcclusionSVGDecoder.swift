@@ -18,7 +18,7 @@ private final class SVGImagePage: NSObject, WKNavigationDelegate {
         view.navigationDelegate = self
     }
 
-    func png(_ data: Data) async throws -> Data {
+    func png(_ data: Data, maximumDimension: Int?) async throws -> Data {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             try await withCheckedThrowingContinuation { continuation in
@@ -38,11 +38,14 @@ private final class SVGImagePage: NSObject, WKNavigationDelegate {
                 });
                 if (!(image.naturalWidth > 0 && image.naturalHeight > 0))
                   throw new Error('The SVG has no image size.');
+                const scale = maximumDimension > 0
+                  ? Math.min(1, maximumDimension / Math.max(image.naturalWidth, image.naturalHeight)) : 1;
                 const canvas = document.createElement('canvas');
-                canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
-                canvas.getContext('2d').drawImage(image, 0, 0);
+                canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+                canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+                canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
                 return canvas.toDataURL('image/png').split(',')[1];
-                """, arguments: ["encoded": data.base64EncodedString()], in: nil,
+                """, arguments: ["encoded": data.base64EncodedString(), "maximumDimension": maximumDimension ?? 0], in: nil,
                 contentWorld: .world(name: "MeguriOcclusionImageDecoder"))
             try Task.checkCancellation()
             guard let encoded = result as? String, let png = Data(base64Encoded: encoded), !png.isEmpty else {
@@ -69,7 +72,8 @@ private final class SVGImagePage: NSObject, WKNavigationDelegate {
 }
 
 enum OcclusionSVGDecoder {
-    static func decode(_ data: Data) async throws -> CGImage {
-        try OcclusionImageInput.decodeBitmap(try await SVGImagePage().png(data))
+    static func decode(_ data: Data, maximumDimension: Int? = OcclusionImageInput.previewMaximumDimension) async throws -> CGImage {
+        try OcclusionImageInput.decodeBitmap(try await SVGImagePage().png(data, maximumDimension: maximumDimension),
+                                            maximumDimension: maximumDimension)
     }
 }
