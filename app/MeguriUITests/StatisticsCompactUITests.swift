@@ -10,7 +10,8 @@ import XCTest
 /// page over a generated collection.
 @MainActor
 final class StatisticsCompactUITests: XCTestCase {
-    override func setUpWithError() throws {
+    override func setUp() async throws {
+        try await super.setUp()
         #if os(macOS)
         throw XCTSkip("The narrow page is the iPhone's and the narrow iPad's")
         #else

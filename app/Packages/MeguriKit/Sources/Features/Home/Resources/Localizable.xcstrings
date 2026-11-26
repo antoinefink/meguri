@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Restore from Backup…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore from Backup…"
+          }
+        }
+      }
+    },
     "Export Deck…": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Export Deck…" } }

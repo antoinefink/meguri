@@ -40,7 +40,7 @@ public struct OcclusionNoteEditor: View {
             #endif
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("io.editor.container")
+        .accessibilityIdentifier(draft.notetype.originalStockKind == 6 ? "io.editor.container" : "editor.fields")
         .onChange(of: masksShown, initial: true) { _, shown in host.showFields(host.usesOcclusionForm || !shown) }
         .onChange(of: host.acceptsMaskInput, initial: true) { _, enabled in
             if enabled { host.restoreTextFocusAfterMaskActivation() }

@@ -224,6 +224,40 @@ impl CoreHost {
             return;
         }
         if self.provider.reload().is_err() { return; }
+        // MP1/MP6.3: replacement changes the publication, not the account.
+        // Keep history for the same-account choice, but retire stale routine
+        // admission through the existing original-Host metadata lane. This
+        // also handles a restore that activated but could only reopen later.
+        if let Ok(doc) = self.provider.snapshot()
+            && doc.selection == Selection::Meguri
+            && doc.handoff.is_none()
+            && let Some(binding) = doc.meguri_binding {
+            let stale = match self.meguri_readiness() {
+                Ok(meguri_sync::provider::MeguriReadiness::Stale) => true,
+                Ok(_) => false,
+                Err(_) => {
+                    self.provider.close_admission();
+                    return;
+                }
+            };
+            if stale {
+                let Ok(collection) = self.collection() else {
+                    self.provider.close_admission();
+                    return;
+                };
+                let generation = collection.generation();
+                let held = self.publish_provider_metadata(generation, |publication| {
+                    if self.provider.meguri_readiness(publication.as_ref()) != meguri_sync::provider::MeguriReadiness::Stale {
+                        return Ok(Ok(()));
+                    }
+                    Ok(self.provider.hold_meguri_binding_for_full_sync(&binding, generation.0, publication))
+                });
+                if !matches!(held, Ok(Ok(()))) {
+                    self.provider.close_admission();
+                    return;
+                }
+            }
+        }
         if let Some(runtime) = self.cloud_runtime() {
             if runtime.qualify_provider_binding().is_err() { self.provider.close_admission(); }
         }

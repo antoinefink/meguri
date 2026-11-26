@@ -13,6 +13,26 @@ import Darwin
 @Suite struct LaunchOptionsTests {
     typealias Options = TestHooks.LaunchOptions
 
+    #if DEBUG
+    @Test func fixtureRunRequiresCanonicalUUIDAndDevIdentity() throws {
+        let id = UUID()
+        let arguments = ["-MeguriFixtureRunID", id.uuidString]
+        #expect(try Options(arguments: arguments, bundleIdentifier: "com.antoinefink.meguri.dev").fixtureRunID == id)
+        #expect(throws: TestHookError.self) { try Options(arguments: arguments, bundleIdentifier: "com.antoinefink.meguri") }
+        for value in ["../Collection", "/tmp/fixture", "not-a-uuid", id.uuidString.replacingOccurrences(of: "-", with: "")] {
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: ["-MeguriFixtureRunID", value], bundleIdentifier: "com.antoinefink.meguri.dev")
+            }
+        }
+        for pair in [["-MeguriOwnedProviderFixture", "off"], ["-MeguriHomeSnapshot", "on"],
+                     ["-MeguriRoute", "review/answer"], ["-MeguriNativeReviewCase", "other"]] {
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: arguments + pair, bundleIdentifier: "com.antoinefink.meguri.dev")
+            }
+        }
+    }
+    #endif
+
     private var nativeArguments: [String] { [
         "-MeguriNativeReviewRoot", "/owned/checkout", "-MeguriNativeReviewCase", "media-case",
         "-MeguriNativeReviewPlatform", "mac", "-MeguriNativeReviewFreezeSHA256", String(repeating: "a", count: 64),
@@ -252,9 +272,13 @@ import Darwin
     @Test func ownedProviderFixtureIsIsolatedAndInertByDefault() throws {
         typealias Owned = TestHooks.OwnedProviderFixture
         let files = FileManager.default
-        let scratch = files.temporaryDirectory.appending(path: "owned-provider-options-\(UUID().uuidString)")
+        let scratch = files.temporaryDirectory.resolvingSymlinksInPath().appending(path: "owned-provider-options-\(UUID().uuidString)")
         try files.createDirectory(at: scratch, withIntermediateDirectories: false)
         defer { try? files.removeItem(at: scratch) }
+        let source = scratch.appending(path: "SyntheticSource", directoryHint: .isDirectory)
+        try files.createDirectory(at: source, withIntermediateDirectories: false)
+        let sourceBytes = Data("synthetic owned source \(UUID().uuidString)".utf8)
+        try sourceBytes.write(to: source.appending(path: "collection.anki2"))
         let destination = scratch.appending(path: "Destination")
         try files.createDirectory(at: destination, withIntermediateDirectories: false)
         let sentinel = destination.appending(path: "collection.anki2")
@@ -276,9 +300,25 @@ import Darwin
 
         let flag = ["-MeguriOwnedProviderFixture", "on"]
         let arguments = flag + ["-MeguriFixture", Owned.source.path(percentEncoded: false)]
-        let on = try Options(arguments: arguments)
+        // Exercise the real parser's full compile-time checkout allowlist without
+        // requiring a generated recipe to exist or writing into that checkout.
+        var checkout = URL(filePath: #filePath)
+        for _ in 0..<4 { checkout.deleteLastPathComponent() }
+        let expected = checkout.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory)
+        #expect(Owned.source == expected)
+        let canonical = try Options(arguments: flag + ["-MeguriFixture", expected.path(percentEncoded: false)])
+        #expect(canonical.ownedProviderFixture && canonical.ownedProviderSource == .localReview)
+        #expect(canonical.fixture == expected)
+        let preparedArguments = flag + ["-MeguriFixture", source.path(percentEncoded: false)]
+        #expect(throws: TestHookError.self) { try Options(arguments: preparedArguments) }
+        #expect(throws: TestHookError.self) {
+            try Options(arguments: flag + ["-MeguriFixture", scratch.appending(path: "build/fixtures/recipes/local-review-1").path])
+        }
+        #expect(throws: TestHookError.self) { try Owned.validateSource(source) }
+        let on = try Options(arguments: preparedArguments, preparedOwnedProviderSourceForTests: source)
         #expect(on.ownedProviderFixture)
         #expect(on != Options())
+        #expect(on.fixture == source && on.ownedProviderSource.url == source)
         for bad in [["-MeguriOwnedProviderFixture"], ["-MeguriOwnedProviderFixture", "yes"],
                     flag + ["-MeguriOwnedProviderFixture", "off"], flag,
                     flag + ["-MeguriFixture", "relative/local-review-1"],
@@ -293,13 +333,23 @@ import Darwin
                      ["-MeguriIntegrations", "off"], ["-MeguriIntegrations", "on"],
                      ["-MeguriSizeClass", "regular"], ["-ShowAnkiServerInterface", "YES"], nativeArguments] {
             #expect(throws: TestHookError.self) { try Options(arguments: arguments + pair) }
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: preparedArguments + pair, preparedOwnedProviderSourceForTests: source)
+            }
         }
         let alias = scratch.appending(path: "alias")
-        try files.createSymbolicLink(at: alias, withDestinationURL: Owned.source)
+        try files.createSymbolicLink(at: alias, withDestinationURL: source)
         #expect(throws: TestHookError.self) { try Options(arguments: flag + ["-MeguriFixture", alias.path]) }
+        for rejected in [alias, scratch, source.appending(path: "../SyntheticSource"), expected] {
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: flag + ["-MeguriFixture", rejected.path(percentEncoded: false)],
+                    preparedOwnedProviderSourceForTests: source)
+            }
+        }
         #expect(throws: TestHookError.self) { try Owned.validateSource(nil) }
         #expect(throws: TestHookError.self) { try Owned.validateSource(scratch.appending(path: "absent")) }
         #expect(throws: TestHookError.self) { try Owned.validateSource(alias) }
+        #expect(throws: TestHookError.self) { try Owned.validateSource(alias, source: on.ownedProviderSource) }
         #expect(throws: TestHookError.self) { try on.prepareOwnedProviderFixture(bundleIdentifier: "test.release") }
         #expect(throws: TestHookError.self) {
             try on.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "test.release"), routes: .standard)
@@ -311,12 +361,11 @@ import Darwin
         #expect(try files.contentsOfDirectory(atPath: destination.path) == ["collection.anki2"])
 
         #if os(macOS)
-        // The public generated recipe is read-only; all destinations and defaults
-        // below are fresh synthetic inputs. MG stages the recipe for the UI lane.
         let ownedResult = try on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev")
         let owned = try #require(ownedResult)
         defer { _ = owned.cleanup(afterClosing: true) }
-        let other = try Owned()
+        #expect(owned.validatedSource == on.fixture && owned.validatedSource == source)
+        let other = try Owned(source: on.ownedProviderSource)
         defer { _ = other.cleanup(afterClosing: true) }
         let root = owned.collectionLocation.directory.deletingLastPathComponent()
         let otherRoot = other.collectionLocation.directory.deletingLastPathComponent()
@@ -344,6 +393,8 @@ import Darwin
         try on.apply(to: &configuration, installer: installer, routes: .standard, ownedProvider: owned)
         #expect(configuration.collectionLocation == owned.collectionLocation)
         #expect(files.fileExists(atPath: configuration.collectionLocation.collectionFile.path))
+        #expect(try Data(contentsOf: configuration.collectionLocation.collectionFile) == sourceBytes)
+        #expect(try Data(contentsOf: source.appending(path: "collection.anki2")) == sourceBytes)
         #expect(!files.fileExists(atPath: owned.installationDirectory.path), "No provider choice or state is synthesized")
         #expect(try Data(contentsOf: sentinel) == bytes)
         #expect(!owned.cleanup(afterClosing: false))
@@ -356,6 +407,8 @@ import Darwin
         #expect(files.fileExists(atPath: otherRoot.path))
         #expect(other.defaults.string(forKey: key) == "second")
         #expect(other.cleanup(afterClosing: true))
+        #expect(!files.fileExists(atPath: otherRoot.path))
+        #expect(try Data(contentsOf: source.appending(path: "collection.anki2")) == sourceBytes)
         #else
         #expect(throws: TestHookError("OwnedProviderFixture applies to the Mac only")) {
             try on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev")

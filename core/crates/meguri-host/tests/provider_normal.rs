@@ -32,6 +32,164 @@ fn receive_steps(name: &str, bytes: &[u8], hash: &str) -> Vec<r::Step> {
     vec![r::begin(1), r::changes(json!([[name, 1, hash]])), r::changes(json!([])),
         r::Step::new(Method::DownloadFiles, r::download_zip(name, bytes)), r::sanity(true)]
 }
+
+fn backup_note(host: &CoreHost) -> meguri_model::ids::NoteId {
+    let collection = host.collection().unwrap();
+    let kind = meguri_engine::notetypes::add_stock(&collection,
+        meguri_engine::notetypes::StockKind::Basic, Some("Generated backup".into())).unwrap().value.id;
+    meguri_engine::notes::add(&collection, meguri_engine::notes::AddNote {
+        notetype_id: kind, fields: vec!["Collection A".into(), "Generated answer".into()],
+        tags: vec![], deck_id: DeckId(1), guid: None, update_add_defaults: false,
+    }, OpSource::UserUndoable).unwrap().value.id
+}
+fn later_backup_edit(host: &CoreHost, id: meguri_model::ids::NoteId) {
+    meguri_engine::notes::update(&host.collection().unwrap(), meguri_engine::notes::UpdateNote {
+        id, fields: vec!["Later local edit".into(), "Generated answer".into()], tags: vec![],
+    }, OpSource::UserUndoable).unwrap();
+    r::pending(host);
+}
+fn backup_fields(host: &CoreHost, id: meguri_model::ids::NoteId) -> String {
+    host.collection().unwrap().reader(ReaderRole::Query).unwrap().note(id).unwrap().unwrap().fields
+}
+fn restored_backup_requires_choice(fault: Option<&str>) {
+    use meguri_engine::{CancelToken, ProgressSink, device_state::{DeviceState, PublicationDecision}};
+    use meguri_host::{MeguriBootstrapError, MeguriSetupChange, MeguriSetupChoice, MeguriSetupRow};
+    use meguri_model::faultpoint::{self, Fault};
+
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, connection) = ready(root.path());
+    let original = bound(&host);
+    assert!(host.provider_authority().snapshot().unwrap().settings.automatic);
+    let id = backup_note(&host);
+    let source = host.engine().back_up_now(&CancelToken::new()).unwrap();
+    assert!(config.backups_directory.join(&source.receipt.name).is_file());
+    later_backup_edit(&host, id);
+    host.media().unwrap().add("restore-pending.txt", b"generated unsent media").unwrap();
+    assert_eq!(backup_fields(&host, id), "Later local edit\u{1f}Generated answer");
+    let generation = host.collection().unwrap().generation();
+    let state = DeviceState::for_collection(&config.collection_directory.join("collection.anki2"));
+    let publication = state.settled_publication().unwrap().unwrap();
+    if let Some(point) = fault { faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other)); }
+    // The native FFI calls this same Host method, with its real package backup service.
+    let outcome = host.restore_backup(&source.receipt.name, &CancelToken::new(), &ProgressSink::new());
+    if let Some(point) = fault { faultpoint::disarm(point); }
+    if fault.is_some() {
+        assert!(outcome.unwrap_err().candidate_active());
+    } else {
+        let restored = outcome.unwrap();
+        assert_eq!(restored.name, source.receipt.name);
+        assert!(restored.safety_backup.is_some());
+        assert_ne!(restored.generation, generation);
+    }
+
+    // Some activated replacement errors leave recovery to ordinary reopen.
+    // Even that original Host may not issue a single routine request.
+    let offline = r::Script::new(vec![]);
+    if host.collection().is_ok() {
+        assert_eq!(backup_fields(&host, id), "Collection A\u{1f}Generated answer");
+        assert!(matches!(host.start_meguri_collection(r::access(&connection, &offline)),
+            MeguriRoundStart::Refused(MeguriRoundRefusal::NotReady)));
+        assert!(host.provider_authority().snapshot().unwrap().meguri_binding.is_none());
+    } else {
+        assert!(host.provider_authority().network_blocked());
+        assert!(matches!(host.start_meguri_collection(r::access(&connection, &offline)),
+            MeguriRoundStart::Refused(MeguriRoundRefusal::Interrupted)));
+    }
+    assert_eq!(offline.methods(), vec![]);
+    host.close().unwrap();
+    let host = CoreHost::open(config).unwrap();
+    assert_eq!(backup_fields(&host, id), "Collection A\u{1f}Generated answer");
+    assert!(host.collection().unwrap().reader(ReaderRole::Query).unwrap()
+        .config_value("routine-generated").unwrap().is_none());
+    let restored = state.settled_publication().unwrap().unwrap();
+    assert_ne!(restored.identity, publication.identity);
+    assert_eq!(restored.decision, PublicationDecision::Pending);
+    let doc = host.provider_authority().snapshot().unwrap();
+    assert_eq!(doc.meguri.as_ref(), Some(&connection));
+    assert!(doc.meguri_binding.is_none());
+    assert!(!doc.settings.automatic && !doc.meguri_settings.automatic);
+    assert_eq!(host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { intent: None });
+    for start in [host.start_meguri_collection(r::access(&connection, &offline)),
+        host.start_meguri_media(r::access(&connection, &offline))] {
+        assert!(matches!(start, MeguriRoundStart::Refused(MeguriRoundRefusal::NotReady)));
+    }
+    assert_eq!(offline.methods(), vec![]);
+
+    // A genuinely empty server would allow row 3 on a first binding. With
+    // this same account's retained binding history, restore must give row 4.
+    let (_, server) = b::server(&root.path().join("empty-server"));
+    let script = r::Script::new(vec![
+        r::Step::new(Method::Meta, b::meta(b::NOW - 2000, 7)),
+        r::Step::new(Method::Download, server),
+        r::Step::new(Method::Meta, b::meta(b::NOW - 1000, 8)),
+    ]);
+    let events = host.engine().stream().subscribe();
+    let preview = b::complete(events, host.prepare_meguri_setup(r::access(&connection, &script)).unwrap()).unwrap();
+    script.assert_done();
+    assert_eq!(&preview.operation.account, original.account());
+    let shown = host.meguri_setup_decision(&connection, b::USER, &preview).unwrap();
+    assert_eq!(shown.row, MeguriSetupRow::Ask);
+    assert_eq!(shown.server.as_ref().unwrap().notes, 0);
+    assert_eq!(shown.server.as_ref().unwrap().cards, 0);
+    assert!(matches!(host.confirm_meguri_setup(r::access(&connection, &script), &shown,
+        preview.clone(), MeguriSetupChoice::NoQuestion),
+        Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Choice))));
+    assert!(matches!(host.prepare_meguri_setup_download(r::access(&connection, &script), &shown,
+        preview.clone(), MeguriSetupChoice::NoQuestion),
+        Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Choice))));
+    // Observe every actual request, not just the absence of one upload method.
+    assert_eq!(script.methods(), vec![Method::Meta, Method::Download, Method::Meta]);
+    assert_eq!(host.manual_transfer_history().get(&preview.operation.id).unwrap().acceptance,
+        meguri_sync::policy::Acceptance::NotSent);
+    assert_eq!(backup_fields(&host, id), "Collection A\u{1f}Generated answer");
+    assert_eq!(state.settled_publication().unwrap().unwrap(), restored);
+    host.discard_meguri_bootstrap_preparation(&connection, &preview.operation).unwrap();
+    host.close().unwrap();
+}
+
+#[test]
+fn device_backup_restore_requires_same_account_choice_before_meguri_publication() {
+    let _lane = b::LANE.lock().unwrap();
+    restored_backup_requires_choice(None);
+}
+#[test]
+fn device_backup_restore_maintenance_error_still_requires_same_account_choice() {
+    let _lane = b::LANE.lock().unwrap();
+    restored_backup_requires_choice(Some("restore.before_maintenance_reevaluation"));
+}
+#[test]
+fn device_backup_restore_rename_error_still_requires_same_account_choice() {
+    let _lane = b::LANE.lock().unwrap();
+    restored_backup_requires_choice(Some("replace.after_rename"));
+}
+#[test]
+fn device_backup_restore_preactivation_refusal_preserves_meguri_binding() {
+    use meguri_engine::{CancelToken, ProgressSink};
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, connection) = ready(root.path());
+    let id = backup_note(&host);
+    let source = host.engine().back_up_now(&CancelToken::new()).unwrap();
+    later_backup_edit(&host, id);
+    let original = bound(&host);
+    let provider = provider_bytes(&config);
+    let generation = host.collection().unwrap().generation();
+    let cancel = CancelToken::new(); cancel.cancel();
+    let error = host.restore_backup(&source.receipt.name, &cancel, &ProgressSink::new()).unwrap_err();
+    assert!(!error.candidate_active());
+    assert!(matches!(error, meguri_package::restore::RestoreError::Engine(meguri_engine::EngineError::Cancelled)));
+    assert_eq!(host.collection().unwrap().generation(), generation);
+    assert_eq!(backup_fields(&host, id), "Later local edit\u{1f}Generated answer");
+    assert_eq!(provider_bytes(&config), provider);
+    assert_eq!(bound(&host), original);
+    let script = r::Script::new(vec![r::Step::new(Method::Meta, r::meta(&host, r::modified(&host), 9))]);
+    let result = r::complete(&host, &r::started(host.start_meguri_collection(r::access(&connection, &script))));
+    assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::NoChanges);
+    assert_eq!(script.methods(), vec![Method::Meta]);
+    assert_eq!(bound(&host), original);
+    host.close().unwrap();
+}
+
 fn bind_server(root: &std::path::Path, bytes: &[u8], facts: &meguri_storage::one_way::LocalTransferFacts)
     -> (CoreHost, meguri_host::HostConfig, meguri_sync::provider::MeguriConnection) {
     let (host, config) = b::seeded(root);

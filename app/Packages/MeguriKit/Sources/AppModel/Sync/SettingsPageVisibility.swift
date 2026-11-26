@@ -18,5 +18,8 @@ extension SettingsPage {
 extension SettingsPage {
     /// The section's row in a Settings list. N15.1 names the section Sync; the
     /// case keeps its stored name, which the last selected section is saved under.
-    public var rowIdentifier: String { "settings.root.\(self == .accountSync ? "sync" : rawValue)" }
+    public var rowIdentifier: String {
+        if self == .backups { return "settings.backups.open" }
+        return "settings.root.\(self == .accountSync ? "sync" : rawValue)"
+    }
 }

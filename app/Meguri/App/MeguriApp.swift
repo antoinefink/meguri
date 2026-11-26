@@ -1,5 +1,6 @@
 import AppModel
 import ImageOcclusion
+import Settings
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -64,7 +65,7 @@ struct MeguriApp: App {
         #endif
         var recordsFieldDiagnostics = startsProduction
         #if MEGURI_TEST_HOOKS
-        recordsFieldDiagnostics = recordsFieldDiagnostics && hooks.ownedProvider == nil
+        recordsFieldDiagnostics = recordsFieldDiagnostics && hooks.ownedProvider == nil && hooks.options.fixtureRunID == nil
         #endif
         if recordsFieldDiagnostics {
             let store = FieldDiagnosticsStore.standard
@@ -89,14 +90,22 @@ struct MeguriApp: App {
             fieldDiagnostics = nil
         }
         let collection: ReviewCollection?
-        #if MEGURI_TEST_HOOKS && os(macOS)
-        if startsProduction, let ownedProvider = hooks.ownedProvider {
-            let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
-                clock: configuration.clock, defaults: nil, recordDiagnostic: configuration.recordDiagnostic)
-            collection = ReviewCollection(configuration: configuration, navigation: navigation,
-                sync: sync, providerDirectory: ownedProvider.installationDirectory)
+        #if MEGURI_TEST_HOOKS
+        if startsProduction, let fixtureRun = hooks.fixtureRunCollection(configuration: configuration, navigation: navigation) {
+            collection = fixtureRun
         } else {
+            #if os(macOS)
+            if startsProduction, let ownedProvider = hooks.ownedProvider {
+                let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
+                    clock: configuration.clock, defaults: nil, recordDiagnostic: configuration.recordDiagnostic)
+                collection = ReviewCollection(configuration: configuration, navigation: navigation,
+                    sync: sync, providerDirectory: ownedProvider.installationDirectory)
+            } else {
+                collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+            }
+            #else
             collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+            #endif
         }
         #else
         collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
@@ -159,6 +168,22 @@ struct MeguriApp: App {
             MaskEditorCommands()
             CloudSyncCommands(collection: collection)
         }
+        Window(BackupRestoreWindowLayout.title, id: BackupRestoreWindowLayout.id) {
+            #if MEGURI_TEST_HOOKS
+            if let state = TestHooks.BackupRestoreWindowPreview.state {
+                TestHooks.BackupRestoreWindowPreview.Content(state: state, configuration: configuration)
+            } else if let collection {
+                BackupRestoreWindow(collection: collection, configuration: configuration)
+            }
+            #else
+            if let collection { BackupRestoreWindow(collection: collection, configuration: configuration) }
+            #endif
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .defaultSize(BackupRestoreWindowLayout.defaultSize)
+        .windowResizability(.contentMinSize)
+        .commandsRemoved()
         SwiftUI.Settings {
             #if MEGURI_TEST_HOOKS
             if let preview = TestHooks.SyncRoutes.SettingsWindowPreview.shared.collection {
