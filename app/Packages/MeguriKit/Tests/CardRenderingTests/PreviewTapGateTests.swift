@@ -45,16 +45,38 @@ extension WebKitSuites {
             let front = try await prepared.webView.callAsyncJavaScript(
                 "return document.querySelectorAll('#qa mjx-container svg').length;", arguments: [:], in: nil, contentWorld: .page)
             #expect(front as? Int == 1)
+            let commits = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            pair.onCommitted = { committed, _ in if committed == update { commits.continuation.yield(()) } }
+            defer { pair.onCommitted = nil; commits.continuation.finish() }
             do {
                 CATransaction.begin()
                 defer { CATransaction.commit() }
                 _ = try pair.present(update)
+            }
+            try await Spike.deadline("preview math native commit", timeout: .seconds(3)) {
+                for await _ in commits.stream { return }
+                throw Spike.Failure("missing preview math commit")
             }
             _ = try await pair.showAnswer()
             let back = try await pair.current.webView.callAsyncJavaScript(
                 "return document.querySelectorAll('#qa mjx-container[display=\"true\"] svg').length;", arguments: [:], in: nil, contentWorld: .page)
             #expect(back as? Int == 1)
             #expect(pair.diagnostics.templateErrors.isEmpty)
+        }
+
+        @Test func malformedMathReachesNativeTemplateErrors() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let pair = fixture.pair
+            try await fixture.present(CardPayload(cardID: 42, ordinal: 2, templateDescriptor: "Math preview",
+                question: #"\(x+1\)"#, answer: #"\(\frac{1}\)"#))
+            _ = try await pair.showAnswer()
+            let error = try #require(pair.diagnostics.templateErrors.first)
+            #expect(error.update == pair.current.update && error.update.side == .answer && error.kind == "math" && error.phase == "typeset")
+            #expect(error.templateOrdinal == 2 && error.templateDescriptor == "Math preview")
+            #expect(error.message.contains("Missing") && !error.message.contains("[object Object]"))
+            #expect(!pair.diagnostics.entries.contains { $0.kind == "bridgeRejected" })
+            #expect(try await fixture.bool("return !!document.querySelector('#qa [data-mml-node=merror]') && document.getElementById('qa').style.opacity === '1';") == true)
         }
 
         @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))

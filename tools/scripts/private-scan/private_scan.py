@@ -835,6 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete public source review of the bundled card runtime.
+    "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
+        "1a4c524ad0182e7ff49844c60a7f365899de16d5e6ea87c2b66214410958fc54",
     "docs/process/review-log/mathjax-20261126.md":
         "94146ab506ef8f3f2168567ee2eef2127ea6c12d9121f585255ce75973594fca",
     "specs/render/card-runtime.md":

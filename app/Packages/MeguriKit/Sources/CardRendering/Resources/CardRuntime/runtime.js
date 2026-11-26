@@ -28,6 +28,14 @@
   const parseInteger = parseInt;
   const ErrorCtor = Error;
   const URLCtor = URL;
+  const urlProtocol = getter(URLCtor.prototype, "protocol");
+  const urlHost = getter(URLCtor.prototype, "host");
+  const urlSearch = getter(URLCtor.prototype, "search");
+  const urlHash = getter(URLCtor.prototype, "hash");
+  const urlUsername = getter(URLCtor.prototype, "username");
+  const urlPassword = getter(URLCtor.prototype, "password");
+  const urlPathname = getter(URLCtor.prototype, "pathname");
+  const urlHref = getter(URLCtor.prototype, "href");
   const CustomEventCtor = CustomEvent;
   const CSSStyleSheetCtor = CSSStyleSheet;
   const WeakMapCtor = WeakMap;
@@ -1121,6 +1129,7 @@
   let mathStarted = false;
   let mathPending = 0;
   let mathClear = null;
+  let mathWhenReady = null;
   let mathOwner = null;
   let mathStartupOwner = null;
 
@@ -1166,11 +1175,12 @@
         // requests to that immutable directory, including on the harness host.
         // URL normalizes dot segments; encoded separators/dots are refused too.
         const root = new URLCtor(mathRoot);
-        if (url.protocol !== root.protocol || url.host !== root.host
-            || url.search || url.hash || url.username || url.password
-            || call(stringIndexOf, url.pathname, root.pathname) !== 0
-            || call(stringIndexOf, url.pathname, "%") !== -1
-            || call(stringIndexOf, url.pathname, "\\") !== -1) {
+        const pathname = call(urlPathname, url);
+        if (call(urlProtocol, url) !== call(urlProtocol, root) || call(urlHost, url) !== call(urlHost, root)
+            || call(urlSearch, url) || call(urlHash, url) || call(urlUsername, url) || call(urlPassword, url)
+            || call(stringIndexOf, pathname, call(urlPathname, root)) !== 0
+            || call(stringIndexOf, pathname, "%") !== -1
+            || call(stringIndexOf, pathname, "\\") !== -1) {
           throw new ErrorCtor("Unbundled MathJax component refused");
         }
       } catch (error) { reject(error); return; }
@@ -1183,7 +1193,7 @@
         const parent = call(parentNodeOf, script);
         if (parent) call(removeChild, parent, script);
         if (error) {
-          mathError(error, owner, url.href);
+          mathError(error, owner, call(urlHref, url));
           reject(error);
         } else resolve();
       };
@@ -1191,7 +1201,7 @@
       // configuration and real completion alive; only callers have deadlines.
       call(nativeAdd, script, "load", function () { finish(); });
       call(nativeAdd, script, "error", function () { finish(new ErrorCtor("Bundled MathJax component failed")); });
-      call(setAttribute, script, "src", url.href);
+      call(setAttribute, script, "src", call(urlHref, url));
       call(appendChild, call(documentHead, doc), script);
     });
   }
@@ -1228,7 +1238,7 @@
     };
   }
 
-  function limitMathPhysics(engine) {
+  function limitMathOptionalCommands(engine) {
     // 4.1.3 has no loader.register hook. CommandMap's base constructor calls
     // MapHandler.register before populating its entries via add(). Wrap each
     // stored function so aliases copy the guard; resolve identities at use.
@@ -1236,27 +1246,30 @@
     const maps = tex.MapHandler.MapHandler;
     const Macro = tex.Token.Macro;
     const register = maps.register;
-    let braKetDepth = 0, braKetCalls = 0;
+    let recursiveDepth = 0, recursiveCalls = 0;
     maps.register = function (map) {
-      if (map.name === "Physics-matrix-macros" || map.name === "Physics-bra-ket-macros") {
+      const mathtools = map.name === "mathtools-macros";
+      const braKet = map.name === "Physics-bra-ket-macros";
+      if (mathtools || map.name === "Physics-matrix-macros" || braKet) {
         const add = map.add;
         map.add = function (name, macro) {
           const method = macro.func;
           const guarded = function (parser, name, ...args) {
-            const methods = tex.physics.PhysicsMethods.default;
-            // These two methods recursively parse duplicated arguments. Share
-            // one budget across both operations and all registered aliases.
-            if (method === methods.BraKet || method === methods.KetBra) {
-              if (!braKetDepth) braKetCalls = 0;
-              if (++braKetCalls > 64) {
+            const methods = mathtools ? tex.mathtools.MathtoolsMethods.MathtoolsMethods : tex.physics.PhysicsMethods.default;
+            // The bra-ket family reparses arguments, sometimes duplicating
+            // them (including Expectation). Share one budget with mathtools
+            // brackets and all aliases copied from these registrations.
+            if (braKet || (mathtools && method === methods.UnderOverBracket)) {
+              if (!recursiveDepth) recursiveCalls = 0;
+              if (++recursiveCalls > 64) {
                 const TeXError = tex.TexError.default;
-                throw new TeXError("MeguriBraKetLimit", "At most 64 recursive bra-ket operations are allowed");
+                throw new TeXError("MeguriRecursiveCommandLimit", "At most 64 recursive optional commands are allowed");
               }
-              braKetDepth++;
+              recursiveDepth++;
               try { return call(method, this, parser, name, ...args); }
-              finally { braKetDepth--; }
+              finally { recursiveDepth--; }
             }
-            if (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix) {
+            if (!mathtools && (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix)) {
               const position = parser.i;
               try {
                 const command = name;
@@ -1357,7 +1370,7 @@
         ready: function () {
           const engine = win.MathJax;
           limitMathAlignments(engine);
-          limitMathPhysics(engine);
+          limitMathOptionalCommands(engine);
           limitMathUnits(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
@@ -1368,6 +1381,9 @@
           mathTypesetSync = engine.typeset;
           mathTypeset = engine.typesetPromise;
           mathClear = engine.typesetClear;
+          // Internal queueing keeps upstream's entry point; templates retain
+          // the public method and may wrap it independently.
+          mathWhenReady = engine.whenReady;
           // Keep template waits bounded and attributed to their requesting side.
           engine.typeset = mathFacade.typeset;
           engine.typesetPromise = mathFacade.typesetPromise;
@@ -1433,17 +1449,15 @@
     const update = latest;
     // Undefined preserves upstream's document-wide template API scope.
     const targets = elements;
-    let expired = false;
     mathPending++;
     const start = function (engine) {
-      return engine.whenReady(async function () {
-        if (expired || update !== latest) return;
+      return call(mathWhenReady, engine, async function () {
+        if (update !== latest) return;
         mathOwner = update;
         try {
           await call(mathTypeset, engine, targets);
         } finally {
           mathOwner = null;
-          if (expired || update !== latest) call(mathClear, engine, targets);
         }
       });
     };
@@ -1455,7 +1469,6 @@
     then(work, function () { mathPending--; }, function () { mathPending--; });
     const waiting = mathDeadline(work, 8000);
     then(waiting, noop, function (error) {
-      expired = true;
       if (update) update.mathFailed = true;
       mathError(error, update);
     });
@@ -1465,7 +1478,8 @@
   const mathFacade = {
     tex: {
       inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]],
-      processEscapes: false, packages: { "[+]": ["ams", "mhchem"] },
+      processEscapes: false, processEnvironments: false, processRefs: false,
+      packages: { "[+]": ["ams", "mhchem"] },
       formatError: function (jax, error) {
         // TeXError is not an Error subclass in this release. Preserve its
         // original id/message rather than reporting "[object Object]".
@@ -1492,25 +1506,33 @@
   };
   defineProperty(mathFacade.startup, "promise", { get: mathStartup });
 
-  function mathText(node) {
-    if (call(nodeTypeOf, node) === 3) return call(characterData, node);
-    // The release lets an explicit process class override a skipped tag.
-    // Inspect the live tree without cloning custom elements or media.
-    if (call(nodeTypeOf, node) === 1
-        && !call(regexpExec, /(?:^| )mathjax_process(?: |$)/, call(getAttribute, node, "class") || "")
-        && call(stringIndexOf, ",script,noscript,style,textarea,pre,code,math,select,option,mjx-container,",
-          "," + call(localNameOf, node) + ",") >= 0) return "";
-    let text = "";
-    for (let child = call(firstChildOf, node); child; child = call(nextSiblingOf, child)) text += mathText(child);
-    return text;
+  function mathText(node, ignored) {
+    const kind = call(nodeTypeOf, node);
+    if (kind === 3) return ignored ? "" : call(characterData, node);
+    if (kind === 8) return ""; // Upstream includes comments and wbr as empty text.
+    if (kind !== 1) return "\n";
+    const tag = call(stringLower, call(localNameOf, node));
+    if (tag === "br") return ignored ? "" : "\n";
+    if (tag === "wbr") return "";
+    const classes = call(getAttribute, node, "class") || "";
+    const process = call(regexpExec, /(?:^| )mathjax_process(?: |$)/, classes);
+    // DomStrings in the pinned bundle uses literal spaces for classes. Ignore
+    // is inherited, process resets it, but skipped containers aren't traversed.
+    if (call(getAttribute, node, "data-MJX") || (!process
+        && call(regexpExec, /^(?:script|noscript|style|textarea|pre|code|math|select|option|mjx-container)$/, tag))) return "\n";
+    ignored = !process && (ignored || call(regexpExec, /(?:^| )mathjax_ignore(?: |$)/, classes));
+    let text = "\n"; // Containers end upstream's current text string.
+    for (let child = call(firstChildOf, node); child; child = call(nextSiblingOf, child)) text += mathText(child, ignored);
+    return text + "\n";
   }
 
   function typesetSide(qa) {
-    // A template already exhausted this side's math wait; still reveal it.
-    if (latest && latest.mathFailed) return null;
     const text = mathText(qa);
     if (call(stringIndexOf, text, "\\(") < 0 && call(stringIndexOf, text, "\\[") < 0) return null;
-    return then(requestMath([qa]), noop, noop); // Automatic work stays on the active side.
+    const ready = then(requestMath([qa]), noop, noop);
+    // A template may have exhausted the wait on startup alone. Still request
+    // rendering, but reveal without a second wait; late work checks its side.
+    return latest && latest.mathFailed ? null : ready;
   }
 
   async function runUpdate(update) {
@@ -1531,27 +1553,23 @@
       setOpacity(qa, "0");
       // 4. Video release.
       releaseVideos(qa);
-      // Release MathItems before their source nodes leave the document.
+      // Upstream render retries operate on the document's MathItem list. Move
+      // old source/output nodes together so those retries cannot reach the next
+      // side. Keep the actual #qa, its attributes and listeners in the page.
       if (mathEngine) {
-        const oldQA = qa;
-        const detach = function () {
-          qa = call(cloneNode, oldQA, false);
-          call(replaceChild, call(parentNodeOf, oldQA), qa, oldQA);
-        };
+        const oldQA = call(cloneNode, qa, false);
+        while (call(firstChildOf, qa)) call(appendChild, oldQA, call(firstChildOf, qa));
+        // findMath normally already ran before a component wait; constrain any
+        // late scan too. Subsequent queued typesets set their own elements.
+        mathEngine.startup.document.options.elements = [oldQA];
+        const cleanup = call(mathWhenReady, mathEngine, function () { call(mathClear, mathEngine, [oldQA]); });
         try {
-          const cleanup = mathEngine.whenReady(function () { call(mathClear, mathEngine, [oldQA]); });
           if (mathOwner) {
-            // Timed-out rendering may resume and rescan its target. Let it
-            // finish against the detached old node, then clear its MathItems.
-            detach();
             then(cleanup, noop, noop);
           } else {
             await mathDeadline(cleanup, 8000);
           }
         } catch (error) {
-          // Conversion and other upstream jobs can also occupy the queue.
-          // Their late work and cleanup must retain only the old subtree.
-          if (qa === oldQA) detach();
           mathError(error, update);
         }
       }

@@ -385,6 +385,14 @@ extension WebKitSuites.CardRuntimeSuites {
         func warmMathTypesetsInsideWhenReady(awaitResult: Bool) async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"<p>\(x+1\)</p><script>window.__mathAPI = MathJax;</script>"#)
+                try await page.run("""
+                    var ready = MathJax.whenReady;
+                    window.__templateReadyCalls = 0;
+                    MathJax.whenReady = function (callback) {
+                      __templateReadyCalls++;
+                      return ready.call(this, callback);
+                    };
+                    """)
                 let callback = awaitResult
                     ? "async function () { await __mathAPI.typesetPromise([m]); }"
                     : "function () { return MathJax.typesetPromise([m]); }"
@@ -399,6 +407,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     </script>
                     """)
                 #expect(try await page.string("document.getElementById('m').dataset.ready") == "true")
+                #expect(try await page.bool("__templateReadyCalls === 1"))
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
@@ -409,16 +418,21 @@ extension WebKitSuites.CardRuntimeSuites {
                 try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
                 try await page.run("""
                     window.__oldQA = document.getElementById('qa');
+                    window.__oldTarget = __oldQA.firstElementChild;
+                    window.__rootEvents = 0;
+                    __oldQA.addEventListener('card-root-check', function () { __rootEvents++; });
                     var released = new Promise(function (resolve) { window.__releaseMath = resolve; });
                     MathJax.whenReady(function () {
                       window.__upstreamEntered = true;
-                      return released.then(function () { __oldQA.dataset.finished = 'true'; });
+                      return released.then(function () { __oldTarget.dataset.finished = 'true'; });
                     });
                     """)
                 try await harness.until("upstream ready callback") { try await page.bool("window.__upstreamEntered === true") }
                 try await page.announce(card: 89, generation: 2)
                 try await page.showPresentedAnswer("<p id='current'>Still reviewable</p>")
-                #expect(try await page.bool("!__oldQA.isConnected && document.getElementById('qa') !== __oldQA && document.getElementById('qa').style.opacity === '1'"))
+                #expect(try await page.bool("__oldQA.isConnected && document.getElementById('qa') === __oldQA && !__oldTarget.isConnected && __oldQA.style.opacity === '1'"))
+                try await page.run("document.getElementById('qa').dispatchEvent(new Event('card-root-check'));")
+                #expect(try await page.bool("__rootEvents === 1"))
                 #expect(harness.diagnostics.contains {
                     $0["kind"] as? String == "math" && $0.card == 89 && $0.generation == 2
                         && ($0["message"] as? String)?.contains("timed out") == true
@@ -426,11 +440,39 @@ extension WebKitSuites.CardRuntimeSuites {
                 let diagnostics = harness.diagnostics.count
                 try await page.run("__releaseMath(); await MathJax.whenReady(function () {});")
                 #expect(try await page.string("document.getElementById('qa').textContent") == "Still reviewable")
-                #expect(try await page.bool("__oldQA.dataset.finished === 'true' && Array.from(MathJax.startup.document.math).length === 0"))
+                #expect(try await page.bool("__oldTarget.dataset.finished === 'true' && !__oldQA.dataset.finished && Array.from(MathJax.startup.document.math).length === 0"))
                 try await page.announce(card: 90, generation: 3)
                 try await page.showPresentedQuestion(#"<p id="next">\(y+1\)</p>"#)
                 #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.run("document.getElementById('qa').dispatchEvent(new Event('card-root-check'));")
+                #expect(try await page.bool("document.getElementById('qa') === __oldQA && __rootEvents === 2"))
                 #expect(harness.diagnostics.count == diagnostics)
+            }
+        }
+
+        @Test func bundledLoaderUsesCapturedURLGetters() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                let captured = try await page.run("""
+                    await MathJax.startup.promise;
+                    var names = ['protocol', 'host', 'search', 'hash', 'username', 'password', 'pathname', 'href'];
+                    var saved = names.map(function (name) { return Object.getOwnPropertyDescriptor(URL.prototype, name); });
+                    var reads = 0;
+                    names.forEach(function (name, index) {
+                      Object.defineProperty(URL.prototype, name, { configurable: true, get: function () {
+                        reads++; return saved[index].get.call(this);
+                      } });
+                    });
+                    try {
+                      await MathJax.config.loader.require('input/tex/extensions/cancel.js');
+                      return reads === 0;
+                    } finally {
+                      names.forEach(function (name, index) { Object.defineProperty(URL.prototype, name, saved[index]); });
+                    }
+                    """)
+                #expect(captured as? Bool == true)
+                #expect(harness.media.requests(for: "/_anki/mathjax/input/tex/extensions/cancel.js").count == 1)
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
 
@@ -529,6 +571,22 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func onlyDelimitedMathIsScannedOnMixedFaces() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let literal = #"\begin{aligned}a&=b\end{aligned} \ref{sample} \eqref{sample} $x$ $$y$$"#
+                let face = #"<p id="literal">"# + literal + #"</p><p id="inline">\(x+1\)</p><div id="aligned">\[\begin{aligned}a&=b\\c&=d\end{aligned}\]</div>"#
+                for answer in [false, true] {
+                    if answer { try await page.showPresentedAnswer(face) }
+                    else { try await page.showPresentedQuestion(face) }
+                    try await page.run("MathJax.typeset();")
+                    #expect(try await page.string("document.getElementById('literal').textContent") == literal)
+                    #expect(try await page.bool("document.querySelector('#literal mjx-container') === null && document.querySelector('#inline svg path') !== null && document.querySelector('#aligned svg path') !== null"))
+                    #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 2 && !document.querySelector('#qa [data-mml-node=merror]')"))
+                }
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func dollarsAndOrdinaryCardsDoNotLoadMath() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"""
@@ -555,6 +613,36 @@ extension WebKitSuites.CardRuntimeSuites {
                     """#)
                 #expect(try await page.bool("document.querySelector('#m svg path') !== null && !document.querySelector('#literal mjx-container')"))
                 #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/tex-svg.js" })
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: [false, true])
+        func lazyMathMatchesUpstreamIgnoreAndProcessRules(process: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let enabled = process ? #"<code class="mathjax_process mathjax_ignore" id="enabled">\(x+1\)</code>"# : ""
+                try await page.showPresentedQuestion(#"""
+                    <div class="mathjax_ignore"><span id="ignored">\(a+1\)</span>\#(enabled)</div>
+                    <pre><span class="mathjax_process">\(skipped\)</span></pre>
+                    <code class="sample&#9;mathjax_process">\(tab-separated\)</code>
+                    <div data-MJX="true" class="mathjax_process">\(already-handled\)</div>
+                    """#)
+                #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/tex-svg.js" } == process)
+                #expect(try await page.bool("document.querySelectorAll('#qa mjx-container svg').length === \(process ? 1 : 0) && !document.querySelector('#ignored mjx-container')"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func mathtoolsBracketsAndAliasesRetainNormalParsing() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"""
+                    <p>\(\require{mathtools}\overbracket{x+y}+\underbracket[.1em][.3em]{z}\)</p>
+                    <p>\(\let\cardbracket\overbracket\cardbracket{\underbracket{x}}\)</p>
+                    <p>\(\require{physics}\overbracket{\braket{x}{y}}\)</p>
+                    """#)
+                #expect(try await page.bool("document.querySelectorAll('#qa mjx-container svg').length === 3 && !document.querySelector('#qa [data-mml-node=merror]')"))
+                try await page.showPresentedAnswer(#"<p>\(\underbracket{a+b}\)</p>"#)
+                #expect(try await page.bool("document.querySelector('#qa svg path') !== null && !document.querySelector('#qa [data-mml-node=merror]')"))
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
@@ -693,8 +781,12 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(try await page.bool("document.querySelectorAll('#qa mjx-container svg').length === 8 && !document.querySelector('#qa [data-mml-node=merror]')"))
                 // A small mixed call exercises the shared budget; the next
                 // expression and side each start a fresh synchronous call.
-                try await page.showPresentedAnswer(#"<p>\(\braket{\ketbra{x}{y}}+\ketbra{z}\)</p>"#)
-                #expect(try await page.bool("document.querySelector('#qa svg path') !== null && !document.querySelector('#qa [data-mml-node=merror]')"))
+                try await page.showPresentedAnswer(#"""
+                    <p>\(\braket{\ketbra{x}{y}}+\ketbra{z}\)</p>
+                    <p>\(\let\cardexpect\expectationvalue\cardexpect{A}{\ket{x}}+\expval*{B}{y}+\ev**{C}{z}+\ev{D}\)</p>
+                    <p>\(\matrixelement{x}{A}{y}+\matrixel{x}{B}{y}+\mel{x}{C}{y}\)</p>
+                    """#)
+                #expect(try await page.bool("document.querySelectorAll('#qa mjx-container svg').length === 3 && !document.querySelector('#qa [data-mml-node=merror]')"))
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }
@@ -784,6 +876,9 @@ extension WebKitSuites.CardRuntimeSuites {
                     <p id="m">\(math)</p><script>
                     window.__mathAPI = MathJax;
                     window.__cardRequire = require;
+                    window.__stableQA = document.getElementById('qa');
+                    window.__rootEvents = 0;
+                    __stableQA.addEventListener('card-root-check', function () { __rootEvents++; });
                     // Includes a retained facade and a second queued request.
                     onUpdateHook.push(async function () {
                       __mathAPI.typeset([document.getElementById('m')]);
@@ -802,6 +897,8 @@ extension WebKitSuites.CardRuntimeSuites {
                 try await page.run("await MathJax.startup.promise; await MathJax.whenReady(function () {});")
                 #expect(try await page.string("document.getElementById('qa').textContent") == "Still reviewable")
                 #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#qa mjx-container')"))
+                try await page.run("document.getElementById('qa').dispatchEvent(new Event('card-root-check'));")
+                #expect(try await page.bool("document.getElementById('qa') === __stableQA && __rootEvents === 1"))
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 0"))
                 #expect(try await page.bool("require === __cardRequire && require('anki/reviewer').onUpdateHook === onUpdateHook"))
                 #expect(try await page.bool("typeof MathJax.typeset === 'function' && typeof MathJax.typesetPromise === 'function' && typeof MathJax.typesetClear === 'function'"))
@@ -819,7 +916,67 @@ extension WebKitSuites.CardRuntimeSuites {
                     """#)
                 #expect(try await page.bool("document.querySelector('#next mjx-container svg path') !== null"))
                 #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.run("document.getElementById('qa').dispatchEvent(new Event('card-root-check'));")
+                #expect(try await page.bool("document.getElementById('qa') === __stableQA && __rootEvents === 2"))
                 #expect(harness.diagnostics.count == diagnostics)
+            }
+        }
+
+        @Test(arguments: ["tex-svg.js", "font/svg/dynamic/fraktur.js"], [false, true])
+        func lateMathStillRendersTheCurrentSide(component: String, startupHook: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let path = "/_anki/mathjax/" + component
+                harness.media.hold(path)
+                try await page.announce(card: 91, generation: 1)
+                let hook = startupHook ? "<script>onUpdateHook.push(function () { return MathJax.startup.promise; });</script>" : ""
+                try await page.showPresentedQuestion(#"<p id="m">\(\mathfrak{\imath}\)</p>"# + hook)
+                #expect(harness.media.requests(for: path).count == 1)
+                #expect(harness.diagnostics.contains { $0["kind"] as? String == "math" && $0.card == 91 })
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#m svg path')"))
+                harness.media.release(path)
+                try await page.run("await MathJax.startup.promise; await MathJax.whenReady(function () {});")
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
+                try await page.showPresentedAnswer(#"<p id="next">\(z+1\)</p>"#)
+                #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 1"))
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
+        @Test(arguments: [false, true])
+        func staleMathCleanupPreservesExistingSiblingItems(documentWide: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                try await page.run(#"""
+                    var sibling = document.createElement('aside');
+                    sibling.id = 'sibling'; sibling.textContent = '\\(s+1\\)';
+                    document.body.appendChild(sibling);
+                    await MathJax.typesetPromise([sibling]);
+                    window.__siblingItem = MathJax.startup.document.getMathItemsWithin([sibling])[0];
+                    window.__siblingSVG = sibling.querySelector('svg');
+                    """#)
+                let path = "/_anki/mathjax/font/svg/dynamic/fraktur.js"
+                harness.media.hold(path)
+                let targets = documentWide ? "" : "[document.getElementById('qa')]"
+                try await page.showPresentedAnswer("""
+                    <p>\\(\\mathfrak{\\imath}\\)</p><script>
+                    onUpdateHook.push(function () { return MathJax.typesetPromise(\(targets)); });
+                    </script>
+                    """)
+                #expect(harness.media.requests(for: path).count == 1)
+                try await page.showPresentedQuestion("""
+                    <p id='current'>Current card</p>
+                    <style>#qa > p { color: rgb(1, 2, 3); }</style>
+                    """)
+                harness.media.release(path)
+                try await page.run("await MathJax.whenReady(function () {});")
+                #expect(try await page.string("document.getElementById('current').textContent") == "Current card")
+                #expect(try await page.bool("document.getElementById('qa').style.opacity === '1' && !document.querySelector('#qa mjx-container') && getComputedStyle(document.getElementById('current')).color === 'rgb(1, 2, 3)'"))
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1 && MathJax.startup.document.getMathItemsWithin([document.getElementById('sibling')])[0] === __siblingItem && document.querySelector('#sibling svg') === __siblingSVG"))
+                // A later document render still retains the exact sibling item.
+                try await page.showPresentedAnswer(#"<p id="next">\(n+1\)</p>"#)
+                try await page.run("await MathJax.typesetPromise();")
+                #expect(try await page.bool("document.querySelector('#next svg path') !== null && Array.from(MathJax.startup.document.math).length === 2 && Array.from(MathJax.startup.document.math).includes(__siblingItem) && document.querySelector('#sibling svg') === __siblingSVG"))
+                #expect(harness.remote.requests.isEmpty)
             }
         }
 
