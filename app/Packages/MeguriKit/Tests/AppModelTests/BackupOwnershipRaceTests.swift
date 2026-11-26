@@ -132,14 +132,14 @@ extension ReviewCollectionStartupTests {
         let root = FileManager.default.temporaryDirectory.appending(path: "backup-drain-retry-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupRaceConfiguration(root)
-        let original = SyncOwnerFake(), service = BackupServiceProbe()
+        let original = SyncOwnerFake(), successor = SyncOwnerFake(), service = BackupServiceProbe()
         let entry = BackupEntry(name: "backup-2030-01-02-09.00.00.colpkg", kind: .backup,
             wallTime: .init(year: 2030, month: 1, day: 2, hour: 9, minute: 0, second: 0), sizeBytes: 1234)
         await service.configure(entries: [entry], refusal: .init(cause: .corrupt))
         var factories = 0
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
             factories += 1
-            return factories == 1 ? original : SyncOwnerFake()
+            return factories == 1 ? original : (factories == 2 ? successor : SyncOwnerFake())
         }, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
@@ -184,8 +184,20 @@ extension ReviewCollectionStartupTests {
                 #expect(owner.state == .ready && owner.error == nil && owner.generation == generation)
                 #expect(owner.lifecycle == .ready(generation: generation))
                 #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
-                #expect(owner.backups.canCreate && owner.canStudy && sync.setupState == .attached)
-                #expect(sync.syncOwnerAttached && original.closed && original.closeCount == 1 && factories == 2)
+                #expect(owner.backups.canCreate)
+                #expect(owner.canStudy)
+                #expect(sync.setupState == .attached)
+                #expect(original !== successor)
+                #expect(original.closed)
+                #expect(original.closeCount == 1)
+                #expect(factories == 2)
+                #expect(!successor.closed)
+                await sync.waitForInputs()
+                let originalEvents = original.events, successorEvents = successor.events
+                // Background still reaches policy while resume proof is pending.
+                sync.receive(.background); await sync.waitForInputs()
+                #expect(successor.events == successorEvents + ["background"])
+                #expect(original.events == originalEvents)
             }
             original.onQuiesce = nil
             let retry = try #require(owner.backups.restoreConfirmed(name: entry.name))
