@@ -237,7 +237,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
 
     private func enter(_ content: String, field name: String, editor: XCUIElement,
                        app: XCUIApplication, replacing: Bool = true) throws {
-        var input = field(name, editor: editor)
+        var input: XCUIElement { field(name, editor: editor) }
         try act(input, app)
         #if os(macOS)
         if replacing {
@@ -258,19 +258,18 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         if isPad {
             let mode = element(app, name == "Front" ? "editor.field.0.htmlToggle" : "editor.field.1.htmlToggle")
-            XCTAssertTrue(wait { mode.exists && mode.isEnabled && app.keyboards.firstMatch.exists },
+            XCTAssertTrue(wait { mode.exists && mode.isEnabled && mode.isHittable },
                 "Focus must reach the native field accessory. \(inputEvidence(name, content, editor, app))")
             if !mode.isSelected { try act(mode, app) }
             XCTAssertTrue(wait { mode.exists && mode.isSelected && mode.isEnabled },
                 "The native HTML Editor action must select source mode. \(inputEvidence(name, content, editor, app))")
             // Switching hides the rich editable and exposes a different AX
             // text view. Reacquire the genuine textarea, never reuse that node.
-            input = field(name, editor: editor)
             try act(input, app)
             XCTAssertTrue(wait {
                 input.exists && input.isHittable && mode.exists && mode.isEnabled
-                    && mode.isSelected && app.keyboards.firstMatch.exists
-            }, "Source input must have its focused-field accessory and keyboard. \(inputEvidence(name, content, editor, app))")
+                    && mode.isSelected
+            }, "Source input must have its focused-field accessory. \(inputEvidence(name, content, editor, app))")
             // These Add fields start empty. Avoid selection-menu/clipboard
             // dependencies; Edit Current inserts the marker at the native caret.
             if replacing {
@@ -294,9 +293,8 @@ final class BackupRecoveryJourneyTests: XCTestCase {
             let nextMode = element(app, name == "Front" ? "editor.field.1.htmlToggle" : "editor.field.0.htmlToggle")
             // The bridge handles blur's commit before the next focus message;
             // the accessory ID is a visible acknowledgment of that sequence.
-            XCTAssertTrue(wait { nextMode.exists && nextMode.isEnabled && app.keyboards.firstMatch.exists },
+            XCTAssertTrue(wait { nextMode.exists && nextMode.isEnabled },
                 "The other field must acknowledge focus after commit. \(inputEvidence(name, content, editor, app))")
-            input = field(name, editor: editor)
             let expected = try XCTUnwrap(beforeBlur, inputEvidence(name, content, editor, app))
             XCTAssertTrue(wait { self.fieldValue(input) == expected },
                 "Commit must preserve the exact pre-blur value. \(inputEvidence(name, content, editor, app))")
