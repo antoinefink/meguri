@@ -6,6 +6,12 @@ import Testing
 
 @testable import Meguri
 
+#if os(macOS)
+private let expectedBackupsRestorePresentation: InitialPresentation.Style = .screen
+#else
+private let expectedBackupsRestorePresentation: InitialPresentation.Style = .sheet
+#endif
+
 /// Launch routes (U7, R1963), in the app process.
 @MainActor
 @Suite struct RouteRegistryTests {
@@ -404,19 +410,11 @@ import Testing
         ("settings/backups/overflow", .screen),
         ("settings/backups/error", .screen),
         ("settings/backups/loading", .screen),
-        #if os(macOS)
-        ("settings/backups/restore/empty", .screen),
-        ("settings/backups/restore/typical", .screen),
-        ("settings/backups/restore/overflow", .screen),
-        ("settings/backups/restore/error", .screen),
-        ("settings/backups/restore/loading", .screen),
-        #else
-        ("settings/backups/restore/empty", .sheet),
-        ("settings/backups/restore/typical", .sheet),
-        ("settings/backups/restore/overflow", .sheet),
-        ("settings/backups/restore/error", .sheet),
-        ("settings/backups/restore/loading", .sheet),
-        #endif
+        ("settings/backups/restore/empty", expectedBackupsRestorePresentation),
+        ("settings/backups/restore/typical", expectedBackupsRestorePresentation),
+        ("settings/backups/restore/overflow", expectedBackupsRestorePresentation),
+        ("settings/backups/restore/error", expectedBackupsRestorePresentation),
+        ("settings/backups/restore/loading", expectedBackupsRestorePresentation),
         ("settings/import-export/error", .sheet),
         ("settings/import-export/loading", .sheet),
         ("settings/import-export/typical", .sheet),
