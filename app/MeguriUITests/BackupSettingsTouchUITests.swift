@@ -33,7 +33,32 @@ final class BackupSettingsTouchUITests: XCTestCase {
         attachment.name = "interval-native-window"
         attachment.lifetime = .keepAlways
         add(attachment)
-        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let screenshotImage = screenshot.image
+        let rawImage = try XCTUnwrap(screenshotImage.cgImage)
+        let rawSize = CGSize(width: CGFloat(rawImage.width), height: CGFloat(rawImage.height))
+        let orientedSize: CGSize
+        switch screenshotImage.imageOrientation {
+        case .up, .down, .upMirrored, .downMirrored:
+            orientedSize = rawSize
+        case .left, .right, .leftMirrored, .rightMirrored:
+            orientedSize = CGSize(width: rawSize.height, height: rawSize.width)
+        @unknown default:
+            XCTFail("Unsupported screenshot orientation: \(screenshotImage.imageOrientation)")
+            return
+        }
+        let image: CGImage
+        if screenshotImage.imageOrientation == .up {
+            image = rawImage
+        } else {
+            // Render at pixel density; UIImage drawing applies its orientation,
+            // including mirroring, without consulting screen or device state.
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let upright = UIGraphicsImageRenderer(size: orientedSize, format: format).image { _ in
+                screenshotImage.draw(in: CGRect(origin: .zero, size: orientedSize))
+            }
+            image = try XCTUnwrap(upright.cgImage)
+        }
         let viewport = window.frame, frame = field.frame
         let scaleX = CGFloat(image.width) / viewport.width
         let scaleY = CGFloat(image.height) / viewport.height
@@ -45,7 +70,8 @@ final class BackupSettingsTouchUITests: XCTestCase {
         let cropPixels = CGRect(x: 0, y: fieldPixels.minY - fieldPixels.height,
                                 width: CGFloat(image.width), height: 3 * fieldPixels.height).integral
             .intersection(CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
-        var diagnostics = "Window=\(viewport), field=\(frame), image=\(image.width)x\(image.height)\n"
+        var diagnostics = "Window=\(viewport), field=\(frame), orientation=\(screenshotImage.imageOrientation), "
+        diagnostics += "raw=\(rawImage.width)x\(rawImage.height), oriented=\(image.width)x\(image.height)\n"
         diagnostics += "Scale=\(scaleX),\(scaleY); top-left pixels: field=\(fieldPixels), crop=\(cropPixels)\n"
         func attachDiagnostics() {
             let text = XCTAttachment(string: diagnostics)
@@ -53,6 +79,12 @@ final class BackupSettingsTouchUITests: XCTestCase {
             text.lifetime = .keepAlways
             add(text)
         }
+        // A single native pixel scale must map both viewport axes accurately.
+        let mappingError = max(abs(CGFloat(image.width) - viewport.width * scaleY),
+                               abs(CGFloat(image.height) - viewport.height * scaleX))
+        if !(mappingError <= 1) { attachDiagnostics() }
+        XCTAssertLessThanOrEqual(mappingError, 1,
+            "The upright screenshot must map uniformly to the native viewport within one physical pixel; see interval-ocr")
         guard let cropped = image.cropping(to: cropPixels) else {
             attachDiagnostics()
             XCTFail("Could not crop the interval row; see interval-ocr")
