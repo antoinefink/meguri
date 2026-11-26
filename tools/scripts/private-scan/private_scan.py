@@ -1326,7 +1326,7 @@ PUBLIC_ARTIFACTS = {
         "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
     # Complete-content PUBLIC review: diag_review, 2026-11-26.
     "specs/servers/meguri-collection-mcp.md":
-        "84a01bd1a8184cd649e0b3e1690a36caf3020cdbe81168aaa853897ff380983e",
+        "eb25747d1e1cb4b4986a595d482bd07a9eddf08077c604d064c415dd2bbe8c0d",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
