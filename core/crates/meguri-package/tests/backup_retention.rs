@@ -538,13 +538,22 @@ fn single_limit_patch_defaults_invalid_members_together_and_keeps_full_range() {
         ),
     ] {
         c.run(
-            OpSpec::named("seed legacy backup limits", OpSource::Maintenance),
+            OpSpec::named("seed legacy backup limits", OpSource::SyncIncoming),
             move |ctx| {
-                ctx.scope().set_config("backups", &ConfigValue::parse(stored.as_bytes()).unwrap())?;
+                ctx.scope().put_config_entry(&meguri_model::config::ConfigEntry {
+                    key: "backups".into(),
+                    usn: meguri_model::usn::Usn(7),
+                    mtime: meguri_model::time::EpochSecs(123),
+                    value: stored.as_bytes().to_vec(),
+                })?;
                 Ok(())
             },
         )
         .unwrap();
+        assert_eq!(
+            c.reader(ReaderRole::Query).unwrap().config_entry("backups").unwrap().unwrap().entry.value,
+            stored.as_bytes()
+        );
         let result = backup_limits::update(c, BackupLimitPatch::Weekly(0)).unwrap();
         assert_eq!(result.value, BackupLimits { weekly: 0, ..initial });
         for (patch, expected) in [
