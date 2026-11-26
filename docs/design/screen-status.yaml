@@ -927,143 +927,148 @@ screens:
     - mac
     evidence:
       lint:
-        run: 20261126T171743Z-12514
+        run: 20261126T180103Z-76005
         status: pass
       iphone:
         snapshots:
-          run: 20261126T171741Z-12094
-          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
+          run: 20261126T180102Z-75624
+          commit: 6df03b7e7965df45b4551c5decc6143d33afe2cb
           status: fail
-          digest: 31ae5740a671b4da52c5be7c6447912d214c065f0b644a4369235c1c5201ebdd
-          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
+          digest: 10d62d1c30aa7c02ec2a20388c93819e0ee2d84a7a25462bb4f4eaee5ab7d62e
+          input: f25f80fdc30cdee1990d3b6f26bf570966821138ac164422102ab361f94d0456
         critic:
-          run: 20261126T172905Z-72014
-          session: s-20261126T172908Z-ced2d889
-          commit: 1f5b571c53c605981ee13e8217348654f593ab78
+          run: 20261126T181407Z-5994
+          session: s-20261126T181411Z-d9110e6a
+          commit: 80444b2c59039e771b4a37c778e30367ec2c049d
           status: pass
           high: 0
           medium: 2
-          low: 1
+          low: 0
           dropped: 0
-          date: '2026-11-26T17:31:04Z'
+          date: '2026-11-26T18:16:12Z'
       ipad:
         snapshots:
-          run: 20261126T171741Z-12094
-          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
+          run: 20261126T180102Z-75624
+          commit: 6df03b7e7965df45b4551c5decc6143d33afe2cb
           status: fail
-          digest: 5c7bf7cf38dd7c65bc4f343912fbea8afee5506f0f990028f1b1184d7ac71c17
-          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
+          digest: ac1550bf211429ca8c218425cd91106994efe0ba47c2826f2824516a4cb5e1c7
+          input: f25f80fdc30cdee1990d3b6f26bf570966821138ac164422102ab361f94d0456
         critic:
-          run: 20261126T172905Z-72014
-          session: s-20261126T172908Z-ced2d889
-          commit: 1f5b571c53c605981ee13e8217348654f593ab78
-          status: fail
-          high: 1
-          medium: 0
-          low: 0
-          dropped: 0
-          date: '2026-11-26T17:31:04Z'
-      mac:
-        snapshots:
-          run: 20261126T171741Z-12094
-          commit: 62266ca479ab8a3417d32b5db92e6d1451f9d8db
-          status: fail
-          digest: 5622eeedad9558cd7e3c83f0625b12faa0171188290b6db820d37ad96505f780
-          input: 7e13c786af49a23cf656100ffeba2ba6df8cc19fdd804fd08858c95316a73831
-        critic:
-          run: 20261126T172905Z-72014
-          session: s-20261126T172908Z-ced2d889
-          commit: 1f5b571c53c605981ee13e8217348654f593ab78
+          run: 20261126T181407Z-5994
+          session: s-20261126T181411Z-d9110e6a
+          commit: 80444b2c59039e771b4a37c778e30367ec2c049d
           status: pass
           high: 0
           medium: 2
           low: 0
           dropped: 0
-          date: '2026-11-26T17:31:04Z'
+          date: '2026-11-26T18:16:12Z'
+      mac:
+        snapshots:
+          run: 20261126T180102Z-75624
+          commit: 6df03b7e7965df45b4551c5decc6143d33afe2cb
+          status: fail
+          digest: 5622eeedad9558cd7e3c83f0625b12faa0171188290b6db820d37ad96505f780
+          input: f25f80fdc30cdee1990d3b6f26bf570966821138ac164422102ab361f94d0456
+        a11y:
+          run: 20261126T174459Z-34192
+          status: fail
+          commit: 60474b4d1144d3e4dd12af3d9fc1a8add3938966
+          input: f25f80fdc30cdee1990d3b6f26bf570966821138ac164422102ab361f94d0456
+          states:
+            restore.empty: fail
+            restore.error: fail
+            restore.loading: fail
+            restore.overflow: fail
+            restore.typical: fail
+            settings.empty: fail
+            settings.error: fail
+            settings.loading: fail
+            settings.overflow: fail
+            settings.typical: fail
+        critic:
+          run: 20261126T181407Z-5994
+          session: s-20261126T181411Z-d9110e6a
+          commit: 80444b2c59039e771b4a37c778e30367ec2c049d
+          status: pass
+          high: 0
+          medium: 1
+          low: 0
+          dropped: 0
+          date: '2026-11-26T18:16:12Z'
     issues:
-    - platform: ipad
-      state: overflow
-      variant: dark-standard-ipadRegular+hc+rm
-      rule: platform-native-defaults
-      severity: high
-      region:
-        x: 484
-        y: 1240
-        width: 1091
-        height: 298
-      summary: In dark mode with Increase Contrast, the selected backup row (Nov 24) looks the same as
-        the other rows, so the person cannot see which backup Restore… will use.
-      image: screens/settings.backups/overflow/dark-standard-ipadRegular+hc+rm.png
-      run: 20261126T172905Z-72014
     - platform: iphone
       state: loading
-      variant: dark-standard-iphoneLarge+rm+tmax
+      variant: light-standard-iphoneLarge+rt
       rule: layout-alignment
       severity: medium
       region:
-        x: 80
-        y: 460
-        width: 320
-        height: 110
-      summary: The progress spinner is centred above the 'Creating Backup…' label, but the label starts
-        at the row's leading edge, so the two don't line up.
-      image: screens/settings.backups/loading/dark-standard-iphoneLarge+rm+tmax.png
-      run: 20261126T172905Z-72014
+        x: 70
+        y: 455
+        width: 330
+        height: 120
+      summary: In the Creating Backup… row, the spinner floats above the label at an off-centre horizontal
+        position instead of sitting on the row's leading edge or inline with the text.
+      image: screens/settings.backups/loading/light-standard-iphoneLarge+rt.png
+      run: 20261126T181407Z-5994
     - platform: iphone
       state: loading
       variant: dark-ax5-iphoneSmall
       rule: layout-alignment
       severity: medium
       region:
-        x: 72
-        y: 555
-        width: 420
-        height: 410
-      summary: At AX5 the progress spinner floats in the middle of the row above a two-line label that
-        starts at the leading edge.
+        x: 60
+        y: 550
+        width: 440
+        height: 420
+      summary: At AX5 the progress row stacks a spinner, centred over the wrapped label, on top of the
+        label, leaving a ragged block that lines up with no other row.
       image: screens/settings.backups/loading/dark-ax5-iphoneSmall.png
-      run: 20261126T172905Z-72014
+      run: 20261126T181407Z-5994
     - platform: mac
       state: loading
-      variant: light-standard-macLarge
+      variant: light-standard-macDefault
       rule: layout-alignment
       severity: medium
       region:
-        x: 911
-        y: 145
-        width: 238
-        height: 119
-      summary: On the Mac the spinner is stacked and centred above a leading 'Creating Backup…' label
-        instead of sitting on one line with it.
-      image: screens/settings.backups/loading/light-standard-macLarge.png
-      run: 20261126T172905Z-72014
-    - platform: mac
-      state: loading
-      variant: light-standard-macLarge
-      rule: layout-native-spacing
+        x: 490
+        y: 140
+        width: 260
+        height: 125
+      summary: On the Mac, the backup progress is a spinner stacked above 'Creating Backup…' and centred
+        over the label, instead of a native inline progress row that matches the form's other rows.
+      image: screens/settings.backups/loading/light-standard-macDefault.png
+      run: 20261126T181407Z-5994
+    - platform: ipad
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: platform-adaptivity
       severity: medium
       region:
-        x: 895
-        y: 425
-        width: 1404
-        height: 45
-      summary: While a backup is running, the gap between the Back Up Now group and the Restore group
-        shrinks to a thin strip, so the two groups almost touch.
-      image: screens/settings.backups/loading/light-standard-macLarge.png
-      run: 20261126T172905Z-72014
-    - platform: iphone
-      state: error
-      variant: dark-standard-iphoneLarge+rm+tmax
-      rule: copy-plain
-      severity: low
+        x: 40
+        y: 270
+        width: 1985
+        height: 1565
+      summary: 'On a regular-width iPad, the Backups form stretches across the whole window, so labels
+        and values sit about 1,500 pt apart and footers run as very long lines: a phone layout stretched
+        across the iPad.'
+      image: screens/settings.backups/typical/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261126T181407Z-5994
+    - platform: ipad
+      state: empty
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      rule: layout-states
+      severity: medium
       region:
-        x: 70
-        y: 490
-        width: 740
-        height: 140
-      summary: Use the shorter Mac recovery instruction on iPhone.
-      image: screens/settings.backups/error/dark-standard-iphoneLarge+rm+tmax.png
-      run: 20261126T172905Z-72014
+        x: 530
+        y: 0
+        width: 1000
+        height: 350
+      summary: Behind the Backups sheet, the dimmed window shows a second copy of the empty state ('No
+        Backups Yet', its message and a blue Try Again) instead of the Settings page the sheet was opened
+        from.
+      image: screens/settings.backups/empty/light-standard-ipadRegular+rt+rm+tmax.png
+      run: 20261126T181407Z-5994
     tasks:
     - rule: layout-alignment
       state: loading
@@ -1076,9 +1081,9 @@ screens:
     - rule: layout-alignment
       state: loading
       variant: dark-ax5-iphoneSmall
-      summary: At AX5 the progress spinner floats in the middle of the row above a two-line label that
-        starts at the leading edge.
-      from: 20261126T172905Z-72014
+      summary: At AX5 the progress row stacks a spinner, centred over the wrapped label, on top of the
+        label, leaving a ragged block that lines up with no other row.
+      from: 20261126T181407Z-5994
       open: true
       since: 20261126T172905Z-72014
     - rule: layout-alignment
@@ -1097,6 +1102,40 @@ screens:
       from: 20261126T172905Z-72014
       open: true
       since: 20261126T172905Z-72014
+    - rule: layout-alignment
+      state: loading
+      variant: light-standard-iphoneLarge+rt
+      summary: In the Creating Backup… row, the spinner floats above the label at an off-centre horizontal
+        position instead of sitting on the row's leading edge or inline with the text.
+      from: 20261126T181407Z-5994
+      open: true
+      since: 20261126T181407Z-5994
+    - rule: layout-alignment
+      state: loading
+      variant: light-standard-macDefault
+      summary: On the Mac, the backup progress is a spinner stacked above 'Creating Backup…' and centred
+        over the label, instead of a native inline progress row that matches the form's other rows.
+      from: 20261126T181407Z-5994
+      open: true
+      since: 20261126T181407Z-5994
+    - rule: platform-adaptivity
+      state: typical
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: 'On a regular-width iPad, the Backups form stretches across the whole window, so labels
+        and values sit about 1,500 pt apart and footers run as very long lines: a phone layout stretched
+        across the iPad.'
+      from: 20261126T181407Z-5994
+      open: true
+      since: 20261126T181407Z-5994
+    - rule: layout-states
+      state: empty
+      variant: light-standard-ipadRegular+rt+rm+tmax
+      summary: Behind the Backups sheet, the dimmed window shows a second copy of the empty state ('No
+        Backups Yet', its message and a blue Try Again) instead of the Settings page the sheet was opened
+        from.
+      from: 20261126T181407Z-5994
+      open: true
+      since: 20261126T181407Z-5994
     history:
     - date: '2026-11-26T17:31:04Z'
       from: sketch
