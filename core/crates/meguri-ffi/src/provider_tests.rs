@@ -1,6 +1,9 @@
 use super::*;
 use meguri_model::{clock::{FixedClock, UtcOffset}, rng::SeededRandom};
 
+#[path = "deletion_admission_tests.rs"]
+mod deletion_admission;
+
 fn unopened_configuration(root: &std::path::Path) -> meguri_host::HostConfig {
     let collection = root.join("collection");
     std::fs::create_dir_all(&collection).unwrap();

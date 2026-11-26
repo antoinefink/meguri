@@ -16,6 +16,7 @@ private actor FakeStructureJobs: MeguriStructureJobService {
     /// The round runs until the job is cancelled, then stops.
     var roundUntilCancelled = false
     private(set) var reachable: [Bool] = []
+    private(set) var removals: [NotetypeRemoval] = []
     private(set) var uploads = 0
     private(set) var pendingReads = 0
 
@@ -39,6 +40,15 @@ private actor FakeStructureJobs: MeguriStructureJobService {
             while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
             return .roundStopped(.init(outcome: .refused(.interrupted), finalization: nil, trackingFailure: nil))
         }
+        for stage in stages { onStage(stage, nil) }
+        if let pendingAfter { pending = pendingAfter }
+        return try saveAnswer.get()
+    }
+    func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                 onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriStructureOutcome {
+        removals.append(request)
+        self.reachable.append(reachable)
         for stage in stages { onStage(stage, nil) }
         if let pendingAfter { pending = pendingAfter }
         return try saveAnswer.get()
@@ -69,6 +79,23 @@ private let draft = NotetypeStructureDraft(notetypeId: 7, base: [1], name: "Samp
         let sync = SyncCoordinator.renderFixture(.meguriConnected)
         sync.stageMeguriStructureForTests(jobs)
         return sync
+    }
+
+    @Test(arguments: [true, false])
+    func removalUsesMP7AndPreservesTheOfflineUploadState(_ reachable: Bool) async throws {
+        let jobs = FakeStructureJobs()
+        await jobs.set(save: .success(.saved(reachable ? .uploaded(mediaComplete: true) : .pending(.unreachable))),
+                       pendingAfter: !reachable, stages: reachable ? [.round, .save, .upload] : [.save])
+        let sync = coordinator(jobs)
+        let request = NotetypeRemoval(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31)
+        let seen = StageLog()
+        let result = try await sync.removeNotetypeStructure(request, reachable: reachable) { stage, _, _ in seen.stages.append(stage) }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(result == .saved(uploaded: reachable))
+        #expect(await jobs.removals == [request])
+        #expect(await jobs.reachable == [reachable])
+        #expect(seen.stages == (reachable ? [.syncing, .saving, .uploading] : [.saving]))
+        #expect(sync.meguriStructureUploadPending == !reachable)
     }
 
     /// The outcome table (PR #100's state machine) as the section and the status show it.

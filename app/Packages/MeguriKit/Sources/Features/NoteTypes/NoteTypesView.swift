@@ -2,6 +2,9 @@ import AppModel
 import CoreBridge
 import DesignSystem
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The Note Types section (`native-interface-contract` N22.1): the list of
 /// note types beside the selected one's detail, with Fields and Cards in the
@@ -390,15 +393,20 @@ struct SaveStatusView: View {
         case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)
         case .saving?, nil:
             // Before the first count, which can come after the status shows.
-            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
-                ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
+            if progress.removing {
+                NoteTypesStrings.deletionProgress(progress.completed, locale: locale)
+            } else {
+                progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
+                    ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
+            }
         }
     }
 
     /// The count at its end, with the largest total this job can have: its digits are monospaced.
     private var widestCount: String {
         let total = max(progress.total ?? 0, notes ?? 0, progress.completed)
-        return NoteTypesStrings.progress(completed: total, total: total, locale: locale)
+        return progress.removing ? NoteTypesStrings.deletionProgress(total, locale: locale)
+            : NoteTypesStrings.progress(completed: total, total: total, locale: locale)
     }
 }
 
@@ -408,11 +416,20 @@ struct SaveStatusView: View {
 struct SaveOutcomeAlerts: ViewModifier {
     @Bindable var model: NoteTypesModel
     @Environment(\.locale) private var locale
+    #if os(macOS)
+    @State private var appVisible = !NSApplication.shared.isHidden
+
+    // Save and deletion share these outcomes. Recheck the actual state in
+    // each binding too: a failure can arrive before didHide is delivered.
+    private var canPresent: Bool { appVisible && !NSApplication.shared.isHidden }
+    #else
+    private let canPresent = true
+    #endif
 
     func body(content: Content) -> some View {
         content
             .alert(Text("noteTypes.failed.title", bundle: .module), isPresented: Binding(
-                get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
+                get: { canPresent && model.failure != nil }, set: { if !$0, canPresent { model.failure = nil } })) {
                 Button(role: .cancel) { model.failure = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
             } message: {
                 if model.failure == .syncStopped {
@@ -424,11 +441,22 @@ struct SaveOutcomeAlerts: ViewModifier {
                 }
             }
             .alert(Text("noteTypes.notUploaded.title", bundle: .module), isPresented: Binding(
-                get: { model.notice != nil && model.failure == nil }, set: { if !$0 { model.notice = nil } })) {
+                get: { canPresent && model.notice != nil && model.failure == nil }, set: { if !$0, canPresent { model.notice = nil } })) {
                 Button(role: .cancel) { model.notice = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
             } message: {
                 Text(verbatim: NoteTypesStrings.notUploaded(device: NoteTypesStrings.device(locale: locale), locale: locale))
             }
+            #if os(macOS)
+            // Keep hidden outcomes pending, including when this view was
+            // first built hidden or returns after missing an unhide event.
+            .onAppear { appVisible = !NSApplication.shared.isHidden }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in
+                appVisible = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in
+                appVisible = !NSApplication.shared.isHidden
+            }
+            #endif
     }
 }
 
@@ -492,6 +520,9 @@ private struct NoteTypeListColumn: View {
                 NoteTypeListRow(item: item, edited: model.isEdited(item.id))
                     .tag(item.id)
             }
+        }
+        .contextMenu(forSelectionType: Int64.self) { rows in
+            if rows.count == 1, let id = rows.first { NoteTypeDeletionMenu(model: model, id: id) }
         }
         // A content list beside the app's sidebar (N22.1): the window's own
         // background, as the filter field above it, with the system selection.

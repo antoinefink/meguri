@@ -8,6 +8,13 @@ import Testing
 @Suite struct NoteTypesStringsTests {
     private let english = Locale(identifier: "en_US")
 
+    @Test func deleteShowsActualLossesIncludingEmptyAndSingularTypes() {
+        #expect(NoteTypesStrings.deleteTitle("Sample", locale: english) == "Delete “Sample”?")
+        #expect(NoteTypesStrings.deleteLosses(.init(notes: 0, cards: 0), locale: english) == "It has no notes.")
+        #expect(NoteTypesStrings.deleteLosses(.init(notes: 1, cards: 1), locale: english) == "Its 1 note and their 1 card will be deleted.")
+        #expect(NoteTypesStrings.deleteLosses(.init(notes: 90, cards: 180), locale: english) == "Its 90 notes and their 180 cards will be deleted.")
+    }
+
     @Test func d4sRowsAndDetailLinesReadAsTheSpecSays() {
         func line(_ kind: NoteTypeSaveRow.Kind) -> (String, [String]) {
             let line = NoteTypesStrings.line(NoteTypeSaveRow(kind: kind), locale: english)

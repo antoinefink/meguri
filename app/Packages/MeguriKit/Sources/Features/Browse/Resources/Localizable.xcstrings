@@ -1,6 +1,61 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "browse.tag.delete": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Tag"
+          }
+        }
+      }
+    },
+    "browse.tag.deleteMany": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Tags"
+          }
+        }
+      }
+    },
+    "browse.tag.failed.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Delete Tag"
+          }
+        }
+      }
+    },
+    "browse.tag.failed.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The tag couldn’t be deleted. Try again when the collection is ready."
+          }
+        }
+      }
+    },
+    "browse.tag.failed.dismiss": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss"
+          }
+        }
+      }
+    },
+    "browse.notetype.delete": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete Note Type…" } }
+      }
+    },
     "browse.addTags.add": {
       "localizations": {
         "en": {

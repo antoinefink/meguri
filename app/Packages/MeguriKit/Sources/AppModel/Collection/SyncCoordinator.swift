@@ -5299,6 +5299,64 @@ extension SyncCoordinator: DeckImportMeguriSync {
 }
 
 extension SyncCoordinator: NoteTypesMeguriSync {
+    /// W12/D3: only proved absence permits local deletion. Presentation's
+    /// notSetUp also covers stale/unread bindings and cannot prove absence.
+    func noteTypeDeletionService() async -> NoteTypeSaveService? {
+        guard !closing, !replacing, !suspended, !providerHandoffInProgress,
+              !providerNeedsAttention, let selection = providerState?.selection else { return nil }
+        guard selection == .meguri else { return .other }
+        guard meguriLocalActionAvailable, meguriWake == nil, meguriStructureStage == nil,
+              !meguriStructureUploadPending, let provider else { return nil }
+        let expected = generation, revision = hostRevision
+        let providerRevision = providerState?.revision
+        let editRevision = meguriAddressEditRevision
+        var answer: NoteTypeSaveService?
+        // Reserve the coordinator's action while inspecting: setup, sign-in,
+        // and regular rounds cannot change the binding between these reads.
+        let issued = issueMeguri { _ in
+            @MainActor func current() -> Bool {
+                self.generation == expected && self.hostRevision == revision && self.provider === provider
+                    && self.providerState?.revision == providerRevision && self.providerState?.selection == .meguri
+                    && self.meguriAddressEditRevision == editRevision
+                    && !self.closing && !self.replacing && !self.suspended
+                    && !self.providerHandoffInProgress && !self.providerNeedsAttention
+            }
+            do {
+                let pending = try await provider.structureUploadPending()
+                guard current(), !pending else { return }
+                let configured = try await provider.configuredMeguri()
+                guard current() else { return }
+                guard let configured else { answer = .other; return }
+                guard let owner = self.meguriConnectionOwner else { return }
+                let facade = try await owner.bootstrapService()
+                guard current(), self.meguriConnectionOwner === owner,
+                      facade.connection == configured.connection else { return }
+                let readiness = try await facade.readiness()
+                guard current(), self.meguriConnectionOwner === owner else { return }
+                switch readiness {
+                case .ready:
+                    if self.noteTypeSyncState == .ready { answer = .meguriSync }
+                case .unbound(let retained):
+                    // An interrupted transfer or unresolved acceptance keeps
+                    // data-first protection even though it has no ready binding.
+                    guard retained.map({ !Self.meguriRetainsEffects($0.receipt) }) ?? true else { return }
+                    let preparation = try await facade.pendingPreparation()
+                    guard current(), self.meguriConnectionOwner === owner, preparation == nil else { return }
+                    answer = .other
+                case .notSelected, .stale: break
+                }
+                // A connection replacement during an await invalidates this
+                // answer, including a replacement with the same endpoint.
+                let latest = try await provider.configuredMeguri()
+                guard current(), self.meguriConnectionOwner === owner,
+                      latest?.connection == configured.connection else { answer = nil; return }
+            } catch { answer = nil }
+        }
+        guard issued, let task = meguriAction?.task else { return nil }
+        await task.value
+        return answer
+    }
+
     /// The jobs for the ready binding, and the pending read for any binding.
     private var meguriStructureJobs: (any MeguriStructureJobService)? {
         if let meguriStructureJobsOverride { return meguriStructureJobsOverride }
@@ -5338,6 +5396,14 @@ extension SyncCoordinator: NoteTypesMeguriSync {
         async throws -> NoteTypeSyncSaveResult {
         try await runMeguriStructure(progress: progress) { jobs, onStage in
             try await jobs.saveNotetypeStructure(draft, reachable: reachable, onStage: onStage)
+        }
+    }
+
+    public func removeNotetypeStructure(_ request: NotetypeRemoval, reachable: Bool,
+                                        progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        try await runMeguriStructure(progress: progress) { jobs, onStage in
+            try await jobs.removeNotetypeStructure(request, reachable: reachable, onStage: onStage)
         }
     }
 

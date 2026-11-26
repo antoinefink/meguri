@@ -210,6 +210,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerRoundOutcome = BridgeCall("ProviderRoundResult.outcome")
     public static let providerRoundRetryFinalization = BridgeCall("ProviderRoundResult.retry_finalization")
     public static let providerStartStructureSave = BridgeCall("ProviderConnection.start_structure_save")
+    public static let providerStartStructureSaveForGeneration = BridgeCall("ProviderConnection.start_structure_save_for_generation")
     public static let providerStartStructureUpload = BridgeCall("ProviderConnection.start_structure_upload")
     public static let providerStructureAdvance = BridgeCall("ProviderStructureJob.advance")
     public static let providerStructureCancel = BridgeCall("ProviderStructureJob.cancel")
@@ -380,6 +381,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startRenameTag = BridgeCall("start_rename_tag")
     public static let startReparentTags = BridgeCall("start_reparent_tags")
     public static let startDeleteTags = BridgeCall("start_delete_tags")
+    public static let startDeleteTagsForGeneration = BridgeCall("start_delete_tags_for_generation")
     public static let startClearUnusedTags = BridgeCall("start_clear_unused_tags")
     public static let trackedMediaNames = BridgeCall("tracked_media_names")
     public static let addMedia = BridgeCall("add_media")
@@ -442,6 +444,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
+    public static let startNotetypeRemoval = BridgeCall("start_notetype_removal")
+    public static let startNotetypeRemovalForGeneration = BridgeCall("start_notetype_removal_for_generation")
+    public static let notetypeRemovalJobResult = BridgeCall("NotetypeRemovalJob.result")
     public static let startNotetypeStructureSave = BridgeCall("start_notetype_structure_save")
     public static let notetypeStructureJobResult = BridgeCall("NotetypeStructureJob.result")
     public static let notetypeCheckFieldName = BridgeCall("notetype_check_field_name")
@@ -766,7 +771,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerBootstrapOutcome, providerBootstrapMediaSnapshot, providerBootstrapRequestStop,
         providerBootstrapRetainedOperation,
         providerStartCollectionRound, providerStartMediaRound, providerRoundOutcome, providerRoundRetryFinalization,
-        providerStartStructureSave, providerStartStructureUpload, providerStructureAdvance, providerStructureCancel,
+        providerStartStructureSave, providerStartStructureSaveForGeneration, providerStartStructureUpload, providerStructureAdvance, providerStructureCancel,
         providerStructureSaved, providerStructureUploadPending,
         providerStructureImportOutcome, packageFileClassOfName, packageFileClass, deckImportStoredOptions,
         startDeckImportInspect, deckImportInspectJobOutcome, deckImportSessionStartApply, deckImportApplyJobOutcome,
@@ -808,13 +813,13 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
-        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, editorAddPicture, trackedMediaNames, flushForBackground,
+        startReparentTags, startDeleteTags, startDeleteTagsForGeneration, startClearUnusedTags, addMedia, editorAddPicture, trackedMediaNames, flushForBackground,
         suspend, resume, checkRollover, fsrsPolicyStatus, enableFsrs, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startUndoStep, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
-        startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
+        startNotetypeRemoval, startNotetypeRemovalForGeneration, notetypeRemovalJobResult, startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
         notetypeTemplateSyntax, notetypeStylingSyntax, renderNotetypeDraft, notetypeNoteIds,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,

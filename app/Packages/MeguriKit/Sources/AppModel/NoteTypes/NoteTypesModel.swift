@@ -34,6 +34,15 @@ public final class NoteTypesModel {
         public var rows: [NoteTypeSaveRow] { NoteTypeSaveRow.rows(summary) }
     }
 
+    /// W12's question always confirms both loss categories, including zero.
+    public nonisolated struct DeletionQuestion: Sendable, Hashable {
+        public let notetypeId: Int64
+        public let name: String
+        public let counts: NotetypeRemovalCounts
+        public let service: NoteTypeSaveService
+        public let expectedGeneration: UInt64
+    }
+
     /// A running save (D5 step 5): "Updating <i> of <n> notes"; with Meguri
     /// Sync, the job's stage (D6).
     public nonisolated struct Progress: Sendable, Hashable {
@@ -42,6 +51,7 @@ public final class NoteTypesModel {
         public var total: UInt64?
         /// Nil for a save on this device alone.
         public var stage: NoteTypeSyncStage?
+        public var removing = false
     }
 
     public nonisolated enum Failure: Sendable, Hashable {
@@ -134,6 +144,7 @@ public final class NoteTypesModel {
     /// Flip found no separator with text on both sides (A15).
     public var flipRefused = false
     public private(set) var question: Question?
+    public private(set) var deletionQuestion: DeletionQuestion?
     /// The confirm button of the shown question is waiting for D5 step 4's read.
     public private(set) var confirming = false
     public private(set) var preparing: Int64?
@@ -196,6 +207,9 @@ public final class NoteTypesModel {
     public let preview: NoteTypePreview
     /// D3: the service and its binding, read at Save (and for the button's title).
     @ObservationIgnored public var service: @MainActor () -> NoteTypeSaveService = { .other }
+    /// W12/D3: deletion alone can run locally with a confirmed absent binding.
+    /// Nil from the read means unknown, busy, or an upload/setup still pending.
+    @ObservationIgnored public var deletionService: (@MainActor () async -> NoteTypeSaveService?)?
     /// Whether a collection exists to read: false on first run, before one
     /// is created, imported or synced (N18.3).
     @ObservationIgnored public var hasCollection: @MainActor () -> Bool = { true }
@@ -205,6 +219,7 @@ public final class NoteTypesModel {
     /// sheet holds the window, and then nothing is asked or saved.
     @ObservationIgnored public var presentQuestion: @MainActor () -> Bool = { true }
     @ObservationIgnored public var dismissQuestion: @MainActor () -> Void = {}
+    @ObservationIgnored public var didDelete: @MainActor (Int64) -> Void = { _ in }
     /// D6's Save and Upload: Meguri Sync's structure save job (MP7). Without
     /// a ready binding Save and Upload is disabled and the sheet says why;
     /// nothing is saved on this device alone (D3: never D5's local save for
@@ -505,7 +520,7 @@ public final class NoteTypesModel {
 
     /// Editing stops while a save prepares or runs (D5 step 5).
     public func editable(_ id: Int64) -> Bool {
-        progress?.notetypeId != id && preparing != id && !(question?.notetypeId == id) && rereading[id] == nil
+        progress?.notetypeId != id && preparing != id && !(question?.notetypeId == id) && deletionQuestion?.notetypeId != id && rereading[id] == nil
             // The note type shown in the selected one's place for a moment takes no edits.
             && !(shownSelection != selection && id == shownSelection)
     }
@@ -937,7 +952,7 @@ public final class NoteTypesModel {
     public func canSave(_ id: Int64) -> Bool {
         // A refused name (V5) holds Save until it is corrected (typed text Save commits first) or cancelled.
         (isEdited(id) || !pendingEdits.isEmpty) && editable(id) && progress == nil && preparing == nil && question == nil
-            && !saveRunning && (renameRefusal == nil || !pendingEdits.isEmpty) && writable() && !issuesBlockSave(id)
+            && deletionQuestion == nil && !saveRunning && (renameRefusal == nil || !pendingEdits.isEmpty) && writable() && !issuesBlockSave(id)
     }
 
     /// Save (⌘S): D2's summary of the draft as it is, then D3; the sheet
@@ -1037,7 +1052,7 @@ public final class NoteTypesModel {
 
     /// The sheet's Cancel (and Esc): nothing is saved; the draft stays.
     public func cancelQuestion() {
-        guard question != nil, !confirming else { return }
+        guard question != nil || deletionQuestion != nil, !confirming else { return }
         closeQuestion()
     }
 
@@ -1045,6 +1060,9 @@ public final class NoteTypesModel {
     public func questionClosed() {
         guard !confirming else { return }
         question = nil
+        deletionQuestion = nil
+        reachabilityToken &+= 1
+        reachabilityTask?.cancel()
     }
 
     private func ask(_ question: Question) {
@@ -1070,13 +1088,14 @@ public final class NoteTypesModel {
         guard let meguriSync else { return }
         reachabilityTask = Task {
             let reachable = await meguriSync.noteTypeSyncReachable()
-            guard !Task.isCancelled, token == reachabilityToken, question != nil, !confirming else { return }
+            guard !Task.isCancelled, token == reachabilityToken, question != nil || deletionQuestion != nil, !confirming else { return }
             meguriUnreachable = !reachable
         }
     }
 
     private func closeQuestion() {
         question = nil
+        deletionQuestion = nil
         reachabilityToken &+= 1
         reachabilityTask?.cancel()
         dismissQuestion()
@@ -1171,6 +1190,225 @@ public final class NoteTypesModel {
         default:
             failure = .notSaved
         }
+    }
+
+    // MARK: Delete Note Type (W12, S12, D4–D8)
+
+    /// Shared admission for the list and Browse's note type row menu. The
+    /// fresh list and the core's LastNotetype refusal protect the final type.
+    public var canRequestDeletion: Bool {
+        writable() && hasCollection() && !leaving && progress == nil && preparing == nil
+            && question == nil && deletionQuestion == nil && !saveRunning && !confirming
+    }
+
+    public func canDelete(_ id: Int64) -> Bool {
+        canRequestDeletion && items.count > 1 && item(id) != nil
+    }
+
+    /// Drafts stay intact on Cancel or any refusal. Deletion removes the
+    /// saved type and only then retires its draft; it never saves that draft.
+    public func delete(_ id: Int64) {
+        guard canRequestDeletion else { return }
+        let epoch = epoch
+        let pending = selection == id ? Array(pendingEdits.values) : []
+        saveRunning = true
+        saveTask = Task {
+            guard self.epoch == epoch, !Task.isCancelled else { return }
+            defer {
+                if self.epoch == epoch {
+                    preparing = nil
+                    saveRunning = false
+                    committingForSave = false
+                }
+            }
+            // Finish already-owned text commits before locking in the question.
+            // While preparing, new edits on this type are disabled.
+            committingForSave = true
+            while true {
+                let batch = inflightCommits.filter { $0.key.notetype == id }
+                if batch.isEmpty { break }
+                for key in batch.keys { inflightCommits[key] = nil }
+                for task in batch.values { _ = await task.value }
+                guard self.epoch == epoch, !Task.isCancelled else { return }
+            }
+            guard self.epoch == epoch, !Task.isCancelled else { return }
+            if !pending.isEmpty {
+                for commit in pending {
+                    _ = await commit()
+                    guard self.epoch == epoch, !Task.isCancelled else { return }
+                }
+            }
+            committingForSave = false
+            preparing = id
+            do {
+                let snapshot = try await backend.deletionSnapshot(id)
+                let names = snapshot.value.names
+                guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving,
+                      names.count > 1, let name = names.first(where: { $0.id == id })?.name else { return }
+                let counts = snapshot.value.counts
+                guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
+                let deletionService = await readDeletionService()
+                guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
+                askDeletion(.init(notetypeId: id, name: name, counts: counts, service: deletionService ?? service(),
+                                  expectedGeneration: snapshot.generation))
+            } catch {
+                guard self.epoch == epoch else { return }
+                failure = .notSaved
+            }
+        }
+    }
+
+    public var canConfirmDeletion: Bool {
+        guard let shown = deletionQuestion, !confirming, writable(), !leaving else { return false }
+        // A setup-required sheet must be able to refresh: its binding may now
+        // be absent. Only the checked read below can admit a local removal.
+        return shown.service != service() || shown.service == .other
+            || (meguriSync != nil && (meguriSyncState == .ready || meguriSyncState == .notSetUp))
+    }
+
+    private func readDeletionService() async -> NoteTypeSaveService? {
+        if let deletionService { return await deletionService() }
+        if service() == .other { return .other }
+        return meguriSync != nil && meguriSyncState == .ready ? .meguriSync : nil
+    }
+
+    public func confirmDeletion() {
+        guard canConfirmDeletion, let shown = deletionQuestion else { return }
+        let epoch = epoch
+        confirming = true
+        saveTask = Task {
+            guard self.epoch == epoch, !Task.isCancelled else { return }
+            defer { if self.epoch == epoch { confirming = false } }
+            do {
+                let snapshot = try await backend.deletionSnapshot(shown.notetypeId)
+                let names = snapshot.value.names
+                guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown else { return }
+                guard names.count > 1, let name = names.first(where: { $0.id == shown.notetypeId })?.name else {
+                    closeQuestion()
+                    reloadList()
+                    return
+                }
+                let counts = snapshot.value.counts
+                guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
+                guard let currentService = await readDeletionService() else { return }
+                guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
+                if snapshot.generation != shown.expectedGeneration || counts.notes > shown.counts.notes || counts.cards > shown.counts.cards || currentService != shown.service || name != shown.name {
+                    askDeletion(.init(notetypeId: shown.notetypeId, name: name, counts: counts, service: currentService,
+                                      expectedGeneration: snapshot.generation))
+                    return
+                }
+                guard currentService == .other || (meguriSync != nil && meguriSyncState == .ready) else { return }
+                let reachable = !meguriUnreachable
+                closeQuestion()
+                await submitDeletion(shown, reachable: reachable)
+            } catch {
+                guard self.epoch == epoch else { return }
+                closeQuestion()
+                deletionRefused(shown, error)
+            }
+        }
+    }
+
+    private func askDeletion(_ question: DeletionQuestion) {
+        preparing = nil
+        let fresh = deletionQuestion == nil
+        deletionQuestion = question
+        if !presentQuestion() {
+            deletionQuestion = nil
+            failure = .notSaved
+            return
+        }
+        if question.service == .meguriSync { checkReachability(fresh: fresh) }
+        else {
+            reachabilityToken &+= 1
+            reachabilityTask?.cancel()
+            meguriUnreachable = false
+        }
+    }
+
+    private func submitDeletion(_ shown: DeletionQuestion, reachable: Bool) async {
+        let id = shown.notetypeId
+        let epoch = epoch
+        let request = NotetypeRemoval(notetypeId: id, confirmedNotes: shown.counts.notes, confirmedCards: shown.counts.cards,
+                                      expectedGeneration: shown.expectedGeneration)
+        progress = Progress(notetypeId: id, stage: shown.service == .other ? nil : (reachable ? .syncing : .saving), removing: true)
+        do {
+            if shown.service == .meguriSync {
+                guard let meguriSync else { progress = nil; failure = .notSaved; return }
+                syncJobRunning = true
+                defer { syncJobRunning = false }
+                let result = try await meguriSync.removeNotetypeStructure(request, reachable: reachable) { [weak self] stage, completed, _ in
+                    guard let self, self.epoch == epoch, self.progress?.notetypeId == id else { return }
+                    self.progress?.stage = stage
+                    self.progress?.completed = completed
+                }
+                guard self.epoch == epoch else { return }
+                progress = nil
+                switch result {
+                case .saved(let uploaded):
+                    deleted(id)
+                    if !uploaded, reachable { notice = .notUploaded }
+                case .syncStopped: failure = .syncStopped
+                case .cancelled: break
+                case .notSaved: failure = .notSaved
+                case .unconfirmed: failure = .unconfirmed
+                }
+            } else {
+                try await backend.remove(request) { [weak self] completed, _ in
+                    guard let self, self.epoch == epoch, self.progress?.notetypeId == id else { return }
+                    self.progress?.completed = completed
+                }
+                guard self.epoch == epoch else { return }
+                progress = nil
+                deleted(id)
+            }
+        } catch {
+            guard self.epoch == epoch else { return }
+            progress = nil
+            if case BridgeError.commitCompleted = error { deleted(id); return }
+            deletionRefused(shown, error)
+        }
+    }
+
+    private func deletionRefused(_ shown: DeletionQuestion, _ error: any Error) {
+        switch error as? BridgeError {
+        case .notetypeStructureRefused(.removalLossesChanged(let notes, let cards))?:
+            askDeletion(.init(notetypeId: shown.notetypeId, name: shown.name,
+                              counts: .init(notes: notes, cards: cards), service: shown.service,
+                              expectedGeneration: shown.expectedGeneration))
+        case .notetypeStructureRefused(.lastNotetype)?:
+            reloadList()
+            failure = .notSaved
+        case .cancelled?: break
+        default: failure = .notSaved
+        }
+    }
+
+    private func deleted(_ id: Int64) {
+        // Drain/retire reads and commits belonging to the removed type, so
+        // none can put its old detail or its unsaved draft back on screen.
+        detailTasks[id]?.cancel(); detailTasks[id] = nil
+        for task in countTasks[id] ?? [] { task.cancel() }
+        countTasks[id] = nil
+        summaryTasks[id]?.cancel(); summaryTasks[id] = nil
+        issueTasks[id]?.cancel(); issueTasks[id] = nil
+        blankTasks[id]?.cancel(); blankTasks[id] = nil
+        referencesTask[id]?.cancel(); referencesTask[id] = nil
+        warming[id] = nil; loaded.remove(id)
+        records[id] = nil; drafts[id] = nil; rereading[id] = nil
+        summaries[id] = nil; revisions[id] = nil; references[id] = nil
+        fieldCounts[id] = nil; typeCounts[id] = nil; templateCardCounts[id] = nil
+        fieldCountsBase[id] = nil; cardCountsBase[id] = nil; blankKeys[id] = nil
+        issueReads[id] = nil; blankReads[id] = nil; blankOwners[id] = nil
+        selectedField[id] = nil; selectedCard[id] = nil
+        stale.remove(id); changedElsewhere.remove(id); recordFailed.remove(id)
+        items.removeAll { $0.id == id }
+        didDelete(id)
+        if selection == id || selection == nil {
+            if filteredItems.isEmpty { filter = "" }
+            selection = filteredItems.first?.id
+        }
+        reloadList()
     }
 
     // MARK: Changes elsewhere
@@ -1290,11 +1528,13 @@ public final class NoteTypesModel {
         issueTasks = [:]; blankTasks = [:]; blankKeys = [:]; cardCountsBase = [:]
         selectedCard = [:]; renamingCard = nil; templateCardCounts = [:]; issueReads = [:]; blankReads = [:]; editorRequest = nil
         flipRefused = false
-        if question != nil { closeQuestion() }
+        if question != nil || deletionQuestion != nil { closeQuestion() }
         phase = .idle; items = []; selection = nil; records = [:]; recordFailed = []; typeCounts = [:]; fieldCounts = [:]
         drafts = [:]; rereading = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; stale = []; selectedField = [:]
         renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; notice = nil; confirming = false
         meguriUnreachable = false
+        saveRunning = false; committingForSave = false
+        pendingEdits = [:]; inflightCommits = [:]
         // A section on screen reads the new collection's list at once.
         if appeared { reloadList() }
     }

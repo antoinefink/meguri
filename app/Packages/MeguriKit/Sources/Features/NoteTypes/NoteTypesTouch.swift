@@ -23,6 +23,14 @@ struct NoteTypesTouchRoot: View {
                 }
                 // Its record is read ahead (a pure read), so its page opens drawn.
                 .onAppear { model.warm(item.id) }
+                .contextMenu { NoteTypeDeletionMenu(model: model, id: item.id) }
+                .swipeActions {
+                    Button(role: .destructive) { model.delete(item.id) } label: {
+                        Label { Text("noteTypes.delete.menu", bundle: .module) } icon: { Image(systemName: "trash") }
+                    }
+                    .disabled(!model.canDelete(item.id))
+                    .accessibilityIdentifier("noteTypes.list.delete")
+                }
             }
         }
         .overlay {

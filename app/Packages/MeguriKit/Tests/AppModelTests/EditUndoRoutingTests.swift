@@ -101,6 +101,7 @@ import Testing
         await held.release()
         await history.waitForCompletion()
         #expect(owner.navigation.section == .settings)
+        #expect(!history.failed, "A successful operation need not change the visible undo status")
     }
 
     @Test func aNewGenerationPeeksItsOwnHistory() async {
@@ -111,6 +112,31 @@ import Testing
         owner.receiveLifecycle(.ready(generation: 12))
         await history.waitForRefresh()
         #expect(await fake.peeks > before, "Same tree, new collection: its undo history is read")
+    }
+
+    @Test func undoFailureIsReportedByTheOperationWithoutGuessingFromHistory() async {
+        let owner = await makeOwner(), history = owner.collectionUndo
+        history.service = FakeUndo(failing: true)
+        await history.waitForRefresh(); await history.refreshNow()
+        let previous = history.undoStatus
+        history.undo(); await history.waitForCompletion()
+        #expect(history.failed && history.undoStatus == previous)
+        history.dismissFailure()
+        #expect(!history.failed)
+    }
+
+    @Test func queuedUndoRechecksCollectionAndPresentationBeforeDispatch() async {
+        for replace in [false, true] {
+            let owner = await makeOwner(), history = owner.collectionUndo, fake = FakeUndo()
+            history.service = fake
+            await history.waitForRefresh(); await history.refreshNow()
+            history.undo()
+            if replace { owner.receiveLifecycle(.ready(generation: 12)) }
+            else { owner.navigation.present(.collectionExport) }
+            await history.waitForCompletion()
+            #expect(await fake.undos == 0)
+            #expect(!history.busy && !history.failed)
+        }
     }
 
     @Test func findIsDisabledDuringReviewAndOutsideTheDeckWorkspace() async {
@@ -144,6 +170,8 @@ import Testing
 
 /// A history with one step; undo moves it to redo.
 private actor FakeUndo: UndoService {
+    let failing: Bool
+    init(failing: Bool = false) { self.failing = failing }
     var undoNameValue: String? = "Rename Deck"
     var redoNameValue: String?
     var undos = 0
@@ -158,6 +186,7 @@ private actor FakeUndo: UndoService {
     func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { peeks += 1; return status(undoNameValue) }
     func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { status(redoNameValue) }
     func startUndo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        if failing { throw .unavailable(reason: "synthetic undo failure") }
         undos += 1; redoNameValue = undoNameValue; undoNameValue = nil
         return .restored(head: head)
     }

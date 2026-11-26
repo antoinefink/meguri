@@ -306,6 +306,7 @@ extension TestHooks {
                     case let .deckOptions(deck): "deckOptions:\(deck.rawValue)"
                     case let .noteType(id): "noteType:\(id)"
                     case .noteTypes: "noteTypes"
+                    case .tags: "tags"
                     case .settingsPage(let page): "settings.\(page.rawValue)"
                     }
                 }.joined(separator: ",")

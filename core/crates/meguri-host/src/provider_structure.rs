@@ -138,6 +138,9 @@ struct TaskState {
     read_usn: Option<i32>,
     /// `col.scm` when the record was written, before the op.
     schema_before: Option<i64>,
+    /// Only results returned by this task's upload/media workers may advance
+    /// this capability. Never resolve a replacement operation from history.
+    media_operation: Option<Operation>,
     finished: Option<Arc<MeguriStructureOutcome>>,
 }
 pub struct MeguriStructureTask {
@@ -207,6 +210,26 @@ fn unsent(op: &Operation) -> bool {
 }
 
 impl CoreHost {
+    /// W12's local route. Refuse a stale UI scope after bootstrap activation
+    /// advances the generation, and recheck the selected binding at the writer.
+    /// In the post-activation generation, retained bootstrap effects already
+    /// prevent the UI from choosing this route before binding publication.
+    pub fn remove_notetype_locally_for_generation(&self, generation: Generation,
+        request: meguri_engine::notetypes::remove::RemoveNotetype, cancel: Arc<CancelToken>,
+        progress: meguri_engine::ProgressSink)
+        -> Result<meguri_engine::OpResult<meguri_engine::notetypes::remove::Removed>, EngineError> {
+        let collection = self.collection_for_generation(generation)?;
+        let doc = self.provider.snapshot()?;
+        // A retained endpoint alone is still Off/unbound. A selected binding
+        // (even stale) or held structure upload must return to the sync route.
+        // The latter can restore its binding when an earlier save was undone.
+        if doc.handoff.is_some() || (doc.selection == meguri_sync::provider::Selection::Meguri
+            && (doc.meguri_binding.is_some() || doc.meguri_structure.is_some())) {
+            return Err(EngineError::Busy { running_op: "Meguri note type removal requires sync admission".into() });
+        }
+        meguri_engine::notetypes::remove::remove(&collection, request, cancel, progress)
+    }
+
     fn structure_record(&self) -> Result<Option<MeguriStructureUpload>, EngineError> {
         Ok(self.provider.snapshot()?.meguri_structure)
     }
@@ -257,10 +280,11 @@ impl CoreHost {
             Ok(self.provider.clear_meguri_structure_upload(record, generation.0, publication)))?;
         cleared.map_err(|_| EngineError::CollectionUnavailable { reason: "Meguri structure record changed".into() })
     }
-    fn structure_admission(&self) -> Result<(Arc<()>, Collection), MeguriStructureRefusal> {
+    fn structure_admission(&self, generation: Generation) -> Result<(Arc<()>, Collection), MeguriStructureRefusal> {
         use MeguriStructureRefusal as R;
+        self.collection_for_generation(generation).map_err(R::Engine)?;
         let admission = self.admit_meguri_structure_job().map_err(|_| R::Busy)?;
-        let collection = self.collection().map_err(R::Engine)?;
+        let collection = self.collection_for_generation(generation).map_err(R::Engine)?;
         Ok((admission, collection))
     }
     fn structure_task(&self, access: MeguriAccessSource, collection: Collection, admission: Arc<()>, reachable: bool,
@@ -269,15 +293,26 @@ impl CoreHost {
         Arc::new(MeguriStructureTask { owner: self.meguri_rounds_owner(), access, generation: collection.generation(), collection,
             reachable, cancelled: AtomicBool::new(false),
             state: Mutex::new(TaskState { stage, admission: finished.is_none().then_some(admission), work, read_usn: None,
-                schema_before: None, finished }) })
+                schema_before: None, media_operation: None, finished }) })
     }
 
     /// MP7 steps 1 to 4 for one confirmed op. `reachable` false is D4's
     /// unreachable case: no round, the save, and the upload left pending.
     pub fn start_meguri_structure_save(&self, access: MeguriAccessSource, work: MeguriStructureWork, reachable: bool)
         -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
+        let generation = self.cloud_connection_generation().map_err(MeguriStructureRefusal::Engine)?;
+        self.start_meguri_structure_save_for_generation(generation, access, work, reachable)
+    }
+    /// A confirmed operation belongs to the collection that supplied its UI
+    /// scope. Refuse before settling uploads or starting a round on a successor.
+    pub fn start_meguri_structure_save_for_generation(&self, generation: Generation, access: MeguriAccessSource,
+        work: MeguriStructureWork, reachable: bool) -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
         use MeguriStructureRefusal as R;
-        let (admission, collection) = self.structure_admission()?;
+        let collection = self.collection_for_generation(generation).map_err(R::Engine)?;
+        let admission = self.admit_meguri_structure_job().map_err(|_| R::Busy)?;
+        // Acquiring the provider lane can wait. Recheck live admission before
+        // any provider work, then retain the already-bound collection in task.
+        self.collection_for_generation(generation).map_err(R::Engine)?;
         if self.settle_meguri_structure_upload().map_err(R::Engine)? { return Err(R::UploadPending); }
         if !matches!(self.meguri_readiness(), Ok(MeguriReadiness::Ready)) { return Err(R::NotReady); }
         if !reachable {
@@ -306,8 +341,15 @@ impl CoreHost {
     /// upload, with no round and no further question.
     pub fn start_meguri_structure_upload(&self, access: MeguriAccessSource)
         -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
+        let generation = self.cloud_connection_generation().map_err(MeguriStructureRefusal::Engine)?;
+        self.start_meguri_structure_upload_for_generation(generation, access)
+    }
+    /// Upload belongs to its caller's original generation, including while
+    /// waiting to acquire the structure lane.
+    pub fn start_meguri_structure_upload_for_generation(&self, generation: Generation, access: MeguriAccessSource)
+        -> Result<Arc<MeguriStructureTask>, MeguriStructureRefusal> {
         use MeguriStructureRefusal as R;
-        let (admission, collection) = self.structure_admission()?;
+        let (admission, collection) = self.structure_admission(generation)?;
         if !self.settle_meguri_structure_upload().map_err(R::Engine)? { return Err(R::NothingPending); }
         let task = self.structure_task(access, collection, admission, true, None, None, None);
         let next = self.begin_upload(&task);
@@ -365,20 +407,24 @@ impl CoreHost {
             }
             Stage::Facts(facts) => self.after_facts(task, state, facts.take_result()),
             Stage::ServerCopy(copy) => self.after_server_copy(task, state, copy.take_result()),
-            Stage::Upload(upload) => self.after_upload(task, upload.take_result()),
-            Stage::MediaPrepare(prepared) => match (prepared.take_result(), (task.access)()) {
-                (Some(Ok(preview)), Ok(access)) => match self.run_meguri_bootstrap_media(access, preview.confirmation) {
-                    Ok(media) => Next::Stage(Stage::Media(media)),
-                    Err(_) => Next::Done(O::Saved(U::Uploaded { media_complete: false })),
-                },
-                _ => Next::Done(O::Saved(U::Uploaded { media_complete: false })),
-            },
+            Stage::Upload(upload) => self.after_upload(task, state, upload.take_result()),
+            Stage::MediaPrepare(prepared) => {
+                if let Some(Ok(preview)) = prepared.take_result()
+                    && state.media_operation.as_ref().is_some_and(|prior| Self::same_media_operation(prior, &preview.operation))
+                    && let Ok(access) = self.structure_media_access(task, &preview.operation)
+                    && let Ok(media) = self.run_meguri_bootstrap_media(access, preview.confirmation) {
+                    state.media_operation = Some(preview.operation);
+                    return Next::Stage(Stage::Media(media));
+                }
+                Next::Done(O::Saved(U::Uploaded { media_complete: false }))
+            }
             Stage::Media(media) => {
-                let complete = match (media.take_result(), (task.access)()) {
-                    (Some(Ok(op)), Ok(access)) => self.complete_meguri_bootstrap(access.connection(), access.username(), &op.id)
-                        .is_ok_and(|accounting| accounting.is_complete()),
-                    _ => false,
-                };
+                let complete = if let Some(Ok(op)) = media.take_result()
+                    && state.media_operation.as_ref().is_some_and(|prior| Self::same_media_operation(prior, &op))
+                    && let Ok(access) = self.structure_media_access(task, &op) {
+                    self.complete_meguri_bootstrap(access.connection(), access.username(), &op.id)
+                        .is_ok_and(|accounting| accounting.is_complete())
+                } else { false };
                 Next::Done(O::Saved(U::Uploaded { media_complete: complete }))
             }
         }
@@ -495,7 +541,7 @@ impl CoreHost {
     /// Step 4, and step 5's Upload…: settles what an earlier attempt left,
     /// then reads the server's facts.
     fn begin_upload(&self, task: &MeguriStructureTask) -> Next {
-        let Ok(access) = (task.access)() else { return pending(MeguriUploadPending::Failed) };
+        let Ok(access) = self.structure_generation_access(task) else { return pending(MeguriUploadPending::Failed) };
         match self.manual_transfer_history().active() {
             Ok(None) => {}
             Ok(Some(op)) if op.acceptance == Acceptance::PossiblyAccepted => return Next::Done(O::Saved(U::AcceptanceUnknown)),
@@ -531,8 +577,44 @@ impl CoreHost {
                 .and_then(|endpoint| meguri_sync::policy::AccountRef::derive(&endpoint, access.username()))
                 .is_some_and(|account| &account == record.binding().account())
     }
-    fn structure_access(&self, task: &MeguriStructureTask, record: &MeguriStructureUpload) -> Result<MeguriAccess, MeguriBootstrapError> {
+    /// Ordinary phases remain tied to the collection admitted at start.
+    fn structure_generation_access(&self, task: &MeguriStructureTask) -> Result<MeguriAccess, MeguriBootstrapError> {
+        self.collection_for_generation(task.generation)?;
+        (task.access)()
+    }
+    fn same_media_operation(prior: &Operation, next: &Operation) -> bool {
+        prior.id == next.id && prior.account == next.account
+            && prior.configured_endpoint == next.configured_endpoint && prior.target_endpoint == next.target_endpoint
+            && prior.direction == next.direction && prior.scope == next.scope
+            && prior.actual_generation == next.actual_generation
+            && prior.resulting_publication == next.resulting_publication && next.revision > prior.revision
+    }
+    /// Only this task's returned upload/media result can cross its activation.
+    /// Generation alone is insufficient: a same-generation replacement must
+    /// also fail the exact retained policy revision and settled R6 identity.
+    fn structure_media_access(&self, task: &MeguriStructureTask, operation: &Operation)
+        -> Result<MeguriAccess, MeguriBootstrapError> {
+        let invalid = || MeguriBootstrapError::ConnectionChanged;
+        if !Arc::ptr_eq(&task.owner, &self.meguri_rounds_owner()) { return Err(invalid()); }
+        let collection = self.collection()?;
+        if operation.actual_generation != Some(collection.generation().0)
+            || !operation.collection_complete || operation.resulting_publication.is_none()
+            || self.manual_transfer_history().get(&operation.id).map_err(|_| invalid())? != *operation
+            || self.manual_transfer_history().active().map_err(|_| invalid())?.as_ref()
+                .map_or(operation.phase != Phase::Complete || operation.receipt.is_none(), |active| active != operation)
+            || DeviceState::for_collection(collection.path()).settled_publication().map_err(MeguriReadyRefusal::Storage)?
+                .map(|publication| publication.identity) != operation.resulting_publication {
+            return Err(invalid());
+        }
         let access = (task.access)()?;
+        let account = meguri_sync::provider::native_endpoint(&access.connection().endpoint).ok()
+            .and_then(|endpoint| meguri_sync::policy::AccountRef::derive(&endpoint, access.username()));
+        if account.as_ref() != Some(&operation.account) { return Err(invalid()); }
+        self.check_meguri_bootstrap_operation(access.connection(), &operation.id)?;
+        Ok(access)
+    }
+    fn structure_access(&self, task: &MeguriStructureTask, record: &MeguriStructureUpload) -> Result<MeguriAccess, MeguriBootstrapError> {
+        let access = self.structure_generation_access(task)?;
         if Self::same_account(&access, record) { Ok(access) } else { Err(MeguriBootstrapError::ConnectionChanged) }
     }
     /// One `meta` read; it changes nothing on either side.
@@ -632,10 +714,14 @@ impl CoreHost {
             Err(error) => { self.discard_unsent(task); pending(bootstrap_pending(&error)) }
         }
     }
-    fn after_upload(&self, task: &MeguriStructureTask, upload: Option<Result<Operation, TransferError>>) -> Next {
+    fn after_upload(&self, task: &MeguriStructureTask, state: &mut TaskState, upload: Option<Result<Operation, TransferError>>) -> Next {
         match upload {
-            Some(Ok(op)) => match (task.access)().and_then(|access| self.prepare_meguri_bootstrap_media(access, op.id.clone())) {
-                Ok(media) => Next::Stage(Stage::MediaPrepare(media)),
+            Some(Ok(op)) => match self.structure_media_access(task, &op)
+                .and_then(|access| self.prepare_meguri_bootstrap_media(access, op.id.clone())) {
+                Ok(media) => {
+                    state.media_operation = Some(op);
+                    Next::Stage(Stage::MediaPrepare(media))
+                },
                 Err(_) => Next::Done(O::Saved(U::Uploaded { media_complete: false })),
             },
             failed => {
@@ -653,7 +739,7 @@ impl CoreHost {
     /// Ends a retained preparation that sent nothing, so that the next
     /// Upload… starts clean. One that may have been sent is never touched.
     fn discard_unsent(&self, task: &MeguriStructureTask) {
-        if let (Ok(Some(op)), Ok(access)) = (self.manual_transfer_history().active(), (task.access)()) {
+        if let (Ok(Some(op)), Ok(access)) = (self.manual_transfer_history().active(), self.structure_generation_access(task)) {
             if unsent(&op) { let _ = self.discard_meguri_bootstrap_preparation_admitted(access.connection(), &op); }
         }
     }
