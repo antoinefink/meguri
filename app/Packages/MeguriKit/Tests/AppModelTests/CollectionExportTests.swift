@@ -9,6 +9,9 @@ private struct RefusingExportService: CollectionExportService {
     var prepareReal = false
     var uncertain = false
     var deckRefusal: DeckExportRefusal?
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
     func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         if prepareReal { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         if uncertain { throw ExportDestinationCompletionUncertain() }
@@ -23,6 +26,9 @@ private struct RefusingExportService: CollectionExportService {
 /// The real service, keeping the last preparation error for a failed expectation's text.
 private final class ObservedExportService: CollectionExportService {
     let lastError = Mutex<String?>(nil)
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
     func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         do { return try await CoreCollectionExportService().prepare(deck: deck, operation: operation, progress: progress) }
         catch { lastError.withLock { $0 = String(describing: error) }; throw error }

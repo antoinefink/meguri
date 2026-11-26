@@ -13,14 +13,14 @@ extension CollectionExportService {
         guard deck == nil else { throw BridgeError.unsupported(feature: "Selected-deck export") }
         return try await prepare(operation: operation, progress: progress)
     }
-    public func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
-        try await prepare(deck: nil, operation: operation, progress: progress)
-    }
 }
 public final class CoreCollectionExportService: CollectionExportService, Sendable {
     private let destination: CoordinatedExportDestination
     private let publisher = StagedCollectionExportDestination()
     public init(destination: CoordinatedExportDestination = CoordinatedExportDestination()) { self.destination = destination }
+    public func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
     public func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         try await CoreEventStream.shared.start()
         try operation.check()
