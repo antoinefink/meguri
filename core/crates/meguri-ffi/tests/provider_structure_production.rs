@@ -1,14 +1,18 @@
 //! The exported MP7 path, including its real access factory. Only the remote
 //! peer is synthetic; no access-source or worker-result substitution.
-use super::*;
+use meguri_ffi::{
+    notetype_structure::NotetypeRemoval,
+    provider::*,
+    test_hooks::provider_owner_for_testing,
+};
 use meguri_engine::{EventKind, OpSource, OpSpec, device_state::DeviceState};
-use meguri_host::{CoreHost, HostConfig, ManualTransferTask, MeguriBootstrapDirection};
-use meguri_model::{clock::{StepClock, UtcOffset}, rng::SeededRandom};
+use meguri_host::{CoreHost, HostConfig};
+use meguri_model::{clock::{StepClock, UtcOffset}, ids::NotetypeId, rng::SeededRandom};
 use meguri_storage::{OpenOptions, ReadRows, ReaderRole, StampMode, Table, open_collection};
-use meguri_sync::{oneway::TransferError, provider::{MeguriReadiness, Selection}};
+use meguri_sync::provider::MeguriReadiness;
 use meguri_testkit::sync_stub::{Reply, SyncStub, TestRoot};
 use serde_json::json;
-use std::{collections::VecDeque, path::Path, sync::mpsc, time::Duration};
+use std::{collections::VecDeque, path::Path, sync::{Arc, Mutex, mpsc}, time::Duration};
 
 const NOW: i64 = 1_894_701_600_000;
 const USER: &str = "synthetic-user";
@@ -42,19 +46,19 @@ fn wait(host: &CoreHost, events: &meguri_engine::Subscription, id: u64) {
         if matches!(event.kind, EventKind::JobFinished { id: done, .. } if done.0 == id) { break; }
     }
 }
-fn transfer<T>(host: &CoreHost, start: impl FnOnce() -> Result<ManualTransferTask<T>, meguri_host::MeguriBootstrapError>) -> T {
+fn transfer(host: &CoreHost, start: impl FnOnce() -> Result<ProviderBootstrapJob, meguri_ffi::CoreError>) -> ProviderBootstrapOutcome {
     let events = host.engine().stream().subscribe();
-    let task = start().unwrap(); wait(host, &events, task.job.id.0);
-    task.take_result().unwrap().unwrap_or_else(|_: TransferError| panic!("actual bootstrap worker failed"))
+    let task = start().unwrap();
+    if let Some(handle) = task.handle { wait(host, &events, handle.id); }
+    task.result.outcome().unwrap()
 }
 fn credentials(connection: &ProviderConnection) -> ProviderCredentials {
-    ProviderCredentials { connection: super::super::information(&connection.inner), username: USER.into(), hostkey: "synthetic-key".into() }
+    ProviderCredentials { connection: connection.information().unwrap(), username: USER.into(), hostkey: "synthetic-key".into() }
 }
 fn started(start: ProviderStructureStart) -> Arc<ProviderStructureJob> {
     match start { ProviderStructureStart::Started { job } => job, _ => panic!("production MP7 admission required") }
 }
-fn drive(job: &ProviderStructureJob, mut upload_gate: Option<mpsc::Sender<()>>, wrong_publication: bool) -> ProviderStructureUpload {
-    let host = &job.owner.host;
+fn drive(host: &CoreHost, job: &ProviderStructureJob, mut upload_gate: Option<mpsc::Sender<()>>, wrong_publication: bool) -> ProviderStructureUpload {
     loop {
         let events = host.engine().stream().subscribe();
         match job.advance().unwrap() {
@@ -99,13 +103,13 @@ fn deletion(offline_then_upload: bool, wrong_publication: bool) {
     meguri_engine::bootstrap::create(&config.collection_directory.join("collection.anki2"), config.clock.as_ref(), config.random.as_ref()).unwrap();
     let host = Arc::new(CoreHost::open(config.clone()).unwrap());
     host.collection().unwrap().run(OpSpec::named("fixture barrier", OpSource::Rollover), |_| Ok(())).unwrap();
-    host.install_meguri_fixture_transport(host.cloud_connection_generation().unwrap(),
-        &config.collection_directory.canonicalize().unwrap().join("collection.anki2"),
-        &config.manual_transfer_directory, &stub.url(), &ca.der()).unwrap();
-    let inner = host.configure_meguri_connection(&stub.url()).unwrap();
-    let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap(); host.finish_provider_handoff(&handoff).unwrap();
-    let setup = ProviderConnection { owner: Arc::new(ProviderOwner { host: host.clone(), generation: host.cloud_connection_generation().unwrap() }), inner };
-    let access = || setup.access(credentials(&setup)).unwrap();
+    let setup_owner = provider_owner_for_testing(host.clone()).unwrap();
+    setup_owner.install_meguri_fixture_transport_for_testing(
+        config.collection_directory.canonicalize().unwrap().join("collection.anki2").to_str().unwrap().into(),
+        config.manual_transfer_directory.to_str().unwrap().into(), stub.url(), ca.der()).unwrap();
+    let setup = setup_owner.clone().configure_meguri(stub.url()).unwrap();
+    let handoff = setup_owner.clone().begin_handoff(ProviderSelection::Meguri, false).unwrap();
+    setup_owner.finish_handoff(handoff).unwrap();
     let collection = host.collection().unwrap();
     let notetype = {
         let reader = collection.reader(ReaderRole::Query).unwrap();
@@ -120,18 +124,32 @@ fn deletion(offline_then_upload: bool, wrong_publication: bool) {
     push(&replies, "/sync/download", server_copy(&root.path().join("initial-server"), NOW - 1000, NOW - 5000, 8));
     for _ in 0..2 { push(&replies, "/sync/meta", meta(NOW - 1000, NOW - 5000, 8)); }
     push(&replies, "/sync/upload", b"OK".to_vec()); push(&replies, "/msync/begin", media());
-    let preview = transfer(&host, || host.prepare_meguri_bootstrap(access(), MeguriBootstrapDirection::UseDeviceCollection));
-    let op = transfer(&host, || host.confirm_meguri_bootstrap(access(), preview));
-    let preview = transfer(&host, || host.prepare_meguri_bootstrap_media(access(), op.id));
-    let op = transfer(&host, || host.run_meguri_bootstrap_media(access(), preview.confirmation));
-    assert!(host.complete_meguri_bootstrap(&setup.inner, USER, &op.id).unwrap().is_complete());
+    let ProviderBootstrapOutcome::Preview { preview } = transfer(&host,
+        || setup.start_bootstrap_prepare(credentials(&setup), ProviderBootstrapDirection::UseDeviceCollection))
+        else { panic!("actual bootstrap preview required") };
+    let ProviderBootstrapOutcome::Operation { operation } = transfer(&host,
+        || setup.start_bootstrap_confirm(credentials(&setup), preview))
+        else { panic!("actual bootstrap upload required") };
+    // Collection activation retires the setup owner, so reacquire through the
+    // same fixture Host without refreshing any retained ordinary owner.
+    let setup = provider_owner_for_testing(host.clone()).unwrap().configured_meguri().unwrap().unwrap();
+    let ProviderBootstrapOutcome::MediaConsent { consent } = transfer(&host,
+        || setup.start_bootstrap_media_prepare(credentials(&setup), operation))
+        else { panic!("actual bootstrap media consent required") };
+    let ProviderBootstrapOutcome::Operation { operation } = transfer(&host,
+        || setup.start_bootstrap_media(credentials(&setup), consent))
+        else { panic!("actual bootstrap media worker required") };
+    assert!(matches!(setup.complete_bootstrap(credentials(&setup), operation).unwrap(), ProviderBootstrapOutcome::Ready { .. }));
     clock.set_now_ms(NOW + 60_000);
-    let connection = ProviderConnection { owner: Arc::new(ProviderOwner { host: host.clone(), generation: host.cloud_connection_generation().unwrap() }), inner: setup.inner.clone() };
+    let owner = provider_owner_for_testing(host.clone()).unwrap();
+    let connection = owner.clone().configured_meguri().unwrap().unwrap();
+    let credentials = credentials(&connection);
+    let generation = host.cloud_connection_generation().unwrap();
     let before = host.collection().unwrap().reader(ReaderRole::Query).unwrap().col().unwrap();
     let remove = ProviderStructureOp::Remove { request: NotetypeRemoval { notetype_id: notetype, confirmed_notes: 1, confirmed_cards: 1 } };
     if !offline_then_upload { push(&replies, "/sync/meta", meta(before.modified.0, before.schema_modified.0, before.usn.0)); }
     // Production credentials are still checked before starting the round.
-    let mut wrong = credentials(&connection); wrong.connection.revision += 1;
+    let mut wrong = credentials.clone(); wrong.connection.revision += 1;
     assert!(matches!(connection.start_structure_save(wrong, remove.clone(), true).unwrap(),
         ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::NotReady }));
     push(&replies, "/sync/meta", meta(before.last_sync.0, before.schema_modified.0, before.usn.0));
@@ -142,22 +160,22 @@ fn deletion(offline_then_upload: bool, wrong_publication: bool) {
     let (release, blocked) = mpsc::channel();
     replies.lock().unwrap().push_back(("/sync/upload", b"OK".to_vec(), Some(blocked)));
     if !wrong_publication { push(&replies, "/msync/begin", media()); }
-    let job = started(connection.start_structure_save(credentials(&connection), remove, !offline_then_upload).unwrap());
+    let job = started(connection.start_structure_save(credentials.clone(), remove, !offline_then_upload).unwrap());
     let deletion_job = job.clone();
     let job = if offline_then_upload {
-        assert!(matches!(drive(&job, None, false), ProviderStructureUpload::Pending { reason: ProviderUploadPending::Unreachable }));
+        assert!(matches!(drive(&host, &job, None, false), ProviderStructureUpload::Pending { reason: ProviderUploadPending::Unreachable }));
         assert!(host.meguri_structure_upload_pending().unwrap());
-        started(connection.start_structure_upload(credentials(&connection)).unwrap())
+        started(connection.start_structure_upload(credentials.clone()).unwrap())
     } else { job };
-    let upload = drive(&job, Some(release), wrong_publication);
+    let upload = drive(&host, &job, Some(release), wrong_publication);
     assert!(matches!(upload, ProviderStructureUpload::Uploaded { media_complete } if media_complete != wrong_publication));
-    assert_ne!(host.cloud_connection_generation().unwrap(), connection.owner.generation);
-    assert!(connection.owner.validate().is_err(), "activation must not refresh the ordinary owner");
-    assert!(connection.start_structure_upload(credentials(&connection)).is_err());
-    assert!(connection.start_structure_save(credentials(&connection), ProviderStructureOp::Remove {
+    assert_ne!(host.cloud_connection_generation().unwrap(), generation);
+    assert!(owner.snapshot().is_err(), "activation must not refresh the ordinary owner");
+    assert!(connection.start_structure_upload(credentials.clone()).is_err());
+    assert!(connection.start_structure_save(credentials.clone(), ProviderStructureOp::Remove {
         request: NotetypeRemoval { notetype_id: notetype, confirmed_notes: 1, confirmed_cards: 1 } }, true).is_err());
-    assert!(matches!(connection.start_media_round(credentials(&connection)).unwrap(),
-        super::super::normal::ProviderRoundStart::Refused { refusal: ProviderRoundRefusal::Interrupted }));
+    assert!(matches!(connection.start_media_round(credentials.clone()).unwrap(),
+        ProviderRoundStart::Refused { refusal: ProviderRoundRefusal::Interrupted }));
     let saved = deletion_job.saved().unwrap().expect("typed deletion result retained");
     assert!(matches!(saved, ProviderStructureSaved::Removed { removed } if removed.removed && removed.notes_removed == 1 && removed.cards_removed == 1));
     let collection = host.collection().unwrap();

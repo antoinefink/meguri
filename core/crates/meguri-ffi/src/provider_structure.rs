@@ -411,7 +411,3 @@ mod tests {
         connection.owner.host.close().unwrap();
     }
 }
-
-#[cfg(all(test, feature = "test-hooks"))]
-#[path = "provider_structure_production_tests.rs"]
-mod production_tests;
