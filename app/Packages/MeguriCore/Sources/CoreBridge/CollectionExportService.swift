@@ -5,17 +5,34 @@ internal import MeguriCoreBindings
 
 public protocol CollectionExportService: Sendable {
     func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection
+    func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection
     func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws
+}
+extension CollectionExportService {
+    public func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        guard deck == nil else { throw BridgeError.unsupported(feature: "Selected-deck export") }
+        return try await prepare(operation: operation, progress: progress)
+    }
 }
 public final class CoreCollectionExportService: CollectionExportService, Sendable {
     private let destination: CoordinatedExportDestination
     private let publisher = StagedCollectionExportDestination()
     public init(destination: CoordinatedExportDestination = CoordinatedExportDestination()) { self.destination = destination }
     public func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        try await prepare(deck: nil, operation: operation, progress: progress)
+    }
+    public func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         try await CoreEventStream.shared.start()
         try operation.check()
         return try await withTaskCancellationHandler {
-            let started = try await MaintenanceLane.shared.call(.startCollectionExport) { try startCollectionExport() }
+            let started: MeguriCoreBindings.CollectionExportJob
+            if let deck {
+                started = try await MaintenanceLane.shared.call(.startDeckExport) {
+                    try startDeckExport(deckId: deck.deckID, options: deck.options.raw, expectedGeneration: deck.expectedGeneration)
+                }
+            } else {
+                started = try await MaintenanceLane.shared.call(.startCollectionExport) { try startCollectionExport() }
+            }
             var setupFailure: BridgeError?
             do throws(BridgeError) {
                 let job = try await Jobs.trackDraining(started.job)
@@ -49,7 +66,8 @@ public final class CoreCollectionExportService: CollectionExportService, Sendabl
         try await withTaskCancellationHandler {
             try await destination.withDestination(url) { coordinatedURL in
                 try operation.check()
-                try await self.publisher.save(to: coordinatedURL, operation: operation) { stagedURL in
+                try await self.publisher.save(to: coordinatedURL, operation: operation,
+                                              deckPackage: artifact.metadata.suggestedName.hasSuffix(".apkg")) { stagedURL in
                     let started = try await MaintenanceLane.shared.call(.startCollectionExportSave) {
                         try startCollectionExportSave(artifact: artifact.raw, destination: stagedURL.path,
                                                       finalValidationDestination: coordinatedURL.path)

@@ -42,6 +42,8 @@ extension TestHooks {
             registry.register("settings/import-export/typical") { _ in .sheet { CollectionExportPreview.preview(.typical) } }
             registry.register("settings/import-export/error") { _ in .sheet { CollectionExportPreview.preview(.error) } }
             registry.register("settings/import-export/loading") { _ in .sheet { CollectionExportPreview.preview(.loading) } }
+            registry.register("collection/deck-export/options") { _ in .sheet { DeckExportOptionsPreview() } }
+            registry.register("collection/deck-export/options-changed") { _ in .sheet { DeckExportOptionsPreview(changed: true) } }
             registry.register("collection/import/empty") { _ in .sheet { CollectionEntryPreview.preview(.empty) } }
             registry.register("collection/import/typical") { _ in .sheet { CollectionEntryPreview.preview(.typical) } }
             registry.register("collection/import/overflow") { _ in .sheet { CollectionEntryPreview.preview(.overflow) } }

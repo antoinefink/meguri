@@ -22,6 +22,7 @@ impl MediaCollectionExportPlan {
     }
 }
 pub struct MediaCollectionExportWritten {
+    pub deck_counts: Option<crate::DeckExportCounts>,
     pub written: LiveCollectionPackageWritten,
     pub source_validation: ExportSourceValidation,
 }
@@ -99,6 +100,7 @@ pub fn write_media_collection_export_from_live(
     // checked at delivery, where the host can discard its private artifact.
 
     Ok(MediaCollectionExportWritten {
+        deck_counts: None,
         written: LiveCollectionPackageWritten { snapshot_modified },
         source_validation: plan.validation,
     })

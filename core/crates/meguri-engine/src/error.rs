@@ -18,6 +18,10 @@ pub enum EngineError {
     ExportSourceInvalid,
     /// The collection or media exceeds the file format's supported limits.
     ExportFormatLimit,
+    /// Selected ids exceed the export time bound; run Check Database.
+    ExportInvalidIds,
+    /// Selected records or references need Check Database.
+    ExportNeedsCheckDatabase,
     /// Normal sync aborts its merge with the original typed preparation fault.
     SyncNote(meguri_model::note::SyncNoteFault),
     DeckOptionsInvalid(Vec<meguri_sched::options::Issue>),
@@ -161,6 +165,8 @@ impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EngineError::ExportSourceChanged => f.write_str("export source changed"),
+            EngineError::ExportInvalidIds => f.write_str("export ids need Check Database"),
+            EngineError::ExportNeedsCheckDatabase => f.write_str("export records need Check Database"),
             EngineError::ExportSourceInvalid => f.write_str("export source item refused"),
             EngineError::ExportFormatLimit => f.write_str("export format limit"),
             EngineError::SyncNote(_) => f.write_str("incoming collection contract"),

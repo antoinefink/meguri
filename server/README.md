@@ -136,6 +136,14 @@ only by the requesting OAuth grant; staged bytes may be reused until expiry.
 Restart discards uploads. Grant invalidation, data reset and collection replacement
 fence them. The former `/mcp/upload` page is removed.
 
+After deploying changes to MCP tool descriptions, refresh the Meguri Testing
+connection in [ChatGPT Plugins](https://chatgpt.com/plugins). In a new
+conversation, check that `prepare_media_upload` describes posting the file
+bytes. A description asking the user to sign in and return to chat is stale.
+Test with a generated PNG in a disposable collection. Read the resulting note
+by ID and compare the image reference with the SHA-256 of the original file.
+[OpenAI's custom connection refresh procedure](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata)
+
 MCP paged search builds an optional in-memory candidate index in a separate
 blocking job. One build and two retained snapshots are allowed per service;
 there is no queue or persisted index. Builds have a five-second cooperative

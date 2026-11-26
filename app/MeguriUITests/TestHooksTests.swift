@@ -292,6 +292,8 @@ final class TestHooksTests: XCTestCase {
             "collection/deck-import/result",
             "collection/deck-import/result-log",
             "collection/deck-import/result-undone",
+            "collection/deck-export/options",
+            "collection/deck-export/options-changed",
             "collection/import/empty",
             "collection/import/error",
             "collection/import/loading",

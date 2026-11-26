@@ -642,7 +642,10 @@ impl From<WriteError> for BackupFailureCause {
             Input::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
             Input::Corrupt { detail } => Self::Corrupt { detail },
             Input::Io { detail } => Self::Io { detail },
-            export_failure @ (Input::ExportFormatLimit
+            export_failure @ (Input::DeckNotFound { .. }
+            | Input::ExportInvalidIds
+            | Input::ExportNeedsCheckDatabase
+            | Input::ExportFormatLimit
             | Input::ExportSourceInvalid { .. }
             | Input::ExportSourceChanged) => {
                 // RF2 and forced backup retain collection-only publication.
