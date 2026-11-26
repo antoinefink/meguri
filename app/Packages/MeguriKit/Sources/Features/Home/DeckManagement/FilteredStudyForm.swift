@@ -158,6 +158,10 @@ private struct StudyFormFrame<Content: View>: View {
                 Section {
                     Text(message(failure), bundle: .module)
                         .accessibilityIdentifier(id + ".message")
+                    if model.canSaveEmpty {
+                        Button { model.confirmEmpty() } label: { Text("Save Empty Deck", bundle: .module) }
+                            .accessibilityIdentifier(id + ".saveEmpty")
+                    }
                     if !model.loaded {
                         Button { model.load() } label: { Text("Try Again", bundle: .module) }
                             .disabled(model.busy)
@@ -188,6 +192,10 @@ private struct StudyFormFrame<Content: View>: View {
         switch failure {
         case .load: "Couldn’t read study settings. Try again."
         case .write: "Couldn’t apply study settings. Check the name, search and amounts. No eligible cards may match. A normal deck with the session’s name must be renamed first."
+        case .noMatches:
+            model.sourceDeck == nil
+                ? "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged."
+                : "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged."
         case .refresh: "The change was saved. Refresh decks to continue."
         }
     }

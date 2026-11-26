@@ -92,59 +92,47 @@ public struct CustomStudyDefaults: Sendable, Equatable {
     }
 }
 public protocol FilteredStudyService: Sendable {
-    func definition(deck: Int64) async throws(BridgeError) -> FilteredStudyDefinition
-    func save(deck: Int64?, definition: FilteredStudyDefinition) async throws(BridgeError) -> Int64
-    func rebuild(deck: Int64) async throws(BridgeError)
-    func empty(deck: Int64) async throws(BridgeError)
-    func custom(deck: Int64, request: CustomStudyRequest) async throws(BridgeError) -> Int64
-    func customDefaults(deck: Int64) async throws(BridgeError) -> CustomStudyDefaults
+    func definition(deck: Int64, generation: UInt64) async throws(BridgeError) -> FilteredStudyDefinition
+    func save(deck: Int64?, definition: FilteredStudyDefinition, allowEmpty: Bool, generation: UInt64) async throws(BridgeError) -> Int64
+    func deckScope(deck: Int64, generation: UInt64) async throws(BridgeError) -> String
+    func rebuild(deck: Int64, generation: UInt64) async throws(BridgeError)
+    func empty(deck: Int64, generation: UInt64) async throws(BridgeError)
+    func custom(deck: Int64, request: CustomStudyRequest, generation: UInt64) async throws(BridgeError) -> Int64
+    func customDefaults(deck: Int64, generation: UInt64) async throws(BridgeError) -> CustomStudyDefaults
 }
 
-/// One collection's filtered-study facade. Pass the route's generation when
-/// available; otherwise the first call pins it. Later calls cannot cross a
-/// collection replacement. Mutation notices also arrive on the core stream.
+/// Every command carries the initiating route's generation, including its first call.
 public actor CoreFilteredStudyService: FilteredStudyService {
-    private var generation: UInt64?
     public private(set) var lastMutation: MutationSummary?
-    public init(generation: UInt64? = nil) { self.generation = generation }
-    private func pinnedGeneration() async throws(BridgeError) -> UInt64 {
-        if let generation { return generation }
-        let current = try await ControlLane.shared.call(.waitCollectionAvailable) {
-            try MeguriCoreBindings.waitCollectionAvailable(timeoutMs: 0)
+    public init() {}
+    public func deckScope(deck: Int64, generation: UInt64) async throws(BridgeError) -> String {
+        try await QueryLane.shared.call(.filteredStudyDeckScope) {
+            try MeguriCoreBindings.filteredStudyDeckScope(deck: deck, generation: generation)
         }
-        if let generation { return generation }
-        generation = current
-        return current
     }
-    public func definition(deck: Int64) async throws(BridgeError) -> FilteredStudyDefinition {
-        let generation = try await pinnedGeneration()
+    public func definition(deck: Int64, generation: UInt64) async throws(BridgeError) -> FilteredStudyDefinition {
         return try await QueryLane.shared.call(.filteredStudyDefinition) {
             FilteredStudyDefinition(try MeguriCoreBindings.filteredStudyDefinition(deck: deck, generation: generation))
         }
     }
-    public func customDefaults(deck: Int64) async throws(BridgeError) -> CustomStudyDefaults {
-        let generation = try await pinnedGeneration()
+    public func customDefaults(deck: Int64, generation: UInt64) async throws(BridgeError) -> CustomStudyDefaults {
         return try await QueryLane.shared.call(.customStudyDefaults) {
             CustomStudyDefaults(try MeguriCoreBindings.customStudyDefaults(deck: deck, generation: generation))
         }
     }
-    public func save(deck: Int64?, definition: FilteredStudyDefinition) async throws(BridgeError) -> Int64 {
-        try await save(deck: deck, definition: definition, allowEmpty: false)
+    public func save(deck: Int64?, definition: FilteredStudyDefinition, allowEmpty: Bool, generation: UInt64) async throws(BridgeError) -> Int64 {
+        try await perform(.save(deck: deck, definition: definition.raw, allowEmpty: allowEmpty), generation: generation)
     }
-    public func save(deck: Int64?, definition: FilteredStudyDefinition, allowEmpty: Bool) async throws(BridgeError) -> Int64 {
-        try await perform(.save(deck: deck, definition: definition.raw, allowEmpty: allowEmpty))
+    public func rebuild(deck: Int64, generation: UInt64) async throws(BridgeError) {
+        _ = try await perform(.rebuild(deck: deck), generation: generation)
     }
-    public func rebuild(deck: Int64) async throws(BridgeError) {
-        _ = try await perform(.rebuild(deck: deck))
+    public func empty(deck: Int64, generation: UInt64) async throws(BridgeError) {
+        _ = try await perform(.empty(deck: deck), generation: generation)
     }
-    public func empty(deck: Int64) async throws(BridgeError) {
-        _ = try await perform(.empty(deck: deck))
+    public func custom(deck: Int64, request: CustomStudyRequest, generation: UInt64) async throws(BridgeError) -> Int64 {
+        try await perform(.custom(deck: deck, request: request.raw), generation: generation)
     }
-    public func custom(deck: Int64, request: CustomStudyRequest) async throws(BridgeError) -> Int64 {
-        try await perform(.custom(deck: deck, request: request.raw))
-    }
-    private func perform(_ command: MeguriCoreBindings.FilteredStudyCommand) async throws(BridgeError) -> Int64 {
-        let generation = try await pinnedGeneration()
+    private func perform(_ command: MeguriCoreBindings.FilteredStudyCommand, generation: UInt64) async throws(BridgeError) -> Int64 {
         try await CoreEventStream.shared.start()
         let started = try await MaintenanceLane.shared.call(.startFilteredStudy) {
             try MeguriCoreBindings.startFilteredStudy(command: command, generation: generation)

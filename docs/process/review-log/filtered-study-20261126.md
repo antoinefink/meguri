@@ -16,3 +16,7 @@ Independent non-author reviewer plancheck examined the complete session records 
 | s-20261126T112411Z-8c5a0336 | 5fbce8f52b1e8ed65adf345305bc9dd805057e2cbc9a6255d3ff3f8c4f947452 |
 
 Plancheck independently examined every byte of `app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift`. The file implements the public F1–F6 contract using native controls and runtime bindings. The orchestrator verified the reviewed SHA-256 `a5345e27c501bc569899b8982826cff4da8d595670b5368844e9eca419795cf5` for the exact path.
+
+The explicit empty-save confirmation changed the native form. Plancheck reviewed its complete 12,876 bytes again. The orchestrator verified the new public SHA-256 `bb91db2a2fbf78fd4877527ace43e5b2cf9bddf47337c5ea7e8f520ead4592ba` at the same path.
+
+Plancheck reviewed the complete `core/crates/meguri-engine/src/decks/custom_study.rs` after the range and scope changes. It contains public F5 logic and takes deck and tag data from the collection at runtime. Verified SHA-256 `73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166`.

@@ -6,6 +6,7 @@ pub mod delete;
 pub mod filtered;
 pub mod names;
 pub mod ops;
+pub mod search_scope;
 pub mod tree;
 
 pub use current::{current, select, select_in};
@@ -65,6 +66,7 @@ pub enum Refusal {
     UnderDescendant,
     FilteredDeck,
     DefaultPreset,
+    NoMatches,
     /// D8 step 6: a live count of the deletion grew past the confirmed one;
     /// the fresh counts.
     LossesChanged { decks: u64, cards: u64 },
@@ -77,6 +79,7 @@ impl Refusal {
             Self::UnderDescendant => "under_descendant",
             Self::FilteredDeck => "filtered_deck",
             Self::DefaultPreset => "default_preset",
+            Self::NoMatches => "no_matches",
             Self::LossesChanged { .. } => "losses_changed",
         }
     }

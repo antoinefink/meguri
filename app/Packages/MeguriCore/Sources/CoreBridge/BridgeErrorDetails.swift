@@ -73,6 +73,7 @@ public enum DeckRefusal: Sendable, Hashable {
     case underDescendant
     case filteredDeck
     case defaultPreset
+    case noMatches
     /// `decks/decks` D8 step 6: the deletion's live counts grew past the
     /// confirmed ones; the question shows again with these.
     case lossesChanged(decks: UInt64, cards: UInt64)
@@ -83,6 +84,7 @@ public enum DeckRefusal: Sendable, Hashable {
         case .underDescendant: self = .underDescendant
         case .filteredDeck: self = .filteredDeck
         case .defaultPreset: self = .defaultPreset
+        case .noMatches: self = .noMatches
         case .lossesChanged(let decks, let cards): self = .lossesChanged(decks: decks, cards: cards)
         }
     }

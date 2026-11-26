@@ -185,7 +185,7 @@ pub fn save_controlled(collection: &Collection, id: Option<DeckId>, def: Definit
         if let Some(id) = id { settings(&require(scope, id)?)?; return_home_in(scope, id)?; }
         let id = save_definition_in(scope, id, &def)?;
         if gather_in(scope, id, &context, salt)? == 0 && !allow_empty {
-            return Err(invalid("No eligible cards matched"));
+            return Err(super::refused(super::Refusal::NoMatches));
         }
         select_in(scope, id)?;
         Ok(id)

@@ -5,7 +5,7 @@ import Observation
 /// F1–F6: drafts and operation admission, never scheduling or card membership.
 @Observable @MainActor
 public final class FilteredStudyModel {
-    public enum Failure: Equatable { case load, write, refresh }
+    public enum Failure: Equatable { case load, write, noMatches, refresh }
     public var definition = FilteredStudyModel.blankDefinition
     public var secondTerm = FilteredStudyTerm(search: "", limit: 20, order: 6)
     public var usesSecondTerm = false
@@ -63,6 +63,8 @@ public final class FilteredStudyModel {
     private var generation: UInt64 = 0
     private var revision: UInt64 = 0
     private var intent: UInt64 = 0
+    private var scopeDeck: Int64?
+    private var emptyCandidate: FilteredStudyDefinition?
     private var savedDeck: Int64?
     private var task: Task<Void, Never>?
 
@@ -81,28 +83,33 @@ public final class FilteredStudyModel {
     public func canEdit(_ deck: Int64) -> Bool { canPresent && owner?.deck(deck)?.filtered == true }
     public func canCustom(_ deck: Int64) -> Bool { canPresent && owner?.deck(deck)?.filtered == false }
 
-    /// A quoted literal operand; the Core owns interpretation of the Browse grammar.
-    public static func deckSearch(_ name: String) -> String {
-        // N3.2's two lowercase keywords are special even inside quotes.
-        let literalName = name == "current" ? "Current" : name == "filtered" ? "Filtered" : name
-        let literal = literalName.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "*", with: "\\*")
-            .replacingOccurrences(of: "_", with: "\\_")
-        return "deck:\"\(literal)\""
-    }
     public func create(deck: Int64? = nil, search: String? = nil) {
         guard canPresent else { return }
         definition = Self.blankDefinition
         secondTerm = .init(search: "", limit: 20, order: 6); usesSecondTerm = false
-        if let deck, let name = owner?.fullDeckName(deck), owner?.deck(deck)?.filtered == false {
-            definition.terms[0].search = Self.deckSearch(name) + " is:due"
-            secondTerm.search = Self.deckSearch(name) + " is:new"
-        }
         if let search { definition.terms[0].search = search }
         readNumericDraft()
         begin(.filteredStudy, deck: nil, source: nil)
-        loaded = true
+        if search == nil, let deck, owner?.deck(deck)?.filtered == false {
+            scopeDeck = deck
+            load()
+        } else { loaded = true }
+    }
+    public func browseCards(_ deck: Int64) {
+        guard canPresent, let owner, owner.deckImportBrowseAvailable else { return }
+        let expected = owner.generation, intent = owner.navigation.intentRevision
+        busy = true
+        task = Task {
+            defer { busy = false; task = nil }
+            do {
+                let search = try await service.deckScope(deck: deck, generation: expected)
+                guard owner.generation == expected, owner.navigation.intentRevision == intent else { return }
+                owner.navigation.browseSearch = search
+                owner.navigation.select(.section(.browse))
+            } catch {
+                if owner.generation == expected, owner.navigation.intentRevision == intent { operationFailed = true }
+            }
+        }
     }
     public func createFromBrowse() {
         guard canPresent, let owner else { return }
@@ -137,7 +144,7 @@ public final class FilteredStudyModel {
         guard let owner else { return }
         revision &+= 1; generation = owner.generation
         editingDeck = deck; sourceDeck = source; failure = nil; loaded = false; savedDeck = nil
-        operationFailed = false; self.route = route
+        operationFailed = false; scopeDeck = nil; emptyCandidate = nil; self.route = route
         owner.navigation.present(route)
         intent = owner.navigation.intentRevision
     }
@@ -156,12 +163,17 @@ public final class FilteredStudyModel {
     public func load() {
         guard !busy, admitted else { return }
         busy = true; failure = nil
-        let revision = revision
+        let revision = revision, generation = generation
         task = Task {
             defer { busy = false; task = nil }
             do {
-                if let deck = editingDeck {
-                    let value = try await service.definition(deck: deck)
+                if let deck = scopeDeck {
+                    let scope = try await service.deckScope(deck: deck, generation: generation)
+                    guard current(revision) else { return }
+                    definition.terms[0].search = scope + " is:due"
+                    secondTerm.search = scope + " is:new"
+                } else if let deck = editingDeck {
+                    let value = try await service.definition(deck: deck, generation: generation)
                     guard current(revision) else { return }
                     definition = value
                     usesSecondTerm = value.terms.count > 1
@@ -169,7 +181,7 @@ public final class FilteredStudyModel {
                     definition.terms = [value.terms.first ?? .init(search: "", limit: 100, order: 1)]
                     readNumericDraft()
                 } else if let deck = sourceDeck {
-                    let value = try await service.customDefaults(deck: deck)
+                    let value = try await service.customDefaults(deck: deck, generation: generation)
                     guard current(revision) else { return }
                     defaults = value; amount = value.extendNew
                     includeTags = value.includeTags.joined(separator: "\n")
@@ -183,7 +195,7 @@ public final class FilteredStudyModel {
         guard !busy, loaded, admitted, savedDeck == nil else { return false }
         if sourceDeck != nil {
             guard Int32(amountText) != nil else { return false }
-            if modeIndex < 2 { return true }
+            if modeIndex < 2 { return (-99_999...99_999).contains(amount) }
             return amount > 0 && (modeIndex != 2 || amount <= 30)
         }
         guard UInt32(firstLimitText) != nil, (!usesSecondTerm || UInt32(secondLimitText) != nil),
@@ -202,24 +214,42 @@ public final class FilteredStudyModel {
     public static func tags(_ text: String) -> [String] {
         text.components(separatedBy: .newlines).filter { !$0.isEmpty }
     }
-    public func submit() {
-        guard canSubmit else { return }
-        busy = true; failure = nil
-        let revision = revision
+    private var draftDefinition: FilteredStudyDefinition {
         var value = definition
         if usesSecondTerm { value.terms.append(secondTerm) }
-        let request = customRequest
+        return value
+    }
+    public var canSaveEmpty: Bool {
+        canSubmit && sourceDeck == nil && emptyCandidate == draftDefinition
+    }
+    public func submit() { submit(allowEmpty: false) }
+    public func confirmEmpty() {
+        guard canSaveEmpty else { return }
+        submit(allowEmpty: true)
+    }
+    private func submit(allowEmpty: Bool) {
+        guard canSubmit else { return }
+        busy = true; failure = nil; emptyCandidate = nil
+        let revision = revision, generation = generation
+        let value = draftDefinition, request = customRequest
+        let source = sourceDeck, editing = editingDeck
         task = Task {
             defer { busy = false; task = nil }
-            guard admitted else { return }
+            guard current(revision), admitted else { return }
             do {
                 let selected: Int64
-                if let sourceDeck { selected = try await service.custom(deck: sourceDeck, request: request) }
-                else { selected = try await service.save(deck: editingDeck, definition: value) }
+                if let source { selected = try await service.custom(deck: source, request: request, generation: generation) }
+                else { selected = try await service.save(deck: editing, definition: value, allowEmpty: allowEmpty, generation: generation) }
                 guard current(revision) else { return }
                 savedDeck = selected
                 await publish(revision)
-            } catch { if current(revision) { failure = .write } }
+            } catch {
+                guard current(revision) else { return }
+                if case .deckRefused(.noMatches) = error {
+                    failure = .noMatches
+                    if source == nil { emptyCandidate = value }
+                } else { failure = .write }
+            }
         }
     }
     private func publish(_ revision: UInt64) async {
@@ -253,7 +283,7 @@ public final class FilteredStudyModel {
     public func cancel() {
         guard !busy else { return }
         if let owner, owner.navigation.sheet == route { owner.navigation.dismissSheet() }
-        route = nil; revision &+= 1; savedDeck = nil
+        route = nil; revision &+= 1; savedDeck = nil; emptyCandidate = nil
     }
     /// Rebuild may legitimately produce an empty deck. No Swift-side search or scheduler.
     public func rebuild(_ deck: Int64) { mutate(deck, empty: false) }
@@ -265,7 +295,7 @@ public final class FilteredStudyModel {
         task = Task {
             defer { busy = false; task = nil }
             do {
-                if empty { try await service.empty(deck: deck) } else { try await service.rebuild(deck: deck) }
+                if empty { try await service.empty(deck: deck, generation: expected) } else { try await service.rebuild(deck: deck, generation: expected) }
                 guard expected == owner.generation else { return }
                 owner.deckWriteFinished()
                 guard try await owner.refreshDeckNames(generation: expected) else { return }
@@ -277,7 +307,7 @@ public final class FilteredStudyModel {
         }
     }
     func invalidate() {
-        revision &+= 1; loaded = false; failure = nil; savedDeck = nil; operationFailed = false
+        revision &+= 1; loaded = false; failure = nil; savedDeck = nil; emptyCandidate = nil; operationFailed = false
         if let owner, route != nil, owner.navigation.sheet == route { owner.navigation.dismissSheet() }
         route = nil
     }

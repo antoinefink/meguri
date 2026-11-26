@@ -79,7 +79,8 @@ fn failed_edits_are_atomic_and_empty_has_real_undo() {
     let mut bad = saved.clone(); bad.name = "Edited".into(); bad.terms.push(Term { search: "(".into(), limit: 2, order: 6 });
     assert!(filtered::save(&h.collection, Some(target), bad, false).is_err());
     let mut empty = saved.clone(); empty.terms[0].search = "cid:1".into();
-    assert!(filtered::save(&h.collection, Some(target), empty.clone(), false).is_err());
+    assert!(matches!(filtered::save(&h.collection, Some(target), empty.clone(), false),
+        Err(meguri_engine::EngineError::DeckRefused(decks::Refusal::NoMatches))));
     assert_eq!(filtered::definition(&*h.collection.reader(ReaderRole::Query).unwrap(), target).unwrap(), saved);
     assert_eq!(ids.iter().map(|id| image(&h, *id)).collect::<Vec<_>>(), before);
     filtered::empty(&h.collection, target).unwrap();
@@ -346,4 +347,94 @@ fn due_order_compares_day_and_intraday_times_and_keeps_nonpositive_dues() {
     let target = filtered::save(&h.collection,Some(target),definition("Due","deck:Home",10,5,true),false).unwrap().value;
     assert_eq!(row(&h,special[0]).due,0); assert_eq!(row(&h,special[1]).due,-4);
     assert_eq!(row(&h,special[0]).deck_id,target);
+}
+
+#[test]
+fn generated_scopes_keep_unicode_whitespace_decks_and_descendants_separate() {
+    let h = common::fresh();
+    let home = source(&h, "A\u{a0}B");
+    let child = source(&h, "A\u{a0}B::Child");
+    let lookalike = source(&h, "A B");
+    let other_child = source(&h, "A B::Child");
+    let mut review = new_card();
+    review.card_type = CardType::Review; review.queue = CardQueue::Review; review.due = 0;
+    let home_ids = [seed(&h, home, vec![new_card(), review.clone()]), seed(&h, child, vec![new_card(), review.clone()])].concat();
+    let other_ids = [seed(&h, lookalike, vec![new_card(), review.clone()]), seed(&h, other_child, vec![new_card(), review])].concat();
+    for (deck, expected, excluded) in [(home, &home_ids, &other_ids), (lookalike, &other_ids, &home_ids)] {
+        let scope = decks::search_scope::deck(&*h.collection.reader(ReaderRole::Query).unwrap(), deck).unwrap();
+        if deck == home { assert!(scope.starts_with("did:")); }
+        // Both editor defaults use this exact operand, retaining descendants.
+        for (state, indexes) in [("is:due", [1, 3]), ("is:new", [0, 2])] {
+            let target = filtered::save(&h.collection, None,
+                definition("Editor scope", &format!("{scope} {state}"), 100, 5, true), false).unwrap().value;
+            let actual = members(&h, target).iter().map(|c| c.id).collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(actual, indexes.map(|i| expected[i]).into_iter().collect());
+            filtered::empty(&h.collection, target).unwrap();
+            // Reuse the editor deck without colliding with the next iteration.
+            decks::rename(&h.collection, target, format!("Editor {} {state}", deck.0)).unwrap();
+        }
+        let target = custom_study::custom(&h.collection, deck, request(Mode::ByState, 100)).unwrap().value;
+        let actual = members(&h, target).iter().map(|c| c.id).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected.iter().copied().collect());
+        assert!(excluded.iter().all(|id| row(&h, *id).original_deck_id == DeckId(0)));
+        filtered::empty(&h.collection, target).unwrap();
+    }
+}
+
+#[test]
+fn daily_adjustment_bounds_preserve_all_rows_on_rejection() {
+    for mode in [Mode::IncreaseNew, Mode::IncreaseReview] {
+        let h = common::fresh();
+        let parent = source(&h, "Bounds"); let home = source(&h, "Bounds::Home");
+        let child = source(&h, "Bounds::Home::Child");
+        let ids = seed(&h, home, vec![new_card(); 2]);
+        h.collection.run(OpSpec::named("parent limits", OpSource::UserNonUndoable), |ctx| {
+            ctx.scope().set_config("applyAllParentLimits", &ConfigValue::Bool(true))?; Ok(())
+        }).unwrap();
+        let today = h.collection.today().unwrap();
+        for delta in [-99_999, 0, 99_999] {
+            let before = h.collection.reader(ReaderRole::Query).unwrap().deck(home).unwrap().unwrap();
+            custom_study::custom(&h.collection, home, request(mode, delta)).unwrap();
+            let r = h.collection.reader(ReaderRole::Query).unwrap();
+            let after = r.deck(home).unwrap().unwrap();
+            let counter = |d: &meguri_model::deck::Deck| if mode == Mode::IncreaseNew { d.common.new_studied } else { d.common.review_studied };
+            let initial = if before.common.last_day_studied == today { counter(&before) } else { 0 };
+            assert_eq!(counter(&after), initial - delta);
+            assert_eq!(counter(&r.deck(parent).unwrap().unwrap()), counter(&after));
+            assert_eq!(counter(&r.deck(child).unwrap().unwrap()), 0);
+        }
+        let deck_images = || h.collection.reader(ReaderRole::Query).unwrap().deck_rows().unwrap().iter().map(Record::to_cells).collect::<Vec<_>>();
+        let before = deck_images();
+        let cards = ids.iter().map(|id| image(&h, *id)).collect::<Vec<_>>();
+        for delta in [-100_000, 100_000, i32::MIN, i32::MAX] {
+            assert!(matches!(custom_study::custom(&h.collection, home, request(mode, delta)), Err(meguri_engine::EngineError::InvalidArgument { .. })));
+            assert_eq!(deck_images(), before);
+            assert_eq!(ids.iter().map(|id| image(&h, *id)).collect::<Vec<_>>(), cards);
+        }
+    }
+}
+
+#[test]
+fn daily_new_adjustment_example_changes_production_queue_counts_across_rollover() {
+    let h = common::fresh(); let home = source(&h, "Daily example");
+    seed(&h, home, vec![new_card(); 32]);
+    let today = h.collection.today().unwrap();
+    h.collection.run(OpSpec::named("daily example", OpSource::UserNonUndoable), move |ctx| {
+        let mut preset = ctx.scope().deck_config(meguri_model::ids::DeckConfigId(1))?.unwrap();
+        preset.config.new_per_day = 10; preset.config.reviews_per_day = 200;
+        ctx.scope().put(&preset)?;
+        let mut deck = ctx.scope().deck(home)?.unwrap();
+        deck.common.last_day_studied = today; deck.common.new_studied = 8;
+        ctx.scope().put(&deck)?; Ok(())
+    }).unwrap();
+    let count = || meguri_engine::sched::queue::QueueProvider::default().queue(&h.collection, Some(home)).unwrap().value.counts.new;
+    assert_eq!(count(), 2);
+    custom_study::custom(&h.collection, home, request(Mode::IncreaseNew, 5)).unwrap();
+    assert_eq!(count(), 7);
+    custom_study::custom(&h.collection, home, request(Mode::IncreaseNew, -2)).unwrap();
+    assert_eq!(count(), 5);
+    assert_eq!(custom_study::defaults(&h.collection, home).unwrap().extend_new, 5);
+    h.clock.set_now_ms(h.collection.next_day_at().unwrap() * 1000 + 1000);
+    custom_study::custom(&h.collection, home, request(Mode::IncreaseNew, 5)).unwrap();
+    assert_eq!(count(), 15);
 }

@@ -358,11 +358,14 @@ public final class ReviewCollection: ChangeFanoutSink {
         return value
     }
     @ObservationIgnored public var showDeckStatistics: ((Int64) -> Void)?
-    private let filteredStudyService: any FilteredStudyService
+    private let filteredStudyService: (any FilteredStudyService)?
+    private var filteredStudyGeneration: UInt64?
     private var filteredStudyOwner: FilteredStudyModel?
     public var filteredStudy: FilteredStudyModel {
-        if let filteredStudyOwner { return filteredStudyOwner }
-        let value = FilteredStudyModel(owner: self, service: filteredStudyService)
+        if let filteredStudyOwner, filteredStudyGeneration == generation { return filteredStudyOwner }
+        filteredStudyOwner?.invalidate()
+        let value = FilteredStudyModel(owner: self, service: filteredStudyService ?? CoreFilteredStudyService())
+        filteredStudyGeneration = generation
         filteredStudyOwner = value
         return value
     }
@@ -715,7 +718,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// How long a press on kept content waits for the first read before it is dropped (N27.4).
     @ObservationIgnored var firstReadWait: Duration = .seconds(3)
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, filteredStudyService: any FilteredStudyService = CoreFilteredStudyService()) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, filteredStudyService: (any FilteredStudyService)? = nil) {
         self.filteredStudyService = filteredStudyService
         self.deckImportService = deckImportService ?? CoreDeckPackageImportService()
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }

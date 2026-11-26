@@ -59,6 +59,9 @@ pub fn defaults(collection: &Collection, id: DeckId) -> Result<Defaults, EngineE
         exclude_tags: tags(rows, id, "customStudyExcludeTags")? })
 }
 fn extend_in(scope: &mut WriteScope<'_>, id: DeckId, request: &Request, today: u32) -> Result<(), EngineError> {
+    if !(-99_999..=99_999).contains(&request.amount) {
+        return Err(invalid("Daily limit adjustments must be between -99999 and 99999"));
+    }
     let source = normal(scope, id)?;
     let parents = SchedConfig::new(scope).apply_all_parent_limits()?;
     for mut deck in scope.deck_rows()?.into_iter().filter(|d| d.id == id ||
@@ -79,7 +82,7 @@ fn extend_in(scope: &mut WriteScope<'_>, id: DeckId, request: &Request, today: u
     }
     Ok(())
 }
-fn definition_for(name: &str, request: &Request) -> Result<Definition, EngineError> {
+fn definition_for(deck_scope: String, request: &Request) -> Result<Definition, EngineError> {
     if request.amount < 1 { return Err(invalid("Provide a positive day count or card limit")); }
     let (search, limit, order, reschedule) = match request.mode {
         Mode::Forgotten => {
@@ -97,7 +100,7 @@ fn definition_for(name: &str, request: &Request) -> Result<Definition, EngineErr
         },
         _ => return Err(invalid("A search mode is required")),
     };
-    let mut operands = vec![literal(BuiltItem::Deck(name.to_owned()))?];
+    let mut operands = vec![deck_scope];
     if !search.is_empty() { operands.push(format!("({search})")); }
     if request.mode == Mode::ByState {
         if !request.include_tags.is_empty() {
@@ -118,13 +121,13 @@ pub fn custom_controlled(collection: &Collection, id: DeckId, request: Request, 
     collection.run(filtered::study_spec(crate::undo::names::CUSTOM_STUDY).cancel(cancel), move |ctx| {
         let salt = ctx.random().next_u64() as i64;
         let scope = ctx.scope();
-        let source = normal(scope, id)?;
+        normal(scope, id)?;
         let context = crate::browse::search::search_context(&c, scope)?;
         if matches!(request.mode, Mode::IncreaseNew | Mode::IncreaseReview) {
             extend_in(scope, id, &request, context.today)?;
             return Ok(id);
         }
-        let def = definition_for(&names::human_name(&source.name), &request)?;
+        let def = definition_for(super::search_scope::deck(scope, id)?, &request)?;
         let rows = scope.deck_rows()?;
         let previous = names::find(&rows, &names::native_name(&def.name));
         if previous.is_some_and(|d| !super::is_filtered(d)) {
@@ -132,7 +135,7 @@ pub fn custom_controlled(collection: &Collection, id: DeckId, request: Request, 
         }
         if let Some(deck) = previous { filtered::return_home_in(scope, deck.id)?; }
         let selected = filtered::save_definition_in(scope, previous.map(|d| d.id), &def)?;
-        if filtered::gather_in(scope, selected, &context, salt)? == 0 { return Err(invalid("No eligible cards matched")); }
+        if filtered::gather_in(scope, selected, &context, salt)? == 0 { return Err(super::refused(super::Refusal::NoMatches)); }
         if request.mode == Mode::ByState {
             for (key, values) in [("customStudyIncludeTags", &request.include_tags), ("customStudyExcludeTags", &request.exclude_tags)] {
                 scope.set_config(&format!("_deck_{}_{key}", id.0),

@@ -56,6 +56,14 @@ pub fn filtered_study_definition(deck: i64, generation: u64) -> Result<FilteredS
     Ok(engine::definition(&*snapshot, DeckId(deck))?.into())
 }
 #[uniffi::export]
+pub fn filtered_study_deck_scope(deck: i64, generation: u64) -> Result<String, CoreError> {
+    callback::enter("filtered_study_deck_scope");
+    let c = runtime::host()?.collection_for_generation(Generation(generation))?;
+    let reader = c.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    Ok(meguri_engine::decks::search_scope::deck(&*snapshot, DeckId(deck))?)
+}
+#[uniffi::export]
 pub fn custom_study_defaults(deck: i64, generation: u64) -> Result<CustomStudyDefaults, CoreError> {
     callback::enter("custom_study_defaults");
     let c = runtime::host()?.collection_for_generation(Generation(generation))?;
@@ -116,6 +124,13 @@ pub fn start_filtered_study(command: FilteredStudyCommand, generation: u64) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn no_matches_round_trips_as_a_typed_job_error() {
+        let error = CoreError::from(meguri_engine::EngineError::DeckRefused(meguri_engine::decks::Refusal::NoMatches));
+        assert_eq!(error, CoreError::DeckRefused { refusal: crate::error_types::DeckRefusal::NoMatches });
+        assert!(matches!(meguri_engine::EngineError::from(error),
+            meguri_engine::EngineError::DeckRefused(meguri_engine::decks::Refusal::NoMatches)));
+    }
     #[test]
     fn typed_definition_and_all_request_variants_map_without_losing_fields() {
         let d = engine::Definition { name: "Selection".into(), terms: vec![engine::Term { search: "is:due".into(), limit: 100, order: 10 },

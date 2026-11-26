@@ -6,9 +6,10 @@ import Testing
 @MainActor @Suite struct FilteredStudyModelTests {
     @Test func creatingAndCancellingIsInertAndScopesLiteralDeckNames() async {
         let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
-        model.create(deck: 1)
-        #expect(model.definition.terms == [.init(search: "deck:\"Source\\*\\_\\\"::OR\" is:due", limit: 100, order: 1)])
-        #expect(model.secondTerm == .init(search: "deck:\"Source\\*\\_\\\"::OR\" is:new", limit: 20, order: 6))
+        model.create(deck: 1); await model.waitForOperation()
+        #expect(model.definition.terms == [.init(search: service.scope + " is:due", limit: 100, order: 1)])
+        #expect(model.secondTerm == .init(search: service.scope + " is:new", limit: 20, order: 6))
+        #expect(service.generations == [11])
         #expect(model.definition.reschedule && !model.usesSecondTerm)
         #expect(model.definition.againSeconds == 60 && model.definition.hardSeconds == 600 && model.definition.goodSeconds == 0)
         model.definition.name = "Draft"
@@ -36,8 +37,6 @@ import Testing
         model.cancel(); model.custom(1); await model.waitForOperation()
         model.amountText = "-"; #expect(!model.canSubmit)
         model.amountText = "-5"; #expect(model.canSubmit && model.customRequest.amount == -5)
-        #expect(FilteredStudyModel.deckSearch("current") == "deck:\"Current\"")
-        #expect(FilteredStudyModel.deckSearch("filtered") == "deck:\"Filtered\"")
     }
 
     @Test func editorKeepsBothTermsAllOrderCodesAndDelaysOnFailure() async {
@@ -50,11 +49,13 @@ import Testing
             #expect(model.secondTerm == service.value.terms[1])
             model.definition.name = "Kept name"
             model.definition.reschedule = false
-            model.definition.againSeconds = 17; model.definition.hardSeconds = 83; model.definition.goodSeconds = 0
+            model.againText = "17"; model.hardText = "83"; model.goodText = "0"
             model.submit(); model.submit(); await model.waitForOperation()
             #expect(service.saved.count == Int(order) + 1)
             #expect(service.saved.last?.terms.count == 2)
+            #expect(service.saved.last?.againSeconds == 17)
             #expect(service.saved.last?.hardSeconds == 83)
+            #expect(service.saved.last?.goodSeconds == 0)
             #expect(model.failure == .write && model.definition.name == "Kept name")
             #expect(model.canSubmit && owner.navigation.sheet == .filteredStudy)
             model.cancel()
@@ -152,6 +153,76 @@ import Testing
         #expect(!owner.deckActions.canPresent(.subdeck(3)))
     }
 
+    @Test func dailyAdjustmentBoundsIncludeZeroAndRefuseAdjacentValuesInBothForms() async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        model.custom(1); await model.waitForOperation()
+        for mode in 0...1 {
+            model.modeIndex = mode
+            for amount in [-99_999, 0, 99_999] {
+                model.amountText = String(amount)
+                #expect(model.canSubmit && model.customRequest.amount == Int32(amount))
+            }
+            for amount in [-100_000, 100_000, Int32.min, Int32.max] {
+                model.amountText = String(amount)
+                #expect(!model.canSubmit)
+                let writes = service.writes
+                model.submit(); await model.waitForOperation()
+                #expect(service.writes == writes && model.amountText == String(amount))
+            }
+        }
+    }
+
+    @Test func emptyConsentRequiresNoMatchesForTheExactDraftAndIsNeverImplicit() async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        service.refuse = false
+        model.edit(3); await model.waitForOperation()
+        model.definition.name = "Empty candidate"
+        model.confirmEmpty(); await model.waitForOperation()
+        #expect(service.writes == 0 && !model.canSaveEmpty)
+        service.saveError = .invalidArgument("invalid search")
+        model.submit(); await model.waitForOperation()
+        #expect(model.failure == .write && !model.canSaveEmpty)
+        service.saveError = .deckRefused(.noMatches)
+        model.submit(); await model.waitForOperation()
+        #expect(model.failure == .noMatches && model.canSaveEmpty)
+        #expect(model.definition.name == "Empty candidate" && model.usesSecondTerm)
+        #expect(owner.navigation.sheet == .filteredStudy && service.emptyConsents == [false, false])
+        model.secondTerm.search = "changed"
+        #expect(!model.canSaveEmpty)
+        model.confirmEmpty(); await model.waitForOperation()
+        #expect(service.writes == 2)
+        model.submit(); await model.waitForOperation()
+        #expect(model.canSaveEmpty)
+        model.confirmEmpty(); model.confirmEmpty(); await model.waitForOperation()
+        #expect(service.emptyConsents == [false, false, false, true])
+        #expect(service.saved.last?.terms.last?.search == "changed")
+    }
+
+    @Test func replacementRenewsTheModelAndRoutesNewOperationsToItsGeneration() async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), first = owner.filteredStudy
+        first.edit(3); await first.waitForOperation()
+        owner.receiveLifecycle(.ready(generation: 12))
+        owner.loadDeckTree = { Self.tree(generation: 12) }
+        await owner.loadCounts()
+        let next = owner.filteredStudy
+        #expect(next !== first && !first.loaded)
+        let previousCalls = service.generations.count
+        next.edit(3); await next.waitForOperation(); next.cancel()
+        next.custom(1); await next.waitForOperation(); next.cancel()
+        next.empty(3); await next.waitForOperation()
+        next.rebuild(3); await next.waitForOperation()
+        #expect(service.generations.dropFirst(previousCalls) == [12, 12, 12, 12])
+    }
+
+    @Test func browseRequiresAnAvailableDestinationAndUsesTheCoreScope() async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        model.browseCards(1); await model.waitForOperation()
+        #expect(service.generations.isEmpty && owner.navigation.section != .browse)
+        owner.deckImportBrowseAvailable = true
+        model.browseCards(1); await model.waitForOperation()
+        #expect(owner.navigation.section == .browse && owner.navigation.browseSearch == service.scope)
+    }
+
     private func makeOwner(_ service: FilteredStudySpy) async -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
@@ -172,6 +243,13 @@ import Testing
 }
 
 @MainActor private final class FilteredStudySpy: FilteredStudyService {
+    var scope = "did:1,4"
+    var generations: [UInt64] = []
+    var emptyConsents: [Bool] = []
+    var saveError: BridgeError?
+    func deckScope(deck: Int64, generation: UInt64) async throws(BridgeError) -> String {
+        generations.append(generation); return scope
+    }
     var refuse = true
     var saveGate: FilteredStudyGate?
     var readGate: FilteredStudyGate?
@@ -184,24 +262,27 @@ import Testing
     var value = FilteredStudyDefinition(name: "Imported", terms: [
         .init(search: "is:due", limit: 100, order: 1), .init(search: "is:new", limit: 20, order: 6)
     ], reschedule: false, againSeconds: 13, hardSeconds: 97, goodSeconds: 7)
-    func definition(deck: Int64) async throws(BridgeError) -> FilteredStudyDefinition {
+    func definition(deck: Int64, generation: UInt64) async throws(BridgeError) -> FilteredStudyDefinition {
+        generations.append(generation)
         await readGate?.hold(); return value
     }
-    func save(deck: Int64?, definition: FilteredStudyDefinition) async throws(BridgeError) -> Int64 {
+    func save(deck: Int64?, definition: FilteredStudyDefinition, allowEmpty: Bool, generation: UInt64) async throws(BridgeError) -> Int64 {
+        generations.append(generation); emptyConsents.append(allowEmpty)
         saved.append(definition)
+        if let saveError, !allowEmpty { throw saveError }
         if let saveGate { await saveGate.hold(); return 3 }
         if refuse { throw .invalidArgument("zero matches or invalid definition") }
         return 3
     }
-    func rebuild(deck: Int64) async throws(BridgeError) { rebuilt.append(deck) }
-    func empty(deck: Int64) async throws(BridgeError) { emptied.append(deck) }
-    func custom(deck: Int64, request: CustomStudyRequest) async throws(BridgeError) -> Int64 {
-        customRequests.append(request)
+    func rebuild(deck: Int64, generation: UInt64) async throws(BridgeError) { generations.append(generation); rebuilt.append(deck) }
+    func empty(deck: Int64, generation: UInt64) async throws(BridgeError) { generations.append(generation); emptied.append(deck) }
+    func custom(deck: Int64, request: CustomStudyRequest, generation: UInt64) async throws(BridgeError) -> Int64 {
+        generations.append(generation); customRequests.append(request)
         if refuse { throw .invalidArgument("zero matches") }
         return request.mode == .increaseNew || request.mode == .increaseReview ? deck : 3
     }
-    func customDefaults(deck: Int64) async throws(BridgeError) -> CustomStudyDefaults {
-        defaultsReads += 1
+    func customDefaults(deck: Int64, generation: UInt64) async throws(BridgeError) -> CustomStudyDefaults {
+        generations.append(generation); defaultsReads += 1
         return .init(availableNew: 731, availableReview: 82, extendNew: 14, extendReview: 27,
                      includeTags: ["language::a*b"], excludeTags: ["draft"])
     }

@@ -78,15 +78,13 @@ struct DeckMenu: View {
             }
         }
         Divider()
-        Button {
-            guard collection.filteredStudy.canPresent else { return }
-            collection.navigation.browseSearch = FilteredStudyModel.deckSearch(collection.fullDeckName(deck.id) ?? deck.name)
-            collection.navigation.select(.section(.browse))
-        } label: {
-            Label { Text("Browse Cards", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
+        if collection.deckImportBrowseAvailable {
+            Button { collection.filteredStudy.browseCards(deck.id) } label: {
+                Label { Text("Browse Cards", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
+            }
+            .disabled(!collection.filteredStudy.canPresent)
+            .accessibilityIdentifier("home.deckMenu.browse.\(deck.id)")
         }
-        .disabled(!collection.filteredStudy.canPresent)
-        .accessibilityIdentifier("home.deckMenu.browse.\(deck.id)")
         if let show = collection.showDeckStatistics {
             Button { show(deck.id) } label: {
                 Label { Text("Deck Statistics", bundle: .module) } icon: { Image(systemName: "chart.bar") }
