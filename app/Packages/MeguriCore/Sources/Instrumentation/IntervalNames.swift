@@ -345,6 +345,12 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let addStockNotetype = BridgeCall("add_stock_notetype")
     public static let cloneNotetype = BridgeCall("clone_notetype")
     public static let ensureImageOcclusionNotetype = BridgeCall("ensure_image_occlusion_notetype")
+    public static let imageOcclusionParse = BridgeCall("image_occlusion_parse")
+    public static let imageOcclusionReading = BridgeCall("image_occlusion_reading")
+    public static let imageOcclusionAllocate = BridgeCall("image_occlusion_allocate")
+    public static let imageOcclusionWrite = BridgeCall("image_occlusion_write")
+    public static let imageOcclusionNumbers = BridgeCall("image_occlusion_numbers")
+    public static let imageOcclusionDetect = BridgeCall("image_occlusion_detect")
     public static let renameNotetype = BridgeCall("rename_notetype")
     public static let setNotetypeCss = BridgeCall("set_notetype_css")
     public static let setNotetypeFieldOptions = BridgeCall("set_notetype_field_options")
@@ -795,6 +801,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
         addNoteForScreen, addMinedNote, updateNote, patchNote, cardDeck, noteCards, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, editorPasteImagesAsPNG, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
+        imageOcclusionParse, imageOcclusionReading, imageOcclusionAllocate,
+        imageOcclusionWrite, imageOcclusionNumbers, imageOcclusionDetect,
         renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, notetypeCardText, notetypeCardTextEdit, tagMutationJobResult,
         tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
