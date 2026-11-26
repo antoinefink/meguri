@@ -40,8 +40,14 @@ public struct BrowseSidebar<Header: View>: View {
     @Environment(\.appClock) private var clock
 
     public var body: some View {
-        List(selection: $selection) {
-            Section { header }
+        List(selection: listSelection) {
+            Section {
+                #if os(macOS)
+                header.simultaneousGesture(TapGesture().onEnded { deletionSelection = BrowseSidebarDeleteSelection() })
+                #else
+                header
+                #endif
+            }
             if filter.isOn && !anyMatch {
                 Text("browse.sidebar.noMatches", bundle: .module)
                     .foregroundStyle(.secondary)
@@ -65,6 +71,7 @@ public struct BrowseSidebar<Header: View>: View {
             guard NSApp.currentEvent?.type == .keyDown else { return }
             activateByKey()
         }
+        .onDeleteCommand { deleteSelectedTags() }
         #else
         // On touch a tap is the selection's (a primary action would take every tap).
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in rowMenu(rows) }
@@ -79,11 +86,14 @@ public struct BrowseSidebar<Header: View>: View {
             // A sidebar built again starts with no row for Return and Space to act on.
             model.forgetSidebarKeyRow()
             selection = model.listSelection
+            deletionSelection = BrowseSidebarDeleteSelection()
             model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
             model.appear()
         }
         .onDisappear { model.disappear() }
+        #if !os(macOS)
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
+        #endif
         // The rows shown changed: Return and Space never act on a row out of sight.
         .onChange(of: model.filter) { forgetKeyRow() }
         .onChange(of: model.folded) { forgetKeyRow() }
@@ -133,6 +143,35 @@ public struct BrowseSidebar<Header: View>: View {
     /// back to the Browse row after that event: the list keeps a selection
     /// it made itself, and the rows draw the query's values (`active`).
     @State private var selection: Set<BrowseSidebarTag> = []
+    @State private var deletionSelection = BrowseSidebarDeleteSelection()
+
+    /// Only List's own writes are user selections. Restoring the Browse row
+    /// must not replace the rows on which Delete acts.
+    private var listSelection: Binding<Set<BrowseSidebarTag>> {
+        #if os(macOS)
+        Binding(get: { selection }, set: { rows in
+            deletionSelection.changed(from: selection, to: rows, byKey: Self.byKey(),
+                                      commandClick: Self.click() == .command)
+            selection = rows
+            selectionChanged(rows)
+        })
+        #else
+        $selection
+        #endif
+    }
+
+    #if os(macOS)
+    private func deleteSelectedTags() {
+        // Search fields and the inspector's text/WebKit editors keep Delete.
+        // Consult the actual responder at dispatch, never a remembered click
+        // or SwiftUI focus flag. This handler belongs to this List alone.
+        guard let window = NSApp.keyWindow, window.attachedSheet == nil,
+              BrowseResponder.sidebar(window.firstResponder) != nil else { return }
+        let names = BrowseSidebarDeleteSelection.tagNames(in: deletionSelection.rows, tree: model.tags)
+        let target = model.tagDeletion.target(names)
+        model.tagDeletion.delete(target)
+    }
+    #endif
 
     private func selectionChanged(_ rows: Set<BrowseSidebarTag>) {
         switch model.sidebarSelectionChanged(to: rows, byKey: Self.byKey(), click: Self.click()) {
@@ -153,11 +192,15 @@ public struct BrowseSidebar<Header: View>: View {
     /// the arrow keys stand on (`BrowseModel.sidebarRowClicked`).
     private func clicked(_ row: BrowseSidebarTag) {
         guard model.sidebarRowClicked(row, click: Self.click()) else { return }
+        #if os(macOS)
+        deletionSelection.clicked(row, commandClick: Self.click() == .command)
+        #endif
         if selection != model.listSelection { selection = model.listSelection }
     }
 
     private func forgetKeyRow() {
         model.forgetSidebarKeyRow()
+        deletionSelection = BrowseSidebarDeleteSelection()
         if selection != model.listSelection { selection = model.listSelection }
     }
 
@@ -199,6 +242,9 @@ public struct BrowseSidebar<Header: View>: View {
                 Text(verbatim: BrowseStrings.section(kind))
                     .accessibilityIdentifier("browse.sidebar.\(kind.rawValue)")
                     .contextMenu { sectionMenu(kind) }
+                    #if os(macOS)
+                    .simultaneousGesture(TapGesture().onEnded { deletionSelection = BrowseSidebarDeleteSelection() })
+                    #endif
             }
         }
     }
