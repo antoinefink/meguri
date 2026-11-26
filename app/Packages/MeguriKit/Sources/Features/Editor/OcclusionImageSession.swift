@@ -57,7 +57,7 @@ final class OcclusionImageSession {
     var completion: Task<Void, Never>? { task }
 
     func reserveSource(host: FieldEditorHost) -> UUID? {
-        guard host.acceptsHostInput, !busy else { return nil }
+        guard host.acceptsOcclusionImageInput, !busy else { return nil }
         focusHost = host
         cancel(); busy = true; error = nil
         let source = ImageSourceRequest()
@@ -256,7 +256,7 @@ final class OcclusionImageSession {
     }
 
     func chooseFile(_ url: URL, host: FieldEditorHost) {
-        guard host.acceptsHostInput, !busy else { return }
+        guard host.acceptsOcclusionImageInput, !busy else { return }
         guard url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost" else {
             error = IONoteText.unreadableImage(url.lastPathComponent); return
         }
@@ -280,7 +280,7 @@ final class OcclusionImageSession {
             OcclusionImageField.extensions.contains { url.absoluteString.lowercased().hasSuffix("." + $0) }
     }
     func chooseRemoteURL(_ url: URL, host: FieldEditorHost) {
-        guard host.acceptsHostInput, !busy else { return }
+        guard host.acceptsOcclusionImageInput, !busy else { return }
         guard Self.isRemoteImageURL(url) else {
             error = "This image URL can’t be opened. Choose a local image file."; return
         }
@@ -303,7 +303,7 @@ final class OcclusionImageSession {
     private func begin(host: FieldEditorHost, name: String,
                        source: ImageSourceRequest = ImageSourceRequest(),
                        prepare: @escaping @Sendable (Bool) async throws -> OcclusionImageInput) {
-        guard host.acceptsHostInput, !busy, let roles = host.draft.occlusionRoles else { return }
+        guard host.acceptsOcclusionImageInput, !busy, let roles = host.draft.occlusionRoles else { return }
         focusHost = host
         cancel(); busy = true; error = nil; fetchFailure = nil; sourceRequest = source
         sourceBinding = SourceBinding(host)
@@ -357,7 +357,7 @@ final class OcclusionImageSession {
 
     private func currentSource(ticket: UUID, host: FieldEditorHost) -> Bool {
         guard request == ticket else { return false }
-        guard sourceRequest?.isCancelled == false, host.acceptsHostInput,
+        guard sourceRequest?.isCancelled == false, host.acceptsOcclusionImageInput,
               sourceBinding == SourceBinding(host) else {
             cancelSource(ticket: ticket); return false
         }
@@ -369,7 +369,7 @@ final class OcclusionImageSession {
         // admit an already queued writer. Track only admission and the actual
         // image revision here: unrelated field edits must not cancel a source.
         withObservationTracking {
-            _ = host.acceptsHostInput
+            _ = host.acceptsOcclusionImageInput
             _ = host.draft.occlusionImageRevision
         } onChange: { [weak self] in
             source.cancel()

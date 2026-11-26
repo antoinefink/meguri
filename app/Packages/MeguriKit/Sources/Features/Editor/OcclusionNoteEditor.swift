@@ -74,7 +74,9 @@ public struct OcclusionNoteEditor: View {
                 session.cancelSource(ticket: ticket)
             })
         .confirmationDialog(Text(verbatim: IONoteText.changeTitle), isPresented: $changeImage, titleVisibility: .visible) {
-            Button { session.replacing = true } label: { Text(verbatim: IONoteText.confirmChange) }
+            Button {
+                if host.acceptsOcclusionImageInput { session.replacing = true }
+            } label: { Text(verbatim: IONoteText.confirmChange) }
             Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
         } message: { Text(verbatim: IONoteText.changeMessage) }
         .alert(Text("Couldn't Get Media", bundle: .module), isPresented: Binding(
@@ -258,7 +260,7 @@ public struct OcclusionNoteEditor: View {
     }
     private var changeImageButton: some View {
         Button { changeImage = true } label: { Text("Change Image…", bundle: .module) }
-            .disabled(!host.acceptsHostInput || session.busy)
+            .disabled(!host.acceptsOcclusionImageInput || session.busy)
             .accessibilityIdentifier("io.editor.changeImage")
     }
     #endif
@@ -275,7 +277,7 @@ public struct OcclusionNoteEditor: View {
             Spacer()
             if masksShown, !session.replacing, session.image != nil || !draft.values[roles!.image].isEmpty || draft.noteID != nil {
                 Button { changeImage = true } label: { Text(verbatim: IONoteText.changeImage) }
-                    .disabled(!host.acceptsHostInput || session.busy)
+                    .disabled(!host.acceptsOcclusionImageInput || session.busy)
                     .accessibilityIdentifier("io.editor.changeImage")
             }
         }.padding()
@@ -283,10 +285,16 @@ public struct OcclusionNoteEditor: View {
 
     @ViewBuilder private var maskContent: some View {
         if let error = readingError, !session.startsNewMasks {
-            ContentUnavailableView {
-                Text(verbatim: IONoteText.unreadableMasks(error, copying: true))
-            } actions: {
-                if !host.usesOcclusionForm || draft.noteID == nil {
+            if draft.noteID != nil {
+                // The legacy fields view already shows this message above it.
+                if host.usesOcclusionForm {
+                    Text(verbatim: IONoteText.unreadableMasks(error, copying: false))
+                        .padding().accessibilityIdentifier("io.editor.unreadable")
+                }
+            } else {
+                ContentUnavailableView {
+                    Text(verbatim: IONoteText.unreadableMasks(error, copying: true))
+                } actions: {
                     Button { host.drawNewMasks() } label: {
                         Text(verbatim: IONoteText.drawNew)
                     }.accessibilityIdentifier("io.editor.drawNewMasks")
@@ -371,7 +379,7 @@ public struct OcclusionNoteEditor: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .disabled(!masksShown || !host.acceptsHostInput)
+        .disabled(!masksShown || !host.acceptsOcclusionImageInput)
         .onDrop(of: [.fileURL, .url, .image], isTargeted: nil) { providers in
             session.chooseProvider(providers, host: host)
         }

@@ -246,6 +246,7 @@ extension FieldEditorTests {
         defer { host.shutDown() }
         try await host.start()
         let session = host.occlusionImage
+        #expect(host.acceptsOcclusionImageInput)
         let ticket = try #require(session.reserveSource(host: host))
         let result = AsyncStream<Void>.makeStream()
         defer { result.continuation.finish() }
@@ -263,9 +264,12 @@ extension FieldEditorTests {
             try await draft.accept([.init(ord: ord, html: text, unchanged: false)], ifCurrent: { true })
             let observation = try #require(session.draftObservation)
             await observation.value
-            #expect(session.busy && session.error == nil && draft.values[ord] == text)
+            #expect(session.busy && host.acceptsOcclusionImageInput && session.error == nil && draft.values[ord] == text)
             #expect(draft.occlusionImageRevision == revision && draft.values[roles.image] == values[roles.image])
         }
+        host.setHostField(OcclusionFieldFlowTests.second, at: roles.occlusions)
+        await session.draftObservation?.value
+        #expect(session.busy && host.acceptsOcclusionImageInput && session.error == nil)
         result.continuation.finish()
         await completion.value
         #expect(!session.busy && session.error == failure.localizedDescription)
@@ -393,6 +397,8 @@ extension FieldEditorTests {
         #expect(!host.usesOcclusionForm && !host.maskEditorVisible)
         #endif
         #expect(draft.showsMaskEditor && !host.acceptsMaskInput)
+        #expect(host.acceptsHostInput && !host.acceptsOcclusionImageInput)
+        #expect(host.occlusionImage.reserveSource(host: host) == nil)
         masks.setMode(!masks.hideAll); masks.undo(); masks.redo()
         host.drawNewMasks() // Edit must never replace unreadable stored masks.
         #expect(masks.field == malformed && !masks.isDirty && !masks.canUndo && !masks.canRedo)
@@ -440,6 +446,7 @@ extension FieldEditorTests {
         try await host.flush(hold: false)
         #expect(host.maskSession === session && session.field == original)
         let malformed = "bad masks  <br/>"
+        let pending = try #require(host.occlusionImage.reserveSource(host: host))
         var stored = draft.values; stored[0] = malformed
         let ords = draft.reloadUnchanged(stored: stored, tags: [])
         try await host.reload(fields: ords)
@@ -447,10 +454,13 @@ extension FieldEditorTests {
         draft.showsMaskEditor = true
         #expect(host.maskEditorVisible == host.usesOcclusionForm && draft.values[0] == malformed)
         #expect(!session.isReadable && !host.acceptsMaskInput)
+        host.occlusionImage.sourceFailed("obsolete source", ticket: pending, host: host)
+        #expect(!host.occlusionImage.busy && host.occlusionImage.error == nil && !host.acceptsOcclusionImageInput)
         stored[0] = original
         try await host.reload(fields: draft.reloadUnchanged(stored: stored, tags: []))
         #expect(host.maskEditorVisible && host.occlusionReadingError == nil && session.field == original)
         #expect(session.isReadable)
+        #expect(host.acceptsOcclusionImageInput)
     }
 
     @Test func hostMasksSurviveAConversionAlreadyOutstandingInWebKit() async throws {
@@ -588,6 +598,48 @@ extension ReviewCollectionStartupTests {
             let note = try await CoreNoteService().readNote(id: added.id)
             #expect(note.fields[roles.occlusions] == savedMasks && note.fields[roles.header] == "<b>Diagram</b>")
             #expect(note.fields[roles.backExtra] == "<i>Metadata</i>" && note.tags == ["io::flow", "kept"])
+            // O5 protects the image even when it decodes successfully. Exercise
+            // both stored role layouts through the real import entry points.
+            do {
+                var fields = note.fields
+                fields[roles.occlusions] = "{{c1::image-occlusion:rect:left=broken}}  <br/>"
+                let protected = try NoteEditorDraft(editing: .init(id: note.id, notetypeId: draft.notetype.id,
+                    fields: fields, tags: note.tags, guid: note.guid), notetype: draft.notetype,
+                    deck: draft.deck, generation: draft.generation)
+                let protectedHost = try FieldEditorHost(draft: protected, isCurrent: { true })
+                defer { protectedHost.shutDown() }
+                try await protectedHost.start()
+                let source = protectedHost.occlusionImage
+                await source.load(host: protectedHost)
+                try #require(source.image != nil && protectedHost.occlusionReadingError != nil)
+                #expect(protectedHost.acceptsHostInput && !protectedHost.acceptsOcclusionImageInput && !protectedHost.acceptsMaskInput)
+                let mediaBefore = try await CoreMediaService().trackedNames().names
+                #expect(source.reserveSource(host: protectedHost) == nil)
+                source.chooseFile(tiff, host: protectedHost)
+                source.chooseBitmap(try OcclusionFieldFlowTests.bitmap(), host: protectedHost)
+                #expect(!source.chooseProvider([NSItemProvider(object: tiff as NSURL)], host: protectedHost))
+                #expect(!source.busy && source.completion == nil && source.error == nil)
+                try await protectedHost.setMode(.html, ord: roles.header)
+                try #require(try await FieldEditorTests.replaceSource(protectedHost, ord: roles.header, value: "editable metadata"))
+                try await protectedHost.flush(hold: false)
+                protectedHost.setNativeTags(["edited"])
+                #expect(protected.patch()?.fields == [roles.header: "editable metadata"] && protected.patch()?.tags == ["edited"])
+                #expect(protected.values[roles.image] == fields[roles.image] && protected.values[roles.occlusions] == fields[roles.occlusions])
+                #expect(try await CoreMediaService().trackedNames().names == mediaBefore)
+
+                let copy = try NoteEditorDraft(generation: draft.generation, notetype: draft.notetype,
+                    deck: draft.deck, values: fields, tags: note.tags)
+                let copyHost = try FieldEditorHost(draft: copy, isCurrent: { true })
+                defer { copyHost.shutDown() }
+                try await copyHost.start()
+                await copyHost.occlusionImage.load(host: copyHost)
+                #expect(copyHost.occlusionReadingError != nil && copyHost.acceptsOcclusionImageInput)
+                copyHost.drawNewMasks()
+                #expect(copyHost.occlusionImage.startsNewMasks && copyHost.acceptsMaskInput)
+                let replacement = try #require(copyHost.occlusionImage.reserveSource(host: copyHost))
+                copyHost.occlusionImage.cancelSource(ticket: replacement)
+                #expect(copy.values == fields)
+            }
             let next = try #require(flow.draft)
             #expect(next.values[roles.occlusions].isEmpty && next.values[roles.image].isEmpty && next.showsMaskEditor)
             let nextHost = try #require(flow.runtime as? FieldEditorHost)

@@ -54,7 +54,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
                     })
             }
             readOcclusionField = field
-            occlusionReadingError = maskSession?.readingError
+            let readingError = maskSession?.readingError
+            if occlusionReadingError != readingError { occlusionReadingError = readingError }
             if usesOcclusionForm, let shapes = try? OcclusionCodec(field: field).shapes {
                 let masks = shapes.filter {
                     if case .text = $0.kind { return false }
@@ -145,10 +146,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     var flushNativeTags: (@MainActor () -> Void)?
     public var acceptsHostInput: Bool { editable && !held && !draft.hostFieldsHeld && !closed && isCurrent() }
+    /// O5 protects the hidden image role when an existing note's masks cannot
+    /// be read. Metadata input remains available through acceptsHostInput.
+    var acceptsOcclusionImageInput: Bool {
+        acceptsHostInput && (draft.noteID == nil || occlusionReadingError == nil)
+    }
     /// The canvas and its retained writer use the same production admission.
     /// Layout/image readiness alone does not mean the field host is editable.
     var acceptsMaskInput: Bool {
-        acceptsHostInput && maskEditorVisible && occlusionImage.image != nil &&
+        acceptsOcclusionImageInput && maskEditorVisible && occlusionImage.image != nil &&
             !occlusionImage.busy && !occlusionImage.replacing
     }
     /// Option B applies only to macOS Add/Edit; Browse keeps its legacy switch.
