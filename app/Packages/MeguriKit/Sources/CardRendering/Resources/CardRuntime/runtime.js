@@ -86,6 +86,7 @@
   const documentQueryAll = Document.prototype.querySelectorAll;
   const documentBody = getter(Document.prototype, "body");
   const documentHead = getter(Document.prototype, "head");
+  const documentCurrentScript = getter(Document.prototype, "currentScript");
   const documentFonts = getter(Document.prototype, "fonts");
   const fontsStatus = getter(FontFaceSet.prototype, "status");
   const fontsReady = getter(FontFaceSet.prototype, "ready");
@@ -316,6 +317,7 @@
 
   call(nativeAdd, win, "error", function (event) {
     if (call(eventTarget, event) !== win) return;
+    if (call(weakMapGet, mathEvaluationErrors, event)) return;
     let phase = "later";
     let index;
     if (runningScript) {
@@ -1132,6 +1134,7 @@
   let mathWhenReady = null;
   let mathOwner = null;
   let mathStartupOwner = null;
+  const mathEvaluationErrors = new WeakMapCtor();
 
   function mathError(error, update, source) {
     // Late work belongs to its requesting side, never the page's next user.
@@ -1188,23 +1191,40 @@
         }
       } catch (error) { reject(error); return; }
       const owner = mathOwner || mathStartupOwner;
+      const source = call(urlHref, url);
       const script = call(createElement, doc, "script");
       let finished = false;
       const finish = function (error) {
         if (finished) return;
         finished = true;
+        call(nativeRemove, win, "error", evaluationFailed, true);
+        call(nativeRemove, script, "load", loaded);
+        call(nativeRemove, script, "error", loadFailed);
         const parent = call(parentNodeOf, script);
         if (parent) call(removeChild, parent, script);
         if (error) {
-          mathError(error, owner, call(urlHref, url));
+          mathError(error, owner, source);
           reject(error);
         } else resolve();
       };
+      const evaluationFailed = function (event) {
+        if (call(eventTarget, event) !== win || event.filename !== source) return;
+        const current = call(documentCurrentScript, doc);
+        if (current && current !== script) return;
+        // Classic scripts still emit load after evaluation throws. Reject
+        // before that event lets upstream mark a missing component loaded.
+        // The global reporter must not attribute this to a replacement side.
+        call(weakMapSet, mathEvaluationErrors, event, true);
+        finish(new ErrorCtor(event.message || "Bundled MathJax component evaluation failed"));
+      };
+      const loaded = function () { finish(); };
+      const loadFailed = function () { finish(new ErrorCtor("Bundled MathJax component failed")); };
       // Removing a classic script cannot cancel execution. Keep its constrained
       // configuration and real completion alive; only callers have deadlines.
-      call(nativeAdd, script, "load", function () { finish(); });
-      call(nativeAdd, script, "error", function () { finish(new ErrorCtor("Bundled MathJax component failed")); });
-      call(setAttribute, script, "src", call(urlHref, url));
+      call(nativeAdd, win, "error", evaluationFailed, true);
+      call(nativeAdd, script, "load", loaded);
+      call(nativeAdd, script, "error", loadFailed);
+      call(setAttribute, script, "src", source);
       call(appendChild, call(documentHead, doc), script);
     });
   }
@@ -1428,7 +1448,13 @@
     defineProperty(configuration.startup, "promise", { get: mathStartup });
     win.MathJax = configuration;
     mathLoading = promise(function (resolve, reject) {
-      configuration.loader.failed = reject;
+      configuration.loader.failed = function (error) {
+        reject(error);
+        // 4.1.3 catches component failures before ready(), so its original
+        // startup promise otherwise stays pending after our load has failed.
+        const startup = win.MathJax.startup;
+        if (startup && typeof startup.promiseReject === "function") startup.promiseReject(error);
+      };
       then(then(loadMathScript(mathRoot + "tex-svg.js"), function () {
         const engine = win.MathJax;
         if (engine.version !== "4.1.3" || !engine.startup || !engine.startup.promise) {
