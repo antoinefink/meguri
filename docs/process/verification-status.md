@@ -18,6 +18,14 @@ and 15 Rust media tests passed, and the iOS Simulator build passed
 (`build-app/20261126T141020Z-4293`). [PR #232](https://github.com/antoinefink/meguri/pull/232)
 contains the four native screenshots and subsequent verification.
 
+Device backup and restore passed 38 focused Swift tests across six suites
+(`swift-test/20261126T165621Z-20752`). Four restore tests on a collection linked
+to Meguri Sync and 13 retention tests passed in the Rust core. The native
+journeys exercise cancellation, restoring an older backup and recovering the
+preceding collection from its safety copy. See the [backup verification
+record](review-log/backups-preview-evidence-20261126.md) for the per-platform
+results, screenshots and limits of coverage.
+
 The selected-deck package branch passed 25 focused package, host and FFI cases
 (`core-test/20261126T121257Z-27087`), five associated unit cases and 21
 media-capture and package cases after the final protection change

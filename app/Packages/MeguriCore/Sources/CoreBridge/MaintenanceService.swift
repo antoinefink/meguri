@@ -6,6 +6,7 @@ public protocol MaintenanceService: Sendable {
     func runDueMaintenance(_ trigger: MaintenanceTrigger, operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> Int64?
     func listBackups() async throws -> [BackupEntry]
     func backupLimits() async throws -> BackupLimits
+    func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits
     func setBackupLimits(_ limits: BackupLimits) async throws -> Bool
     func status() async throws -> MaintenanceStatus
 }
@@ -16,6 +17,7 @@ protocol MaintenanceNative: Sendable {
     func startRunDueMaintenance(_ trigger: MeguriCoreBindings.MaintenanceTrigger) throws -> MeguriCoreBindings.DueMaintenanceJob
     func listBackups() throws -> [MeguriCoreBindings.BackupEntry]
     func backupLimits() throws -> MeguriCoreBindings.BackupLimits
+    func updateBackupLimit(_ patch: MeguriCoreBindings.BackupLimitPatch) throws -> MeguriCoreBindings.BackupLimits
     func setBackupLimits(_ limits: MeguriCoreBindings.BackupLimits) throws -> Bool
     func maintenanceStatus() throws -> MeguriCoreBindings.MaintenanceStatus
 }
@@ -26,6 +28,7 @@ private struct RealMaintenanceNative: MaintenanceNative {
     func listBackups() throws -> [MeguriCoreBindings.BackupEntry] { try MeguriCoreBindings.listBackups() }
     func backupLimits() throws -> MeguriCoreBindings.BackupLimits { try MeguriCoreBindings.backupLimits() }
     func setBackupLimits(_ limits: MeguriCoreBindings.BackupLimits) throws -> Bool { try MeguriCoreBindings.setBackupLimits(limits: limits) }
+    func updateBackupLimit(_ patch: MeguriCoreBindings.BackupLimitPatch) throws -> MeguriCoreBindings.BackupLimits { try MeguriCoreBindings.updateBackupLimit(patch: patch) }
     func maintenanceStatus() throws -> MeguriCoreBindings.MaintenanceStatus { try MeguriCoreBindings.maintenanceStatus() }
 }
 public final class CoreMaintenanceService: MaintenanceService, Sendable {
@@ -94,6 +97,9 @@ public final class CoreMaintenanceService: MaintenanceService, Sendable {
     }
     public func setBackupLimits(_ limits: BackupLimits) async throws -> Bool {
         try await MaintenanceLane.shared.call(.setBackupLimits) { try self.native.setBackupLimits(limits.raw) }
+    }
+    public func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits {
+        try await MaintenanceLane.shared.call(.updateBackupLimit) { try BackupLimits(self.native.updateBackupLimit(patch.raw)) }
     }
     public func status() async throws -> MaintenanceStatus {
         try await MaintenanceLane.shared.call(.maintenanceStatus) { try MaintenanceStatus(self.native.maintenanceStatus()) }

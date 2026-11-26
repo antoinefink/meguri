@@ -383,7 +383,7 @@ public final class AppNavigation {
         selectedDeck = nil; showsDeckPage = false; restoredDeckPagePending = false
         paths.removeAll(); scrollPositions.removeAll(); featureStates.removeAll()
         browseSearch = ""; section = .home; settingsTabSection = .settings
-        if sheet != .manualTransfer, !keepingEntrySheet || sheet != .collectionEntry { dismissSheet() }
+        if sheet != .manualTransfer, sheet != .backupRestore, !keepingEntrySheet || sheet != .collectionEntry { dismissSheet() }
     }
 
     // MARK: Scroll positions (R5, R19)

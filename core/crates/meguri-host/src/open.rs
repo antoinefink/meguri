@@ -846,7 +846,7 @@ impl CoreHost {
         cancel: &Arc<meguri_engine::CancelToken>,
         progress: &meguri_engine::ProgressSink,
     ) -> Result<meguri_package::restore::RestoredBackup, meguri_package::restore::RestoreError> {
-        meguri_package::restore::restore_backup(
+        let outcome = meguri_package::restore::restore_backup(
             &self.engine,
             &self.backup_inputs,
             self.initial_open.clone(),
@@ -854,7 +854,14 @@ impl CoreHost {
             name,
             cancel,
             progress,
-        )
+        );
+        // A failed return can still have activated the backup. Retire the old
+        // provider admission in that case too; a preactivation refusal keeps it.
+        let activated = outcome.is_ok() || outcome.as_ref().is_err_and(|error| error.candidate_active());
+        if activated && self.provider.snapshot().is_ok_and(|doc| doc.selection == meguri_sync::provider::Selection::Meguri) {
+            self.refresh_provider_admission();
+        }
+        outcome
     }
 
     pub fn backup(&self) -> Arc<dyn BackupService> {

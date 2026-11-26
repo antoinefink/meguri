@@ -1,6 +1,7 @@
 import DesignSystem
 import Foundation
 import SnapshotTesting
+import Settings
 import SwiftUI
 import Testing
 #if os(macOS)
@@ -38,6 +39,8 @@ enum SnapshotLayout: String, Codable, Sendable {
     /// simulator's own window: the class renders on the simulator whose
     /// screen it is (`DeviceClass.target`), so the insets are its own.
     case screen
+    /// Backup history: a standard titled Mac window or a native touch sheet.
+    case backupRestore
 }
 
 /// One `tools/mg snapshots` test run, from the environment the job sets
@@ -502,7 +505,7 @@ enum HostedRenderer {
                     .background(.token(.backgroundPrimary))
                     .modifier(CellEnvironment(cell: cell))
             )
-        case .screen:
+        case .screen, .backupRestore:
             return AnyView(view.modifier(CellEnvironment(cell: cell)))
         }
     }
@@ -542,24 +545,32 @@ enum HostedRenderer {
         private let window: NSWindow
         private let hostingView: NSView
         private let screenSize: CGSize?
+        private let capturesWindow: Bool
 
         init(_ view: AnyView, cell: MatrixCell, layout: SnapshotLayout) throws {
             var size = cell.device.size
             if layout == .component {
                 size = try HostedRenderer.componentSize(of: view, cell: cell)
             }
+            capturesWindow = layout == .backupRestore
+            if capturesWindow { size = BackupRestoreWindowLayout.defaultSize }
             let controller = NSHostingController(rootView: HostedRenderer.content(view, cell: cell, layout: layout))
+            if capturesWindow {
+                size.height = max(size.height, controller.sizeThatFits(in: size).height)
+            }
             guard size.width > 0, size.height > 0 else { throw RenderError(description: "the view has no size") }
-            screenSize = layout == .screen ? size : nil
+            screenSize = layout != .component ? size : nil
             window = NSWindow(
                 contentRect: CGRect(origin: CGPoint(x: -30_000, y: -30_000), size: size),
-                styleMask: [.borderless], backing: .buffered, defer: false
+                styleMask: capturesWindow ? [.titled, .closable, .miniaturizable, .resizable] : [.borderless],
+                backing: .buffered, defer: false
             )
             window.isReleasedWhenClosed = false
+            if capturesWindow { window.title = BackupRestoreWindowLayout.title }
             window.appearance = NSAppearance(named: cell.appearance == .dark ? .darkAqua : .aqua)
             window.animationBehavior = .none
             hostingView = controller.view
-            if layout == .screen {
+            if layout != .component {
                 // A screen owns its viewport. Native Form/NavigationStack
                 // fitting sizes must not resize it during deferred layout.
                 controller.sizingOptions = []
@@ -599,14 +610,25 @@ enum HostedRenderer {
                 hostingView.layoutSubtreeIfNeeded()
                 try validateScreenGeometry()
             }
-            let bounds = hostingView.bounds
+            // Capture AppKit's actual frame view for restore, including its
+            // titlebar and standard controls. No painted replacement chrome.
+            let captureView: NSView
+            if capturesWindow {
+                guard let frameView = window.contentView?.superview,
+                      frameView.bounds.height > hostingView.bounds.height else {
+                    throw RenderError(description: "restore snapshot has no native titlebar frame")
+                }
+                captureView = frameView
+            } else { captureView = hostingView }
+            captureView.layoutSubtreeIfNeeded()
+            let bounds = captureView.bounds
             guard let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: Int(bounds.width * SnapshotTolerance.scale), pixelsHigh: Int(bounds.height * SnapshotTolerance.scale),
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
             ) else { throw RenderError(description: "could not allocate a bitmap") }
             rep.size = bounds.size
-            hostingView.cacheDisplay(in: bounds, to: rep)
+            captureView.cacheDisplay(in: bounds, to: rep)
             try validateScreenGeometry()
             let image = NSImage(size: bounds.size)
             image.addRepresentation(screenSize != nil ? try opaqueScreenBitmap(rep) : rep)
@@ -657,6 +679,18 @@ enum HostedRenderer {
         }
     }
     #else
+    private struct RestoreSheetHost: View {
+        let content: AnyView
+        let cell: MatrixCell
+        @State private var presented = true
+        var body: some View {
+            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                .sheet(isPresented: $presented) {
+                    content.modifier(CellEnvironment(cell: cell))
+                }
+        }
+    }
+
     /// A window of its own on the app's scene, made key and visible, so the
     /// render server draws glass and blur (drawHierarchy). The iOS 27
     /// safe-area workaround (issue #1125 shifted renders by the window's
@@ -677,7 +711,8 @@ enum HostedRenderer {
             else { throw RenderError(description: "the host app has no window scene") }
             previousKeyWindow = scene.keyWindow
             UIView.setAnimationsEnabled(false)
-            let controller = UIHostingController(rootView: HostedRenderer.content(view, cell: cell, layout: layout))
+            let root = layout == .backupRestore ? AnyView(RestoreSheetHost(content: view, cell: cell)) : view
+            let controller = UIHostingController(rootView: HostedRenderer.content(root, cell: cell, layout: layout))
             if layout == .component {
                 controller.safeAreaRegions = []
             }
@@ -695,6 +730,13 @@ enum HostedRenderer {
             window = UIWindow(windowScene: scene)
             window.windowLevel = .alert + 1
             window.overrideUserInterfaceStyle = cell.appearance == .dark ? .dark : .light
+            if layout == .backupRestore {
+                // The native presentation controller inherits traits from the window.
+                window.traitOverrides.preferredContentSizeCategory = cell.textSize.contentSizeCategory
+                window.traitOverrides.accessibilityContrast = cell.increaseContrast ? .high : .normal
+                window.traitOverrides.horizontalSizeClass = cell.device.horizontalSizeClassIsRegular ? .regular : .compact
+                window.traitOverrides.verticalSizeClass = .regular
+            }
             window.backgroundColor = UIColor(ColorToken.backgroundPrimary.color)
             window.frame = CGRect(origin: .zero, size: size)
             // Core Animation stands still in this window: a spinner or any

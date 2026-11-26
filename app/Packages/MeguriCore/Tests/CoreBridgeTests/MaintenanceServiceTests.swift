@@ -26,6 +26,9 @@ private final class RecordingMaintenanceNative: MaintenanceNative {
     func setBackupLimits(_ limits: MeguriCoreBindings.BackupLimits) throws -> Bool {
         record("setLimits"); return try MeguriCoreBindings.setBackupLimits(limits: limits)
     }
+    func updateBackupLimit(_ patch: MeguriCoreBindings.BackupLimitPatch) throws -> MeguriCoreBindings.BackupLimits {
+        record("updateLimit"); return try MeguriCoreBindings.updateBackupLimit(patch: patch)
+    }
     func startRestoreBackup(_ name: String) throws -> MeguriCoreBindings.RestoreBackupJob {
         record("restore"); return try MeguriCoreBindings.startRestoreBackup(name: name)
     }
@@ -58,6 +61,7 @@ private struct MaintenanceSpace: DiskSpaceProviding {
         requireSendable(CoreBridge.MaintenanceFailure.self)
         requireSendable(CoreBridge.BackupEntry.self)
         requireSendable(CoreBridge.BackupLimits.self)
+        requireSendable(CoreBridge.BackupLimitPatch.self)
         requireSendable(CoreBridge.RestoredBackup.self)
         requireSendable(CoreBridge.MaintenanceStatus.self)
         requireSendable(CoreBridge.MaintenanceTrigger.self)
@@ -166,6 +170,18 @@ extension EventTests {
             let limits = CoreBridge.BackupLimits(daily: 12, weekly: 10, monthly: 9, minimumIntervalMinutes: 30)
             _ = try await service.setBackupLimits(limits)
             #expect(try await service.backupLimits() == limits)
+            // Settings cached the old limits before another writer committed.
+            let cached = try await service.backupLimits()
+            let remote = CoreBridge.BackupLimits(daily: .max, weekly: 10, monthly: 23, minimumIntervalMinutes: .max)
+            _ = try await service.setBackupLimits(remote)
+            #expect(cached.monthly == 9)
+            let confirmed = try await service.updateBackupLimit(.weekly(4))
+            #expect(confirmed == .init(daily: .max, weekly: 4, monthly: 23, minimumIntervalMinutes: .max))
+            #expect(try await service.backupLimits() == confirmed)
+            #expect(try await service.updateBackupLimit(.daily(0)) == .init(daily: 0, weekly: 4, monthly: 23, minimumIntervalMinutes: .max))
+            #expect(try await service.updateBackupLimit(.monthly(.max)) == .init(daily: 0, weekly: 4, monthly: .max, minimumIntervalMinutes: .max))
+            #expect(try await service.updateBackupLimit(.minimumIntervalMinutes(30)) == .init(daily: 0, weekly: 4, monthly: .max, minimumIntervalMinutes: 30))
+            _ = try await service.setBackupLimits(limits)
             let updates = Mutex<[CoreProgress]>([])
             let backup = try await service.createBackup(operation: MaintenanceOperation(), progress: { value in
                 updates.withLock { $0.append(value) }
@@ -184,7 +200,7 @@ extension EventTests {
             let safety = try #require(restored.safetyBackup)
             #expect(files.fileExists(atPath: location.backupsDirectory.appending(path: safety).path))
             #expect(try await collections.lifecycle() == .ready(generation: generation + 1))
-            #expect(native.calls.withLock { Set($0) } == Set(["create", "list", "limits", "setLimits", "restore", "status", "due"]))
+            #expect(native.calls.withLock { Set($0) } == Set(["create", "list", "limits", "setLimits", "updateLimit", "restore", "status", "due"]))
             #expect(clock.mainThreadCalls.withLock { !$0.isEmpty && $0.allSatisfy { !$0 } })
             for update in updates.withLock({ $0 }) {
                 if let total = update.total { #expect(update.completed <= total) }

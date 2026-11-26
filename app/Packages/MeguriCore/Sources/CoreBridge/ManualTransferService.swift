@@ -96,6 +96,12 @@ public actor CoreManualTransferService: ManualTransferService {
         let session = try await owner()
         _ = try await run(operation, start: { try session.startSetup() }, call: .manualTransferSessionStartSetup)
     }
+    /// Reuse the existing offline recovery host admission. It retains Failed
+    /// lifecycles after an unreadable file's open and makes no server request.
+    /// Native backup recovery uses this without exposing the legacy server UI.
+    public func prepareLocalRecoveryHost() async throws {
+        try await setup(ManualTransferOperation())
+    }
     public func login(endpoint: String, username: String, password: String, operation: ManualTransferOperation) async throws -> ManualTransferCredentials {
         let session = try await owner()
         let result = try await run(operation, start: { try session.startLogin(configured: endpoint, username: username, password: password) }, call: .manualTransferSessionStartLogin)

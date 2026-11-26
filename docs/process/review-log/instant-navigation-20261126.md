@@ -22,3 +22,5 @@ The same reviewer inspected the complete files below, including comments and lit
 ## Corrective review
 
 The independent source review identified pending-selection Back navigation and commands that could still target the prior deck. The fixer added coverage for both and for cancelled Browse reads. The independent privacy reviewer read the corrected `app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift` in full (169016 bytes), and the orchestrator verified SHA-256 `79cb64c7ebf3408df4622bb728d57ad9d3a76df9cc2822075a70a9272d769589`.
+
+The upstream backup integration changed the same collection source. The independent reviewer read all 184150 bytes of the merged file and approved SHA-256 `f6b94d3d852e1b399758fefe3fdc7cf49edf6f3fa70d7dbc418f56aecdb5fc6c`, verified again after integration. Both macOS test registries retain the backup and navigation routes.

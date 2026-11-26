@@ -109,7 +109,11 @@ import AppKit
         let titles = items.map(\.title)
         #expect(!titles.contains("New Window"), "\(titles)")
         #expect(!titles.contains { $0.hasPrefix("New Meguri Window") }, "\(titles)")
-        #expect(!items.contains { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }, "⌘N opens something")
+        let file = try #require(NSApp.mainMenu?.items.first { $0.title == "File" }?.submenu, "no File menu")
+        let newNote = try #require(file.items.first { $0.title == "New Note" }, "no File › New Note command (N20.4)")
+        #expect(newNote.keyEquivalent == "n" && newNote.keyEquivalentModifierMask == .command, "New Note must use ⌘N")
+        let claims = items.filter { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }
+        #expect(claims.count == 1 && claims.first === newNote, "⌘N belongs only to File › New Note: \(claims.map(\.title))")
         let settings = try #require(items.first { $0.title.hasPrefix("Settings") }, "no native Settings command (N1, N5)")
         #expect(settings.keyEquivalent == "," && settings.keyEquivalentModifierMask == .command, "Settings must use ⌘,")
     }

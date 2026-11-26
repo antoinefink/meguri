@@ -1124,36 +1124,61 @@ screens:
     variants: pairwise
     references: [grouped-form, sheet-form, list-counts, confirmation-dialog]
     purpose: >-
-      The Backups section (Mac: a Settings window sidebar section, plus File › Back Up Now and File ›
-      Restore from Backup…; iPad and iPhone: the Backups row of Settings). A grouped form: (1) "Back Up
-      Now" with "Last backup: <date and time>" from the maintenance status (optimize-integrity M10),
-      and the result "Created <file name> (<size>)" in the footer after a run; (2) "Restore from
-      Backup…" and "Show in Finder" (Mac) or "Show in Files" (iPad, iPhone; Documents/Backups); (3)
-      the limits with the Synced badge: "Back up every" N minutes (5–9999), "Daily backups",
-      "Weekly backups", "Monthly backups" (0–9999 each), written only on change (package/backups
-      B6.2). Each field shows the value B6.1 reads, even outside its range; an edit changes only the
-      edited member and passes the other three read values to the B6.2 write unchanged. Footer "Backups don't include media files." and, once U162 attaches it, "Export
-      Collection with Media…". The restore sheet (on the window it was opened from; the main window
-      from the damaged-collection screen): title "Restore from Backup", a list newest first of date and
-      time, size, and "Server copy" for a server copy; an unverified server copy is listed dimmed with
-      "Can't be restored" and cannot be selected; the newest restorable entry is preselected; Cancel
-      and Restore (disabled without a selection). The sheet stays open through the confirmation, the
-      progress and a refusal, and closes on success. Restore asks first (confirmation-dialog): "Replace
-      the current collection with the backup from <date>?", message "The current collection is backed
-      up first. The restored collection stays on this device until you choose what to do with
-      iCloud." (that choice is sync.publicationChoice), destructive Restore and Cancel. Loading: Back Up Now is a background job
-      (package/backup-triggers T5): a non-modal activity in its row with Cancel while stopping is safe;
-      only Back Up Now and Restore from Backup… are disabled meanwhile, and study and edits go on. The
-      restore runs in the exclusive phase: its progress replaces the sheet's list, with Cancel while
-      stopping is safe, and U153's gate disables mutating entry points app-wide. Error: a Back Up Now
-      failure shows its cause in the section footer. A refused or failed restore shows one line in the
-      sheet naming the cause and saying the current collection is unchanged: a backup that fails its
-      check (the next-newest restorable entry is then preselected), a review session open, another
-      operation running (named), the safety backup failing, not enough space. Empty: no
-      backups yet; Restore from Backup… disabled with the footer "No backups yet". In Failed{Corrupt}
-      Back Up Now and the limits are disabled and Restore stays. Success lands on the deck workspace
-      with the iCloud publication choice (sync.publicationChoice) when iCloud is enabled on this
-      device.
+      Native offline device backups, shared across the collection lifetime. Mac: a Backups section
+      in the Settings sidebar and focused-window File commands Back Up Now and Restore from Backup…;
+      iPad and iPhone: a Backups row in Settings. A grouped form offers Back Up Now with nonmodal
+      progress and safe cancellation, the last successful backup's date and time, and the created
+      filename and size or actionable failure. Restore from Backup…, Show in Finder (Mac) or Show in
+      Files (touch), and Export Collection with Media… follow. Device backups omit media; the footer
+      explains that export includes media. Automatic Backups has a synced Interval row with a trailing
+      editable number and visible min unit. Keep Backups has synced Daily, Weekly and Monthly counts.
+      These share native single-line label/value alignment at ordinary text sizes, with measured
+      full-UInt32 fields and content-driven reflow only at AX sizes; no fixed row heights or preset menus. Interval
+      edits accept 5–9999, count edits 0–9999. Each field displays the full stored UInt32; editing one
+      preserves the other three exactly. Failed collection hosts keep restoration and folder access
+      while creation and limits are unavailable.
+      Restore from Backup is a single independently titled, resizable native Mac Window scene
+      (N29), suppressed at launch, sharing the shell collection and context, with standard controls.
+      Settings, the focused File menu and damaged-collection recovery open it; the old Mac sheet is
+      excluded. Initial content size is 560 by 240 pt, minimum 420 by 230; large histories scroll and
+      user resizing is retained. Mac uses a native selectable Table with Backup Date and Size.
+      Touch keeps a native form sheet and selectable List with system medium/large detents, large
+      for AX text and long histories. Both show newest first the filename's local wall date and time
+      with seconds (without reinterpreting it in today's time zone) and size. Exact filenames remain
+      in accessibility and hover/context help. Same-second archives have a visible Archive number
+      and their confirmation names the exact file. Verified retained server copies say Server copy; unverified and rejected entries say
+      Can’t be restored and cannot be selected. The newest eligible entry is selected initially;
+      keyboard and touch can select an older entry. Empty and failed reads keep an actionable sheet
+      with Try Again. The Mac window's bottom actions and the touch toolbar have Cancel and Restore…;
+      Cancel and standard Mac Close (Cmd-W or red control) clear the intent without writing.
+      Restore… advances to a destructive
+      confirmation naming the selected date and time. The confirmation's standard English action
+      title is Restore. Its message says the current collection is backed up first and explains only
+      the current provider's publication decision: iCloud's device-local publication choice, Meguri
+      Sync's explicit collection choice before upload, or local replacement with media kept when Off.
+      The confirmed exact listed filename is passed to core. Progress occupies the sheet during
+      restore, with cancellation only while core permits it. A pre-activation refusal retains the
+      sheet and recovery host; a rejected archive selects the next eligible entry. Errors distinguish
+      an unactivated candidate, an active candidate with a failed final step, and uncertain activation;
+      they never claim the predecessor is intact without evidence. Safety-copy and uncertain backup
+      publication facts remain visible. Success refreshes the deck workspace, clears stale state and
+      closes the sheet; existing provider handling retains publication fences and explicit decisions.
+      Cold damaged-file recovery first retains the existing offline recovery host, preserving the
+      damaged predecessor through core's safety copy. No native backup action requires a server.
+      Connected Meguri Sync users also get Server Backups in Browser…, opening the configured service's
+      authenticated /collection page without native credentials, query or fragment. The footer states
+      that scheduled server backups include media and restoration there replaces the server collection.
+      Stable identifiers: settings.backups.open, settings.backups.create, settings.backups.restore,
+      settings.backups.restoreContent, settings.backups.entry.<exact filename>, settings.backups.apply and
+      settings.backups.cancel. The settings.backups.cancel action is the common restore witness and
+      capture anchor on Mac and touch. Mac functional captures include the real window titlebar;
+      restore matrix cases capture an actual styled NSWindow on Mac and native sheets on touch. SwiftUI may merge restoreContent into the native list; no second
+      list identifier is required. History readiness requires actual entry children and enabled Restore…,
+      while loading has Loading Backups… progress and empty content offers Try Again. Unique app entry
+      IDs support queries without depending on the platform’s native container shape.
+      Scheduling observes core deadline events, collection replacement,
+      foreground/background and Mac quit independently of this page; another foreground scene retains
+      the shared collection when one scene closes.
   - id: settings.maintenance
     title: Maintenance
     units: [U163]

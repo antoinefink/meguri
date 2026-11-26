@@ -10,7 +10,7 @@ import OSLog
 /// One production collection, held above shell layouts.
 @Observable
 @MainActor
-public final class ReviewCollection: ChangeFanoutSink {
+public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     public enum State: Equatable { case unopened, loading, noFile, ready, unavailable, creationRecovery, failed(String) }
     public private(set) var state: State = .unopened
     public private(set) var lifecycle: CollectionLifecycle = .noCollection
@@ -183,6 +183,25 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var mediaArrivals = ReviewMediaArrivals()
     private weak var mediaArrivalReview: ReviewCoordinator?
     private var sceneActive = true
+    private var sceneActivities: [UUID: (active: Bool, background: Bool)] = [:]
+    /// A disappearing/background scene cannot suspend another foreground
+    /// scene's shared collection. The last scene acquires the platform lease.
+    @discardableResult public func updateSceneActivity(_ id: UUID, active: Bool, background: Bool) -> Bool {
+        sceneActivities[id] = (active, background)
+        return reconcileSceneActivity()
+    }
+    @discardableResult public func removeSceneActivity(_ id: UUID) -> Bool {
+        sceneActivities[id] = nil
+        return reconcileSceneActivity()
+    }
+    private func reconcileSceneActivity() -> Bool {
+        setSceneActive(sceneActivities.values.contains { $0.active })
+        if sceneActivities.values.contains(where: { !$0.background }) {
+            setForeground(true)
+            return false
+        }
+        return foreground
+    }
     private var applicationActive = true
     private var windowVisible = true
     private var reviewWindowActive = true
@@ -329,6 +348,34 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard ownsAddGeneration(expected), let request = deckPageRefreshRequest else { return }
         await refreshDeckPage(request)
     }
+    private let maintenanceService: any MaintenanceService
+    let backupTrigger: BackupTrigger
+    private var backupOwner: BackupCoordinator?
+    public var backups: BackupCoordinator {
+        if let backupOwner { return backupOwner }
+        let value = BackupCoordinator(host: self, service: maintenanceService)
+        backupOwner = value
+        return value
+    }
+    /// Persists after the restore sheet closes; only a drained close/reopen
+    /// may recover an owner whose activation could not be established.
+    public private(set) var backupRecoveryRequired = false
+    private var backupRestoreState: (state: State, lifecycle: CollectionLifecycle, generation: UInt64)?
+    private var backupEditorDecision: EditorReplacementDecision?
+    private var backupEditorReservation: UUID?
+    private var backupPreparationTask: Task<Void, any Error>?
+    private var backupPreparationRevision: UInt64 = 0
+    private var backupRestoreDrainPending = false
+    @ObservationIgnored var readBackupLifecycle: @MainActor () async throws -> CollectionLifecycle = {
+        try await CoreCollectionService().lifecycle()
+    }
+    var backupGeneration: UInt64 { generation }
+    var backupsWritable: Bool { !backupRecoveryRequired && !closed && !closing && !opening && lifecycle == .ready(generation: generation) }
+    var backupCancellationSafe: Bool {
+        if case .exclusiveBusy(_, _, let cancellable) = lifecycle { return cancellable }
+        return true
+    }
+    var backupsAvailable: Bool { !backupRecoveryRequired && !closed && !closing && (!opening || backupRestoreDrainPending) && !starting && !sync.providerHandoffInProgress }
     private var entryOwner: CollectionEntryCoordinator?
     public var entry: CollectionEntryCoordinator {
         if let entryOwner { return entryOwner }
@@ -728,7 +775,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// How long a press on kept content waits for the first read before it is dropped (N27.4).
     @ObservationIgnored var firstReadWait: Duration = .seconds(3)
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, filteredStudyService: (any FilteredStudyService)? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil, filteredStudyService: (any FilteredStudyService)? = nil, maintenanceService: (any MaintenanceService)? = nil) {
+        let maintenance = maintenanceService ?? CoreMaintenanceService()
+        self.maintenanceService = maintenance
+        backupTrigger = BackupTrigger(service: maintenance, clock: configuration.clock)
         self.filteredStudyService = filteredStudyService
         self.deckImportService = deckImportService ?? CoreDeckPackageImportService()
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
@@ -763,6 +813,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             })
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
+        backupTrigger.didRun = { [weak self] in
+            guard let self, self.foreground, !self.opening, !self.closing, self.backupOwner != nil else { return }
+            await self.backupOwner?.refresh()
+        }
         configureSyncOwnership()
         configureStudyPreparation()
         configureStudyWarmup()
@@ -831,7 +885,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         sync.providerChangeAllowed = { [weak self] in
             guard let self else { return false }
-            return !closed && !closing && !opening && !starting && !enabling && !resuming && !meguriSignInPreparing
+            return self.backupOwner?.busy != true && !closed && !closing && !opening && !starting && !enabling && !resuming && !meguriSignInPreparing
                 && review == nil && navigation.review == nil && !deckNamesReserved
                 && entryOwner?.busy != true && entryOwner?.preview == nil && entryOwner?.pickerPresented != true
                 && exportOwner?.busy != true && exportOwner?.artifact == nil && exportOwner?.providerLease == nil
@@ -928,6 +982,7 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     public func start() async {
         guard state == .unopened || state == .noFile || isFailed, !opening else { return }
+        backupPreparationRevision &+= 1
         #if DEBUG
         openFailureDiagnosticValue = nil
         #endif
@@ -1190,6 +1245,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         startupStep?("studyPrepared")
         if countsRevision != countsAtRead || deckTreeGeneration != generation { await loadCounts() }
         preparedGeneration = generation
+        backupTrigger.own(generation)
+        if foreground, !closing, !backupRecoveryRequired { await backupTrigger.run(.opened) }
         studyWarmup.warm()
     }
     /// Each step of a host's completion as it ends (`launchTimingFirstDeckTreeIsReadBeforeTheRestOfTheHostCompletes` (AppModelTests)).
@@ -1200,6 +1257,167 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
     }
+    func prepareBackups() async throws {
+        // A refused pre-write drain retains the already prepared predecessor.
+        if backupRestoreDrainPending { return }
+        if let backupPreparationTask { try await backupPreparationTask.value; return }
+        let task = Task {
+            defer { backupPreparationTask = nil }
+            try await prepareBackupHost()
+        }
+        backupPreparationTask = task
+        try await task.value
+    }
+    private func prepareBackupHost() async throws {
+        if let openTask { await openTask.value }
+        guard !closing, !closed, !opening else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        let prior = state, expected = backupPreparationRevision, originalGeneration = generation
+        func requireCurrent() throws {
+            guard !closing, !closed, !opening, expected == backupPreparationRevision, generation == originalGeneration else {
+                throw CancellationError()
+            }
+        }
+        let location = try await prepareEntry()
+        try requireCurrent()
+        let recovery = CoreManualTransferService(location: location,
+            clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
+        try await recovery.prepareLocalRecoveryHost()
+        try requireCurrent()
+        let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+        try requireCurrent()
+        let retained = try await collection.prepareCloudConnectionHost(location, randomSeed: seed)
+        try requireCurrent()
+        let actual = try await readBackupLifecycle()
+        try requireCurrent()
+        // Preparing the local recovery host neither opens the damaged file nor
+        // takes away its recovery presentation. No account/network is required.
+        let presentation: State
+        switch actual {
+        case .ready(let next):
+            guard next == retained else { throw CancellationError() }
+            presentation = .ready
+        case .failed(let reason):
+            if case .failed = prior { presentation = prior }
+            else { presentation = .failed(Self.explanation(reason)) }
+        case .noCollection: presentation = .noFile
+        default: throw BridgeError.busy(runningOperation: "collection preparation")
+        }
+        // No suspension between validating the owner and publishing its state.
+        // Core's setup job drains and releases its open reservation itself; a
+        // stale preparation must never close a successor's retained host.
+        generation = retained; lifecycle = actual; state = presentation
+    }
+    func beginBackupRestore() async throws {
+        if backupRestoreDrainPending {
+            guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            // Only a successful retry may release the old sync capability.
+            try await drainEntryActivation()
+            backupRestoreDrainPending = false
+            _ = await finishBackupRestore(candidateActive: false, generation: nil)
+        }
+        // Retry may have been cancelled while draining, before an editor
+        // decision existed. Reconcile the drained predecessor before stopping.
+        try Task.checkCancellation()
+        guard !closing, !closed, !opening else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        guard review == nil, !starting else { throw BridgeError.sessionActive }
+        let decision = EditorReplacementDecision()
+        backupEditorDecision = decision
+        let admission = await prepareEditorReplacement(operation: "Restore from Backup", decision: decision) {
+            !decision.cancelled && !Task.isCancelled
+        }
+        guard let admission else { backupEditorDecision = nil; throw CancellationError() }
+        backupEditorReservation = admission.id
+        guard admission.accepted else {
+            finishEditorReplacement(admission.id); backupEditorReservation = nil; backupEditorDecision = nil
+            throw CancellationError()
+        }
+        let previous = (state: state, lifecycle: lifecycle, generation: generation)
+        var drained = false
+        do {
+            try beginManualActivation(replacement: admission.id)
+            backupRestoreState = previous
+            sync.beginEntryActivation()
+            backupTrigger.pauseTimer()
+            try await drainEntryActivation()
+            drained = true
+            try decision.admitEffect()
+        } catch {
+            if backupRestoreState != nil, !drained {
+                // No collection write ran. Keep input and sync held, but retain
+                // the healthy predecessor's presentation and permit drain retry.
+                backupRestoreDrainPending = true
+                finishEditorReplacement(admission.id); backupEditorReservation = nil; backupEditorDecision = nil
+            } else if backupRestoreState != nil { _ = await finishBackupRestore(candidateActive: false, generation: nil) }
+            else { finishEditorReplacement(admission.id); backupEditorReservation = nil; backupEditorDecision = nil }
+            throw error
+        }
+    }
+    func cancelBackupRestoreAdmission() { _ = backupEditorDecision?.cancel() }
+    func finishBackupRestore(candidateActive reportedActive: Bool?, generation expected: UInt64?) async -> BackupRestoreCompletion {
+        // Cancellation still owns admission and the active restore job. Its
+        // terminal facts and provider reattachment must finish on an independent
+        // task, including rollback from a cancelled admission after sync drained.
+        await Task {
+            await reconcileBackupRestore(candidateActive: reportedActive, generation: expected)
+        }.value
+    }
+    private func reconcileBackupRestore(candidateActive reportedActive: Bool?, generation expected: UInt64?) async -> BackupRestoreCompletion {
+        let previous = backupRestoreState
+        defer {
+            if let reservation = backupEditorReservation { finishEditorReplacement(reservation) }
+            backupEditorReservation = nil; backupEditorDecision = nil; backupRestoreState = nil
+        }
+        // A terminal-read failure may lack activation facts. Reconcile the
+        // retained lifecycle before releasing any collection-bound state.
+        let actual = try? await collection.lifecycle()
+        let candidateActive: Bool?
+        if let reportedActive { candidateActive = reportedActive }
+        else if case .ready(let next)? = actual, let previous { candidateActive = next != previous.generation }
+        else if let actual, let previous, actual == previous.lifecycle { candidateActive = false }
+        else { candidateActive = nil }
+        // Typed activation evidence wins over cancellation. Completion reattaches
+        // the selected provider through its existing publication-fence handling.
+        if candidateActive == true, let expected, let previous,
+           generation != previous.generation && generation != expected {
+            // A different replacement already owns the workspace. Never apply
+            // an older terminal result or its publication state to that owner.
+            opening = false
+            return BackupRestoreCompletion(candidateActive: true, ready: false)
+        }
+        guard let candidateActive else {
+            opening = false
+            backupRecoveryRequired = true
+            backupTrigger.own(nil)
+            state = .unavailable
+            return BackupRestoreCompletion(candidateActive: nil, ready: false)
+        }
+        let finished = await finishEntryActivation(candidateActive: candidateActive)
+        if !candidateActive, let previous, generation == previous.generation {
+            switch previous.lifecycle {
+            case .failed, .noCollection:
+                state = previous.state
+                // Keep the actual retained host's lifecycle; its Failed/NoCollection
+                // state is a valid restore host even when ordinary entry refuses it.
+            default: break
+            }
+        }
+        if !candidateActive, state == .ready, foreground, !closing, !closed {
+            // Early inspection/cancel may leave Core's armed deadline unchanged,
+            // so no MaintenanceDeadline event will rearm our paused timer.
+            backupTrigger.own(generation)
+            await backupTrigger.run(.opened)
+        }
+        return BackupRestoreCompletion(candidateActive: candidateActive, ready: finished)
+    }
+    public func presentBackupRestore(host: AppNavigation.SheetHost = .main) {
+        guard backups.canOpenRestore, navigation.sheet == nil else { return }
+        navigation.present(.backupRestore); navigation.sheetHost = host
+    }
+    func backupRestoreSucceeded() {
+        if navigation.sheet == .backupRestore { navigation.dismissSheet() }
+        navigation.show(.home)
+    }
+
     /// Selection needs local Host admission before handoff can cancel the old
     /// account owner. It must not join that owner's account-authority wait.
     public func prepareSyncServiceSelection() async throws { try await prepareLocalCloudConnectionHost() }
@@ -1317,9 +1535,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     var entryAllowed: Bool { allowsEntryActivation() }
     var manualAllowed: Bool { allowsManualActivation() }
     private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
-        !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
+        (backupOwner?.busy != true || backupOwner?.work == .restore) && !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
             (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
-            !opening && !starting && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
+            !backupRecoveryRequired && !opening && !starting && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
     }
     private func allowsEntryActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
         !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) &&
@@ -1332,6 +1550,7 @@ public final class ReviewCollection: ChangeFanoutSink {
               discovery || addFlowOwner?.isPresented != true else { throw BridgeError.busy(runningOperation: "Add Note") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
+        backupPreparationRevision &+= 1
         opening = true
         // A transfer may replace the collection: its last read is not kept for it.
         dropKeptHome(replaced: false)
@@ -1347,6 +1566,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 (replacement != nil && entryOwner === entry && allowsEntryActivation(entry: entry)) else {
             throw BridgeError.busy(runningOperation: "collection preparation")
         }
+        backupPreparationRevision &+= 1
         opening = true
         // An import or a first download replaces the collection: its last read is not kept for it.
         dropKeptHome(replaced: false)
@@ -1462,6 +1682,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         sync.coreEvent(event)
         routeActivity(event)
         switch event.kind {
+        case .maintenanceDeadline(let at):
+            if event.generation == generation { backupTrigger.event(deadline: at) }
         case .lifecycle(let value):
             receiveLifecycle(value)
         case .available:
@@ -1516,6 +1738,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             #if os(macOS)
             miningOwner?.collectionChanged(replaced: true)
             #endif
+            backupTrigger.own(next)
+            backupOwner?.collectionChanged()
             sync.collectionReplaced(next)
             guard preparedGeneration != next else { return }
             exportOwner?.generationChanged()
@@ -1533,7 +1757,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             navigation.collectionReplaced(keepingEntrySheet: opening)
             browseCollectionReplaced()
             if !opening {
-                navigation.dismissSheet()
+                if navigation.sheet != .backupRestore { navigation.dismissSheet() }
                 entryOwner?.destinationChanged()
                 cloudActivationCompletion = Task { [weak self] in
                     guard let self else { return }
@@ -1581,6 +1805,12 @@ public final class ReviewCollection: ChangeFanoutSink {
         sync.receiveLifecycle(value)
         let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
         lifecycle = value
+        if backupRecoveryRequired { return }
+        switch value {
+        case .ready(let next): backupTrigger.own(next)
+        case .opening, .upgrading, .noCollection: backupTrigger.own(nil)
+        case .exclusiveBusy, .failed: backupTrigger.pauseTimer()
+        }
         #if os(macOS)
         if case .ready = value, !closed, !closing, state != .creationRecovery {
             miningOwner?.collectionAvailable()
@@ -1608,7 +1838,13 @@ public final class ReviewCollection: ChangeFanoutSink {
                 state = .ready
                 if let review { review.onVisibleMediaChanged?(review.visibleMediaNames) }
                 if !wasReady && foreground { Task { await day?.checkNow() } }
-                if renewed { browseOwner?.collectionReady() }
+                if renewed {
+                    browseOwner?.collectionReady()
+                    if foreground { Task {
+                        guard !closing, !backupRecoveryRequired else { return }
+                        await backupTrigger.run(.opened)
+                    } }
+                }
             }
         case .opening, .upgrading: invalidateDeckActions(keepingFirstReadSelection: firstReadSelectionIntent != nil); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
@@ -2568,28 +2804,32 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
+        backupTrigger.setTimerEnabled(active)
         // MP6.10: back in the foreground, the background path stops waiting for a
         // review window's round; the foreground's own round sends what is left.
         if active { sync.endMeguriRoundWait() }
         let cancelledEditor = active ? nil : cancelPendingEditorReplacement()
         if !active { syncPresentation.cancelStatusHandoff(); meguriSignInPreparationTask?.cancel() }
         resuming = active
-        if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate(); studyWarmup.release() }
+        if !active { review?.beginPause(); day?.pause(); backupTrigger.pauseTimer(); countTimer?.invalidate(); studyWarmup.release() }
+        let lease = backgroundLease
         let previous = lifecycleTask
         lifecycleTask = Task {
             await cancelledEditor?.waitForFinish()
             await previous?.value
             if !active {
+                await backupOwner?.cancelAndDrain()
+                _ = await backupPreparationTask?.result
                 await meguriSignInPreparationTask?.value
                 await filteredStudyOwner?.waitForOperation(); await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain(); await deckImportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
-            if state == .creationRecovery {
+            if state == .creationRecovery || backupRecoveryRequired {
                 // There may be no writer to resume/suspend. Preserve the bounded
                 // create error and retained resources until the drained close.
                 if !active {
-                    if case .ready? = try? await collection.lifecycle() { try? await collection.flushForBackground() }
+                    if !backupRecoveryRequired, case .ready? = try? await collection.lifecycle() { try? await collection.flushForBackground() }
                     _ = await sync.cancelAndDrain()
                 }
                 resuming = false
@@ -2618,6 +2858,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                     await refreshMedia()
                     if reviewIsActive, resolver != nil { try await review?.resume() }
                     await sync.foregroundAfterLocalResume()
+                    if !closing, !backupRecoveryRequired { await backupTrigger.run(.opened) }
                     await addFlowOwner?.resumeInput()
                     resuming = false
                     deferredSuspend = nil
@@ -2643,6 +2884,13 @@ public final class ReviewCollection: ChangeFanoutSink {
                     guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
                         throw BridgeError.cloudPolicy(.coreCapabilityUnavailable)
                     }
+                    if !foreground, !closing, lease == backgroundLease, !backgroundLeaseExpired {
+                        await backupTrigger.run(.background)
+                    }
+                    // An expired lease skips Background, but still owns the
+                    // cancelled automatic operation until its terminal result.
+                    await backupTrigger.drain()
+                    backupTrigger.pauseTimer()
                     #if os(macOS)
                     if miningOwner?.enabled == true {
                         // P1.1/H14: browser mining outlives the main window.
@@ -2687,6 +2935,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func backgroundTaskExpired(_ token: UInt64) {
         guard token == backgroundLease, !foreground else { return }
         backgroundLeaseExpired = true
+        backupTrigger.cancelPending()
         sync.backgroundExpired()
     }
     public func systemTimeChanged() {
@@ -2721,7 +2970,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         // a save that failed keeps the collection open, with the text.
         if await browseOwner?.inspector.flushForBackground() == false { return false }
         closing = true
-        defer { closing = false }
+        defer {
+            closing = false
+            if closed, backupRestoreDrainPending {
+                backupRestoreDrainPending = false; backupRestoreState = nil; opening = false
+            }
+            if !closed, !backupRecoveryRequired, case .ready(let next) = lifecycle {
+                backupTrigger.own(next)
+                backupTrigger.setTimerEnabled(foreground)
+                if foreground, !backupRecoveryRequired { Task { await backupTrigger.run(.opened) } }
+            }
+        }
         if let cancelledEditor = cancelPendingEditorReplacement() {
             // Its guard joins accepted Add work and releases the same host;
             // its candidate cleanup owns the reservation until completion.
@@ -2732,6 +2991,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         // Keep Editing cancels quit without retiring the collection owner.
         guard await editFlowOwner?.requestCancel() != false else { return false }
         guard await addFlowOwner?.requestClose() != false else { return false }
+        // Retire automatic archives before joining lifecycle/open work that
+        // may itself be waiting on one. Keep the join: no mutation is abandoned.
+        backupTrigger.setTimerEnabled(false)
+        backupTrigger.pauseTimer()
+        backupTrigger.cancelPending()
         meguriSignInPreparationTask?.cancel()
         await meguriSignInPreparationTask?.value
         invalidateDeckActions()
@@ -2743,6 +3007,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         _ = await selectionTask?.value
         await collapseTask?.value
         await manualOwner?.cancelAndDrain()
+        await backupOwner?.cancelAndDrain()
+        _ = await backupPreparationTask?.result
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()
         await deckImportOwner?.collectionClosing()
@@ -2758,13 +3024,20 @@ public final class ReviewCollection: ChangeFanoutSink {
         // Core close also supports a failed creation owner, drains its jobs and
         // flushes a writer if one survived. Preflush requires an open collection
         // and would otherwise prevent the recovery screen's Quit instruction.
-        if state == .noFile || state == .unopened || state == .creationRecovery {
+        if state == .noFile || state == .unopened || state == .creationRecovery || backupRecoveryRequired {
             noCollectionCleanup = true
         } else {
-            do { noCollectionCleanup = try await collection.lifecycle() == .noCollection }
+            do {
+                switch try await collection.lifecycle() {
+                case .noCollection, .failed: noCollectionCleanup = true
+                default: noCollectionCleanup = false
+                }
+            }
             catch { self.error = String(describing: error); return false }
         }
         if noCollectionCleanup {
+            backupTrigger.own(nil)
+            await backupTrigger.drain()
             guard await sync.cancelAndDrain() else { return false }
             do { try await collection.close() }
             catch { self.error = "Couldn’t close the collection. Try again."; return false }
@@ -2781,6 +3054,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                 await sync.quitAfterLocalFlush { quitAllowed = true }
                 guard quitAllowed else { return false }
             }
+            await backupTrigger.run(quitting ? .quit : .background)
+            backupTrigger.own(nil)
+            await backupTrigger.drain()
             guard await sync.cancelAndDrain() else { return false }
             // A close is the one reason to stop the step; the next open starts it again (F5.1).
             studyPreparation.collectionEnded(); await studyPreparation.drain()

@@ -4,6 +4,7 @@ import Foundation
 /// one `-Meguri…` option; see `TestHooks.LaunchOptions` in the app.
 struct MeguriLaunch {
     var fixture: URL?
+    var fixtureRunID: UUID?
     var ownedProviderFixture: Bool?
     var importSource: URL?
     var now: String?
@@ -31,6 +32,7 @@ struct MeguriLaunch {
         }
         func onOff(_ value: Bool?) -> String? { value.map { $0 ? "on" : "off" } }
         add("Fixture", fixture?.path(percentEncoded: false))
+        add("FixtureRunID", fixtureRunID?.uuidString)
         add("OwnedProviderFixture", onOff(ownedProviderFixture))
         add("ImportSource", importSource?.path(percentEncoded: false))
         add("Now", now)
