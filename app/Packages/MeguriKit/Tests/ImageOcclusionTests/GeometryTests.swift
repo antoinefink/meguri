@@ -34,7 +34,8 @@ import Testing
         for area in [CGSize(width: 900, height: 600), CGSize(width: 1040, height: 11)] {
             viewport.resize(session: session, imageSize: image, area: area, displayScale: 2)
             #expect(session.referenceSize == reference && viewport.reference == reference)
-            #expect(viewport.zoom == min(area.width / reference.width, area.height / reference.height))
+            let expectedZoom: Double = Double(min(area.width / reference.width, area.height / reference.height))
+            #expect(abs(viewport.zoom - expectedZoom) < 1e-12)
             #expect(session.document == document && session.field == field)
         }
         session.resetForImageChange()

@@ -82,3 +82,5 @@ The focused Rust media suite passed all 13 tests in `core-test/20261126T101106Z-
 Verification receipts: `core-test/20261126T104859Z-81496` (15 passed) and `ui-test/20261126T104509Z-64172` (Add, two cards, Edit Note).
 
 The independent privacy reviewer reviewed all 291,418 bytes of the native interface contract and admitted the public document at SHA-256 `222c5bc30ccdf96f5f7c165f8796d2ed93db55d7cc776d662cb14b982acfb285`.
+
+The independent privacy reviewer read and admitted all 26,664 bytes of `app/MeguriUITests/IOAddEditUITests.swift` as public. SHA-256 `d9808ec46e45b931185ca72203231e024baeea1fb91c8888f5e92e359a21f8d5`.

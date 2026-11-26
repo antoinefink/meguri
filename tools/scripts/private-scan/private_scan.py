@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "c94356e618294a9266b4a71d4522ca8fe1228b065567d0f568c31c1901a122cc",
-    "app/MeguriUITests/IOAddEditUITests.swift": "69127fd8bdf09a512b015da47994b79e32f22cc40bf2aa19bb94a54f3c63ca42",
+    "app/MeguriUITests/IOAddEditUITests.swift": "d9808ec46e45b931185ca72203231e024baeea1fb91c8888f5e92e359a21f8d5",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",

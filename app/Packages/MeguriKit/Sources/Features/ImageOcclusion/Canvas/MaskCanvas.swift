@@ -28,18 +28,9 @@ struct MaskCanvas: View {
                 .accessibilityAddTraits(.isImage)
                 .accessibilityHidden(usesNativeAccessibility)
                 .allowsHitTesting(false)
-            Canvas { context, _ in
-                context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
-                context.scaleBy(x: viewport.zoom, y: viewport.zoom)
-                for shape in session.displayed.shapes { draw(shape, in: &context) }
-                drawPolygon(in: &context)
-                if let selectionBox = interaction.selectionBox {
-                    context.stroke(Path(selectionBox), with: .color(.accentColor), style: .init(lineWidth: 1 / viewport.zoom, dash: [4 / viewport.zoom]))
-                }
-                if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
-                    context.stroke(Path(box), with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
-                }
-            }
+            MaskCanvasDrawing(document: session.displayed, viewport: viewport, translucent: translucent,
+                              polygon: session.polygon, pointer: pointer, selection: session.selection,
+                              selectionBox: interaction.selectionBox)
             .accessibilityHidden(true)
             #if !os(macOS)
             accessibleItems
@@ -217,44 +208,6 @@ struct MaskCanvas: View {
     }
     #endif
 
-    private func draw(_ shape: OcclusionShape, in context: inout GraphicsContext) {
-        var layer = context
-        layer.opacity = translucent ? 0.4 : 1
-        let box = shape.unrotatedBounds(in: viewport.reference)
-        let path = Path(shape.path(in: viewport.reference))
-        if case let .text(text, scale, fs) = shape.data.kind {
-            layer.translateBy(x: box.minX, y: box.minY)
-            layer.rotate(by: .degrees(shape.data.angle))
-            layer.fill(Path(CGRect(origin: .zero, size: box.size)), with: .color(.white))
-            let fontSize = (fs.map { $0 * viewport.reference.height } ?? 40) * scale
-            // CoreText supplies the same Arial M-box line spacing as the model.
-            let lines = text.components(separatedBy: "\n")
-            let lineHeight = (box.height - 5 * scale) / Double(max(1, lines.count))
-            for (index, line) in lines.enumerated() {
-                layer.draw(Text(line).font(.custom("Arial", size: fontSize))
-                    .foregroundStyle(maskColor(shape.data.fill, fallback: .black)),
-                           at: .init(x: 0, y: Double(index) * lineHeight), anchor: .topLeading)
-            }
-        } else {
-            layer.fill(path, with: .color(maskColor(shape.data.fill, fallback: MaskAppearance.defaultColor)))
-            layer.stroke(path, with: .color(.primary), lineWidth: 1 / viewport.zoom)
-            let bounds = shape.bounds(in: viewport.reference)
-            context.draw(Text(String(shape.data.number)).font(.caption).foregroundStyle(.primary),
-                         at: .init(x: bounds.midX, y: bounds.midY))
-        }
-    }
-
-    private func drawPolygon(in context: inout GraphicsContext) {
-        guard let first = session.polygon.first else { return }
-        var path = Path(); path.move(to: first)
-        for point in session.polygon.dropFirst() { path.addLine(to: point) }
-        if let pointer { path.addLine(to: pointer) }
-        context.stroke(path, with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
-        let radius = 5.0
-        context.stroke(Path(ellipseIn: .init(x: first.x - radius, y: first.y - radius, width: 2 * radius, height: 2 * radius)),
-                       with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
-    }
-
     private func itemLabel(_ item: [UUID], first: OcclusionShape) -> String {
         if item.count > 1 { return String(format: ioString("io.a11y.group"), Int64(first.data.number), Int64(item.count)) }
         switch first.data.kind {
@@ -336,5 +289,70 @@ struct MaskCanvas: View {
     private func rotation(_ value: DragGesture.Value, around center: CGPoint) -> Double {
         (atan2(value.location.y - center.y, value.location.x - center.x)
          - atan2(value.startLocation.y - center.y, value.startLocation.x - center.x)) * 180 / .pi
+    }
+}
+
+/// The production drawing layer stays SwiftUI-only so ImageRenderer can render
+/// imported fills without placeholders for the canvas's native input/AX views.
+struct MaskCanvasDrawing: View {
+    let document: OcclusionDocument
+    let viewport: CanvasViewport
+    let translucent: Bool
+    let polygon: [CGPoint]
+    let pointer: CGPoint?
+    let selection: Set<UUID>
+    let selectionBox: CGRect?
+
+    var body: some View {
+        Canvas { context, _ in
+            context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
+            context.scaleBy(x: viewport.zoom, y: viewport.zoom)
+            for shape in document.shapes { draw(shape, in: &context) }
+            drawPolygon(in: &context)
+            if let selectionBox {
+                context.stroke(Path(selectionBox), with: .color(.accentColor), style: .init(lineWidth: 1 / viewport.zoom, dash: [4 / viewport.zoom]))
+            }
+            if let box = document.bounds(of: selection, in: viewport.reference) {
+                context.stroke(Path(box), with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
+            }
+        }
+    }
+
+    private func draw(_ shape: OcclusionShape, in context: inout GraphicsContext) {
+        var layer = context
+        layer.opacity = translucent ? 0.4 : 1
+        let box = shape.unrotatedBounds(in: viewport.reference)
+        let path = Path(shape.path(in: viewport.reference))
+        if case let .text(text, scale, fs) = shape.data.kind {
+            layer.translateBy(x: box.minX, y: box.minY)
+            layer.rotate(by: .degrees(shape.data.angle))
+            layer.fill(Path(CGRect(origin: .zero, size: box.size)), with: .color(.white))
+            let fontSize = (fs.map { $0 * viewport.reference.height } ?? 40) * scale
+            // CoreText supplies the same Arial M-box line spacing as the model.
+            let lines = text.components(separatedBy: "\n")
+            let lineHeight = (box.height - 5 * scale) / Double(max(1, lines.count))
+            for (index, line) in lines.enumerated() {
+                layer.draw(Text(line).font(.custom("Arial", size: fontSize))
+                    .foregroundStyle(maskColor(shape.data.fill, fallback: .black)),
+                           at: .init(x: 0, y: Double(index) * lineHeight), anchor: .topLeading)
+            }
+        } else {
+            layer.fill(path, with: .color(maskColor(shape.data.fill, fallback: MaskAppearance.defaultColor)))
+            layer.stroke(path, with: .color(.primary), lineWidth: 1 / viewport.zoom)
+            let bounds = shape.bounds(in: viewport.reference)
+            context.draw(Text(String(shape.data.number)).font(.caption).foregroundStyle(.primary),
+                         at: .init(x: bounds.midX, y: bounds.midY))
+        }
+    }
+
+    private func drawPolygon(in context: inout GraphicsContext) {
+        guard let first = polygon.first else { return }
+        var path = Path(); path.move(to: first)
+        for point in polygon.dropFirst() { path.addLine(to: point) }
+        if let pointer { path.addLine(to: pointer) }
+        context.stroke(path, with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
+        let radius = 5.0
+        context.stroke(Path(ellipseIn: .init(x: first.x - radius, y: first.y - radius, width: 2 * radius, height: 2 * radius)),
+                       with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
     }
 }

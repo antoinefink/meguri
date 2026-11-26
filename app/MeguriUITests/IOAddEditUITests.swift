@@ -130,11 +130,16 @@ import XCTest
         XCTAssertEqual(edited[0].minY, original[0].minY + 0.14, accuracy: 0.015)
         assertBounds([edited[1]], equalTo: [original[1]])
         try click(editWindow.buttons["review.editCurrent.done"])
+        // Keep the actual workspace/window state even if closing or resuming
+        // review fails. Capture before waiting for either state to settle.
+        capture(app, named: "image-occlusion-post-save-workspace-synthetic")
+        captureHierarchy(app, stage: "post-save-workspace")
         XCTAssertTrue(editWindow.waitForNonExistence(timeout: 20))
 
-        // Reload the stored note through the same normal entry, with no fixture
-        // reinstallation or draft reuse. Both coordinates and sizes must persist.
-        let reopened = try openEditCurrent(app, bundle: bundle, imageSize: imageSize)
+        // Reload through normal UI, with no fixture reinstallation or draft
+        // reuse. This empty collection contains only our note's two cards, so
+        // either card's Edit Note must reopen the same stored note.
+        let reopened = try openEditCurrent(app, bundle: bundle, imageSize: imageSize, savedNoteDeck: page)
         let reloadedCanvas = try readableCanvas(in: reopened, imageSize: imageSize, stage: "reopened")
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
         assertNativeImage(reloadedCanvas, in: reopened, stage: "reopened")
@@ -143,8 +148,33 @@ import XCTest
         XCTAssertTrue(reopened.waitForNonExistence(timeout: 15))
     }
 
-    private func openEditCurrent(_ app: XCUIApplication, bundle: String, imageSize: CGSize) throws -> XCUIElement {
+    private func openEditCurrent(_ app: XCUIApplication, bundle: String, imageSize: CGSize,
+                                 savedNoteDeck: XCUIElement? = nil) throws -> XCUIElement {
         try app.bringToFront(bundleIdentifier: bundle)
+        // App activation alone does not select the workspace's key window.
+        // A title-bar click restores it without revealing or rating the card.
+        let main = app.windows["main"]
+        XCTAssertTrue(main.waitForExistence(timeout: 10))
+        try prepareInput()
+        main.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: 12)).click()
+        let reveal = element(main, "review.session.reveal")
+        if let savedNoteDeck {
+            let study = savedNoteDeck.buttons["home.deck.study"]
+            let readyForReview = { reveal.exists && reveal.isEnabled && reveal.isHittable }
+            let readyToStudy = {
+                savedNoteDeck.exists && study.exists && study.isEnabled && study.isHittable
+            }
+            XCTAssertTrue(wait { readyForReview() || readyToStudy() },
+                          "Save must return to a usable review or the saved note's deck")
+            if !readyForReview() {
+                // A deck page has no current review note. Start Study once,
+                // only after confirming that no card was answered or lost.
+                XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 2, learning: 0, review: 0))
+                try click(study)
+            }
+        }
+        XCTAssertTrue(wait { reveal.exists && reveal.isEnabled && reveal.isHittable })
         let command = app.menuBars.menuBarItems["Note"].menuItems.matching(
             NSPredicate(format: "title == %@", "Edit Note")).firstMatch
         XCTAssertTrue(wait { command.exists && command.isEnabled })
@@ -334,6 +364,7 @@ import XCTest
             try requireMask(number, in: window, stage: "geometry-\(number)")
             let mask = element(window, "io.mask.\(number)")
             XCTAssertEqual(mask.elementType, .button)
+            XCTAssertEqual(mask.label, "Rectangle \(number)", "saved mask numbers must keep their identities")
             let rect = mask.frame
             XCTAssertGreaterThan(rect.width, 10)
             XCTAssertGreaterThan(rect.height, 10)

@@ -16,18 +16,27 @@ import Testing
     ]) func importedCanvasFillRendersColorAndAlphaWithoutRewriting(sample: (String, [Int])) throws {
         let (fill, expected) = sample
         let source = "{{c1::image-occlusion:rect:left=.1:top=.1:width=.8:height=.8:fill=\(fill):oi=1}}"
-        let session = OcclusionDocumentTests().session(source, editing: true)
+        let size = CGSize(width: 100, height: 100)
+        let session = MaskEditorSession(field: source, isEditing: true)
+        session.setReferenceSizeIfNeeded(imageSize: size, area: size, displayScale: 1)
         #expect(session.isReadable)
+        #expect(session.referenceSize == size)
+        let document = session.document
+        var writes = 0
+        session.onWrite = { _ in writes += 1 }
         let context = try #require(CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
             bytesPerRow: 400, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        let blank = try #require(context.makeImage())
-        let viewport = CanvasViewport(reference: .init(width: 100, height: 100), area: .init(width: 100, height: 100))
-        let canvas = MaskCanvas(image: Image(decorative: blank, scale: 1), session: session,
-            viewport: .constant(viewport), translucent: false, fill: "#ffffff", editLabel: { _ in },
-            focusCanvas: {})
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        // Read premultiplied RGBA bytes in sRGB, starting with a clear bitmap.
+        context.clear(.init(origin: .zero, size: size))
+        let viewport = CanvasViewport(reference: session.referenceSize, area: size)
+        // Render the same drawing layer as MaskCanvas, without AppKit representables.
+        let canvas = MaskCanvasDrawing(document: session.displayed, viewport: viewport, translucent: false,
+            polygon: session.polygon, pointer: nil, selection: session.selection, selectionBox: nil)
         let renderer = ImageRenderer(content: canvas.frame(width: 100, height: 100))
         renderer.scale = 1
+        renderer.isOpaque = false
+        renderer.colorMode = .nonLinear
         let rendered = try #require(renderer.cgImage)
         context.draw(rendered, in: .init(x: 0, y: 0, width: 100, height: 100))
         let bytes = try #require(context.data).assumingMemoryBound(to: UInt8.self)
@@ -36,7 +45,11 @@ import Testing
         for channel in 0..<4 {
             #expect(abs(Int(bytes[offset + channel]) - expected[channel]) <= 2)
         }
-        #expect(Array(session.field.utf8) == Array(source.utf8) && !session.canUndo)
+        // Outside the mask stays transparent, including for opaque imported fills.
+        let outside = 5 * 400 + 5 * 4
+        #expect((0..<4).allSatisfy { bytes[outside + $0] == 0 })
+        #expect(Array(session.field.utf8) == Array(source.utf8))
+        #expect(session.document == document && !session.isDirty && !session.canUndo && writes == 0)
     }
 
     @Test func cssNamesHueUnitsAndInvalidValues() throws {
