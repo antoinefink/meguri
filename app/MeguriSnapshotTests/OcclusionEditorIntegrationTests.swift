@@ -137,9 +137,24 @@ import UniformTypeIdentifiers
             try await wait(window) { imageElement.accessibilityFrame().size != before.size }
             #expect(session.referenceSize == reference)
             checkFrames()
-            #expect(mask.accessibilityPerformPress())
+            let currentFrame = mask.accessibilityFrame()
+            let axRead = await Task.detached {
+                let point = NSPoint(x: currentFrame.midX, y: currentFrame.midY)
+                return (
+                    mask.accessibilityFrame(),
+                    (mask.accessibilityParent() as? NativeCanvasAccessibility.Container) === native,
+                    (native.accessibilityHitTest(point) as? NativeCanvasAccessibility.Element) === mask,
+                    (native.accessibilityHitTest(.init(x: -1_000_000, y: -1_000_000))
+                        as? NativeCanvasAccessibility.Container) === native
+                )
+            }.value
+            #expect(axRead.0 == currentFrame)
+            #expect(axRead.1 && axRead.2 && axRead.3)
+            let pressed = await Task.detached { mask.accessibilityPerformPress() }.value
+            #expect(pressed)
             #expect(session.selection.count == 1 && session.field == source)
-            #expect(mask.accessibilityPerformIncrement())
+            let incremented = await Task.detached { mask.accessibilityPerformIncrement() }.value
+            #expect(incremented)
             #expect(session.field != source)
             #expect(session.document.shapes.count == 1)
         }
