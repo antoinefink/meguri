@@ -48,8 +48,8 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
         element(app, "noteTypes.list.delete").tap()
         assertConfirmation(app)
         capture(app, "touch-note-type-delete-confirmation-90-notes-180-cards")
-        element(app, "noteTypes.delete.cancel").tap()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
+        app.alerts.firstMatch.buttons["Cancel"].tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 10))
         XCTAssertTrue(reversedTypeRow.waitForExistence(timeout: 10))
         XCTAssertTrue(reversedTypeRow.isHittable, "Cancel returns to the unchanged list")
         XCTAssertTrue(basicTypeRow.exists)
@@ -57,15 +57,56 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
 
         openDeleteMenu(app, target: reversedTypeRow)
         element(app, "noteTypes.list.delete").tap()
-        assertConfirmation(app)
-        element(app, "noteTypes.delete.confirm").tap()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 30))
+        assertConfirmation(app) // Cancel retained the exact 90-note / 180-card question.
+        app.alerts.firstMatch.buttons["Delete"].tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 30))
         XCTAssertTrue(element(app, "noteTypes.list.table").waitForExistence(timeout: 10))
         XCTAssertTrue(reversedTypeRow.waitForNonExistence(timeout: 30), "The confirmed type is removed from the real list")
         XCTAssertTrue(basicTypeRow.waitForExistence(timeout: 10))
         XCTAssertTrue(basicTypeRow.isHittable)
         XCTAssertTrue(element(app, "noteTypes.list.row.1884308400000").exists, "The second named type survives")
         capture(app, "touch-note-type-delete-resulting-list")
+    }
+
+    func testCompactSampleShellUsesItsOwnDeletionModelForEmptyType() throws {
+        try sampleShellEmptyQuestion(sizeClass: "compact")
+    }
+
+    func testRegularIPadSampleShellUsesItsOwnDeletionModelForEmptyType() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("Regular iPad shell") }
+        try sampleShellEmptyQuestion(sizeClass: "regular")
+    }
+
+    private func sampleShellEmptyQuestion(sizeClass: String) throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks, try build.bundleIdentifier.hasSuffix(".dev") else {
+            throw XCTSkip("The sample shell requires the development test container")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false,
+            route: "notetypes/list/typical", extra: ["-MeguriSizeClass", sizeClass]).arguments
+        addTeardownBlock { @MainActor in app.terminate() }
+        app.launch()
+        XCTAssertTrue(element(app, "noteTypes.list.table").waitForExistence(timeout: 20))
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        search.typeText("Phrases")
+        let row = element(app, "noteTypes.list.row.1700000100007")
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        openDeleteMenu(app, target: row)
+        element(app, "noteTypes.list.delete").tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertTrue(alert.staticTexts["Delete “Phrases”?"].exists)
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        XCTAssertTrue(alert.staticTexts["It has no notes.\n\nA backup of the collection is kept on this \(device)."].exists)
+        XCTAssertTrue(alert.buttons["Delete"].isEnabled)
+        XCTAssertFalse(element(app, "noteTypes.list.saveSheet").exists)
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(row.exists, "Cancel retains the sample shell's empty type")
     }
 
     private func openNoteTypes(_ app: XCUIApplication) throws {
@@ -105,15 +146,30 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
     }
 
     private func assertConfirmation(_ app: XCUIApplication) {
-        let title = element(app, "noteTypes.delete.title")
-        XCTAssertTrue(title.waitForExistence(timeout: 10))
-        XCTAssertEqual(title.label, "Delete “Meguri Basic and Reverse”?")
-        XCTAssertEqual(element(app, "noteTypes.delete.counts").label,
-                       "Its 90 notes and their 180 cards will be deleted.")
-        let confirm = element(app, "noteTypes.delete.confirm")
-        XCTAssertEqual(confirm.label, "Delete")
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.alerts.count, 1)
+        let title = alert.staticTexts["Delete “Meguri Basic and Reverse”?"]
+        XCTAssertTrue(title.exists)
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        let message = alert.staticTexts["Its 90 notes and their 180 cards will be deleted.\n\nA backup of the collection is kept on this \(device)."]
+        XCTAssertTrue(message.exists, "Exact losses and backup instructions belong to the native alert")
+        let confirm = alert.buttons["Delete"]
+        let cancel = alert.buttons["Cancel"]
         XCTAssertTrue(confirm.isEnabled && confirm.isHittable)
-        XCTAssertTrue(element(app, "noteTypes.delete.cancel").isHittable)
+        XCTAssertTrue(cancel.isEnabled && cancel.isHittable)
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertFalse(element(app, "noteTypes.list.saveSheet").exists)
+        XCTAssertFalse(element(app, "noteTypes.delete.sheet").exists)
+
+        // This ordinary-sized fixture needs no scrolling. Compare the alert to
+        // its actual content, not a phone/pad's dimensions: a large blank form
+        // or alert must fail even when every label and action remains visible.
+        let content = [title, message, confirm, cancel].reduce(CGRect.null) { $0.union($1.frame) }
+        XCTAssertFalse(content.isEmpty)
+        XCTAssertTrue(alert.frame.contains(content), "All confirmation content fits inside the alert")
+        XCTAssertLessThan(alert.frame.height, content.height * 1.5,
+                          "The system alert must hug its content without a large blank region")
     }
 
     private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
@@ -121,7 +177,7 @@ final class TouchNoteTypeDeletionUITests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let png = UIDevice.current.userInterfaceIdiom == .pad ? XCUIScreen.main.screenshot().pngRepresentation : app.screenshot().pngRepresentation
+        let png = XCUIScreen.main.screenshot().pngRepresentation
         let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
         attachment.name = name + ".png"
         attachment.lifetime = .keepAlways

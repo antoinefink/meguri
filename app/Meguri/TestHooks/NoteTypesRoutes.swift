@@ -144,11 +144,11 @@ extension TestHooks {
             features.todayRoot = true
             #if os(macOS)
             features.nativeMacWorkspace = true
-            features.noteTypeDeletionModel = model
             features.availableSections = [.home, .noteTypes]
             #else
             features.availableSections = [.home, .noteTypes, .settings]
             #endif
+            features.noteTypeDeletionModel = model
             let placeholder = features.sectionRoot
             features.sectionRoot = { section, navigation in
                 section == .noteTypes ? AnyView(NoteTypesView(model: model, navigation: navigation)) : placeholder(section, navigation)
