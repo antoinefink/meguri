@@ -1230,66 +1230,94 @@
 
   function limitMathPhysics(engine) {
     // 4.1.3 has no loader.register hook. CommandMap's base constructor calls
-    // MapHandler.register before populating its entries. Install on that map
-    // immediately, but resolve method identities only when a command is parsed.
-    const maps = engine._.input.tex.MapHandler.MapHandler;
+    // MapHandler.register before populating its entries via add(). Wrap each
+    // stored function so aliases copy the guard; resolve identities at use.
+    const tex = engine._.input.tex;
+    const maps = tex.MapHandler.MapHandler;
+    const Macro = tex.Token.Macro;
     const register = maps.register;
     maps.register = function (map) {
       if (map.name === "Physics-matrix-macros") {
-        const parse = map.parse;
-        map.parse = function (input) {
-          const parser = input[0];
-          const name = input[1];
-          const methods = engine._.input.tex.physics.PhysicsMethods.default;
-          const method = this.parserFor(name);
-          if (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix) {
-            const position = parser.i;
-            try {
-              const command = "\\" + name;
-              let rows, columns;
-              let valid = true;
-              if (method === methods.DiagonalMatrix) {
-                // Count with upstream's brace-aware delimiter reader, without
-                // constructing the entry list or expanding the matrix.
-                if (parser.GetNext() === "{") {
-                  const start = parser.i;
-                  parser.GetArgument(command);
-                  const end = parser.i;
-                  parser.i = start + 1;
-                  let entries = 0;
-                  while (parser.i < end) {
-                    if (++entries > 64) break;
-                    try { parser.GetUpTo(command, ","); } catch (_) { break; }
+        const add = map.add;
+        map.add = function (name, macro) {
+          const method = macro.func;
+          const guarded = function (parser, name, ...args) {
+            const methods = tex.physics.PhysicsMethods.default;
+            if (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix) {
+              const position = parser.i;
+              try {
+                const command = name;
+                let rows, columns;
+                let valid = true;
+                if (method === methods.DiagonalMatrix) {
+                  // Count with upstream's brace-aware delimiter reader, without
+                  // constructing the entry list or expanding the matrix.
+                  if (parser.GetNext() === "{") {
+                    const start = parser.i;
+                    parser.GetArgument(command);
+                    const end = parser.i;
+                    parser.i = start + 1;
+                    let entries = 0;
+                    while (parser.i < end) {
+                      if (++entries > 64) break;
+                      try { parser.GetUpTo(command, ","); } catch (_) { break; }
+                    }
+                    rows = columns = entries;
                   }
-                  rows = columns = entries;
+                } else if (method === methods.IdentityMatrix) {
+                  // IdentityMatrix accepts parseInt prefixes, unlike XMatrix.
+                  rows = parseInteger(parser.GetArgument(command), 10);
+                  columns = rows;
+                } else {
+                  parser.GetStar();
+                  parser.GetArgument(command); // Cell contents.
+                  const rowText = parser.GetArgument(command);
+                  const columnText = parser.GetArgument(command);
+                  rows = parseInteger(rowText, 10);
+                  columns = parseInteger(columnText, 10);
+                  // Leave upstream's canonical-number validation unchanged.
+                  valid = StringCtor(rows) === rowText && StringCtor(columns) === columnText;
                 }
-              } else if (method === methods.IdentityMatrix) {
-                // IdentityMatrix accepts parseInt prefixes, unlike XMatrix.
-                rows = parseInteger(parser.GetArgument(command), 10);
-                columns = rows;
-              } else {
-                parser.GetStar();
-                parser.GetArgument(command); // Cell contents.
-                const rowText = parser.GetArgument(command);
-                const columnText = parser.GetArgument(command);
-                rows = parseInteger(rowText, 10);
-                columns = parseInteger(columnText, 10);
-                // Leave upstream's canonical-number validation unchanged.
-                valid = StringCtor(rows) === rowText && StringCtor(columns) === columnText;
+                if (valid && (rows > 64 || columns > 64)) {
+                  const TeXError = engine._.input.tex.TexError.default;
+                  throw new TeXError("MeguriMatrixLimit", "At most 64 rows and columns are allowed");
+                }
+              } finally {
+                parser.i = position;
               }
-              if (valid && (rows > 64 || columns > 64)) {
-                const TeXError = engine._.input.tex.TexError.default;
-                throw new TeXError("MeguriMatrixLimit", "At most 64 rows and columns are allowed");
-              }
-            } finally {
-              parser.i = position;
             }
-          }
-          return call(parse, this, input);
+            return call(method, this, parser, name, ...args);
+          };
+          return call(add, this, name, new Macro(macro.token, guarded, macro.args));
         };
       }
       return call(register, this, map);
     };
+  }
+
+  function limitMathUnits(engine) {
+    const tex = engine._.input.tex;
+    const units = tex.MapHandler.MapHandler.getMap("mhchem");
+    const physicalUnit = units.lookup("pu");
+    const parse = physicalUnit.func;
+    // Macro.func is getter-only in 4.1.3. Replace the entry so \let copies
+    // this guard along with the original token and arguments.
+    units.add("pu", new tex.Token.Macro(physicalUnit.token, function (parser, name, ...args) {
+      const position = parser.i;
+      try {
+        const text = parser.GetArgument(name);
+        // mhchem eagerly duplicates nested unit fractions before TeX's
+        // limits apply. Bound raw input and fraction separators here,
+        // including macro-dispatched calls, without duplicating its grammar.
+        if (text.length > 256 || call(stringSplit, text, "/").length > 5) {
+          const TeXError = tex.TexError.default;
+          throw new TeXError("MeguriUnitLimit", "Physical units allow at most 256 characters and 4 fraction separators");
+        }
+      } finally {
+        parser.i = position;
+      }
+      return call(parse, this, parser, name, ...args);
+    }, physicalUnit.args));
   }
 
   function loadMath() {
@@ -1317,6 +1345,7 @@
           const engine = win.MathJax;
           limitMathAlignments(engine);
           limitMathPhysics(engine);
+          limitMathUnits(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
             mergeUserSettings() {}
@@ -1326,7 +1355,7 @@
           mathTypesetSync = engine.typeset;
           mathTypeset = engine.typesetPromise;
           mathClear = engine.typesetClear;
-          // Keep template calls bounded and side-scoped after startup too.
+          // Keep template waits bounded and attributed to their requesting side.
           engine.typeset = mathFacade.typeset;
           engine.typesetPromise = mathFacade.typesetPromise;
           engine.typesetClear = mathFacade.typesetClear;
@@ -1389,7 +1418,8 @@
 
   function requestMath(elements) {
     const update = latest;
-    const targets = elements || [findQA()];
+    // Undefined preserves upstream's document-wide template API scope.
+    const targets = elements;
     let expired = false;
     mathPending++;
     const work = then(loadMath(), function (engine) {
@@ -1432,7 +1462,7 @@
       const update = latest;
       mathOwner = update;
       try {
-        return call(mathTypesetSync, mathEngine, elements || [findQA()]);
+        return call(mathTypesetSync, mathEngine, elements);
       } catch (error) {
         mathError(error, update);
         throw error;
@@ -1463,7 +1493,7 @@
     if (latest && latest.mathFailed) return null;
     const text = mathText(qa);
     if (call(stringIndexOf, text, "\\(") < 0 && call(stringIndexOf, text, "\\[") < 0) return null;
-    return then(requestMath([qa]), noop, noop);
+    return then(requestMath([qa]), noop, noop); // Automatic work stays on the active side.
   }
 
   async function runUpdate(update) {

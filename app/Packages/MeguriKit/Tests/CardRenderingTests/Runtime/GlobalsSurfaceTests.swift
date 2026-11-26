@@ -381,6 +381,46 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func authoredMathScopeAndSideCleanup() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"""
+                    <p id="m">\(x+1\)</p><script>
+                    var sibling = document.createElement('div');
+                    sibling.id = 'authoredMath';
+                    sibling.textContent = '\\(y+1\\)';
+                    document.body.appendChild(sibling);
+                    onUpdateHook.push(function () { return MathJax.typesetPromise(); });
+                    </script>
+                    """#)
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && document.querySelector('#authoredMath svg path') !== null"))
+                try await page.showPresentedAnswer(#"""
+                    <p id="answer">\(x+2\)</p><p id="automatic">\(x+3\)</p><script>
+                    MathJax.typesetClear([document.getElementById('authoredMath')]);
+                    document.getElementById('authoredMath').textContent = '\\(y+2\\)';
+                    MathJax.typeset([document.getElementById('answer')]);
+                    document.getElementById('answer').dataset.targeted = String(!document.querySelector('#authoredMath mjx-container'));
+                    </script>
+                    """#)
+                #expect(try await page.string("document.getElementById('answer').dataset.targeted") == "true")
+                #expect(try await page.bool("document.querySelector('#authoredMath mjx-container') === null && document.querySelector('#answer svg path') !== null && document.querySelector('#automatic svg path') !== null"))
+                try await page.run("MathJax.typeset();")
+                #expect(try await page.bool("document.querySelector('#authoredMath svg path') !== null && Array.from(MathJax.startup.document.math).length === 3"))
+                try await page.showPresentedQuestion("<p>Next ordinary card</p>")
+                #expect(try await page.bool("Array.from(MathJax.startup.document.math).length === 1 && Array.from(MathJax.startup.document.math)[0].math === 'y+2'"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: [#"\pu{9.8 m/s2}"#, #"\def\cardunit#1{\pu{#1}}\cardunit{9.8 m/s2}"#,
+                          #"\let\cardunit\pu\cardunit{9.8 m/s2}"#])
+        func physicalUnitsRetainSmallInputParsing(units: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion("<p id='unit'>\\(\(units)\\)</p><p id='chem'>\\(\\ce{2H2 + O2 -> 2H2O}\\)</p>")
+                #expect(try await page.bool("document.querySelector('#unit svg path') !== null && document.querySelector('#chem svg path') !== null && !document.querySelector('#qa [data-mml-node=merror]')"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func warmMathTypesetProducesDOMSynchronously() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"<p>\(x+1\)</p><script>window.__mathAPI = MathJax;</script>"#)
