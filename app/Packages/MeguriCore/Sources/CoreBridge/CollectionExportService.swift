@@ -23,7 +23,7 @@ public final class CoreCollectionExportService: CollectionExportService, Sendabl
             let started: MeguriCoreBindings.CollectionExportJob
             if let deck {
                 started = try await MaintenanceLane.shared.call(.startDeckExport) {
-                    try startDeckExport(deckId: deck.deckID, options: deck.options.raw)
+                    try startDeckExport(deckId: deck.deckID, options: deck.options.raw, expectedGeneration: deck.expectedGeneration)
                 }
             } else {
                 started = try await MaintenanceLane.shared.call(.startCollectionExport) { try startCollectionExport() }

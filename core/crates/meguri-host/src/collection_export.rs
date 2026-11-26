@@ -110,15 +110,10 @@ impl CoreHost {
             let selected = rows.iter().find(|row| row.id.0 == id).ok_or_else(|| EngineError::InvalidArgument {
                 message: "The selected deck no longer exists".into(),
             })?;
-            deck_export_name(&meguri_engine::decks::names::human_name(&selected.name))
+            meguri_package::DeckExportPlan::suggested_name_for_deck(&selected.name)
         } else {
             "Meguri-Collection.colpkg".into()
         };
-        // Refuse an unrepresentable basename before creating an ownership marker.
-        // Otherwise a failed create could strand a marker that recovery cannot read.
-        if suggested_name.len() > 255 {
-            return Err(EngineError::InvalidArgument { message: "deck export filename too long".into() });
-        }
         let path = operation.join(&suggested_name);
         let is_cancelled = || cancel.is_cancelled();
         let context = CollectionPackageWriteContext {
@@ -200,12 +195,6 @@ impl CoreHost {
             space: config.disk_space_provider.clone(),
         })
     }
-}
-fn deck_export_name(name: &str) -> String {
-    let name: String = name.chars().map(|c| {
-        if "\\/?<>:*|\"^".contains(c) || c.is_control() { '_' } else { c }
-    }).collect();
-    format!("{}.apkg", if name.is_empty() { "Meguri-Deck" } else { &name })
 }
 fn io(error: std::io::Error) -> EngineError {
     meguri_storage::StorageError::from(error).into()
@@ -295,7 +284,9 @@ fn ownership(directory: &Path) -> Result<(String, String, String), EngineError> 
         return Err(invalid());
     }
     let filename = if lines[0] == "meguri-export-v1" { "Meguri-Collection.colpkg" } else { lines[3] };
-    if filename.is_empty() || Path::new(filename).file_name().and_then(|name| name.to_str()) != Some(filename)
+    if filename.is_empty()
+        || filename.len() > 255
+        || Path::new(filename).file_name().and_then(|name| name.to_str()) != Some(filename)
         || (filename != "Meguri-Collection.colpkg" && !filename.ends_with(".apkg"))
         || filename.chars().any(char::is_control)
     {
@@ -469,20 +460,59 @@ mod export_refusal_tests {
     use meguri_package::CollectionPackageWriteError as PackageError;
     #[test]
     fn deck_names_and_owned_markers_remain_narrow_and_collection_compatible() {
-        assert_eq!(deck_export_name("Alpha::Beta/?"), "Alpha__Beta__.apkg");
+        let suggested = meguri_package::DeckExportPlan::suggested_name_for_deck;
+        assert_eq!(suggested("Alpha\u{1f}Beta/?"), "AlphaBeta.apkg");
+        assert_eq!(suggested("Alpha\0\r\n\tBeta"), "AlphaBeta.apkg");
+        assert_eq!(suggested(" . /\\:?<>*|\"^\n . "), "Meguri-Deck.apkg");
+        assert_eq!(suggested(&"a".repeat(300)), format!("{}.apkg", "a".repeat(250)));
+        assert_eq!(
+            suggested(&format!("{}é", "a".repeat(249))),
+            format!("{}.apkg", "a".repeat(249))
+        );
+        assert_eq!(suggested(&"🎴".repeat(100)), format!("{}.apkg", "🎴".repeat(62)));
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join("owned");
         fs::create_dir(&directory).unwrap();
         let operation = "operation-0000000000000001";
-        for filename in ["Meguri-Collection.colpkg", "Alpha__Beta.apkg"] {
+        let filenames = [
+            "Meguri-Collection.colpkg".into(),
+            "Alpha__Beta.apkg".into(),
+            suggested(&"é".repeat(200)),
+            suggested(&"🎴".repeat(100)),
+            suggested("Hello\nworld\0"),
+        ];
+        for filename in &filenames {
             write_ownership(&directory, operation, "safe", filename).unwrap();
-            assert_eq!(ownership(&directory).unwrap(), (operation.into(), "safe".into(), filename.into()));
+            assert_eq!(
+                ownership(&directory).unwrap(),
+                (operation.into(), "safe".into(), filename.clone())
+            );
+            let marker = fs::read_to_string(directory.join(MARKER)).unwrap();
+            assert!(marker.starts_with(if filename == "Meguri-Collection.colpkg" {
+                "meguri-export-v1\n"
+            } else {
+                "meguri-export-v2\n"
+            }));
+            let output = directory.join(operation);
+            fs::create_dir(&output).unwrap();
+            fs::write(output.join(filename), b"synthetic package filename witness").unwrap();
             collection_export_provider_state(&directory, true).unwrap();
             assert_eq!(ownership(&directory).unwrap().1, "provider");
             collection_export_provider_state(&directory, false).unwrap();
-            assert_eq!(ownership(&directory).unwrap().2, filename);
+            assert_eq!(&ownership(&directory).unwrap().2, filename);
+            remove_collection_export(&directory, &[]).unwrap();
+            assert!(!directory.exists());
+            fs::create_dir(&directory).unwrap();
         }
-        for filename in ["../keep.apkg", "/keep.apkg", "keep.colpkg", "child/keep.apkg"] {
+        for filename in [
+            "../keep.apkg".into(),
+            "/keep.apkg".into(),
+            "keep.colpkg".into(),
+            "child/keep.apkg".into(),
+            "keep\nname.apkg".into(),
+            "keep\0name.apkg".into(),
+            format!("{}.apkg", "a".repeat(251)),
+        ] {
             fs::write(directory.join(MARKER), format!("meguri-export-v2\nsafe\n{operation}\n{filename}\n")).unwrap();
             assert!(ownership(&directory).is_err());
         }

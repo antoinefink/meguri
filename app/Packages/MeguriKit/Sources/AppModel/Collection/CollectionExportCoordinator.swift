@@ -70,6 +70,11 @@ public final class CollectionExportCoordinator {
     public var canPresent: Bool { owner?.exportAllowed == true && !busy }
     public func present() {
         guard canPresent else { return }
+        // A closed options sheet leaves its selected deck behind until the
+        // next action chooses its scope. Ordinary export always means all decks.
+        if artifact == nil {
+            deckID = nil; deckName = nil; deckGeneration = nil; stale = false
+        }
         owner?.navigation.present(.collectionExport)
     }
 
@@ -159,7 +164,9 @@ public final class CollectionExportCoordinator {
         guard canPrepare, let owner else { return }
         stale = false; message = nil; publicationUncertain = false; stage = .preparing; progress = nil
         let generation = owner.generation
-        let deck = deckID.map { DeckExportRequest(deckID: $0, options: deckOptions) }
+        let deck = deckID.flatMap { id in
+            deckGeneration.map { DeckExportRequest(deckID: id, options: deckOptions, expectedGeneration: $0) }
+        }
         let operation = CollectionExportOperation(); self.operation = operation
         task = Task { [self] in
             do {
@@ -360,8 +367,6 @@ public final class CollectionExportCoordinator {
     }
     private func sourceRefusalMessage(_ cause: BridgeError) -> String? {
         switch cause {
-        case .invalidArgument(let reason) where reason == "deck export filename too long":
-            return "The deck name is too long for an export file. Shorten it and try again."
         case .exportSourceChanged:
             return "The media source changed during export. Start a fresh export after changes finish."
         case .exportSourceInvalid:

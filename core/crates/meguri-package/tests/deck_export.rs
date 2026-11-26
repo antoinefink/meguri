@@ -13,6 +13,7 @@ use meguri_package::{
     CollectionPackageWriteContext, CollectionPackageWriteError as Error, DeckExportOptions, Finalisation,
     preflight_deck_export_from_live, write_deck_export_from_live,
 };
+use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport, TypeChangeReport};
 use meguri_storage::{ReadRows, ReaderRole, Table, atomic_file::Purpose, space::StatvfsSpace};
 use meguri_testkit::normal_support::{Fixture, NOW};
 use std::{
@@ -51,12 +52,40 @@ fn seeded() -> Fixture {
                 preset.config.set_fsrs_params_6(vec![0.4, 0.7]);
                 scope.put(&preset)?;
                 let mut nt = scope.notetype(ntid)?.unwrap();
+                let before = LayoutShape::of(&nt)?;
                 nt.config.css = ".card {background: url(_style.png)}".into();
                 nt.templates[0].config.q_format = "<script src=_script.js></script>{{Front}}".into();
                 let mut second = nt.templates[0].clone();
                 second.ord = 1;
                 second.name = "Other face".into();
+                second.config.id = None;
                 nt.templates.push(second);
+                let after = LayoutShape::of(&nt)?;
+                // Report both authored changes before writing either the layout
+                // or the note's new type. The second template has no old origin.
+                let mut report = StructureReport::default();
+                report
+                    .reasons
+                    .extend([StructureReason::TemplatesChanged, StructureReason::NotesNotetypeChanged]);
+                report.layouts.insert(
+                    ntid.0,
+                    LayoutReport {
+                        before,
+                        after,
+                        field_map: vec![0, 1],
+                        template_map: vec![0, -1],
+                    },
+                );
+                report.type_changes.insert(
+                    (ntid.0, 9000),
+                    TypeChangeReport {
+                        before,
+                        after,
+                        field_map: vec![0, 1],
+                        template_map: vec![0, -1],
+                    },
+                );
+                let structure = scope.start_structure_report(report)?;
                 scope.put_notetype(&nt)?;
                 let mut extra = nt.clone();
                 extra.id = NotetypeId(9000);
@@ -108,6 +137,7 @@ fn seeded() -> Fixture {
                         scope.put(&sibling)?;
                     }
                 }
+                scope.complete_structure_report(structure)?;
                 scope.set_config("unrelatedExportFixture", &PRIVATE.into())?;
                 scope.set_config("nextPos", &777_i64.into())?;
                 scope.set_config("creationOffset", &(-60_i64).into())?;
@@ -279,6 +309,11 @@ fn deck_scope_options_archive_rows_and_fresh_import() {
                 assert_eq!(rows.row_count(Table::Cards).unwrap(), 3);
                 assert_eq!(rows.row_count(Table::Revlog).unwrap(), if scheduling { 2 } else { 0 });
                 assert_eq!(rows.row_count(Table::Notetypes).unwrap(), 1);
+                assert_eq!(rows.notetype(f.notetype).unwrap().unwrap().templates.len(), 2);
+                let sibling = rows.card(CardId(NOW + 500)).unwrap().unwrap();
+                assert_eq!(sibling.ord, 1);
+                assert_eq!(sibling.deck_id, DeckId(200));
+                assert_eq!(sibling.note_id, rows.card(f.cards[0]).unwrap().unwrap().note_id);
                 assert_eq!(rows.row_count(Table::Graves).unwrap(), 0);
                 assert_eq!(rows.row_count(Table::Tags).unwrap(), 0);
                 assert!(rows.deck(DeckId(101)).unwrap().is_some());

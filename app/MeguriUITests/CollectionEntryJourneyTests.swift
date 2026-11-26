@@ -965,10 +965,13 @@ import notify
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()
         defer { app.terminate() }
+        // local-review seed 1: this parent owns the populated Cards child
+        // (four synthetic notes/cards). Default may also be visible and empty.
+        let deckID = "1884308400001"
         let row = app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@", "home.sidebar.deck.", "home.deck.row.")).firstMatch
+            format: "identifier == %@ OR identifier == %@", "home.sidebar.deck.\(deckID)", "home.deck.row.\(deckID)")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 30), app.debugDescription)
-        let deckID = try XCTUnwrap(row.identifier.split(separator: ".").last)
+        XCTAssertEqual(row.label, "Local Review")
         #if os(macOS)
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
@@ -1037,7 +1040,10 @@ import notify
         XCTAssertEqual(saved.count, 1)
         let package = try XCTUnwrap(saved.first)
         XCTAssertEqual(package.pathExtension, "apkg")
+        XCTAssertEqual(package.lastPathComponent, "Local Review.apkg")
         XCTAssertGreaterThan(try Data(contentsOf: package).count, 0)
+        // Keep the real writer output for the integrator's SQLite inspection:
+        // Local Review::Cards must contribute all four synthetic notes/cards.
         let attachment = XCTAttachment(contentsOfFile: package)
         attachment.name = "selected-deck.apkg"; attachment.lifetime = .keepAlways; add(attachment)
         #endif

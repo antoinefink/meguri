@@ -82,13 +82,25 @@ impl DeckExportPlan {
         self.validation.files.len() as u64
     }
     pub fn suggested_name(&self) -> String {
-        let name = meguri_model::deck::human_name(&self.name);
-        format!(
-            "{}.apkg",
-            name.chars()
-                .map(|c| if "\\/?<>:*|\"^".contains(c) { '_' } else { c })
-                .collect::<String>()
-        )
+        Self::suggested_name_for_deck(&self.name)
+    }
+    /// A single filesystem component that also fits the line-based ownership
+    /// marker. Reserve the suffix before truncating at a UTF-8 boundary.
+    pub fn suggested_name_for_deck(native_name: &str) -> String {
+        const SUFFIX: &str = ".apkg";
+        let human_name = meguri_model::deck::human_name(native_name);
+        let mut stem = String::new();
+        for c in human_name
+            .chars()
+            .filter(|c| !c.is_control() && !"\\/?<>:*|\"^".contains(*c))
+        {
+            if stem.len() + c.len_utf8() > 255 - SUFFIX.len() {
+                break;
+            }
+            stem.push(c);
+        }
+        let stem = stem.trim_matches(|c| c == '.' || c == ' ');
+        format!("{}{SUFFIX}", if stem.is_empty() { "Meguri-Deck" } else { stem })
     }
 }
 fn read_error(error: DeckExportReadError) -> Error {

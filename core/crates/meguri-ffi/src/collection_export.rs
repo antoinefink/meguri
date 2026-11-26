@@ -311,7 +311,7 @@ pub struct CollectionExportJob {
 #[uniffi::export]
 pub fn start_collection_export() -> Result<CollectionExportJob, CoreError> {
     callback::enter("start_collection_export");
-    start_package_export(None)
+    start_package_export(None, None)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
@@ -326,14 +326,31 @@ impl From<DeckExportOptions> for meguri_package::DeckExportOptions {
     }
 }
 #[uniffi::export]
-pub fn start_deck_export(deck_id: i64, options: DeckExportOptions) -> Result<CollectionExportJob, CoreError> {
+pub fn start_deck_export(
+    deck_id: i64,
+    options: DeckExportOptions,
+    expected_generation: u64,
+) -> Result<CollectionExportJob, CoreError> {
     callback::enter("start_deck_export");
-    start_package_export(Some((deck_id, options.into())))
+    start_package_export(Some((deck_id, options.into())), Some(expected_generation))
 }
-fn start_package_export(deck: Option<(i64, meguri_package::DeckExportOptions)>) -> Result<CollectionExportJob, CoreError> {
+fn start_package_export(
+    deck: Option<(i64, meguri_package::DeckExportOptions)>,
+    expected_generation: Option<u64>,
+) -> Result<CollectionExportJob, CoreError> {
     let host = runtime::host()?;
     let collection = host.collection()?; // Ready independently of FSRS study eligibility.
     let generation = collection.generation().0;
+    // Check the exact Collection moved into the worker, before reserving a
+    // flow or starting any job. Never re-fetch the runtime collection here.
+    if let Some(planned) = expected_generation
+        && planned != generation
+    {
+        return Err(CoreError::StaleGeneration {
+            planned,
+            current: generation,
+        });
+    }
     let admission_seq = collection.last_seq().0;
     let source = collection.path().to_owned();
     let flow = Flow::reserve()?;

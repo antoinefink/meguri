@@ -17,7 +17,10 @@ public struct DeckExportOptions: Sendable, Equatable {
 public struct DeckExportRequest: Sendable, Equatable {
     public let deckID: Int64
     public let options: DeckExportOptions
-    public init(deckID: Int64, options: DeckExportOptions) { self.deckID = deckID; self.options = options }
+    public let expectedGeneration: UInt64
+    public init(deckID: Int64, options: DeckExportOptions, expectedGeneration: UInt64) {
+        self.deckID = deckID; self.options = options; self.expectedGeneration = expectedGeneration
+    }
 }
 
 public struct CollectionExportMetadata: Sendable, Equatable {

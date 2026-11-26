@@ -451,6 +451,14 @@ extension ReviewCollectionStartupTests {
             coordinator.presentDeck(1)
             #expect(coordinator.deckOptions == DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false))
             await coordinator.cancel()
+            // The ordinary prepare entry must clear the closed deck options,
+            // just as the continuous File/Settings command does below.
+            coordinator.present(); coordinator.prepare(); await coordinator.waitForCompletion()
+            try #require(coordinator.stage == .ready)
+            #expect(!coordinator.isDeckExport)
+            #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
+            await coordinator.cancel()
+            coordinator.presentDeck(1); await coordinator.cancel()
             coordinator.start()
             await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
             try #require(coordinator.destinationPresented)
@@ -458,6 +466,22 @@ extension ReviewCollectionStartupTests {
             #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
             coordinator.nativeCancelled(); await coordinator.waitForCompletion()
             #expect(owner.navigation.sheet == nil && coordinator.providerLease == nil)
+            // A delayed bridge request retains the originating generation,
+            // even when the replacement has exactly the same deck ID.
+            let delayed = DeckExportRequest(deckID: 1, options: coordinator.deckOptions,
+                                            expectedGeneration: owner.generation)
+            owner.entry.inspect(source); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
+            try #require(owner.state == .ready && owner.generation != delayed.expectedGeneration)
+            try #require(owner.fullDeckName(1) == "Default")
+            do {
+                let unexpected = try await CoreCollectionExportService().prepare(deck: delayed,
+                    operation: CollectionExportOperation(), progress: { _ in })
+                try await unexpected.discard()
+                Issue.record("An old deck action must refuse a replacement with the same deck ID")
+            } catch let error as BridgeError {
+                #expect(error == .staleGeneration(planned: delayed.expectedGeneration, current: owner.generation))
+            }
             #expect(await owner.close())
         } catch {
             coordinator.nativeCancelled(); await coordinator.waitForCompletion()
