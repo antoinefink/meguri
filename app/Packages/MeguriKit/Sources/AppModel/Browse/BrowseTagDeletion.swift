@@ -35,12 +35,15 @@ public final class BrowseTagDeletion {
     }
 
     public func canDelete(_ target: BrowseTagDeletionTarget) -> Bool {
-        isCurrent(target) && !target.names.isEmpty && target.names.allSatisfy(contains) && available() && !busy
+        matchesTree(target) && !target.names.isEmpty && target.names.allSatisfy(contains) && available() && !busy
     }
 
     private func isCurrent(_ target: BrowseTagDeletionTarget) -> Bool {
         target.epoch == epoch && target.generation == generation()
-            && target.expectedGeneration != nil && target.expectedGeneration == expectedGeneration()
+    }
+
+    private func matchesTree(_ target: BrowseTagDeletionTarget) -> Bool {
+        isCurrent(target) && target.expectedGeneration != nil && target.expectedGeneration == expectedGeneration()
     }
 
     public func delete(_ target: BrowseTagDeletionTarget) {
@@ -50,18 +53,20 @@ public final class BrowseTagDeletion {
         announcement = nil
         task = Task {
             defer { if target.epoch == epoch { busy = false; task = nil } }
-            guard isCurrent(target), available(), !Task.isCancelled else { return }
+            guard matchesTree(target), available(), !Task.isCancelled else { return }
             // A global tag delete rewrites notes too: save the inspector's draft
             // first, just as the table's commands do, then recheck its collection.
             guard await saveFirst() else {
                 if isCurrent(target) { failed = target }
                 return
             }
-            guard isCurrent(target), !Task.isCancelled else { return }
+            guard matchesTree(target), !Task.isCancelled else { return }
             guard available(), target.names.allSatisfy(contains) else { failed = target; return }
             do {
                 guard let expectedGeneration = target.expectedGeneration else { return }
                 let result = try await backend.deleteTags(text: target.names.joined(separator: " "), expectedGeneration: expectedGeneration)
+                // The write's change event can invalidate the tree before this
+                // result arrives. Verify its retained scope against the receipt.
                 guard isCurrent(target),
                       result.summary.generation == expectedGeneration, available() else { return }
                 // A zero-note result can still remove registry rows and record Undo.
@@ -69,7 +74,7 @@ public final class BrowseTagDeletion {
                 if result.summary.undoName != nil { stepRecorded(result.summary.seq, title) }
                 await finished(result, title)
                 await refreshUndo()
-                guard target.epoch == epoch, target.generation == generation(), available() else { return }
+                guard isCurrent(target), available() else { return }
                 serial &+= 1
                 announcement = BrowseAnnouncement(kind: .tagsChanged, count: result.count, serial: serial)
             } catch {

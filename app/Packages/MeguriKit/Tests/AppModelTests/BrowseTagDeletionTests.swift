@@ -36,6 +36,75 @@ import Testing
         #expect(backend.texts.isEmpty)
     }
 
+    @Test func completionSurvivesTreeInvalidationAcrossTheWrite() async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        backend.coreGeneration = 41
+        var treeGeneration: UInt64? = 41
+        deletion.generation = { 9001 }
+        deletion.expectedGeneration = { treeGeneration }
+        deletion.available = { true }
+        deletion.contains = { _ in treeGeneration != nil }
+        var steps: [String] = [], refreshes: [String] = []
+        deletion.stepRecorded = { seq, title in
+            #expect(seq == 1)
+            steps.append(title)
+        }
+        deletion.finished = { result, title in
+            #expect(treeGeneration == nil && result.summary.generation == 41)
+            refreshes.append(title)
+        }
+        var undoRefreshed = false
+        deletion.refreshUndo = { undoRefreshed = true }
+        backend.perform = { treeGeneration = nil } // Change event precedes job completion.
+        let target = deletion.target(["brask"])
+        deletion.delete(target)
+        await deletion.waitForCompletion()
+        #expect(backend.texts == ["brask"] && backend.expectedGenerations == [41])
+        #expect(steps == ["Delete Tag"] && refreshes == ["Delete Tag"] && undoRefreshed)
+        #expect(deletion.announcement?.count == 2 && deletion.failed == nil && !deletion.busy)
+        #expect(!deletion.canDelete(target), "new dispatch still requires a current tree")
+    }
+
+    @Test(arguments: [false, true])
+    func treeInvalidationDoesNotHideSameCollectionErrors(duringSave: Bool) async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        var treeGeneration: UInt64? = 0
+        deletion.expectedGeneration = { treeGeneration }
+        deletion.available = { true }
+        deletion.contains = { _ in true }
+        if duringSave {
+            deletion.saveFirst = { treeGeneration = nil; return false }
+        } else {
+            backend.perform = {
+                treeGeneration = nil
+                throw BridgeError.unavailable(reason: "synthetic")
+            }
+        }
+        let target = deletion.target(["brask"])
+        deletion.delete(target)
+        await deletion.waitForCompletion()
+        #expect(deletion.failed == target && deletion.announcement == nil && !deletion.busy)
+        #expect(backend.texts.count == (duringSave ? 0 : 1))
+        #expect(!deletion.canDelete(target))
+    }
+
+    @Test func mismatchedReceiptGenerationCannotDeliverSuccessAfterTreeInvalidation() async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        var treeGeneration: UInt64? = 41
+        deletion.expectedGeneration = { treeGeneration }
+        deletion.available = { true }
+        deletion.contains = { _ in true }
+        var delivered = false
+        deletion.stepRecorded = { _, _ in delivered = true }
+        deletion.finished = { _, _ in delivered = true }
+        deletion.refreshUndo = { delivered = true }
+        backend.perform = { treeGeneration = nil; backend.coreGeneration = 42 }
+        deletion.delete(deletion.target(["brask"]))
+        await deletion.waitForCompletion()
+        #expect(backend.expectedGenerations == [41])
+        #expect(!delivered && deletion.announcement == nil && deletion.failed == nil && !deletion.busy)
+    }
+
     @Test func forwardsLiteralFullNamesAndReportsTheCoreCountIncludingZero() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
         deletion.expectedGeneration = { 0 }
