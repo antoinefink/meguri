@@ -52,6 +52,7 @@ struct BackupsContent: View {
         Form {
             Section {
                 Button(action: actions.create) { Text("Back Up Now", bundle: .module) }
+                    .backupFormActionTint()
                     .disabled(!presentation.canCreate)
                     .accessibilityIdentifier("settings.backups.create")
                 if presentation.work == .create { BackupProgress(work: presentation.work, canCancel: presentation.canCancel, cancel: actions.cancel) }
@@ -64,18 +65,21 @@ struct BackupsContent: View {
                 } else if presentation.loading { ProgressView() }
                 else { Text("No successful backup recorded", bundle: .module) }
             } footer: {
-                if let receipt = presentation.created {
-                    Text("Created \(receipt.name) (\(BackupPresentation.size(receipt.sizeBytes)))", bundle: .module)
-                        .accessibilityIdentifier("settings.backups.created")
-                }
-                if let error = presentation.failure { BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: false) }
-                if let error = presentation.listFailure { BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false) }
-                if case .uncertain = presentation.backupPublication {
-                    Text("The backup’s publication could not be confirmed. Check the backup folder before trying again.", bundle: .module)
+                caption {
+                    if let receipt = presentation.created {
+                        Text("Created \(receipt.name) (\(BackupPresentation.size(receipt.sizeBytes)))", bundle: .module)
+                            .accessibilityIdentifier("settings.backups.created")
+                    }
+                    if let error = presentation.failure { BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: false) }
+                    if let error = presentation.listFailure { BackupFailureText(error: error, candidateActive: false, uncertain: false, restore: false) }
+                    if case .uncertain = presentation.backupPublication {
+                        Text("The backup’s publication could not be confirmed. Check the backup folder before trying again.", bundle: .module)
+                    }
                 }
             }
             Section {
                 Button(action: actions.restore) { Text("Restore from Backup…", bundle: .module) }
+                    .backupFormActionTint()
                     .disabled(!presentation.canOpenRestore)
                     .accessibilityIdentifier("settings.backups.restore")
                 Button(action: actions.revealFolder) {
@@ -85,36 +89,48 @@ struct BackupsContent: View {
                     Text("Show in Files", bundle: .module)
                     #endif
                 }
+                .backupFormActionTint()
                 .accessibilityIdentifier("settings.backups.folder")
                 Button(action: actions.export) { Text("Export Collection with Media…", bundle: .module) }
+                    .backupFormActionTint()
                     .disabled(!presentation.canExport)
                     .accessibilityIdentifier("settings.backups.export")
                 if folderFailed { Text("The backup folder could not be opened. Check file access and try again.", bundle: .module) }
-            } footer: { Text("Device backups contain only the collection. Export it to save media too.", bundle: .module)
-                .accessibilityIdentifier("settings.backups.mediaExplanation") }
+            } footer: {
+                caption {
+                    Text("Device backups contain only the collection. Export it to save media too.", bundle: .module)
+                        #if os(iOS)
+                        .font(.footnote)
+                        #endif
+                        .accessibilityIdentifier("settings.backups.mediaExplanation")
+                }
+            }
             Section {
                 if let limits = presentation.limits {
                     limit("Interval", field: .interval, value: limits.minimumIntervalMinutes)
                 } else {
                     Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
                 }
-            } header: { Text("Automatic Backups", bundle: .module) }
-            footer: { Text("Synced settings. Enter 5–9999 minutes.", bundle: .module) }
+            } header: { caption { Text("Automatic Backups", bundle: .module) } }
+            footer: { caption { Text("Synced settings. Enter 5–9999 minutes.", bundle: .module) } }
             if let limits = presentation.limits {
                 Section {
                     limit("Daily", field: .daily, value: limits.daily)
                     limit("Weekly", field: .weekly, value: limits.weekly)
                     limit("Monthly", field: .monthly, value: limits.monthly)
-                } header: { Text("Keep Backups", bundle: .module) }
-                footer: { Text("Synced settings. Enter 0–9999 backups per period.", bundle: .module) }
+                } header: { caption { Text("Keep Backups", bundle: .module) } }
+                footer: { caption { Text("Synced settings. Enter 0–9999 backups per period.", bundle: .module) } }
             }
             if let url = presentation.serverBackupsURL {
                 Section {
                     Link(destination: url) { Text("Server Backups in Browser…", bundle: .module) }
+                        .backupFormActionTint()
                         .accessibilityIdentifier("settings.backups.server")
                 } footer: {
-                    Text("Sign in to your Meguri Sync account in the browser. Scheduled server backups include media. Restoring there replaces the server collection.", bundle: .module)
-                        .accessibilityIdentifier("settings.backups.serverExplanation")
+                    caption {
+                        Text("Sign in to your Meguri Sync account in the browser. Scheduled server backups include media. Restoring there replaces the server collection.", bundle: .module)
+                            .accessibilityIdentifier("settings.backups.serverExplanation")
+                    }
                 }
             }
         }
@@ -123,10 +139,31 @@ struct BackupsContent: View {
         .accessibilityIdentifier("settings.backups.content")
     }
 
+    // The native light iPhone audit found these Form captions below 4.5:1.
+    @ViewBuilder private func caption<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        #if os(iOS)
+        // Footer status views also use the secondary style.
+        content().foregroundStyle(ColorToken.textSecondary.color, ColorToken.textSecondary.color)
+        #else
+        content()
+        #endif
+    }
+
     private func limit(_ title: LocalizedStringKey, field: BackupCoordinator.LimitField, value: UInt32) -> some View {
         BackupLimitRow(title: title, identifier: "settings.backups.limit.\(String(describing: field))", field: field, value: value, enabled: presentation.canEditLimits) { edited in
             actions.editLimit(field, edited)
         }
+    }
+}
+
+private extension View {
+    // Native light iPhone action tint measured below 4.5:1.
+    @ViewBuilder func backupFormActionTint() -> some View {
+        #if os(iOS)
+        self.tint(ColorToken.statusAccent.color)
+        #else
+        self
+        #endif
     }
 }
 
@@ -169,7 +206,14 @@ private struct BackupLimitRow: View {
                 }
                 .monospacedDigit()
                 .fixedSize(horizontal: true, vertical: false)
-                if let unit { Text(unit, bundle: .module).foregroundStyle(.secondary) }
+                if let unit {
+                    Text(unit, bundle: .module)
+                        #if os(iOS)
+                        .foregroundStyle(ColorToken.textSecondary.color)
+                        #else
+                        .foregroundStyle(.secondary)
+                        #endif
+                }
             }
             .fixedSize(horizontal: true, vertical: false)
         } label: { Text(title, bundle: .module) }
