@@ -839,7 +839,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
         "fa5d19ac178410ace8f5735d69f2d99e98b1b1322fe8a7a627459a93701610d1",
     "docs/process/review-log/mathjax-20261126.md":
-        "94146ab506ef8f3f2168567ee2eef2127ea6c12d9121f585255ce75973594fca",
+        "4f69f63a59c7d26f923bf83596ead73b2c440aa0af67ed6c6958f9c1ebdd1a89",
     "specs/render/card-runtime.md":
         "67e70ed2ebb021946e6292211d70cab6a524e6c711765c230ab145d7079796bd",
     # Complete-content review of the MathJax card runtime and synthetic review fixture.
