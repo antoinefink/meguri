@@ -280,6 +280,7 @@ fn diff(old: &[HeadItem], head: Head) -> HeadDiff {
 struct Presentation {
     queue: SessionQueue,
     overlay: Overlay,
+    filtered_revision: Option<Seq>,
     rebuild: bool,
     force: Option<CardId>,
     label_boundary: Option<i64>,
@@ -365,6 +366,7 @@ struct PendingRedo {
 struct Session {
     id: SessionId,
     deck: DeckId,
+    filtered: bool,
     generation: Generation,
     ending: bool,
     presentation: Arc<Mutex<Presentation>>,
@@ -768,7 +770,7 @@ impl ReviewService {
         let hooks = self.start_hooks.lock().unwrap().clone();
         // Admission and select share the existing writer transaction. Refusal
         // returns before hooks or any row writes, and enable uses this writer.
-        let admitted = c
+        let (admitted, filtered) = c
             .run(
                 OpSpec::named("set_current_deck", OpSource::UserNonUndoable).skip_undo(),
                 move |ctx| {
@@ -776,8 +778,11 @@ impl ReviewService {
                         return Err(EngineError::SessionActive);
                     }
                     if let Some(refusal) = admission(ctx.scope(), deck, policy.seen())? {
-                        return Ok(Some(refusal));
+                        return Ok((Some(refusal), false));
                     }
+                    // Keep the admitted identity even if the selected deck is
+                    // deleted before its asynchronous observer reaches us.
+                    let filtered = is_filtered(ctx.scope(), deck)?;
                     for hook in hooks {
                         hook.session_starting();
                     }
@@ -786,7 +791,7 @@ impl ReviewService {
                         *policy.review_active.lock().unwrap() = true;
                         *active.active_session.lock().unwrap() = Some(id);
                     });
-                    Ok(None)
+                    Ok((None, filtered))
                 },
             )?
             .value;
@@ -800,18 +805,21 @@ impl ReviewService {
             let built = snapshot.stamp;
             let mut queue = SessionQueue::new(snapshot.value, NEXT_BUILD.fetch_add(1, Ordering::Relaxed));
             queue.set_current(resume);
-            let time_lim = {
+            let (time_lim, filtered_revision) = {
                 let r = c.reader(ReaderRole::Interactive)?;
-                SchedConfig::new(&*r).time_limit()?
+                let rows = r.snapshot()?;
+                (SchedConfig::new(&*rows).time_limit()?, rows.filtered_lifecycle.revision(deck))
             };
             let mut session = Session {
                 id,
                 deck,
+                filtered,
                 generation: c.generation(),
                 ending: false,
                 presentation: Arc::new(Mutex::new(Presentation {
                     queue,
                     overlay: Overlay::default(),
+                    filtered_revision,
                     rebuild: false,
                     force: None,
                     label_boundary: None,
@@ -1311,7 +1319,7 @@ impl ReviewService {
         // A delayed observer may leave a returned/moved card in this queue.
         // Check stored membership before an overlay can hide that commit or
         // capture_state can mint an ordinary token for the now-home card.
-        if is_filtered(&*rows, session.deck)?
+        if session.filtered
             && !filtered_member(&*rows, session.deck, card, session.undo_view.as_ref())?
         {
             drop(p);
@@ -2417,20 +2425,26 @@ fn project_snapshot(
 ) -> Result<Head, EngineError> {
     let day = timing(&**rows, c, at)?;
     let mut p = s.presentation.lock().unwrap();
-    let filtered = is_filtered(&**rows, s.deck)?;
+    let filtered = s.filtered;
+    if filtered && p.filtered_revision != rows.filtered_lifecycle.revision(s.deck) {
+        p.rebuild = true;
+    }
     if filtered && !p.rebuild {
-        let mut removed = false;
-        // Include held learning/preview repeats, so Empty also clears a
-        // waiting head and its counts before the observer reaches us.
-        for id in p.queue.value().main.iter().map(|e| e.id)
-            .chain(p.queue.value().learning.iter().map(|e| e.id))
-        {
+        // Lifecycle identity catches Empty/rebuild for the entire queue. Moves
+        // need only guard the issued entries and the next waiting card; never
+        // read every queued card from SQLite on an ordinary head/answer.
+        let entries = p.queue.read(at.div_euclid(1000), count);
+        let waiting = if entries.is_empty() {
+            p.queue.value().learning.iter().min_by_key(|e| e.due).map(|e| e.id)
+        } else {
+            None
+        };
+        for id in entries.iter().map(|e| e.id).chain(waiting) {
             if !filtered_member(&**rows, s.deck, id, s.undo_view.as_ref())? {
-                removed = true;
+                p.rebuild = true;
                 break;
             }
         }
-        p.rebuild = removed;
     }
     // Keep the boundary that supplied the shown labels. At day zero a real
     // boundary crossing need not change the clamped day number.
@@ -2561,6 +2575,7 @@ fn project_snapshot(
                 p.queue.set_current(Some(force));
             }
             p.rebuild = false;
+            p.filtered_revision = rows.filtered_lifecycle.revision(s.deck);
             p.restore_cache = false;
             p.label_boundary = Some(day.next_day_at);
             s.built = Stamp {

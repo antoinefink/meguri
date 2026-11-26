@@ -14,6 +14,10 @@ use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 pub(crate) struct FilteredLifecycle(Arc<BTreeMap<DeckId, Seq>>);
 
 impl FilteredLifecycle {
+    pub(crate) fn revision(&self, deck: DeckId) -> Option<Seq> {
+        self.0.get(&deck).copied()
+    }
+
     pub(crate) fn record(&mut self, seq: Seq, decks: BTreeSet<DeckId>, changes: &[DeckChange]) {
         let removed = || changes.iter().filter(|d| d.kind == ChangeKind::Removed).map(|d| d.id);
         if !decks.is_empty() || removed().any(|id| self.0.contains_key(&id)) {

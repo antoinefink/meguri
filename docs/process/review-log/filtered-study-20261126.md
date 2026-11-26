@@ -38,3 +38,5 @@ The collection writer and pending-answer projection now preserve the original de
 The native operation alert now offers Refresh Decks after a committed change. Plancheck independently reviewed the entire 13,590-byte form. Its verified public SHA-256 is `4ded70a1d10bb62adf87d3342b98857a266c92a7a1c7508a8f4ba43f32a29419`.
 
 Planinterop inspected the complete 13,742-byte `core/crates/meguri-engine/tests/session_filtered_lifecycle.rs`. It uses synthetic harness data and runtime state tokens to exercise writer and observer timing. The verified public SHA-256 is `d18d814689444a9d2823c27512a4697f320746fb10cf68c58d4b609945943d35`.
+
+Planinterop independently re-reviewed the 14,500-byte lifecycle test after its deletion and move cases changed. All records are fixture-derived. Its verified public SHA-256 is `847e05fc1456d929196a53a7deb4b401bf06e2441ebb67ba38ff3d4ce7be1fcc`.

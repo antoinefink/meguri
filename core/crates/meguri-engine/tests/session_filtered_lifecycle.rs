@@ -37,9 +37,9 @@ fn assert_finished(head: &Head) {
 }
 
 #[test]
-fn delayed_empty_or_move_never_projects_or_admits_a_home_card_in_filtered_session() {
+fn delayed_empty_move_or_delete_never_projects_or_admits_a_home_card_in_filtered_session() {
     for reschedule in [false, true] {
-        for empty in [false, true] {
+        for operation in ["empty", "move", "delete"] {
             for head_first in [false, true] {
                 let h = Harness::new(1);
                 let deck = filtered::save(&h.collection, None, definition(&h, 0, reschedule), false)
@@ -53,11 +53,17 @@ fn delayed_empty_or_move_never_projects_or_admits_a_home_card_in_filtered_sessio
                 h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
                     if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
                 })));
-                if empty {
-                    filtered::empty(&h.collection, deck).unwrap();
-                } else {
-                    change_deck::run(&h.collection, &CardTarget::Cards(vec![card]),
-                        &DeckTarget::Deck(DeckId(1)), CancelToken::new(), ProgressSink::new()).unwrap();
+                match operation {
+                    "empty" => { filtered::empty(&h.collection, deck).unwrap(); }
+                    "move" => {
+                        change_deck::run(&h.collection, &CardTarget::Cards(vec![card]),
+                            &DeckTarget::Deck(DeckId(1)), CancelToken::new(), ProgressSink::new()).unwrap();
+                    }
+                    _ => {
+                        h.collection.run(OpSpec::named("delete selected filtered deck", OpSource::UserUndoable),
+                            move |ctx| meguri_engine::decks::delete_in(ctx.scope(), &[deck])).unwrap();
+                        assert!(h.collection.reader(ReaderRole::Query).unwrap().deck(deck).unwrap().is_none());
+                    }
                 }
                 gate.wait_entered();
                 let home = h.collection.reader(ReaderRole::Query).unwrap().card(card).unwrap().unwrap();
@@ -77,7 +83,7 @@ fn delayed_empty_or_move_never_projects_or_admits_a_home_card_in_filtered_sessio
                     AnswerOutcome::NotAtHead { fresh_head } | AnswerOutcome::Stale { fresh_head, .. } => {
                         assert_finished(&fresh_head);
                     }
-                    other => panic!("home card accepted: empty={empty} head_first={head_first} reschedule={reschedule}: {other:?}"),
+                    other => panic!("home card accepted: {operation} head_first={head_first} reschedule={reschedule}: {other:?}"),
                 }
                 h.settle();
                 assert!(h.logs().is_empty(), "wrong-deck answer wrote a review log");
@@ -91,8 +97,8 @@ fn delayed_empty_or_move_never_projects_or_admits_a_home_card_in_filtered_sessio
 }
 
 #[test]
-fn delayed_empty_clears_presented_and_waiting_preview_repeats() {
-    for delay in [60, 3600] {
+fn delayed_empty_or_move_clears_presented_and_waiting_preview_repeats() {
+    for (empty, delay) in [(false, 60), (false, 3600), (true, 60), (true, 3600)] {
         let h = Harness::new(1);
         let mut def = definition(&h, 0, false);
         def.again_seconds = delay;
@@ -115,7 +121,12 @@ fn delayed_empty_clears_presented_and_waiting_preview_repeats() {
         h.review.observe_hook_for_testing(Some(Arc::new(move |payload| {
             if payload.card_ids().any(|id| id == card) { held.enter_and_wait(); }
         })));
-        filtered::empty(&h.collection, deck).unwrap();
+        if empty {
+            filtered::empty(&h.collection, deck).unwrap();
+        } else {
+            change_deck::run(&h.collection, &CardTarget::Cards(vec![card]),
+                &DeckTarget::Deck(DeckId(1)), CancelToken::new(), ProgressSink::new()).unwrap();
+        }
         gate.wait_entered();
         let polled = h.review.head(session, 3);
         let outcome = h.review.answer(session, card, Rating::Easy, shown.state_token,
@@ -125,7 +136,7 @@ fn delayed_empty_clears_presented_and_waiting_preview_repeats() {
         assert_finished(&polled.unwrap());
         assert!(matches!(outcome.unwrap(), AnswerOutcome::NotAtHead { .. }));
         h.settle();
-        assert_eq!(h.logs().len(), 1, "Empty must leave only the prior preview log");
+        assert_eq!(h.logs().len(), 1, "removing membership must leave only the prior preview log");
         assert_finished(&h.review.head(session, 3).unwrap());
         h.review.end(session).unwrap();
     }
