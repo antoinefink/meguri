@@ -20,11 +20,15 @@ public struct NoteTypeSaveSheet: View {
 
     public var body: some View {
         Group {
+            #if os(iOS)
             if let question = model.deletionQuestion {
                 NoteTypeDeletionSheet(model: model, question: question)
             } else if let question = model.question {
                 content(question)
             }
+            #else
+            if let question = model.question { content(question) }
+            #endif
         }
         // A save question ends only by Cancel or the confirm button.
         .interactiveDismissDisabled(true)

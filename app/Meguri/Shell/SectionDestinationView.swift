@@ -49,6 +49,8 @@ private struct WalkReviewDestination: View {
 /// fixtures and test-hook routes pass their own.
 struct ShellFeatures {
     var nativeMacWorkspace = false
+    /// W12: the Mac deletion alert is hosted directly on the route's window.
+    var noteTypeDeletionModel: NoteTypesModel?
     /// N14.1: the sidebar's first row and the detail with no deck selected are Today.
     var todayRoot = false
     /// What an unfolded iPhone shows beside the deck list before a deck is picked (N14.1).
@@ -118,6 +120,7 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
+        features.noteTypeDeletionModel = collection.noteTypes
         #endif
         // N21.1: Today, then Statistics (N25.1) and Browse on the Mac; Note Types under them
         // (N22.1). The iPad's Browse row waits for its own layout; W14: Note Types has a sidebar

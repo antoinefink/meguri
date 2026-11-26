@@ -34,31 +34,28 @@ final class NoteTypeDeletionUITests: XCTestCase {
                                         title: "Delete…", captureName: "note-type-delete-native-row-menu")
         action.click()
         assertCounts(app)
-        capture(app.windows.firstMatch, "note-type-delete-native-confirmation-90-notes-180-cards")
-        capture(element(app, "noteTypes.delete.counts"), "note-type-delete-counts-element")
+        capture(confirmation(app), "noteTypes.delete.sheet")
 
-        // Return must never accept this destructive question. The native Mac
-        // sheet may route it to Cancel; reopen only after that dismissal.
+        // The native alert's default Return is Cancel, never Delete.
         app.typeKey(.return, modifierFlags: [])
-        if element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 3) {
-            XCTAssertTrue(target.exists, "Return must preserve the target note type")
-            XCTAssertEqual(listRows(app).count, 3)
-            try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
-        }
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
+        XCTAssertTrue(target.exists, "Return must preserve the target note type")
+        XCTAssertEqual(listRows(app).count, 3)
+        try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         // Fresh counts after a Return dismissal also prove that it did not
         // delete notes or cards while leaving the type behind.
         assertCounts(app)
         XCTAssertTrue(element(app, identifier).exists)
-        element(app, "noteTypes.delete.cancel").click()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
+        confirmation(app).buttons["Cancel"].click()
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, identifier).exists, "Cancel keeps the type and its notes")
         XCTAssertEqual(listRows(app).count, 3)
         capture(app.windows.firstMatch, "note-type-delete-cancelled")
 
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app)
-        element(app, "noteTypes.delete.confirm").click()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 20))
+        confirmation(app).buttons["Delete"].click()
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 20))
         XCTAssertTrue(element(app, identifier).waitForNonExistence(timeout: 30))
         XCTAssertTrue(remaining.exists)
         XCTAssertTrue(noteTypeRow(app, id: clozeID).exists)
@@ -79,8 +76,8 @@ final class NoteTypeDeletionUITests: XCTestCase {
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app) // Undo restored both notes and their cards.
         capture(app.windows.firstMatch, "note-type-delete-undo-restored-counts")
-        element(app, "noteTypes.delete.cancel").click()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
+        confirmation(app).buttons["Cancel"].click()
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
     }
 
     func testBrowseNoteTypeRowOffersNativeDeleteAndCancel() throws {
@@ -102,9 +99,9 @@ final class NoteTypeDeletionUITests: XCTestCase {
                                         title: "Delete Note Type…", captureName: "browse-note-type-native-delete-menu")
         action.click()
         assertCounts(app)
-        capture(app.windows.firstMatch, "browse-note-type-delete-confirmation")
-        element(app, "noteTypes.delete.cancel").click()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
+        capture(confirmation(app), "browse-note-type-delete-confirmation")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         // Browse's delete action navigates to Note Types before presenting
         // the question. Cancel leaves the user in that workspace.
         let target = noteTypeRow(app, id: reverseID)
@@ -114,8 +111,8 @@ final class NoteTypeDeletionUITests: XCTestCase {
         // Reopen here to read fresh counts after Cancel, then leave without a write.
         try openDeleteMenu(app, row: target, identifier: "noteTypes.list.delete", title: "Delete…").click()
         assertCounts(app)
-        element(app, "noteTypes.delete.cancel").click()
-        XCTAssertTrue(element(app, "noteTypes.delete.sheet").waitForNonExistence(timeout: 10))
+        confirmation(app).buttons["Cancel"].click()
+        XCTAssertTrue(confirmation(app).waitForNonExistence(timeout: 10))
         XCTAssertTrue(noteTypeRow(app, id: reverseID).waitForExistence(timeout: 10))
         XCTAssertEqual(listRows(app).count, 3)
     }
@@ -138,11 +135,26 @@ final class NoteTypeDeletionUITests: XCTestCase {
         return (app, bundle)
     }
 
+    /// NSAlert is exposed as a sheet of the presenting main window. Native
+    /// buttons are reached by label; SwiftUI content identifiers are absent.
+    private func confirmation(_ app: XCUIApplication) -> XCUIElement {
+        app.windows["main"].sheets.firstMatch
+    }
+
     private func assertCounts(_ app: XCUIApplication) {
-        assertText(element(app, "noteTypes.delete.title"), "Delete “Meguri Basic and Reverse”?")
-        assertText(element(app, "noteTypes.delete.counts"), "Its 90 notes and their 180 cards will be deleted.")
-        assertText(element(app, "noteTypes.delete.confirm"), "Delete")
-        XCTAssertTrue(element(app, "noteTypes.delete.confirm").isEnabled)
+        let alert = confirmation(app)
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "A real native alert is attached to the main window")
+        let title = "Delete “Meguri Basic and Reverse”?"
+        assertText(alert.staticTexts.matching(NSPredicate(
+            format: "label == %@ OR value == %@ OR title == %@", title, title, title)).firstMatch, title)
+        for text in ["Its 90 notes and their 180 cards will be deleted.", "A backup of the collection is kept on this Mac."] {
+            let content = alert.staticTexts.matching(NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@ OR title CONTAINS %@", text, text, text)).firstMatch
+            XCTAssertTrue(content.exists, "Native alert includes \(text): \(alert.debugDescription)")
+        }
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertTrue(alert.buttons["Cancel"].isEnabled)
+        XCTAssertTrue(alert.buttons["Delete"].isEnabled)
     }
 
     private func assertText(_ element: XCUIElement, _ expected: String) {
