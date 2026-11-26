@@ -133,9 +133,7 @@ extension WebKitSuites {
             #expect(try await Self.answer(request, fixture: fixture).body == Data("arrival".utf8))
         }
 
-        @Test func bundledMathRoutesAreConfinedAndNeverUseCollectionMedia() async throws {
-            let fixture = MediaFixture()
-            let paths = CardRuntime.assetPaths.filter { $0.hasPrefix("mathjax/") }
+        private static func bundledMathScriptPaths() throws -> Set<String> {
             let root = try #require(CardRuntime.bundledMathResourceURL)
             let files = try #require(FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: [.isRegularFileKey]))
@@ -144,6 +142,13 @@ extension WebKitSuites {
                 #expect(try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true)
                 bundledScripts.insert("mathjax/" + String(file.path.dropFirst(root.path.count + 1)))
             }
+            return bundledScripts
+        }
+
+        @Test func bundledMathRoutesAreConfinedAndNeverUseCollectionMedia() async throws {
+            let fixture = MediaFixture()
+            let paths = CardRuntime.assetPaths.filter { $0.hasPrefix("mathjax/") }
+            let bundledScripts = try Self.bundledMathScriptPaths()
             #expect(Set(paths) == bundledScripts)
             // Runs against Bundle.module on both Mac and the hosted iOS suite.
             for path in paths {
