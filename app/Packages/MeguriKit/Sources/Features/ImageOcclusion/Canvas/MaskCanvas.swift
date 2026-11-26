@@ -11,6 +11,8 @@ struct MaskCanvas: View {
     let translucent: Bool
     let fill: String
     let editLabel: (UUID) -> Void
+    let focusCanvas: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
     @State private var interaction = MaskCanvasInteraction()
     @State private var pointer: CGPoint?
     @GestureState private var pointerGestureActive = false
@@ -18,16 +20,13 @@ struct MaskCanvas: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Offset preserves the element's fitted size; position introduces
-            // a canvas-sized layout wrapper that AX can report as its frame.
-            // Native layout converts these canvas-local bounds to window/screen
-            // coordinates, including an enclosing scroll view's displacement.
             image.resizable()
                 .frame(width: viewport.imageRect.width, height: viewport.imageRect.height)
                 .offset(x: viewport.imageRect.minX, y: viewport.imageRect.minY)
                 .accessibilityLabel(ioString("io.a11y.canvas"))
                 .accessibilityIdentifier("io.editor.canvas")
                 .accessibilityAddTraits(.isImage)
+                .accessibilityHidden(usesNativeAccessibility)
                 .allowsHitTesting(false)
             Canvas { context, _ in
                 context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
@@ -42,8 +41,16 @@ struct MaskCanvas: View {
                 }
             }
             .accessibilityHidden(true)
+            #if !os(macOS)
             accessibleItems
+            #endif
             handles
+                .accessibilityHidden(usesNativeAccessibility)
+            #if os(macOS)
+            NativeCanvasAccessibility(items: nativeAccessibilityItems, enabled: isEnabled)
+            // Do not apply accessibilityHidden or allowsHitTesting here: AppKit
+            // returns nil from mouse hitTest while retaining its AX children.
+            #endif
             CanvasNavigationInput(
                 navigate: { factor, delta, anchor in
                     interaction.navigationStarted(session: session)
@@ -75,14 +82,21 @@ struct MaskCanvas: View {
             if !active { interaction.handleGestureEnded(session: session) }
         }
         .clipped()
+        #if !os(macOS)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(ioString("io.a11y.canvas"))
         .accessibilityIdentifier("io.canvas")
+        #endif
     }
 
-    // Each control keeps its own scaled bounds and canvas-local offset. SwiftUI
-    // resolves its native global AX frame from that layout, just like the image;
-    // viewport.screenRect supplies the same zoom and pan used by Canvas drawing.
+    private var usesNativeAccessibility: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     private var accessibleItems: some View {
         ZStack(alignment: .topLeading) {
             ForEach(session.displayed.accessibilityItems(in: viewport), id: \.identifier) { item in
@@ -147,6 +161,62 @@ struct MaskCanvas: View {
         .allowsHitTesting(false)
     }
 
+    #if os(macOS)
+    private var nativeAccessibilityItems: [NativeCanvasAccessibility.Item] {
+        var result: [NativeCanvasAccessibility.Item] = [
+            .init(identifier: "io.editor.canvas", label: ioString("io.a11y.canvas"),
+                  frame: viewport.imageRect, role: .image)
+        ]
+        for item in session.displayed.accessibilityItems(in: viewport) {
+            let select = { focusCanvas(); session.select(item.first.id) }
+            var actions: [(String, () -> Void)] = [
+                (ioString("io.command.delete"), { select(); session.deleteSelection() }),
+                (ioString("io.command.duplicate"), { select(); session.duplicate() })
+            ]
+            if session.canGroup(including: item.ids) {
+                actions.append((ioString("io.command.group"), { session.group(including: item.ids) }))
+            }
+            if item.ids.count > 1 {
+                actions.append((ioString("io.command.ungroup"), { select(); session.ungroup() }))
+            }
+            for alignment in MaskAlignment.allCases {
+                actions.append((ioString(alignment.key), { select(); session.align(alignment) }))
+            }
+            result.append(.init(identifier: item.identifier, label: itemLabel(item.ids, first: item.first),
+                frame: item.frame, selected: session.selection.contains(item.first.id), press: select,
+                adjust: { increment in
+                    select(); session.commit(session.moved(dx: increment ? 5 : -5, dy: 0, finishing: true))
+                }, actions: actions))
+        }
+        if let frame = viewport.polygonFrame(session.polygon) {
+            let close = { if session.polygon.count >= 3 { session.closePolygon() } }
+            result.append(.init(identifier: "io.polygon.unfinished",
+                label: String(format: ioString("io.a11y.polygon.unfinished"), Int64(session.polygon.count)),
+                frame: frame, press: close,
+                actions: session.polygon.count >= 3 ? [(ioString("io.command.closePolygon"), close)] : []))
+        }
+        if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
+            for handle in ResizeHandle.allCases.filter({ !session.uniformResize || $0.isCorner }) {
+                let center = viewport.screenPoint(session.handlePoint(handle, in: session.displayed))
+                result.append(.init(identifier: "io.handle.resize.\(handle.rawValue)",
+                    label: ioString("io.a11y.handle.resize"),
+                    frame: CGRect(x: center.x - 22, y: center.y - 22, width: 44, height: 44),
+                    adjust: { increment in
+                        let delta = increment ? 5.0 : -5.0
+                        session.commit(session.resized(handle: handle, delta: .init(width: delta, height: delta), finishing: true))
+                    }))
+            }
+            if session.canRotate {
+                let center = viewport.screenPoint(.init(x: box.midX, y: box.minY))
+                result.append(.init(identifier: "io.handle.rotate", label: ioString("io.a11y.handle.rotate"),
+                    frame: CGRect(x: center.x - 22, y: center.y - 66, width: 44, height: 44),
+                    adjust: { session.rotateStep(increment: $0) }))
+            }
+        }
+        return result
+    }
+    #endif
+
     private func draw(_ shape: OcclusionShape, in context: inout GraphicsContext) {
         var layer = context
         layer.opacity = translucent ? 0.4 : 1
@@ -197,6 +267,7 @@ struct MaskCanvas: View {
     }
 
     private func dragChanged(_ value: DragGesture.Value) {
+        focusCanvas()
         #if os(macOS)
         let extending = !NSEvent.modifierFlags.intersection([.shift, .command]).isEmpty
         #else

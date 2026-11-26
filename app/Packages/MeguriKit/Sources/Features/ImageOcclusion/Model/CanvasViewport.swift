@@ -34,6 +34,16 @@ struct CanvasViewport {
     func screenRect(_ rect: CGRect) -> CGRect {
         .init(origin: screenPoint(rect.origin), size: .init(width: rect.width * zoom, height: rect.height * zoom))
     }
+    mutating func resize(session: MaskEditorSession, imageSize: CGSize, area: CGSize, displayScale: Double) {
+        guard area.width.isFinite, area.height.isFinite, area.width > 0, area.height > 0 else { return }
+        // A canvas smaller than one native touch target is a layout proposal,
+        // not a usable first authoring area. Later resizes keep the locked W/H.
+        guard session.referenceSize != .zero || (area.width >= 44 && area.height >= 44) else { return }
+        session.setReferenceSizeIfNeeded(imageSize: imageSize, area: area, displayScale: displayScale)
+        reference = session.referenceSize
+        self.area = area
+        fit()
+    }
     mutating func fit() {
         guard reference.width > 0, reference.height > 0, area.width > 0, area.height > 0,
               reference.width.isFinite, reference.height.isFinite, area.width.isFinite, area.height.isFinite else { return }

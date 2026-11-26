@@ -9,3 +9,5 @@
 - Selection alone never transforms geometry or writes. Navigation cancels all in-flight transforms through their final callback; handle and canvas callbacks share one lifecycle.
 - Mask commands belong to focused canvas, tool and inspector controls. Hidden/disabled editors and text entry relinquish them; native Edit history prefers an enabled mask step, then the host route.
 - Imported CSS fills are decoded only for drawing; keep their stored text. Custom collection palettes require a typed atomic K9 read/mutate operation; do not substitute device preferences or a read-then-write adapter.
+
+- On Mac, keyboard focus is a sibling of the canvas, never a SwiftUI `.focusable()` ancestor: that wrapper can collapse the entire AX subtree. `NativeCanvasAccessibility` owns image/mask/handle AX frames in flipped canvas coordinates and returns nil from mouse hit testing; keep it outside hidden drawing/navigation layers. Initialize W/H only after a usable layout, then retain it across resizes.

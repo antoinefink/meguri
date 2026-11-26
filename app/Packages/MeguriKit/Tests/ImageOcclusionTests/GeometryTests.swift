@@ -16,6 +16,35 @@ import Testing
         #expect(model.referenceSize == .init(width: 1000, height: 1000))
     }
 
+    @Test func initialLayoutIgnoresTinyProposalThenLocksUsableReference() {
+        let session = MaskEditorSession(field: "", isEditing: false)
+        let image = CGSize(width: 960, height: 540)
+        var viewport = CanvasViewport()
+        // The initial GeometryReader proposal must never become document W/H.
+        for area in [CGSize.zero, CGSize(width: 1040, height: 11), CGSize(width: .nan, height: 431)] {
+            viewport.resize(session: session, imageSize: image, area: area, displayScale: 2)
+            #expect(session.referenceSize == .zero)
+        }
+        viewport.resize(session: session, imageSize: image, area: .init(width: 1040, height: 431), displayScale: 2)
+        let reference = session.referenceSize
+        #expect(reference.height == 431)
+        #expect(abs(viewport.zoom - 1) < 0.001)
+        session.addBox(from: .init(x: 30, y: 40), to: .init(x: 100, y: 90))
+        let document = session.document, field = session.field
+        for area in [CGSize(width: 900, height: 600), CGSize(width: 1040, height: 11)] {
+            viewport.resize(session: session, imageSize: image, area: area, displayScale: 2)
+            #expect(session.referenceSize == reference && viewport.reference == reference)
+            #expect(viewport.zoom == min(area.width / reference.width, area.height / reference.height))
+            #expect(session.document == document && session.field == field)
+        }
+        session.resetForImageChange()
+        viewport.resize(session: session, imageSize: .init(width: 540, height: 960),
+                        area: .init(width: 1040, height: 431), displayScale: 2)
+        #expect(session.referenceSize != reference)
+        #expect(abs(viewport.zoom - 1) < 0.001)
+        #expect(session.document == document && session.field == field)
+    }
+
     @Test func pointerAnchorAndZoomClamps() {
         var viewport = CanvasViewport(reference: .init(width: 1000, height: 1000), area: .init(width: 700, height: 600))
         viewport.fit()

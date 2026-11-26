@@ -96,6 +96,61 @@ import UniformTypeIdentifiers
         }
     }
 
+    @Test func mountedCanvasHasNativeImageAndMaskFramesWithoutInterceptingDrawing() async throws {
+        try await SnapshotAppLifecycle.shared.withExclusiveAccess {
+            let source = "{{c1::image-occlusion:rect:left=.1:top=.2:width=.3:height=.15:oi=1}}  <br/>"
+            let session = MaskEditorSession(field: source, isEditing: true)
+            let pixels = try #require(NSBitmapImageRep(data: bitmap(width: 960, height: 540)))
+            let image = try #require(pixels.cgImage)
+            let window = mount(MaskEditorView(image: Image(decorative: image, scale: 1),
+                imageSize: .init(width: image.width, height: image.height),
+                occlusions: Binding(get: { session.field }, set: { _ in }), isEditing: true, session: session)
+                // Match the production visible masks branch, including the
+                // ancestor modifiers that used to surround a focusable leaf.
+                .allowsHitTesting(true).accessibilityHidden(false))
+            defer { window.close() }
+            try await wait(window) { session.referenceSize.width > 0 && nativeCanvas(window.contentView) != nil }
+            let native = try #require(nativeCanvas(window.contentView))
+            #expect(native.hitTest(.init(x: 100, y: 100)) == nil)
+            let children = try #require(native.accessibilityChildren() as? [NativeCanvasAccessibility.Element])
+            let imageElement = try #require(children.first { $0.identifier == "io.editor.canvas" })
+            let mask = try #require(children.first { $0.identifier == "io.mask.1" })
+            #expect(imageElement.accessibilityRole() == .image)
+            #expect(mask.accessibilityRole() == .button)
+            func checkFrames() {
+                let imageFrame = imageElement.accessibilityFrame(), maskFrame = mask.accessibilityFrame()
+                #expect(abs(imageFrame.width / imageFrame.height - 960.0 / 540) < 0.002)
+                #expect(abs((maskFrame.minX - imageFrame.minX) / imageFrame.width - 0.1) < 0.001)
+                // AppKit screen coordinates have their origin at the bottom.
+                #expect(abs((imageFrame.maxY - maskFrame.maxY) / imageFrame.height - 0.2) < 0.001)
+                #expect(abs(maskFrame.width / imageFrame.width - 0.3) < 0.001)
+                #expect(abs(maskFrame.height / imageFrame.height - 0.15) < 0.001)
+            }
+            checkFrames()
+            let before = imageElement.accessibilityFrame()
+            window.setFrameOrigin(window.frame.origin.applying(.init(translationX: 37, y: 23)))
+            #expect(imageElement.accessibilityFrame().minX == before.minX + 37)
+            #expect(imageElement.accessibilityFrame().minY == before.minY + 23)
+            checkFrames()
+            let reference = session.referenceSize
+            window.setContentSize(.init(width: 1100, height: 750))
+            try await wait(window) { imageElement.accessibilityFrame().size != before.size }
+            #expect(session.referenceSize == reference)
+            checkFrames()
+            #expect(mask.accessibilityPerformPress())
+            #expect(session.selection.count == 1 && session.field == source)
+            #expect(mask.accessibilityPerformIncrement())
+            #expect(session.field != source)
+            #expect(session.document.shapes.count == 1)
+        }
+    }
+
+    private func nativeCanvas(_ view: NSView?) -> NativeCanvasAccessibility.Container? {
+        guard let view else { return nil }
+        if let canvas = view as? NativeCanvasAccessibility.Container { return canvas }
+        return view.subviews.lazy.compactMap { nativeCanvas($0) }.first
+    }
+
     private func mount(_ view: some View) -> NSWindow {
         let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 1400, height: 900),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)

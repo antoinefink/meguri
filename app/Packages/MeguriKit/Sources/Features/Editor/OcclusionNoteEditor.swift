@@ -64,7 +64,7 @@ public struct OcclusionNoteEditor: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("io.editor")
+        .accessibilityIdentifier("io.editor.container")
         .onChange(of: masksShown, initial: true) { _, shown in host.showFields(!shown) }
         .onChange(of: roles.map { draft.values[$0.occlusions] }) { host.refreshMaskSession() }
         .onAppear { session.retryFailedLoad() }
@@ -141,7 +141,7 @@ public struct OcclusionNoteEditor: View {
             if masksShown, !session.replacing, session.image != nil || !draft.values[roles!.image].isEmpty || draft.noteID != nil {
                 Button { changeImage = true } label: { Text(verbatim: IONoteText.changeImage) }
                     .disabled(!host.acceptsHostInput || session.busy)
-                    .accessibilityIdentifier("io.changeImage")
+                    .accessibilityIdentifier("io.editor.changeImage")
             }
         }.padding()
     }
@@ -223,7 +223,7 @@ public struct OcclusionNoteEditor: View {
         .onDrop(of: [.fileURL, .url, .image], isTargeted: nil) { providers in
             session.chooseProvider(providers, host: host)
         }
-        .accessibilityIdentifier("io.picker")
+        .accessibilityIdentifier("io.picker.container")
     }
 
     private func paste() {

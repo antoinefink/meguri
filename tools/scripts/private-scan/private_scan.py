@@ -841,10 +841,10 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "45a381178815c391e3c2de3c62086fc3fdb1504d7d2f398216671137cb27cd45",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "c4b6ee938977f446a3de0d4c3ab1dbe070364d8b9ffa0d3a5542abeec659d4b9",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "5bfb128d099517da9cf40767e606dc6d3fad01313ec18d3b9340e1866d919f18",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "c94356e618294a9266b4a71d4522ca8fe1228b065567d0f568c31c1901a122cc",
-    "app/MeguriUITests/IOAddEditUITests.swift": "71557f0bc50dfc2d76c2940a5f3634b10fec564486c6f77304711c418436ad30",
+    "app/MeguriUITests/IOAddEditUITests.swift": "661998d1d56b00418c9071fba59ffcd803a4c5f9a61fb88aa696a2295d6b45d6",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
         "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",

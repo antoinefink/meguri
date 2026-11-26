@@ -4,8 +4,8 @@ import Foundation
 import XCTest
 
 /// VM-only, production UI and core; no editor routes or injected masks.
-/// Integration AX contract: io.editor.canvas bounds are the fitted image,
-/// without letterboxing; io.mask.1 / io.mask.2 expose each mask's drawn bounds
+/// Integration AX contract: native io.editor.canvas bounds are the fitted image;
+/// io.canvas is the viewport. io.mask.1 / io.mask.2 expose each mask's drawn bounds
 /// (editor/image-occlusion-strings S7). Paste Image uses its native caption.
 @MainActor final class IOAddEditUITests: XCTestCase {
     private var inputApplication: XCUIApplication?
@@ -54,28 +54,46 @@ import XCTest
         // Never read or save the workstation clipboard. Only generated pixels
         // enter the VM clipboard, which is cleared even after a failed assertion.
         let png = try geometryDiagram()
+        let pixels = try XCTUnwrap(NSBitmapImageRep(data: png))
+        let imageSize = CGSize(width: pixels.pixelsWide, height: pixels.pixelsHigh)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         defer { pasteboard.clearContents() }
         XCTAssertTrue(pasteboard.setData(png, forType: .png))
         try click(paste)
-        let addCanvas = element(addWindow, "io.editor.canvas")
-        try assertReadableCanvas(addCanvas, window: addWindow, stage: "add")
+        let addCanvas = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "add")
 
         // O4.2 opens Rectangle. These are real mouse drags over the two
         // diagram labels, expressed as fractions of the fitted source image.
         try drag(addCanvas, from: CGVector(dx: 0.05, dy: 0.50), to: CGVector(dx: 0.31, dy: 0.62))
-        XCTAssertTrue(element(addWindow, "io.mask.1").waitForExistence(timeout: 10))
+        capture(addWindow, named: "image-occlusion-add-first-mask-immediately-after-input-synthetic")
+        try requireMask(1, in: addWindow, stage: "add-first")
         try drag(addCanvas, from: CGVector(dx: 0.69, dy: 0.50), to: CGVector(dx: 0.95, dy: 0.62))
-        XCTAssertTrue(element(addWindow, "io.mask.2").waitForExistence(timeout: 10))
+        capture(addWindow, named: "image-occlusion-add-two-masks-immediately-after-input-synthetic")
+        try requireMask(2, in: addWindow, stage: "add-second")
         try deselect(in: addCanvas, app: app)
+        capture(addWindow, named: "image-occlusion-add-note-two-drawn-masks-synthetic")
+        assertNativeImage(addCanvas, in: addWindow, stage: "add-completed")
         let original = try maskBounds(in: addWindow, canvas: addCanvas)
         assertBounds(original, equalTo: [
             CGRect(x: 0.05, y: 0.50, width: 0.26, height: 0.12),
             CGRect(x: 0.69, y: 0.50, width: 0.26, height: 0.12)
         ])
-        capture(addWindow, named: "image-occlusion-add-note-two-drawn-masks-synthetic")
+        // The actual fields/masks composition must hide the native subtree,
+        // restore it, and preserve every mask without an intervening save.
+        try click(addWindow.buttons["io.maskEditor.toggle"])
+        capture(addWindow, named: "image-occlusion-add-fields-after-toggle-synthetic")
+        let hidden = addCanvas.viewport.waitForNonExistence(timeout: 10)
+        if !hidden { captureToolbar(addWindow, stage: "fields-canvas-unexpectedly-visible") }
+        XCTAssertTrue(hidden)
+        XCTAssertFalse(element(addWindow, "io.mask.1").exists)
+        XCTAssertFalse(element(addWindow, "io.mask.2").exists)
+        try click(addWindow.buttons["io.maskEditor.toggle"])
+        let restored = try readableCanvas(in: addWindow, imageSize: imageSize, stage: "restored-masks")
+        assertNativeImage(restored, in: addWindow, stage: "restored-masks")
+        assertBounds(try maskBounds(in: addWindow, canvas: restored), equalTo: original)
         try click(addWindow.buttons["editor.add.save"])
+        capture(addWindow, named: "image-occlusion-add-immediately-after-save-input-synthetic")
         XCTAssertTrue(element(addWindow, "editor.add.result").waitForExistence(timeout: 20))
         XCTAssertFalse(element(addWindow, "editor.add.error").exists)
         XCTAssertTrue(paste.waitForExistence(timeout: 15), "the next draft has no image or masks")
@@ -87,8 +105,8 @@ import XCTest
         try click(page.buttons["home.deck.study"])
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
         let editWindow = try openEditCurrent(app, bundle: bundle)
-        let editCanvas = element(editWindow, "io.editor.canvas")
-        try assertReadableCanvas(editCanvas, window: editWindow, stage: "edit")
+        let editCanvas = try readableCanvas(in: editWindow, imageSize: imageSize, stage: "edit")
+        assertNativeImage(editCanvas, in: editWindow, stage: "edit")
         assertBounds(try maskBounds(in: editWindow, canvas: editCanvas), equalTo: original)
 
         // Edit opens Select. Drag the first mask's interior, away from handles.
@@ -97,7 +115,9 @@ import XCTest
         let start = first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.click(forDuration: 0.1, thenDragTo: start.withOffset(
             CGVector(dx: editCanvas.frame.width * 0.04, dy: editCanvas.frame.height * 0.14)))
+        capture(editWindow, named: "image-occlusion-edit-moved-mask-immediately-after-input-synthetic")
         try deselect(in: editCanvas, app: app)
+        capture(editWindow, named: "image-occlusion-edit-note-moved-mask-synthetic")
         XCTAssertTrue(wait {
             let frame = first.frame, image = editCanvas.frame
             return image.height > 0 && (frame.minY - image.minY) / image.height > original[0].minY + 0.10
@@ -106,17 +126,16 @@ import XCTest
         XCTAssertEqual(edited[0].minX, original[0].minX + 0.04, accuracy: 0.015)
         XCTAssertEqual(edited[0].minY, original[0].minY + 0.14, accuracy: 0.015)
         assertBounds([edited[1]], equalTo: [original[1]])
-        capture(editWindow, named: "image-occlusion-edit-note-moved-mask-synthetic")
         try click(editWindow.buttons["review.editCurrent.done"])
         XCTAssertTrue(editWindow.waitForNonExistence(timeout: 20))
 
         // Reload the stored note through the same normal entry, with no fixture
         // reinstallation or draft reuse. Both coordinates and sizes must persist.
         let reopened = try openEditCurrent(app, bundle: bundle)
-        let reloadedCanvas = element(reopened, "io.editor.canvas")
-        try assertReadableCanvas(reloadedCanvas, window: reopened, stage: "reopened")
-        assertBounds(try maskBounds(in: reopened, canvas: reloadedCanvas), equalTo: edited)
+        let reloadedCanvas = try readableCanvas(in: reopened, imageSize: imageSize, stage: "reopened")
         capture(reopened, named: "image-occlusion-edit-note-persisted-after-reopen-synthetic")
+        assertNativeImage(reloadedCanvas, in: reopened, stage: "reopened")
+        assertBounds(try maskBounds(in: reopened, canvas: reloadedCanvas), equalTo: edited)
         try click(reopened.buttons["review.editCurrent.cancel"])
         XCTAssertTrue(reopened.waitForNonExistence(timeout: 15))
     }
@@ -155,42 +174,112 @@ import XCTest
                       "the complete native editor window must be large enough to read")
     }
 
-    private func assertReadableCanvas(_ canvas: XCUIElement, window: XCUIElement, stage: String) throws {
-        let appeared = canvas.waitForExistence(timeout: 20)
-        // Keep the real editor window and its global AX frames even when the
-        // first geometry assertion stops this journey. No desktop/menu capture.
+    /// Input can still complete and produce evidence if the fitted child is
+    /// unexpectedly absent. Only the real AX viewport is awaited; measured
+    /// source pixels determine its letterboxing. Native-image absence fails the
+    /// completed-state contract below, after the immediate input captures.
+    private struct DrawingSurface {
+        let viewport: XCUIElement
+        let nativeImage: XCUIElement
+        let imageSize: CGSize
+        var fittedFrame: CGRect {
+            let area = viewport.frame
+            let scale = min(area.width / imageSize.width, area.height / imageSize.height)
+            let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+            return CGRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2,
+                          width: size.width, height: size.height)
+        }
+        var frame: CGRect { nativeImage.exists ? nativeImage.frame : fittedFrame }
+        func coordinate(withNormalizedOffset point: CGVector) -> XCUICoordinate {
+            if nativeImage.exists { return nativeImage.coordinate(withNormalizedOffset: point) }
+            let image = fittedFrame, area = viewport.frame
+            return viewport.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: image.minX - area.minX + point.dx * image.width,
+                dy: image.minY - area.minY + point.dy * image.height))
+        }
+    }
+
+    private func readableCanvas(in window: XCUIElement, imageSize: CGSize, stage: String) throws -> DrawingSurface {
+        let viewport = element(window, "io.canvas")
+        let appeared = viewport.waitForExistence(timeout: 20)
         capture(window, named: "image-occlusion-\(stage)-authoring-surface-synthetic")
+        captureHierarchy(window, stage: stage)
+        if !appeared { captureToolbar(window, stage: stage) }
+        XCTAssertTrue(appeared)
+        XCTAssertTrue(wait { viewport.frame.width >= 600 && viewport.frame.height >= 330 })
+        XCTAssertTrue(window.frame.contains(viewport.frame), "capture includes the full viewport")
+        let result = DrawingSurface(viewport: viewport, nativeImage: element(window, "io.editor.canvas"), imageSize: imageSize)
+        if !result.nativeImage.exists { captureToolbar(window, stage: "\(stage)-image-absent") }
+        let zoom = element(window, "io.zoom")
+        if !zoom.exists { captureToolbar(window, stage: "\(stage)-zoom-absent") }
+        XCTAssertTrue(zoom.exists)
+        XCTAssertEqual(zoom.value as? String, "100%", "the first usable image layout opens at 100% within pixel rounding")
+        return result
+    }
+
+    private func assertNativeImage(_ surface: DrawingSurface, in window: XCUIElement, stage: String) {
+        if !surface.nativeImage.exists {
+            captureToolbar(window, stage: stage)
+            captureHierarchy(window, stage: stage)
+        }
+        XCTAssertTrue(surface.nativeImage.exists, "the fitted image must be a native AX image child")
+        XCTAssertEqual(surface.nativeImage.elementType, .image)
+        let actual = surface.nativeImage.frame, fitted = surface.fittedFrame
+        XCTAssertGreaterThan(actual.width, 600)
+        XCTAssertGreaterThan(actual.height, 330)
+        XCTAssertTrue(window.frame.contains(actual))
+        XCTAssertEqual(actual.minX, fitted.minX, accuracy: 1)
+        XCTAssertEqual(actual.minY, fitted.minY, accuracy: 1)
+        XCTAssertEqual(actual.width, fitted.width, accuracy: 1)
+        XCTAssertEqual(actual.height, fitted.height, accuracy: 1)
+        XCTAssertEqual(actual.width / actual.height, surface.imageSize.width / surface.imageSize.height, accuracy: 0.02)
+    }
+
+    private func requireMask(_ number: Int, in window: XCUIElement, stage: String) throws {
+        let present = element(window, "io.mask.\(number)").waitForExistence(timeout: 10)
+        if !present {
+            capture(window, named: "image-occlusion-\(stage)-unexpected-mask-absence-synthetic")
+            captureToolbar(window, stage: stage)
+            captureHierarchy(window, stage: stage)
+        }
+        XCTAssertTrue(present, "real input must create the native mask AX element")
+    }
+
+    private func captureHierarchy(_ window: XCUIElement, stage: String) {
         let hierarchy = XCTAttachment(string: window.debugDescription)
         hierarchy.name = "image-occlusion-\(stage)-authoring-surface-ax"
         hierarchy.lifetime = .keepAlways
         add(hierarchy)
-        XCTAssertTrue(appeared)
-        XCTAssertTrue(wait { canvas.frame.width >= 600 && canvas.frame.height >= 330 })
-        XCTAssertTrue(window.frame.contains(canvas.frame), "capture includes the full image")
-        XCTAssertEqual(canvas.frame.width / canvas.frame.height, 960.0 / 540.0, accuracy: 0.02,
-                       "canvas AX bounds must follow the fitted image, excluding letterboxing")
     }
 
-    private func drag(_ canvas: XCUIElement, from: CGVector, to: CGVector) throws {
+    private func captureToolbar(_ window: XCUIElement, stage: String) {
+        // The mask tools are in the window content, rather than NSToolbar.
+        // Keep both its pixels and AX snapshot after any unexpected absence.
+        capture(window, named: "image-occlusion-\(stage)-toolbar-diagnostic-synthetic")
+        captureHierarchy(window, stage: "\(stage)-toolbar")
+    }
+
+    private func drag(_ canvas: DrawingSurface, from: CGVector, to: CGVector) throws {
         try prepareInput()
         canvas.coordinate(withNormalizedOffset: from).click(forDuration: 0.1,
             thenDragTo: canvas.coordinate(withNormalizedOffset: to))
     }
 
-    private func deselect(in canvas: XCUIElement, app: XCUIApplication) throws {
+    private func deselect(in canvas: DrawingSurface, app: XCUIApplication) throws {
         try prepareInput()
         app.typeKey("s", modifierFlags: [])
         try prepareInput()
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).click()
     }
 
-    private func maskBounds(in window: XCUIElement, canvas: XCUIElement) throws -> [CGRect] {
+    private func maskBounds(in window: XCUIElement, canvas: DrawingSurface) throws -> [CGRect] {
         let image = canvas.frame
         XCTAssertGreaterThan(image.width, 0)
         XCTAssertGreaterThan(image.height, 0)
-        return (1...2).map { number in
+        return try (1...2).map { number in
+            try requireMask(number, in: window, stage: "geometry-\(number)")
             let mask = element(window, "io.mask.\(number)")
-            XCTAssertTrue(mask.waitForExistence(timeout: 10))
+            XCTAssertEqual(mask.elementType, .button)
             let rect = mask.frame
             XCTAssertGreaterThan(rect.width, 10)
             XCTAssertGreaterThan(rect.height, 10)

@@ -79,11 +79,26 @@ private struct MaskEditorContent: View {
             if session.isReadable {
                 GeometryReader { geometry in
                     MaskCanvas(image: image, session: session, viewport: $viewport,
-                               translucent: translucent, fill: selectedFill, editLabel: beginLabelEdit)
+                               translucent: translucent, fill: selectedFill, editLabel: beginLabelEdit,
+                               focusCanvas: { canvasFocused = true })
+                        #if os(macOS)
+                        // A focusable SwiftUI ancestor replaces the canvas AX
+                        // subtree with a leaf. Keep keyboard focus in a sibling.
+                        .background {
+                            Color.clear.focusable().focused($canvasFocused)
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                        #else
                         .focusable().focused($canvasFocused)
-                        .onAppear { resize(geometry.size) }
-                        .onChange(of: geometry.size) { _, size in resize(size) }
-                        .onChange(of: session.imageRevision) { resize(geometry.size) }
+                        #endif
+                        .task(id: CanvasLayout(width: geometry.size.width, height: geometry.size.height,
+                                              revision: session.imageRevision)) {
+                            // Initialization follows layout; a newer geometry or
+                            // image cancels the earlier proposal before it locks W/H.
+                            await Task.yield()
+                            guard !Task.isCancelled else { return }
+                            resize(geometry.size)
+                        }
                 }
             } else { Spacer() }
             if compact { Divider(); toolRow }
@@ -107,7 +122,7 @@ private struct MaskEditorContent: View {
                 session.editLabel(edit.id, text: text)
             }
         }
-        .accessibilityIdentifier("io.editor")
+        .accessibilityIdentifier("io.editor.maskEditor")
     }
 
     private var compact: Bool {
@@ -213,6 +228,7 @@ private struct MaskEditorContent: View {
             Button(ioString("io.command.zoomToFit")) { viewport.fit() }
         } label: { Text(viewport.zoom, format: .percent.precision(.fractionLength(0))) }
         .accessibilityLabel(ioString("io.zoom"))
+        .accessibilityValue(Text(viewport.zoom, format: .percent.precision(.fractionLength(0))))
         .accessibilityIdentifier("io.zoom")
     }
     private var inspectorButton: some View {
@@ -272,8 +288,7 @@ private struct MaskEditorContent: View {
         canvasFocused = true
     }
     private func resize(_ size: CGSize) {
-        session.setReferenceSizeIfNeeded(imageSize: imageSize, area: size, displayScale: displayScale)
-        viewport.reference = session.referenceSize; viewport.area = size; viewport.fit()
+        viewport.resize(session: session, imageSize: imageSize, area: size, displayScale: displayScale)
     }
     private func zoom(_ factor: Double) {
         viewport.magnify(by: factor, at: .init(x: viewport.area.width / 2, y: viewport.area.height / 2))
@@ -346,3 +361,9 @@ private struct MaskEditorContent: View {
 private struct LabelEdit: Identifiable { let id: UUID; let text: String }
 
 func ioString(_ key: String) -> String { String(localized: String.LocalizationValue(key), bundle: .module) }
+
+private struct CanvasLayout: Hashable {
+    let width: CGFloat
+    let height: CGFloat
+    let revision: Int
+}

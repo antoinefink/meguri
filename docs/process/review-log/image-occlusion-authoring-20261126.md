@@ -60,3 +60,7 @@ The independent privacy reviewer read and admitted all 51,346 bytes of `app/Pack
 The independent privacy reviewer read and admitted all 34,506 bytes of `app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift` as public. SHA-256 `31fab3ca100375579d03536fe0e6877dd3c0115ee3bee4e7aadcb4e350dac84a`.
 
 The independent privacy reviewer read and admitted all 12,593 bytes of `app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift` as public. SHA-256 `cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6`.
+
+The independent privacy reviewer read and admitted all 21,328 bytes of `app/MeguriUITests/IOAddEditUITests.swift` as public. SHA-256 `661998d1d56b00418c9071fba59ffcd803a4c5f9a61fb88aa696a2295d6b45d6`.
+
+The independent privacy reviewer read and admitted all 2,193 bytes of `app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md` as public. SHA-256 `0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6`.
