@@ -286,27 +286,28 @@ extension ReviewCollectionStartupTests {
             await service.configureDue(deadline: nil, held: true)
             var automaticEnded = false
             let automatic = Task { await owner.backupTrigger.run(.deadline); automaticEnded = true }
-            await service.waitForStart()
-            let deadlineOperation = try #require(await service.dueOperation)
-            let heldTriggers = await service.triggers
-            #expect(Array(heldTriggers.dropFirst(baseline)) == [.deadline])
             var quit: Task<Bool, Never>?
             var quitEnded = false
             let began = ContinuousClock.now
             let lease: UInt64?
-            if quitting {
-                lease = nil
-                quit = Task {
-                    let result = await owner.closeForQuit()
-                    quitEnded = true
-                    return result
-                }
-            } else {
-                // Expire synchronously, before the queued background path can dispatch.
-                lease = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
-                owner.backgroundTaskExpired(try #require(lease))
-            }
+            let deadlineOperation: MaintenanceOperation
             do {
+                try await service.waitForStart()
+                deadlineOperation = try #require(await service.dueOperation)
+                let heldTriggers = await service.triggers
+                #expect(Array(heldTriggers.dropFirst(baseline)) == [.deadline])
+                if quitting {
+                    lease = nil
+                    quit = Task {
+                        let result = await owner.closeForQuit()
+                        quitEnded = true
+                        return result
+                    }
+                } else {
+                    // Expire synchronously, before the queued background path can dispatch.
+                    lease = owner.beginBackgroundTask(deadlineMilliseconds: 123_000)
+                    owner.backgroundTaskExpired(try #require(lease))
+                }
                 try await service.waitForOperationCancellation()
                 let cancellingOperation = await service.dueOperation
                 let cancellingTriggers = await service.triggers
@@ -350,8 +351,8 @@ extension ReviewCollectionStartupTests {
                 #expect(!resumed.isEmpty && resumed.allSatisfy { $0 == .opened })
                 await service.configureDue(deadline: nil, held: true)
                 let foreground = Task { await owner.backupTrigger.run(.opened) }
-                await service.waitForStart()
                 do {
+                    try await service.waitForStart()
                     let foregroundOperation = try #require(await service.dueOperation)
                     #expect(foregroundOperation !== deadlineOperation)
                     owner.backgroundTaskExpired(try #require(lease))

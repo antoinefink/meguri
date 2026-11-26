@@ -13,10 +13,12 @@ public struct BackupLimitDraft {
     public mutating func commit(value: UInt32, minimum: UInt32) -> UInt32? {
         // Focus/defocus is not an edit, including for legacy unbounded values.
         guard let original, text != String(original) else { reset(to: value); return nil }
-        guard let number = UInt32(text.trimmingCharacters(in: .whitespaces)), number >= minimum, number <= 9999 else {
+        guard let number = UInt32(text.trimmingCharacters(in: .whitespaces)) else {
             invalid = true; return nil
         }
-        if number == original || number == value { reset(to: value); return nil }
+        if number == original { reset(to: value); return nil }
+        guard number >= minimum, number <= 9999 else { invalid = true; return nil }
+        if number == value { reset(to: value); return nil }
         reset(to: number)
         return number
     }

@@ -191,7 +191,7 @@ public final class BackupCoordinator {
     }
 
     public func editLimit(_ field: LimitField, value: UInt32) async {
-        guard canEditLimits, let current = limits else { return }
+        guard canEditLimits, let current = limits, let host else { return }
         let patch: BackupLimitPatch
         let previous: UInt32
         let bounded = field == .interval ? min(max(value, 5), 9999) : min(value, 9999)
@@ -202,14 +202,25 @@ public final class BackupCoordinator {
         case .interval: patch = .minimumIntervalMinutes(bounded); previous = current.minimumIntervalMinutes
         }
         guard bounded != previous else { return }
-        let expected = ownership
+        let expected = ownership, generation = host.backupGeneration
         limitsRevision &+= 1
+        let revision = limitsRevision
+        func currentOwner() -> Bool {
+            expected == ownership && generation == host.backupGeneration && revision == limitsRevision
+        }
         savingLimits = true
         defer { savingLimits = false }
         do {
             let confirmed = try await service.updateBackupLimit(patch)
-            if expected == ownership { limits = confirmed }
-        } catch { if expected == ownership { failure = Self.cause(error); failureWork = nil } }
+            if currentOwner() { limits = confirmed }
+        } catch {
+            guard currentOwner() else { return }
+            failure = Self.cause(error)
+            failureWork = nil
+            // The refused write fenced concurrent snapshots. Read again under
+            // that same owner while keeping the write failure visible.
+            if let fresh = try? await service.backupLimits(), currentOwner() { limits = fresh }
+        }
     }
 
     private func begin(_ work: Work) {

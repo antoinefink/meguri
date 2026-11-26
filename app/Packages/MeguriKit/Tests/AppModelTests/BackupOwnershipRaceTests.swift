@@ -127,8 +127,8 @@ extension ReviewCollectionStartupTests {
         }
     }
 
-    @Test(.timeLimit(.minutes(1)))
-    func refusedBackupDrainKeepsHealthyPredecessorAndSyncHoldUntilSafeRetry() async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: ["none", "explicit", "task"])
+    func refusedBackupDrainKeepsHealthyPredecessorAndSyncHoldUntilSafeRetry(cancellation: String) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "backup-drain-retry-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupRaceConfiguration(root)
@@ -143,6 +143,8 @@ extension ReviewCollectionStartupTests {
         }, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
+        let retryDrain = BackupRaceGate()
+        var pendingRetry: Task<Void, Never>?
         await owner.start()
         do {
             try #require(owner.state == .ready)
@@ -164,6 +166,27 @@ extension ReviewCollectionStartupTests {
                 sync.receive(.foreground); await sync.waitForInputs()
                 #expect(original.events == events) // Failed drain kept original sync admission closed.
             }
+            if cancellation != "none" {
+                original.onQuiesce = { await retryDrain.hold() }
+                let cancelled = try #require(owner.backups.restoreConfirmed(name: entry.name))
+                pendingRetry = cancelled
+                try await retryDrain.waitUntilHeld()
+                // The refused attempt removed its editor decision. Cancellation
+                // must still stop retry before a new replacement is admitted.
+                #expect(owner.backups.canCancel && !owner.canStudy)
+                if cancellation == "explicit" { owner.backups.cancel() }
+                else { cancelled.cancel() }
+                retryDrain.release(); await cancelled.value
+                #expect(await service.restoredNames.isEmpty)
+                #expect(owner.backups.failure == .cancelled && !owner.backups.busy)
+                #expect(!owner.backups.candidateActive && !owner.backups.activationUncertain)
+                #expect(!owner.backups.restoreCompleted && owner.backups.selectedName == entry.name)
+                #expect(owner.state == .ready && owner.error == nil && owner.generation == generation)
+                #expect(owner.lifecycle == .ready(generation: generation))
+                #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
+                #expect(owner.backups.canCreate && owner.canStudy && sync.setupState == .attached)
+                #expect(sync.syncOwnerAttached && original.closed && original.closeCount == 1 && factories == 2)
+            }
             original.onQuiesce = nil
             let retry = try #require(owner.backups.restoreConfirmed(name: entry.name))
             await retry.value
@@ -173,7 +196,10 @@ extension ReviewCollectionStartupTests {
             #expect(owner.backups.canCreate && owner.canStudy && sync.setupState == .attached)
             #expect(original.closed && original.closeCount == 1 && factories > 1)
             try #require(await owner.close())
-        } catch { original.onQuiesce = nil; _ = await owner.close(); throw error }
+        } catch {
+            retryDrain.release(); await pendingRetry?.value
+            original.onQuiesce = nil; _ = await owner.close(); throw error
+        }
     }
 
     private func activateBackupRaceReplacement(_ owner: ReviewCollection, activationOwner: String) async throws -> CollectionActivation {

@@ -34,6 +34,78 @@ import Testing
     }
 
     @Test(.timeLimit(.minutes(1)))
+    func refusedLimitEditReadsRemoteValuesAndFencesConcurrentSnapshot() async throws {
+        let read = BackupRaceGate(), write = BackupRaceGate()
+        let service = HeldBackupLimits(read: read, write: write), host = LimitRaceHost()
+        let model = BackupCoordinator(host: host, service: service)
+        await model.refresh()
+        await service.holdNextRead()
+        let refresh = Task { await model.refresh() }
+        var edit: Task<Void, Never>?
+        do {
+            try await read.waitUntilHeld()
+            await service.holdNextWrite()
+            await service.refuseNextWrite()
+            let pending = Task { await model.editLimit(.weekly, value: 4) }
+            edit = pending
+            try await write.waitUntilHeld()
+            await service.remoteWeekly(7)
+            await service.remoteMonthly(23)
+            write.release(); await pending.value
+            let remote = BackupLimits(daily: .max, weekly: 7, monthly: 23, minimumIntervalMinutes: .max)
+            #expect(model.limits == remote && model.failure == .diskFull && !model.savingLimits)
+            #expect(await service.written.isEmpty)
+            read.release(); await refresh.value
+            #expect(model.limits == remote && model.failure == .diskFull)
+            // Refusal does not close admission to a later genuine edit.
+            await model.editLimit(.weekly, value: 4)
+            #expect(model.limits?.weekly == 4 && model.limits?.monthly == 23)
+        } catch {
+            read.release(); write.release(); await refresh.value; await edit?.value
+            throw error
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true], [false, true])
+    func lateLimitResultCannotPublishAfterOwnerChanges(refused: Bool, generationOnly: Bool) async throws {
+        let read = BackupRaceGate(), write = BackupRaceGate()
+        let service = HeldBackupLimits(read: read, write: write), host = LimitRaceHost()
+        let model = BackupCoordinator(host: host, service: service)
+        await model.refresh()
+        if refused { await service.refuseNextWrite(); await service.holdNextRead() }
+        else { await service.holdNextWrite() }
+        let edit = Task { await model.editLimit(.weekly, value: 4) }
+        do {
+            // Hold either the successful write or the refused write's fresh read.
+            try await (refused ? read : write).waitUntilHeld()
+            if generationOnly { host.backupGeneration += 1 }
+            else { model.collectionChanged() }
+            await service.remoteWeekly(8)
+            await service.remoteMonthly(23)
+            let before = model.limits
+            read.release(); write.release(); await edit.value
+            #expect(model.limits == before && !model.savingLimits)
+            if refused, generationOnly { #expect(model.failure == .diskFull) }
+            await model.refresh()
+            #expect(model.limits?.monthly == 23)
+        } catch {
+            read.release(); write.release(); await edit.value
+            throw error
+        }
+    }
+
+    @Test func failedLimitReadPreservesWriteFailureAndLastKnownLimits() async {
+        let service = HeldBackupLimits(read: BackupRaceGate(), write: BackupRaceGate()), host = LimitRaceHost()
+        let model = BackupCoordinator(host: host, service: service)
+        await model.refresh()
+        let previous = model.limits
+        await service.refuseNextWrite()
+        await service.refuseNextRead()
+        await model.editLimit(.weekly, value: 4)
+        #expect(model.limits == previous && model.failure == .diskFull && !model.savingLimits)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func cachedLimitsEditKeepsRemoteMembersAndDisplaysConfirmedStoredLimits() async throws {
         let write = BackupRaceGate()
         defer { write.release() }
@@ -64,7 +136,18 @@ import Testing
         #expect(!draft.invalid && draft.text == String(UInt32.max))
         draft.reset(to: 1) // Legacy interval below the UI's minimum.
         #expect(draft.commit(value: 1, minimum: 5) == nil && !draft.invalid)
+        draft.text = " 1 "
+        #expect(draft.commit(value: 1, minimum: 5) == nil && !draft.invalid)
+        draft.text = " 1 "
+        #expect(draft.commit(value: 8, minimum: 5) == nil && !draft.invalid && draft.text == "8")
+        draft.reset(to: .max)
+        draft.text = " \(UInt32.max) "
+        #expect(draft.commit(value: 9, minimum: 5) == nil && !draft.invalid && draft.text == "9")
+        draft.reset(to: 1)
         draft.text = "2"
+        #expect(draft.commit(value: 1, minimum: 5) == nil && draft.invalid)
+        #expect(draft.commit(value: 2, minimum: 5) == nil && draft.invalid) // Synced value is not the edit baseline.
+        draft.text = "10000"
         #expect(draft.commit(value: 1, minimum: 5) == nil && draft.invalid)
         draft.text = "5"
         #expect(draft.commit(value: 1, minimum: 5) == 5 && !draft.invalid)
@@ -94,12 +177,16 @@ private actor HeldBackupLimits: MaintenanceService {
     var limits = BackupLimits(daily: .max, weekly: 10, monthly: 9, minimumIntervalMinutes: .max)
     var written: [BackupLimits] = []
     private var holdRead = false, holdWrite = false
+    private var refuseWrite = false, refuseRead = false
     init(read: BackupRaceGate, write: BackupRaceGate) { self.read = read; self.write = write }
     func holdNextRead() { holdRead = true }
     func holdNextWrite() { holdWrite = true }
+    func refuseNextWrite() { refuseWrite = true }
+    func refuseNextRead() { refuseRead = true }
     func remoteWeekly(_ value: UInt32) { limits.weekly = value }
     func remoteMonthly(_ value: UInt32) { limits.monthly = value }
     func backupLimits() async throws -> BackupLimits {
+        if refuseRead { refuseRead = false; throw MaintenanceError.collectionUnavailable }
         let snapshot = limits
         if holdRead { holdRead = false; await read.hold() }
         return snapshot
@@ -111,6 +198,7 @@ private actor HeldBackupLimits: MaintenanceService {
     func listBackups() async throws -> [BackupEntry] { [] }
     func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits {
         if holdWrite { holdWrite = false; await write.hold() }
+        if refuseWrite { refuseWrite = false; throw MaintenanceError.diskFull }
         switch patch {
         case .daily(let value): limits.daily = value
         case .weekly(let value): limits.weekly = value
@@ -127,7 +215,7 @@ private actor HeldBackupLimits: MaintenanceService {
 }
 
 @MainActor private final class LimitRaceHost: BackupHost {
-    let backupGeneration: UInt64 = 1
+    var backupGeneration: UInt64 = 1
     let backupsWritable = true, backupsAvailable = true, backupCancellationSafe = true
     func prepareBackups() async throws {}
     func beginBackupRestore() async throws {}

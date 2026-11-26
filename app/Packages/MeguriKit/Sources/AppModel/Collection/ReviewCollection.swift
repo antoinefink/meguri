@@ -1284,6 +1284,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             backupRestoreDrainPending = false
             _ = await finishBackupRestore(candidateActive: false, generation: nil)
         }
+        // Retry may have been cancelled while draining, before an editor
+        // decision existed. Reconcile the drained predecessor before stopping.
+        try Task.checkCancellation()
         guard !closing, !closed, !opening else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         let decision = EditorReplacementDecision()

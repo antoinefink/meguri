@@ -18,7 +18,7 @@ actor BackupServiceProbe: MaintenanceService {
     var deadline: Int64?
     var held = false
     var started = false
-    var startWaiters: [CheckedContinuation<Void, Never>] = []
+    var startWaiters: [UUID: AsyncStream<Void>.Continuation] = [:]
     var releaseWaiter: CheckedContinuation<Void, Never>?
     var beforeRestore: (@Sendable () async -> Void)?
     func configure(entries: [BackupEntry], refusal: MaintenanceFailure? = nil) {
@@ -31,15 +31,31 @@ actor BackupServiceProbe: MaintenanceService {
         self.deadline = deadline; self.held = held; started = false
     }
     func beforeRestore(_ action: @escaping @Sendable () async -> Void) { beforeRestore = action }
-    func waitForStart() async {
+    func waitForStart(timeout: Duration = .seconds(10)) async throws {
+        try Task.checkCancellation()
         if started { return }
-        await withCheckedContinuation { startWaiters.append($0) }
+        let id = UUID(), signal = AsyncStream<Void>.makeStream()
+        startWaiters[id] = signal.continuation
+        defer { startWaiters.removeValue(forKey: id)?.finish() }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in signal.stream { try Task.checkCancellation(); return }
+                throw CancellationError()
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw BridgeError.internal("Timed out waiting for backup service admission")
+            }
+            defer { group.cancelAll() }
+            _ = try await group.next()
+            try Task.checkCancellation()
+        }
     }
     func release() { held = false; releaseWaiter?.resume(); releaseWaiter = nil }
     private func reachGate() async {
         started = true
         let waiting = startWaiters; startWaiters.removeAll()
-        waiting.forEach { $0.resume() }
+        waiting.values.forEach { $0.yield(()); $0.finish() }
         if held { await withCheckedContinuation { releaseWaiter = $0 } }
     }
     func createBackup(operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ImportBackupReceipt {
@@ -114,6 +130,73 @@ actor BackupServiceProbe: MaintenanceService {
         return BackupRestoreCompletion(candidateActive: candidateActive, ready: true)
     }
     func backupRestoreSucceeded() { succeeded = true }
+}
+
+@MainActor @Suite struct BackupServiceProbeTests {
+    @Test(.timeLimit(.minutes(1)))
+    func missingStartTimesOutAndCleanupReleasesAndJoinsDelayedWork() async throws {
+        let service = BackupServiceProbe(), admission = BackupRaceGate()
+        await service.configureDue(deadline: nil, held: true)
+        var ended = false
+        let pending = Task {
+            await admission.hold()
+            _ = try? await service.runDueMaintenance(.opened, operation: MaintenanceOperation(), progress: { _ in })
+            ended = true
+        }
+        do {
+            try await admission.waitUntilHeld()
+            do {
+                try await service.waitForStart(timeout: .zero)
+                Issue.record("Missing service admission must fail")
+            } catch BridgeError.internal(let detail) {
+                #expect(detail == "Timed out waiting for backup service admission")
+            }
+            #expect(await service.startWaiters.isEmpty)
+            #expect(!ended)
+        } catch {
+            await service.release(); admission.release(); await pending.value
+            throw error
+        }
+        // Release even a not-yet-admitted operation before joining its owner.
+        await service.release(); admission.release(); await pending.value
+        let triggers = await service.triggers
+        #expect(ended && triggers == [.opened])
+        try await service.waitForStart() // Already-started success stays immediate.
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func startWaitHonorsCancellationAndRetiresItsWaiter(alreadyStarted: Bool) async throws {
+        let service = BackupServiceProbe()
+        if alreadyStarted {
+            _ = try await service.runDueMaintenance(.opened, operation: MaintenanceOperation(), progress: { _ in })
+        }
+        let waiting = Task { try await service.waitForStart() }
+        do {
+            if !alreadyStarted {
+                let deadline = ContinuousClock.now.advanced(by: .seconds(4))
+                while await service.startWaiters.isEmpty, ContinuousClock.now < deadline {
+                    try await Task.sleep(for: .milliseconds(1))
+                }
+                try #require(await service.startWaiters.count == 1)
+            }
+            waiting.cancel()
+            switch await waiting.result {
+            case .success: Issue.record("Cancelled start wait must fail")
+            case .failure(let error): #expect(error is CancellationError)
+            }
+            #expect(await service.startWaiters.isEmpty)
+            // Cancelling one wait must not poison the next successful admission.
+            if !alreadyStarted {
+                let next = Task { try await service.waitForStart() }
+                _ = try await service.runDueMaintenance(.opened, operation: MaintenanceOperation(), progress: { _ in })
+                try await next.value
+            }
+        } catch {
+            waiting.cancel(); _ = await waiting.result
+            await service.release()
+            throw error
+        }
+    }
 }
 
 @MainActor @Suite struct BackupCoordinatorTests {
@@ -255,7 +338,8 @@ actor BackupServiceProbe: MaintenanceService {
         let model = BackupCoordinator(host: host, service: service)
         await model.openedRestore()
         let restore = try #require(model.restoreConfirmed(name: selected.name))
-        await service.waitForStart()
+        do { try await service.waitForStart() }
+        catch { await service.release(); await restore.value; throw error }
         host.backupCancellationSafe = false
         #expect(!model.canCancel)
         restore.cancel()
@@ -277,7 +361,9 @@ actor BackupServiceProbe: MaintenanceService {
         trigger.own(1); trigger.event(deadline: 0)
         let immediate = try #require(fire)
         immediate()
-        await service.waitForStart(); await trigger.drain()
+        do { try await service.waitForStart() }
+        catch { trigger.own(nil); await service.release(); await trigger.drain(); throw error }
+        await trigger.drain()
         #expect(await service.triggers == [.deadline])
         #expect(scheduled == [Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 5)])
         trigger.own(nil)
@@ -298,19 +384,21 @@ actor BackupServiceProbe: MaintenanceService {
         trigger.event(deadline: 4000)
         #expect(cancelled == 3 && dates.count == 3 && trigger.deadlineMilliseconds == nil)
     }
-    @Test func eventWinsOverAnInFlightDeadlineResultAndReplacementDiscardsTerminalTimer() async {
+    @Test func eventWinsOverAnInFlightDeadlineResultAndReplacementDiscardsTerminalTimer() async throws {
         let service = BackupServiceProbe()
         await service.configureDue(deadline: 4000, held: true)
         let trigger = BackupTrigger(service: service, schedule: { _, _ in {} })
         trigger.own(1)
         let running = Task { await trigger.run(.opened) }
-        await service.waitForStart()
+        do { try await service.waitForStart() }
+        catch { trigger.own(nil); await service.release(); await running.value; throw error }
         trigger.event(deadline: 9000)
         await service.release(); await running.value
         #expect(trigger.deadlineMilliseconds == 9000)
         await service.configureDue(deadline: 6000, held: true)
         let retired = Task { await trigger.run(.deadline) }
-        await service.waitForStart()
+        do { try await service.waitForStart() }
+        catch { trigger.own(nil); await service.release(); await retired.value; throw error }
         trigger.own(2)
         trigger.event(deadline: 12000)
         await service.release(); await retired.value
@@ -324,15 +412,20 @@ actor BackupServiceProbe: MaintenanceService {
         trigger.own(1)
         var firstEnded = false, successorEnded = false
         let running = Task { await trigger.run(.opened); firstEnded = true }
-        await service.waitForStart()
+        do { try await service.waitForStart() }
+        catch { trigger.own(nil); await service.release(); await running.value; throw error }
         var queuedEntered = false
         let queued = Task { queuedEntered = true; await trigger.run(.background) }
         let admissionLimit = ContinuousClock.now.advanced(by: .seconds(2))
         while !queuedEntered, ContinuousClock.now < admissionLimit { await Task.yield() }
-        try #require(queuedEntered)
-        trigger.cancelPending()
-        do { try await service.waitForOperationCancellation() }
-        catch { await service.release(); await running.value; await queued.value; throw error }
+        do {
+            try #require(queuedEntered)
+            trigger.cancelPending()
+            try await service.waitForOperationCancellation()
+        } catch {
+            trigger.own(nil); await service.release(); await running.value; await queued.value
+            throw error
+        }
         let successor = Task { await trigger.run(.opened); successorEnded = true }
         await Task.yield()
         #expect(!firstEnded && !successorEnded) // Cancellation never abandons the active operation.
@@ -351,9 +444,10 @@ actor BackupServiceProbe: MaintenanceService {
         var ended = false
         let began = ContinuousClock.now
         let quit = Task { await trigger.run(.quit); ended = true }
-        await service.waitForStart()
-        do { try await service.waitForOperationCancellation() }
-        catch { await service.release(); await quit.value; throw error }
+        do {
+            try await service.waitForStart()
+            try await service.waitForOperationCancellation()
+        } catch { trigger.own(nil); await service.release(); await quit.value; throw error }
         #expect(began.duration(to: .now) < .seconds(3))
         #expect(!ended)
         await service.release(); await quit.value
