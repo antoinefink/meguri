@@ -838,7 +838,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/AppModel/Collection/BackupTrigger.swift":
         "dde4dd4b82894df3eb270cded5a9abdac5ada95a203dea7c30e7a9e3bbb10859",
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":
-        "40111b17225292957ddb52f694b43b0e8beca74db205fc438426c4ac6d7d4209",
+        "ad79311280c0e3216296e574b0aab632e8529c7c725afda3dd9720ed379ba5ff",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
         "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
