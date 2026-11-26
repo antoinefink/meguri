@@ -681,10 +681,13 @@ enum HostedRenderer {
     #else
     private struct RestoreSheetHost: View {
         let content: AnyView
+        let cell: MatrixCell
         @State private var presented = true
         var body: some View {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                .sheet(isPresented: $presented) { content }
+                .sheet(isPresented: $presented) {
+                    content.modifier(CellEnvironment(cell: cell))
+                }
         }
     }
 
@@ -708,7 +711,7 @@ enum HostedRenderer {
             else { throw RenderError(description: "the host app has no window scene") }
             previousKeyWindow = scene.keyWindow
             UIView.setAnimationsEnabled(false)
-            let root = layout == .backupRestore ? AnyView(RestoreSheetHost(content: view)) : view
+            let root = layout == .backupRestore ? AnyView(RestoreSheetHost(content: view, cell: cell)) : view
             let controller = UIHostingController(rootView: HostedRenderer.content(root, cell: cell, layout: layout))
             if layout == .component {
                 controller.safeAreaRegions = []
@@ -727,6 +730,13 @@ enum HostedRenderer {
             window = UIWindow(windowScene: scene)
             window.windowLevel = .alert + 1
             window.overrideUserInterfaceStyle = cell.appearance == .dark ? .dark : .light
+            if layout == .backupRestore {
+                // The native presentation controller inherits traits from the window.
+                window.traitOverrides.preferredContentSizeCategory = cell.textSize.contentSizeCategory
+                window.traitOverrides.accessibilityContrast = cell.increaseContrast ? .high : .normal
+                window.traitOverrides.horizontalSizeClass = cell.device.horizontalSizeClassIsRegular ? .regular : .compact
+                window.traitOverrides.verticalSizeClass = .regular
+            }
             window.backgroundColor = UIColor(ColorToken.backgroundPrimary.color)
             window.frame = CGRect(origin: .zero, size: size)
             // Core Animation stands still in this window: a spinner or any
