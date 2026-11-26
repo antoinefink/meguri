@@ -256,10 +256,13 @@ extension ReviewCollectionStartupTests {
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         // Ready publishes the engine's initial deadline independently of the
         // probe. Seed T2.3's persisted reference so the real deadline is nil.
+        // Probe automatic maintenance so the future clock cannot advance the
+        // process-wide periodic attempt floor; forced backups do not set it.
         let initialSync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() },
             defaults: nil, cloudConfigured: false)
         let initial = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: initialSync, providerDirectory: root.appending(path: "synthetic-installation"))
+            sync: initialSync, providerDirectory: root.appending(path: "synthetic-installation"),
+            maintenanceService: BackupServiceProbe())
         initial.studyPreparation.runsUnprompted = false
         await initial.start()
         do {
@@ -268,11 +271,9 @@ extension ReviewCollectionStartupTests {
             await initial.waitForLifecycle()
             await initial.backupTrigger.drain()
             try #require(initial.state == .ready)
-            let create = try #require(initial.backups.create())
-            await create.value
-            let receipt = try #require(initial.backups.created)
+            let receipt = try await CoreMaintenanceService().createBackup(operation: MaintenanceOperation(), progress: { _ in })
             try #require(receipt.sizeBytes > 0)
-            try #require(initial.backups.entries.contains { $0.name == receipt.name && $0.sizeBytes == receipt.sizeBytes })
+            try #require(try await CoreMaintenanceService().listBackups().contains { $0.name == receipt.name && $0.sizeBytes == receipt.sizeBytes })
             try #require(await initial.close())
         } catch { _ = await initial.close(); throw error }
         let service = BackupServiceProbe()
