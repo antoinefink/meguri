@@ -42,7 +42,7 @@ async function fixture(page: Page, origin: string, many = false) {
   const notes = samples.map(([Spanish, Example], i) => ({ note_id: String(101 + i), note_type_id: "10", fields: { Spanish: Spanish!, English: "<b>keep this field</b>", Example: Example! }, tags: ["study"], revision: "r1" }));
   const state = { signedIn: true, account: "synthetic-a", responseAccount: "synthetic-a", notes, pages: [] as BrowseScope[], writes: [] as { path: string; body: Record<string, unknown> }[],
     pageGate: null as Promise<void> | null, detailGate: null as Promise<void> | null, writeGate: null as Promise<void> | null,
-    pageGateAt: null as number | null, releasedPages: 0, releasedDetails: 0, conflict: false, catalogError: false, detailError: false, pageError: false, detailUnavailable: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
+    pageGateAt: null as number | null, releasedPages: 0, releasedDetails: 0, conflict: false, catalogError: false, detailError: false, pageError: false, detailUnavailable: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false, writeError: false, unavailableCard: null as string | null };
   const card = (i: number, scope: BrowseScope): BrowseCard => {
     const note = notes[i % notes.length]!;
     const field = scope.field || (scope.query && note.fields.Spanish.toLowerCase().includes(scope.query.toLowerCase()) ? "Spanish" : "Example");
@@ -73,7 +73,7 @@ async function fixture(page: Page, origin: string, many = false) {
       if (state.pageError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });
       const position = state.sparse ? Number(body.cursor ?? 0) + 200 : 0;
       const indexes = state.sparse ? position === 600 ? [399] : position === 1200 ? [800, 801] : [] : Array.from({ length: many ? 50 : 3 }, (_, i) => i);
-      const cards = indexes.map(i => card(i, body as BrowseScope)).filter(c => {
+      const cards = indexes.map(i => card(i, body as BrowseScope)).map(c => c.card_id === state.unavailableCard ? { ...c, unavailable: `Card ${c.card_id} · Note ${c.note_id}. Unavailable for browser editing.` } : c).filter(c => {
         const note = notes.find(n => n.note_id === c.note_id)!;
         return body.deck_id !== "2" && (!body.query || Object.entries(note.fields).some(([name, text]) => (!body.field || body.field === name) && text.toLowerCase().includes(String(body.query).toLowerCase())));
       });
@@ -98,6 +98,7 @@ async function fixture(page: Page, origin: string, many = false) {
       return;
     }
     state.writesStarted++; state.writes.push({ path, body }); await state.writeGate;
+    if (state.writeError) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable" } }) });
     if (state.conflict) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "browse_conflict" } }) });
     if (path.endsWith("/delete")) return reply({ account_id: state.responseAccount });
     const note = notes.find(n => n.note_id === body.note_id) ?? notes[0]!;
@@ -155,7 +156,7 @@ test("field examples, inert highlights, shared editing and unchanged markup", as
   await page.getByLabel("Field", { exact: true }).selectOption("Spanish"); await expect(rows(page)).toHaveCount(1); await expect(rows(page)).toContainText("aprovechar");
   await page.getByLabel("Field", { exact: true }).selectOption(""); await expect(rows(page)).toHaveCount(3);
   await rows(page).first().click(); await expect(page.getByLabel("Example", { exact: true })).toBeFocused();
-  await expect(page.getByText("2 cards share this note.")).toBeVisible(); await page.getByText("Card info", { exact: true }).click();
+  await expect(page.getByText("2 cards share this note.")).toBeVisible();
   await expect(page.getByText("201", { exact: true })).toBeVisible(); await expect(page.getByText("101", { exact: true })).toBeVisible();
   await page.getByLabel("Example", { exact: true }).fill("Quiero aprovechar el viaje para ver a mi hermana."); await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Note 101 saved." })).toBeVisible();
@@ -175,8 +176,8 @@ test("compact Back retains scope, scroll and row focus; dirty drafts require a d
   expect(before).toBeGreaterThan(0);
   await selected.press("Enter"); await expect(page.getByLabel("Example", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Search note fields")).toBeHidden(); await page.getByLabel("Example", { exact: true }).fill("draft");
-  page.once("dialog", dialog => void dialog.dismiss()); await page.getByRole("button", { name: "Back to results" }).click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("draft");
-  page.once("dialog", dialog => void dialog.accept()); await page.getByRole("button", { name: "Back to results" }).click();
+  page.once("dialog", dialog => void dialog.dismiss()); await page.getByRole("button", { name: "All cards" }).click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("draft");
+  page.once("dialog", dialog => void dialog.accept()); await page.getByRole("button", { name: "All cards" }).click();
   await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(selected).toBeFocused();
   await expect.poll(() => page.locator(".browse-results").evaluate(el => el.scrollTop)).toBeCloseTo(before, 0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -254,9 +255,9 @@ test("conflicts retain proposed fields and deletion requires the displayed sibli
   page.once("dialog", dialog => void dialog.dismiss()); await rows(page).nth(1).click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("my draft");
   state.conflict = false; page.once("dialog", dialog => void dialog.accept()); await page.getByRole("button", { name: "Load server copy" }).click();
   await expect(page.getByLabel("Example", { exact: true })).toHaveValue(samples[0]![1]!); await page.getByRole("button", { name: "Delete note", exact: true }).click();
-  const confirmation = page.getByRole("region", { name: "Confirm note deletion" }); await expect(confirmation).toContainText("el viaje"); await expect(confirmation).toContainText("all 2 of its cards");
+  const confirmation = page.getByRole("dialog", { name: /^Delete “/ }); await expect(confirmation).toContainText("el viaje"); await expect(confirmation).toContainText("all 2 of its cards");
   await confirmation.getByRole("button", { name: "Cancel" }).click(); expect(state.writes).toHaveLength(1);
-  await page.getByRole("button", { name: "Delete note", exact: true }).click(); await confirmation.getByRole("button", { name: "Confirm delete note" }).click();
+  await page.getByRole("button", { name: "Delete note", exact: true }).click(); await confirmation.getByRole("button", { name: "Delete note", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible();
   expect(state.writes[1]!.body).toEqual({ note_id: "101", revision: "r1", confirmation: "confirm-r1" });
 });
@@ -273,9 +274,9 @@ test("sparse pages automatically advance and account mismatches clear collection
   const before = state.pageReads;
   await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
   expect(state.pageReads - before).toBe(3); await expect(rows(page).first()).toHaveAttribute("data-card", "600");
-  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  await page.getByRole("button", { name: "Search further" }).click(); await expect(rows(page)).toHaveCount(3);
   expect(state.pageReads - before).toBe(6);
-  await expect(page.getByRole("button", { name: "Load more cards" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Search further" })).toHaveCount(0);
   state.responseAccount = "synthetic-b"; await search(page, "aprovechar");
   await expect(page.getByRole("alert")).toContainText("account changed"); await expect(rows(page)).toHaveCount(0); await expect(page.getByRole("button", { name: "Add note", exact: true })).toBeDisabled();
 });
@@ -352,7 +353,7 @@ test("selection handover fences typing in the previous editor during a delayed r
 test("saving a later sparse result replays the examined range and keeps nearby matches", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
   state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
-  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  await page.getByRole("button", { name: "Search further" }).click(); await expect(rows(page)).toHaveCount(3);
   await rows(page).nth(1).click(); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("la oportunidad");
   const before = state.pageReads;
   await page.getByLabel("Example", { exact: true }).fill("This row no longer matches.");
@@ -363,7 +364,7 @@ test("saving a later sparse result replays the examined range and keeps nearby m
   await expect(rows(page).first()).toHaveAttribute("data-card", "600");
   await expect(rows(page).last()).toHaveAttribute("data-card", "1002");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Back to results" }).click();
+  await page.getByRole("button", { name: "All cards" }).click();
   await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar"); await expect(rows(page).last()).toBeFocused();
   expect(state.writes[0]!.body.revision).toBe("r1");
 });
@@ -388,7 +389,7 @@ test("changed search and selection cancel automatic sparse continuation", async 
   await expect(page.getByRole("status").filter({ hasText: "cards shown" })).toContainText("1 cards shown");
   const pending = barrier(); state.pageGate = pending.promise;
   const reads = state.pageReads; state.pageGateAt = reads + 2;
-  await page.getByRole("button", { name: "Load more cards" }).click(); await expect.poll(() => state.pageReads).toBe(reads + 2);
+  await page.getByRole("button", { name: "Search further" }).click(); await expect.poll(() => state.pageReads).toBe(reads + 2);
   await expect(rows(page).first()).toBeEnabled();
   await rows(page).first().press("Enter"); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("el viaje");
   pending.release(); await expect.poll(() => state.releasedPages).toBe(2);
@@ -423,9 +424,9 @@ test("creation and deletion stay acknowledged when result refresh fails", async 
   expect(state.writes).toHaveLength(1);
   state.pageError = false; await search(page, ""); await rows(page).first().click();
   await page.getByRole("button", { name: "Delete note", exact: true }).click(); state.pageError = true;
-  await page.getByRole("button", { name: "Confirm delete note" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete note", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Note and its cards deleted. Could not refresh");
-  await expect(page.getByRole("button", { name: "Confirm delete note" })).toHaveCount(0);
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Delete note", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
   expect(state.writes).toHaveLength(2);
 });
@@ -433,14 +434,14 @@ test("creation and deletion stay acknowledged when result refresh fails", async 
 for (const removeMatch of [false, true]) test(`compact Back preserves a delayed committed replay (${removeMatch ? "removed match" : "updated excerpt"})`, async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
   state.sparse = true; await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(1);
-  await page.getByRole("button", { name: "Load more cards" }).click(); await expect(rows(page)).toHaveCount(3);
+  await page.getByRole("button", { name: "Search further" }).click(); await expect(rows(page)).toHaveCount(3);
   await page.setViewportSize({ width: 390, height: 844 });
   await rows(page).nth(1).click();
   await page.getByLabel("Example", { exact: true }).fill(removeMatch ? "No longer a match." : "aprovechar the committed excerpt");
   const held = barrier(); const before = state.pageReads; state.pageGate = held.promise; state.pageGateAt = before + 2;
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect.poll(() => state.pageReads).toBe(before + 2);
-  const back = page.getByRole("button", { name: "Back to results" }); await expect(back).toBeEnabled(); await back.click();
+  const back = page.getByRole("button", { name: "All cards" }); await expect(back).toBeEnabled(); await back.click();
   await expect(rows(page).nth(1)).toBeFocused();
   held.release(); await expect(page.getByRole("status").filter({ hasText: "cards shown" })).toBeVisible();
   expect(state.pageReads - before).toBe(6);
@@ -489,4 +490,102 @@ test("an individually unavailable detail keeps its identity and the next card us
   await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
   state.detailUnavailable = false; await rows(page).nth(1).click();
   await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("aprovechar");
+});
+
+test("wide Browse lists at full width, then keeps the results as a rail beside the open card", async ({ page, baseURL }) => {
+  await fixture(page, baseURL!, true); await page.goto("/browse"); await expect(rows(page)).toHaveCount(50);
+  const columns = page.locator(".browse-columns");
+  await expect(columns).toHaveText("NoteCardDeck"); await page.screenshot({ path: "/out/browse-wide-list.png" });
+  expect(await page.locator(".browse-list-pane").evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(900);
+  await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(50);
+  await expect(columns).toHaveText("NoteCardDeckMatch"); await expect(rows(page).first().locator("mark")).toHaveText("aprovechar"); await page.screenshot({ path: "/out/browse-wide-search.png" });
+  const target = rows(page).nth(30); await target.scrollIntoViewIfNeeded();
+  const before = await page.locator(".browse-results").evaluate(el => el.scrollTop); expect(before).toBeGreaterThan(0);
+  await target.click(); await expect(page.getByLabel("Example", { exact: true })).toBeVisible();
+  await expect(target).toHaveAttribute("aria-current", "true"); await expect(target).toBeInViewport();
+  await expect(target.locator(".browse-cell-deck")).toBeHidden(); await expect(columns).toBeHidden(); await expect(target.locator("mark")).toHaveText("aprovechar");
+  await expect(page.getByLabel("Search note fields")).toBeVisible(); await page.screenshot({ path: "/out/browse-wide-card.png" });
+  await page.getByRole("button", { name: "All cards" }).click();
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(target).toBeFocused();
+  await expect.poll(() => page.locator(".browse-results").evaluate(el => el.scrollTop)).toBeCloseTo(before, 0);
+  await expect(page.getByLabel("Search note fields")).toHaveValue("aprovechar");
+  const cleared = page.waitForRequest(request => request.url().endsWith("/browse/page") && request.postDataJSON().query === "");
+  await page.getByRole("button", { name: "Clear search" }).click(); await cleared;
+  await expect(page.getByLabel("Search note fields")).toHaveValue(""); await expect(columns).toHaveText("NoteCardDeck");
+  await page.getByLabel("Search note fields").fill("oportunidad");
+  const submitted = page.waitForRequest(request => request.url().endsWith("/browse/page") && request.postDataJSON().query === "oportunidad");
+  await page.getByLabel("Search note fields").press("Enter"); await submitted;
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test("cards step with previous, next and arrow keys and show their card info", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  const spanish = page.getByLabel("Spanish", { exact: true });
+  await expect(spanish).toHaveValue("el viaje"); await expect(page.getByText("201", { exact: true })).toBeVisible(); await expect(page.getByText("101", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("English", { exact: true })).toHaveClass(/browse-code/); await expect(page.getByLabel("Example", { exact: true })).not.toHaveClass(/browse-code/);
+  const previous = page.getByRole("button", { name: "Previous card" }), next = page.getByRole("button", { name: "Next card" });
+  await expect(previous).toBeDisabled(); await next.click(); await expect(spanish).toHaveValue("aprovechar"); await expect(next).toBeFocused();
+  await page.getByRole("heading", { name: "aprovechar" }).focus(); await page.keyboard.press("ArrowDown");
+  await expect(spanish).toHaveValue("la oportunidad"); await expect(page.getByRole("heading", { name: "la oportunidad" })).toBeFocused(); await expect(next).toBeDisabled();
+  const reads = state.detailReads;
+  await page.getByLabel("Example", { exact: true }).focus(); await page.keyboard.press("ArrowUp"); await expect(spanish).toHaveValue("la oportunidad");
+  await page.getByLabel("Example", { exact: true }).fill("draft"); expect(state.detailReads).toBe(reads);
+  page.once("dialog", dialog => void dialog.dismiss()); await previous.click(); await expect(page.getByLabel("Example", { exact: true })).toHaveValue("draft");
+  page.once("dialog", dialog => void dialog.accept()); await previous.click(); await expect(spanish).toHaveValue("aprovechar");
+  await page.getByRole("heading", { name: "aprovechar" }).focus(); await page.keyboard.press("ArrowUp"); await expect(spanish).toHaveValue("el viaje");
+  await page.getByRole("heading", { name: "el viaje" }).press("Escape");
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(rows(page).first()).toBeFocused();
+});
+
+test("stepping skips cards that are unavailable for browser editing", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); state.unavailableCard = "202"; await page.goto("/browse");
+  await expect(rows(page).nth(1)).toContainText("Unavailable for browser editing"); await rows(page).first().click();
+  await page.getByRole("button", { name: "Next card" }).click(); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("la oportunidad");
+  await page.getByRole("button", { name: "Previous card" }).click(); await expect(page.getByLabel("Spanish", { exact: true })).toHaveValue("el viaje");
+  expect(state.pages).toHaveLength(1);
+});
+
+test("Add note opens beside the results and Cancel returns to the full list", async ({ page, baseURL }) => {
+  await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
+  await page.getByRole("button", { name: "Add note", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New note" })).toBeVisible(); await expect(rows(page).first()).toBeVisible();
+  await expect(page.getByLabel("Deck", { exact: true }).last()).toBeVisible(); await expect(page.getByRole("button", { name: "Create note" })).toBeEnabled();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("heading", { name: "New note" })).toHaveCount(0); await expect(page.locator(".browse-columns")).toBeVisible();
+});
+
+test("deletion confirms in a modal dialog and reports a failure inside it", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  const trigger = page.getByRole("button", { name: "Delete note", exact: true }); await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Delete “el viaje”?" });
+  await expect(dialog).toContainText("all 2 of its cards"); await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused(); await page.screenshot({ path: "/out/browse-delete-dialog.png" });
+  await page.keyboard.press("Escape"); await expect(dialog).toBeHidden(); await expect(trigger).toBeFocused(); expect(state.writes).toHaveLength(0);
+  await trigger.click(); state.writeError = true; await dialog.getByRole("button", { name: "Delete note", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible(); await expect(dialog).toBeVisible(); expect(state.writes).toHaveLength(1);
+  state.writeError = false; await dialog.getByRole("button", { name: "Delete note", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Note and its cards deleted." })).toBeVisible(); await expect(dialog).toHaveCount(0);
+});
+
+for (const [width, height] of [[390, 844], [900, 800]] as const) test(`below the rail breakpoint the card takes the content area with a pinned Save bar (${width}px)`, async ({ page, baseURL }) => {
+  await page.setViewportSize({ width, height }); await fixture(page, baseURL!); await page.goto("/browse");
+  await search(page, "aprovechar"); await expect(rows(page).first().locator("mark")).toBeVisible(); await page.screenshot({ path: `/out/browse-narrow-${width}-list.png` });
+  await rows(page).first().click(); await expect(page.getByLabel("Search note fields")).toBeHidden(); await expect(rows(page).first()).toBeHidden();
+  await page.getByLabel("Example", { exact: true }).fill("edited");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const save = page.getByRole("button", { name: "Save changes" }); await expect(save).toBeInViewport({ ratio: 1 }); await page.screenshot({ path: `/out/browse-narrow-${width}-card.png` }); await expect(page.getByRole("button", { name: "Load server copy" })).toBeInViewport({ ratio: 1 });
+  const sidebar = await page.locator('[data-slot="sidebar"]').boundingBox(), bar = await page.locator(".browse-bottom-bar").boundingBox();
+  if (width > 768) expect(bar!.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("Escape from a note field returns to the list, and a pending delete cannot be cancelled", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  await page.getByLabel("Example", { exact: true }).press("Escape");
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0); await expect(rows(page).first()).toBeFocused();
+  await rows(page).first().click(); await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete “el viaje”?" });
+  const held = barrier(); state.writeGate = held.promise; state.writeError = true;
+  await dialog.getByRole("button", { name: "Delete note", exact: true }).click(); await expect.poll(() => state.writesStarted).toBe(1);
+  await page.keyboard.press("Escape"); await expect(dialog).toBeVisible();
+  held.release(); await expect(dialog.getByRole("alert")).toBeVisible(); expect(state.writes).toHaveLength(1);
 });
