@@ -837,11 +837,11 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
-        "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
+        "699320082bad2ef596d5c2f0a28cd52882928052309200261cba7004458b0ee9",
     "server/web/tests/browser/browse-real.spec.ts":
-        "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797",
+        "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad",
     "server/web/src/browse.tsx":
-        "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a",
+        "5fc7f9d4240624daf80a72aac8ccfd7160140696cb7c391bd5dcb2c02531aa8a",
     "server/tests/browse.rs":
         "d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
@@ -1011,7 +1011,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        "35d049ed611bbf8e6b2d43943c906727d7dfc2ea5f2840b84564bd22f51fc2cc",
+        "0363d86db300f75ad4f04e5bd80f86446ad140f972498fdbf6db41f69272b4f6",
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1215,7 +1215,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/upstream-records.json':
         "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385",
     'server/web/src/style.css':
-        "1ae979edef65184c9f80823ed688768036a5873e40a1b0979d93f25b06627abc",
+        "2f2cd42bbd0f8f21305d1c87832bb93341246b4b6a101e4cf38ae83683a7dc1b",
     'server/web/src/app.tsx':
         "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69",
     'server/web/tests/browser/accounts.spec.ts':
@@ -1305,6 +1305,10 @@ PUBLIC_ARTIFACTS = {
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "docs/plans/2026-11-25-1512-feat-online-browse-plan.md":
         "42ece08d046176f26f02f6e6f6e2d68f26f5029d9ddca6f5b7ff77f38b81d798",
+    "docs/plans/2026-11-26-0903-feat-browse-two-layouts-plan.md":
+        "b57b679c7c2ad0b0a60fbbb7f849125fe8f1f52b24e0ace28c9391bd8234a9f2",
+    "docs/process/review-log/browse-two-layouts-20261126.md":
+        "b3b339bbf4952ca3a149323b191eeed5fa906b6ceba71c95c4d06579c5fb924b",
     "specs/servers/meguri-sync-web.md":
         "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
     "specs/servers/meguri-collection-mcp.md":
