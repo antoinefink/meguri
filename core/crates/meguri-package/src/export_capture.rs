@@ -553,6 +553,8 @@ impl ExportSourceValidation {
             retained: RetainedTree::new(),
             referenced: Some(ReferencedMedia { names, variants }),
         };
+        proof.retained =
+            proof.read_retained(check, &mut ProtectedBudget::new(PROTECTED_LIMITS), &mut BTreeSet::new())?;
         let (files, excluded) = proof.scan(check)?;
         proof.files = files;
         proof.excluded = excluded;
@@ -634,7 +636,9 @@ impl ExportSourceValidation {
         budget: &mut ProtectedBudget,
         identities: &mut BTreeSet<(u64, u64)>,
     ) -> Result<RetainedTree> {
-        if self.referenced.is_some() {
+        // Referenced payloads still exclude retained recovery identities. A
+        // no-media export needs neither media nor recovery-tree authority.
+        if self.referenced.as_ref().is_some_and(|r| r.names.is_empty()) {
             return Ok(RetainedTree::new());
         }
         cancelled(check)?;
@@ -1301,6 +1305,34 @@ mod tests {
         let plan = nested.join("plan.json");
         fs::write(&plan, b"saved recovery fixture bytes").unwrap();
         (directory, plan)
+    }
+    #[test]
+    fn referenced_media_keeps_retained_identity_protection_with_a_matching_baseline() {
+        let (directory, plan) = retained_fixture();
+        let proof = ExportSourceValidation::referenced(
+            directory.path(),
+            vec![],
+            BTreeSet::from(["included".to_owned()]),
+            &|| false,
+        )
+        .unwrap();
+        assert!(!proof.retained.is_empty());
+        assert!(
+            proof
+                .protected_identities(&|| false)
+                .unwrap()
+                .identities
+                .contains(&identity(&fs::metadata(plan).unwrap()))
+        );
+        assert_eq!(proof.files.len(), 1);
+        assert_eq!(proof.files[0].name(), "included");
+        proof.validate(&|| false).unwrap();
+
+        let without_media =
+            ExportSourceValidation::referenced(directory.path(), vec![], BTreeSet::new(), &|| false).unwrap();
+        assert!(without_media.retained.is_empty());
+        assert!(without_media.files.is_empty());
+        without_media.validate(&|| false).unwrap();
     }
     #[test]
     fn retained_tree_is_metadata_only_and_active_export_stage_may_change_and_disappear() {
