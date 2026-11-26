@@ -644,7 +644,7 @@ fn home(
     let filtered = match &deck.kind.kind {
         DeckKind::Normal(_) => {
             if card.original_deck_id.0 != 0 {
-                return Err(invalid("ordinary card has a home deck override"));
+                return Err(state_error("InFilteredDeck"));
             }
             None
         }
