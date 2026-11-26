@@ -55,7 +55,7 @@ import XCTest
         capture(app, "filtered-preview-reopened-definition-retains-edited-delays")
         try click("home.filteredStudy.cancel", app: app, bundle: bundle)
         // Both deck-page keyboard entries reach the filtered definition editor.
-        let shortcuts: [XCUIKeyModifierFlags] = [[], [.command, .option]]
+        let shortcuts: [XCUIElement.KeyModifierFlags] = [[], [.command, .option]]
         for modifiers in shortcuts {
             try app.bringToFront(bundleIdentifier: bundle)
             app.typeKey("o", modifierFlags: modifiers)
