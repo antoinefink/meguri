@@ -17,6 +17,9 @@ extension TestHooks {
             registry.register("collection/deck-import/options-large") { _ in .sheet { DeckImportSheetPreview.fixture("options-large") } }
             registry.register("collection/deck-import/options-changed") { _ in .sheet { DeckImportSheetPreview.fixture("options-changed") } }
             registry.register("collection/deck-import/importing") { _ in .sheet { DeckImportSheetPreview.fixture("importing") } }
+            registry.register("collection/deck-import/importing-finishing") { _ in
+                .sheet { DeckImportSheetPreview.fixture("importing-finishing") }
+            }
             registry.register("collection/deck-import/confirm-losses") { _ in .sheet { DeckImportSheetPreview.fixture("confirm-losses") } }
             registry.register("collection/deck-import/confirm-sync") { _ in .sheet { DeckImportSheetPreview.fixture("confirm-sync") } }
             registry.register("collection/deck-import/confirm-sync-losses") { _ in
