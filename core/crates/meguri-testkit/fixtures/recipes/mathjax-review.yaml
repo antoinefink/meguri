@@ -3,7 +3,6 @@
 recipe: mathjax-review
 description: "Offline MathJax question and worked answer in the production reviewer."
 now: "2030-01-15T10:00:00+01:00"
-learn_ahead_secs: 0
 decks:
   - name: "Offline Mathematics"
     due: 1

@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/runtime.js":
         "b3cf37141e7dd6ccc6f1313aa8dce6bce33f732fb28bd8e8fdb60a8307871841",
     "docs/process/review-log/mathjax-20261126.md":
-        "4e387a963e6d298cbe4337ea99229f30d69d40d4a32eae2da1952381f06b6c93",
+        "2316925d809aca3712f1c7ecbfb895b5c47f66cbe2444f0894e0151f812b3ff3",
     "specs/render/card-runtime.md":
         "3acd8972440e4d4ef0c1d6fd9e2d4a57554dd808b91b21c5de228b8a63ce0a7c",
     # Complete-content review of the MathJax card runtime and synthetic review fixture.
@@ -850,7 +850,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/CardRendering/CardRuntime.swift':
         '0f261ab74b4de1a8ffda0a7913bc685b147192a1ead0f65d02f36bd1a029ae07',
     'core/crates/meguri-testkit/fixtures/recipes/mathjax-review.yaml':
-        'ca0d86921d1421da97300218b40385098271f7d344b5bc8e6551fe0590387650',
+        '674b5c6be5c81dbfd1ae9bb00dc0b552c21c625676f4c402e1756a834efa649b',
     "docs/process/review-log/selected-deck-export-20261126.md": "5ac63d39e84a100e82fd4cbaf0f5e5e0401a25de123422aea9a64c63f690ccda",
     "core/crates/meguri-package/tests/deck_export.rs": "95b151205de713a386a2292a3c26151ac3a0da09b6275b02b900113984905fc7",
     "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
