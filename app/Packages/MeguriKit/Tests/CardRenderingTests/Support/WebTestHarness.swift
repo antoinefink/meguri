@@ -319,9 +319,12 @@ final class TestPage {
     }
 
     private func call(_ body: String, _ arguments: [String: Any], in world: WKContentWorld) async throws -> Any? {
-        try await within("a script") { finish in
+        let stage = "a script in \(world.name ?? "page"): \(body)"
+        return try await within(stage) { finish in
             webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: world) { result in
-                finish(result.map { $0 as Any? })
+                finish(result.map { $0 as Any? }.mapError { error -> any Error in
+                    HarnessFailure("\(stage) threw \(error); \((error as NSError).userInfo)")
+                })
             }
         }
     }
@@ -527,6 +530,7 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private var files: [String: File] = [:]
     private var delays: [String: Duration] = [:]
     private var held: Set<String> = []
+    private var notFound: Set<String> = []
     private var heldResponses: [ObjectIdentifier: (path: String, respond: () -> Void)] = [:]
     /// Answers nothing at all (C7.4's remote origin).
     var holdsEverything = false
@@ -541,6 +545,9 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     func add(_ path: String, text: String, _ mimeType: String = "text/javascript") {
         add(path, Data(text.utf8), mimeType)
     }
+
+    /// Returns a real 404 for this path while other bundle files remain available.
+    func respondNotFound(_ path: String) { notFound.insert(path) }
 
     /// Answers `path` only after `delay`.
     func delay(_ path: String, by delay: Duration) { delays[path] = delay }
@@ -594,6 +601,10 @@ final class TestMediaServer: NSObject, WKURLSchemeHandler {
     private func respond(_ task: any WKURLSchemeTask, url: URL, path: String, range: String?) {
         // A stopped task must never be answered: WebKit raises an exception.
         guard active.remove(ObjectIdentifier(task)) != nil else { return }
+        if notFound.contains(path) {
+            send(task, url: url, status: 404, headers: ["Content-Type": "text/plain"], body: Data())
+            return
+        }
         let runtimeAsset = servesRuntime && path.hasPrefix(CardRuntime.assetPrefix)
             ? CardRuntime.asset(at: String(path.dropFirst(CardRuntime.assetPrefix.count))) : nil
         guard let file = files[path] ?? runtimeAsset.map({ File(data: $0.data, mimeType: $0.mimeType) }) else {

@@ -42,9 +42,7 @@ extension WebKitSuites {
                 question: #"\(a^2+b^2=c^2\)"#, answer: #"\[c=\sqrt{a^2+b^2}\]"#))
             let prepared = pair.idle
             #expect(prepared.settled)
-            let front = try await prepared.webView.callAsyncJavaScript(
-                "return document.querySelectorAll('#qa mjx-container svg').length;", arguments: [:], in: nil, contentWorld: .page)
-            #expect(front as? Int == 1)
+            try await MathRenderingProbe.expect(in: prepared.webView, count: 1, label: "preview front", display: false)
             let commits = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
             pair.onCommitted = { committed, _ in if committed == update { commits.continuation.yield(()) } }
             defer { pair.onCommitted = nil; commits.continuation.finish() }
@@ -58,9 +56,7 @@ extension WebKitSuites {
                 throw Spike.Failure("missing preview math commit")
             }
             _ = try await pair.showAnswer()
-            let back = try await pair.current.webView.callAsyncJavaScript(
-                "return document.querySelectorAll('#qa mjx-container[display=\"true\"] svg').length;", arguments: [:], in: nil, contentWorld: .page)
-            #expect(back as? Int == 1)
+            try await MathRenderingProbe.expect(in: pair.current.webView, count: 1, label: "preview back", display: true)
             #expect(pair.diagnostics.templateErrors.isEmpty)
         }
 
