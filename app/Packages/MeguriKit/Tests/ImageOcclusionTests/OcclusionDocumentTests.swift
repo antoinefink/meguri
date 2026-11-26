@@ -147,6 +147,62 @@ import Testing
         #expect(model.field == rect1 && writes == 2)
     }
 
+    @Test func replacingImageClearsGeometryAndHistoryButKeepsDocumentToolAndSourceBytes() throws {
+        let model = session(rect1 + " \t<br/>" + protected, editing: true)
+        model.selectAll(); model.commit(model.moved(dx: 20, dy: 0, finishing: true))
+        model.tool = .ellipse
+        let before = model.document, field = model.field
+        #expect(model.canUndo)
+        var writes = 0
+        model.onWrite = { _ in writes += 1 }
+        model.resetForImageChange()
+        model.setReferenceSizeIfNeeded(imageSize: .init(width: 200, height: 800),
+            area: .init(width: 600, height: 400), displayScale: 2)
+        #expect(model.referenceSize == CGSize(width: 100, height: 400))
+        #expect(model.document == before && model.field == field && model.tool == .ellipse)
+        #expect(!model.canUndo && !model.canRedo && model.selection.isEmpty)
+        model.undo(); model.redo()
+        #expect(model.field == field && writes == 0)
+    }
+
+    @Test func retainedCardNoticeRequiresLastNumberedMaskRemovalAndShowsOncePerEditSession() throws {
+        let high = rect1.replacingOccurrences(of: "c1::", with: "c600::")
+        let label = "{{c9::image-occlusion:text:left=.1:top=.1:text=hi:scale=1}}"
+        let zero = rect1.replacingOccurrences(of: "c1::", with: "c0::")
+        let model = session(high + "<br>" + high + "<br>" + label + "<br>" + zero, editing: true)
+        model.deleteSelection()
+        model.selectAll()
+        #expect(model.retainedCardNotice == nil && model.removedNumbers.isEmpty && !model.canUndo)
+        model.selection = [model.document.shapes[0].id]
+        model.deleteSelection() // One member remains for 600.
+        #expect(model.retainedCardNotice == nil && model.removedNumbers.isEmpty)
+        model.selection = Set(model.document.shapes.filter { $0.isLabel || $0.data.number == 0 }.map(\.id))
+        model.deleteSelection()
+        #expect(model.retainedCardNotice == nil && model.removedNumbers.isEmpty)
+        model.selectAll(); model.deleteSelection()
+        #expect(model.retainedCardNotice == 500 && model.removedNumbers == [600])
+        model.retainedCardNotice = nil
+        model.undo(); model.redo(); model.undo()
+        #expect(model.retainedCardNotice == nil)
+        model.selectAll(); model.deleteSelection()
+        #expect(model.retainedCardNotice == nil)
+        model.receive(rect1, isEditing: true)
+        model.selectAll(); model.deleteSelection()
+        #expect(model.retainedCardNotice == nil && model.removedNumbers == [1, 600])
+        let add = session(rect1)
+        add.selectAll(); add.deleteSelection(); add.undo(); add.redo()
+        #expect(add.retainedCardNotice == nil)
+    }
+
+    @Test func groupingRemovedNumberShowsNoticeButUndoAndRedoDoNot() {
+        let model = session(rect1 + "<br>" + protected, editing: true)
+        model.selectAll(); model.group()
+        #expect(model.removedNumbers == [4] && model.retainedCardNotice == 4)
+        model.retainedCardNotice = nil
+        model.undo(); model.redo()
+        #expect(model.retainedCardNotice == nil)
+    }
+
     @Test func strictCoreCodecReadsNumberedMasksLabelsAndEmptyDocuments() throws {
         #expect(try OcclusionCodec(field: rect1).shapes.map(\.number) == [1])
         #expect(try OcclusionCodec(field: "{{c0::image-occlusion:text:left=.1:top=.1:text=hi}}").shapes.map(\.number) == [0])

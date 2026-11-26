@@ -123,23 +123,28 @@ public final class AddNoteFlow {
                   var types = try? await CoreNotetypeService().notetypeNames(),
                   isPresented, let current = self.draft, current.generation == draft.generation,
                   decks.generation == current.generation else { return }
-            var hasIO = false
-            for type in types {
-                guard let record = try? await CoreNotetypeService().readNotetype(id: type.id) else { return }
-                if record.originalStockKind == 6 { hasIO = true; break }
-            }
-            guard isPresented, self.draft === current,
+            guard let choices = try? await Self.imageOcclusionChoices(types, read: { id in
+                try await CoreNotetypeService().readNotetype(id: id)
+            }), isPresented, self.draft === current,
                   owner?.ownsAddGeneration(current.generation) == true else { return }
-            if !hasIO {
-                var name = "Image Occlusion"
-                while types.contains(where: { $0.name == name }) { name += "+" }
-                types.append(.init(id: Self.imageOcclusionChoice, name: name))
-                types.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            }
+            types = choices
             deckChoices = Self.deckChoices(names: decks.decks, selected: current.deck.id,
                                            defaultShown: owner?.deck(1) != nil)
             notetypeChoices = types
         }
+    }
+
+    /// N9/O10: a stock-kind marker alone cannot open the mask editor. Keep
+    /// the stand-in choice until a type with all four role positions exists.
+    static func imageOcclusionChoices(_ types: [NotetypeName],
+        read: (Int64) async throws -> NotetypeRecord) async rethrows -> [NotetypeName] {
+        for type in types {
+            if OcclusionFieldRoles(notetype: try await read(type.id)) != nil { return types }
+        }
+        var name = "Image Occlusion"
+        while types.contains(where: { $0.name == name }) { name += "+" }
+        return (types + [.init(id: imageOcclusionChoice, name: name)])
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// A2: choosing another deck selects it and changes nothing else.

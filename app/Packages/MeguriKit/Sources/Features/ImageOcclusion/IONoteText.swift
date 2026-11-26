@@ -19,6 +19,9 @@ public enum IONoteText {
     public static var noRoles: String { String(localized: "io.editor.noRoles", defaultValue: "This note type has too few fields for image occlusion. You can still edit its other fields.", bundle: .module) }
     public static var noImage: String { String(localized: "io.editor.noImage", defaultValue: "This note has no image.", bundle: .module) }
     public static var drawNew: String { String(localized: "io.editor.drawNewMasks", defaultValue: "Draw New Masks", bundle: .module) }
+    public static func cardRemains(_ number: UInt16) -> String {
+        String(format: String(localized: "io.delete.cardRemains", defaultValue: "Card %lld stays, without a mask of its own, until you use Empty Cards.", bundle: .module), Int64(number))
+    }
     public static func missingImage(_ name: String) -> String {
         String(format: String(localized: "io.editor.imageMissing", defaultValue: "“%@” isn’t in the media folder.", bundle: .module), name)
     }

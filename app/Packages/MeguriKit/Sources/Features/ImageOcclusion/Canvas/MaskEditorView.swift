@@ -32,6 +32,7 @@ public struct MaskEditorView: View {
             if let session = suppliedSession ?? retainedSession {
                 MaskEditorContent(image: image, imageSize: imageSize, isEditing: isEditing,
                                   occlusions: $occlusions, session: session)
+                    .id(ObjectIdentifier(session))
             } else {
                 ProgressView()
             }
@@ -82,6 +83,7 @@ private struct MaskEditorContent: View {
                         .focusable().focused($canvasFocused)
                         .onAppear { resize(geometry.size) }
                         .onChange(of: geometry.size) { _, size in resize(size) }
+                        .onChange(of: session.imageRevision) { resize(geometry.size) }
                 }
             } else { Spacer() }
             if compact { Divider(); toolRow }

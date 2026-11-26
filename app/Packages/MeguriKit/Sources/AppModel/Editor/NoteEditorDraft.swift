@@ -328,14 +328,11 @@ public final class NoteEditorDraft {
             mapped = Array(repeating: "", count: notetype.fields.count)
             var used: Set<Int> = [], filled: Set<Int> = []
             if let old = occlusionRoles {
-                for (source, target) in zip([old.occlusions, old.image, old.header, old.backExtra],
-                                           [roles.occlusions, roles.image, roles.header, roles.backExtra]) {
+                for (source, target) in zip([old.occlusions, old.image], [roles.occlusions, roles.image]) {
                     mapped[target] = values[source]; used.insert(source); filled.insert(target)
                 }
             }
-            let destinations = [roles.header, roles.backExtra] + notetype.fields.indices.filter {
-                ![roles.occlusions, roles.image, roles.header, roles.backExtra].contains($0)
-            }
+            let destinations = notetype.fields.indices.filter { !roles.hidden.contains($0) }
             for target in destinations where !filled.contains(target) {
                 if let source = fields.indices.first(where: {
                     !used.contains($0) && !hostFields.contains($0) && fields[$0].definition.name == notetype.fields[target].name && !values[$0].isEmpty

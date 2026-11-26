@@ -1,6 +1,7 @@
 import AppModel
 import CoreBridge
 import Foundation
+import ImageOcclusion
 import Instrumentation
 import Observation
 import OSLog
@@ -28,11 +29,43 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public private(set) var held = false
     public private(set) var error: String?
     let occlusionImage = OcclusionImageSession()
+    private(set) var maskSession: MaskEditorSession?
+    private(set) var occlusionReadingError: String?
+    private var readOcclusionField: String?
+    private var referenceImageField: String?
+    struct ImageLoadKey: Equatable {
+        let draft: UUID
+        let field: String?
+    }
+    var occlusionImageLoadKey: ImageLoadKey {
+        .init(draft: draft.identity, field: draft.occlusionRoles.map { draft.values[$0.image] })
+    }
+
+    /// Called at host creation and field-change boundaries, never from body.
+    /// Binding echoes keep the codec, original source and local history intact.
+    func refreshMaskSession() {
+        guard let roles = draft.occlusionRoles else { return }
+        let field = draft.values[roles.occlusions], image = draft.values[roles.image]
+        if field != readOcclusionField {
+            if let maskSession { maskSession.receive(field, isEditing: draft.noteID != nil) }
+            else { maskSession = MaskEditorSession(field: field, isEditing: draft.noteID != nil) }
+            readOcclusionField = field
+            occlusionReadingError = maskSession?.readingError
+        }
+        if let referenceImageField, referenceImageField != image { maskSession?.resetForImageChange() }
+        referenceImageField = image
+    }
+
+    func drawNewMasks() {
+        guard acceptsHostInput, draft.noteID == nil else { return }
+        occlusionImage.startsNewMasks = true
+        maskSession?.receive("", isEditing: false)
+    }
     var flushNativeTags: (@MainActor () -> Void)?
     public var acceptsHostInput: Bool { editable && !held && !draft.hostFieldsHeld && !closed && isCurrent() }
     public var maskEditorVisible: Bool {
-        guard let roles = draft.occlusionRoles, draft.showsMaskEditor else { return false }
-        return draft.noteID == nil || (try? occlusionHasNumberedMask(draft.values[roles.occlusions])) != nil
+        guard draft.occlusionRoles != nil, draft.showsMaskEditor else { return false }
+        return draft.noteID == nil || occlusionReadingError == nil
     }
     var ownsDraft: Bool { !closed && isCurrent() }
     func showFields(_ visible: Bool) {
@@ -54,7 +87,10 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     public func setHostField(_ value: String, at index: Int) {
         guard acceptsHostInput else { return }
+        let sameImage = draft.occlusionRoles?.image == index && draft.values[index] == value
         draft.acceptHostField(value, at: index)
+        refreshMaskSession()
+        if sameImage { maskSession?.resetForImageChange() }
         // Browse uses the same durable patch/undo path as a field blur.
         onFieldBlur?()
     }
@@ -159,6 +195,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         self.draft = draft; self.isCurrent = isCurrent
         document = previous.document; relay = previous.relay; webView = previous.webView
         super.init()
+        refreshMaskSession()
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
         browsing = previous.browsing
         fetchOcclusionImage = previous.fetchOcclusionImage
@@ -198,6 +235,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         webView = FieldEditorMacWebView(frame: .zero, configuration: configuration)
         #endif
         super.init()
+        refreshMaskSession()
         relay.owner = self; webView.navigationDelegate = self
         #if os(iOS)
         view.owner = self
@@ -362,6 +400,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// stored note after a change made elsewhere (B3 `setField`).
     public func reload(fields ords: [Int]) async throws {
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
+        refreshMaskSession()
         for ord in ords where !draft.hostFields.contains(ord) {
             let html = try await draft.displayValue(ord)
             try requireCurrent(expected)

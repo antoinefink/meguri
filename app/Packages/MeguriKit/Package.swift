@@ -75,7 +75,7 @@ let package = Package(
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
-            dependencies: ["AppModel", "CardRendering", "Editor", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: ["AppModel", "CardRendering", "Editor", "ImageOcclusion", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
             resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg"), .copy("Fixtures/deck-tree.apkg")],
             swiftSettings: settings

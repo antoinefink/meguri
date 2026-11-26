@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
+import ImageOcclusion
 import Testing
 import UniformTypeIdentifiers
 import WebKit
@@ -26,13 +27,13 @@ import WebKit
         return bytes as Data
     }
 
-    static func type(tags: [UInt32?] = [0, 1, 2, 3, 4], stock: Int32 = 6, sticky: Bool = false) -> NotetypeRecord {
+    static func type(tags: [UInt32?] = [0, 1, 2, 3, 4], stock: Int32 = 6, sticky: Bool = false, names: [String]? = nil, id: Int64 = 206) -> NotetypeRecord {
         let fields = tags.enumerated().map { index, tag in
-            NotetypeField(ord: UInt32(index * 2), id: Int64(index + 100), name: "Field \(index)", sticky: sticky,
+            NotetypeField(ord: UInt32(index * 2), id: Int64(index + 100), name: names?[index] ?? "Field \(index)", sticky: sticky,
                 rtl: false, fontName: "", fontSize: 20, description: "", plainText: false,
                 collapsed: false, excludeFromSearch: false, tag: tag)
         }
-        return .init(id: 206, name: "IO", kind: 1, sortField: 0, css: "", base: [], fields: fields,
+        return .init(id: id, name: "IO", kind: 1, sortField: 0, css: "", base: [], fields: fields,
                      templates: [], originalStockKind: stock)
     }
 
@@ -43,6 +44,17 @@ import WebKit
         #expect(partial.occlusions == 0 && partial.image == 1 && partial.header == 2 && partial.backExtra == 3)
         #expect(OcclusionFieldRoles(notetype: Self.type(tags: [0, 1, 2])) == nil)
         #expect(OcclusionFieldRoles(notetype: Self.type(stock: 1)) == nil)
+    }
+
+    @Test func malformedIOTypeDoesNotHideOnDemandChoiceAndValidIOTypeDoes() async throws {
+        let malformed = Self.type(tags: [0, 1, 2])
+        let names = [NotetypeName(id: malformed.id, name: "Image Occlusion")]
+        let offered = await AddNoteFlow.imageOcclusionChoices(names) { _ in malformed }
+        #expect(offered.map(\.name) == ["Image Occlusion", "Image Occlusion+"])
+        #expect(offered.last?.id == AddNoteFlow.imageOcclusionChoice)
+        let usable = Self.type(tags: [0, 1, 2, 3])
+        let storedOnly = await AddNoteFlow.imageOcclusionChoices(names) { _ in usable }
+        #expect(storedOnly == names)
     }
 
     @Test func imageFieldReadsRawLastSourceInFirstMatchingImage() {
@@ -59,14 +71,31 @@ import WebKit
             values: [Self.first, "<img src=\"x.png\">", "header", "extra", "comments"], tags: ["kept"])
         let next = try draft.nextAfterAcknowledgedAdd()
         #expect(next.values == ["", "", "header", "extra", "comments"] && next.tags == ["kept"])
-        let basic = try NoteEditorDraft(generation: 1, notetype: Self.type(tags: [nil, nil], stock: 1),
+        let basic = try NoteEditorDraft(generation: 1, notetype: Self.type(tags: [nil, nil], stock: 1, id: 205),
                                         deck: Self.deck, values: ["a", "b"])
         let mapped = try basic.replacingSelection(notetype: type, deck: Self.deck)
         #expect(mapped.values == ["", "", "a", "b", ""])
         let reversed = Self.type(tags: [3, 2, 1, 0, 4])
         let remapped = try draft.replacingSelection(notetype: NotetypeRecord(id: 207, name: reversed.name,
             kind: reversed.kind, sortField: 0, css: "", base: [], fields: reversed.fields, templates: [], originalStockKind: 6), deck: Self.deck)
-        #expect(remapped.values == ["extra", "header", "<img src=\"x.png\">", Self.first, "comments"])
+        #expect(remapped.values == ["header", "extra", "<img src=\"x.png\">", Self.first, "comments"])
+    }
+
+    @Test func ioMappingPreservesHiddenRolesButMatchesEveryVisibleFieldByNameThenStoredOrder() throws {
+        let source = Self.type(names: ["Masks", "Image", "Header", "Extra", "Comments"])
+        let draft = try NoteEditorDraft(generation: 1, notetype: source, deck: Self.deck,
+            values: [Self.first, "raw image bytes", "header", "extra", "comments"])
+        let fields = Self.type(names: ["Masks", "Image", "Extra", "Header", "Comments"]).fields
+        let target = NotetypeRecord(id: 207, name: "Swapped", kind: 1, sortField: 0, css: "", base: [],
+            fields: fields, templates: [], originalStockKind: 6)
+        #expect(try draft.replacingSelection(notetype: target, deck: Self.deck).values ==
+            [Self.first, "raw image bytes", "extra", "header", "comments"])
+        // A visible extra field before Header gets the first unmatched value.
+        let reordered = Self.type(tags: [0, 1, 4, 2, 3], names: ["Masks", "Image", "New", "Also New", "Last"])
+        let ordered = NotetypeRecord(id: 208, name: "Stored order", kind: 1, sortField: 0, css: "", base: [],
+            fields: reordered.fields, templates: [], originalStockKind: 6)
+        #expect(try draft.replacingSelection(notetype: ordered, deck: Self.deck).values ==
+            [Self.first, "raw image bytes", "header", "extra", "comments"])
     }
 
     @Test func scopedMediaReadRefusesTraversalLinksDirectoriesAndNamedPipes() throws {
@@ -120,6 +149,38 @@ extension FieldEditorTests {
         #expect(draft.patch()?.fields == [2: "edited header"] && draft.values[0] == malformed)
         #expect(draft.tags == ["kept"])
     }
+    @Test func hostCachesStrictReadingAcrossUnrelatedEditsAndRefreshesOnActualReload() async throws {
+        let type = OcclusionFieldFlowTests.type()
+        let original = OcclusionFieldFlowTests.first + " \t<br/>"
+        let draft = try NoteEditorDraft(editing: .init(id: 7, notetypeId: type.id,
+            fields: [original, "", "header", "extra", "comments"], tags: [], guid: "g"),
+            notetype: type, deck: OcclusionFieldFlowTests.deck, generation: 1)
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        defer { host.shutDown() }
+        try await host.start()
+        let session = try #require(host.maskSession)
+        for _ in 0..<20 {
+            #expect(host.maskEditorVisible && host.occlusionReadingError == nil)
+            host.refreshMaskSession()
+            #expect(host.maskSession === session)
+        }
+        draft.showsMaskEditor = false
+        try await host.setMode(.html, ord: 2)
+        try #require(try await Self.replaceSource(host, ord: 2, value: "new header"))
+        try await host.flush(hold: false)
+        #expect(host.maskSession === session && session.field == original)
+        let malformed = "bad masks  <br/>"
+        var stored = draft.values; stored[0] = malformed
+        let ords = draft.reloadUnchanged(stored: stored, tags: [])
+        try await host.reload(fields: ords)
+        #expect(host.maskSession === session && host.occlusionReadingError != nil)
+        draft.showsMaskEditor = true
+        #expect(!host.maskEditorVisible && draft.values[0] == malformed)
+        stored[0] = original
+        try await host.reload(fields: draft.reloadUnchanged(stored: stored, tags: []))
+        #expect(host.maskEditorVisible && host.occlusionReadingError == nil && session.field == original)
+    }
+
     @Test func hostMasksSurviveAConversionAlreadyOutstandingInWebKit() async throws {
         let type = OcclusionFieldFlowTests.type(tags: [3, 2, 1, 0, 4])
         let original = OcclusionFieldFlowTests.first + " \t<br/>" + OcclusionFieldFlowTests.second

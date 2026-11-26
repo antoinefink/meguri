@@ -36,6 +36,12 @@ enum MaskAlignment: String, CaseIterable {
     public private(set) var field: String
     public private(set) var errorKey: String?
     public private(set) var isReadable = false
+    public private(set) var readingError: String?
+    public private(set) var imageRevision = 0
+    public private(set) var removedNumbers: Set<UInt16> = []
+    public var retainedCardNotice: UInt16?
+    private var showedRetainedCardNotice = false
+    private let isEditing: Bool
     public private(set) var referenceSize = CGSize.zero
     var onWrite: ((String) -> Void)?
     private var codec: OcclusionCodec?
@@ -53,6 +59,7 @@ enum MaskAlignment: String, CaseIterable {
     var displayed: OcclusionDocument { preview ?? document }
 
     public init(field: String, isEditing: Bool) {
+        self.isEditing = isEditing
         self.field = field
         tool = isEditing ? .select : .rectangle
         load(field, isEditing: isEditing)
@@ -66,7 +73,7 @@ enum MaskAlignment: String, CaseIterable {
     }
 
     private func load(_ value: String, isEditing: Bool) {
-        field = value; preview = nil; polygon = []; selection = []; errorKey = nil
+        field = value; preview = nil; polygon = []; selection = []; errorKey = nil; readingError = nil
         do {
             let codec = try OcclusionCodec(field: value)
             self.codec = codec
@@ -75,6 +82,7 @@ enum MaskAlignment: String, CaseIterable {
             isReadable = true
         } catch {
             codec = nil; document = .init(); isReadable = false
+            readingError = String(describing: error)
             errorKey = "io.editor.unreadable.generic"
         }
         initial = document; history = [document]; historyIndex = 0
@@ -83,6 +91,14 @@ enum MaskAlignment: String, CaseIterable {
     public func setReferenceSizeIfNeeded(imageSize: CGSize, area: CGSize, displayScale: Double) {
         guard referenceSize == .zero else { return }
         referenceSize = Self.referenceSize(imageSize: imageSize, area: area, displayScale: displayScale)
+    }
+
+    /// O8 keeps the current document and tool, including source indexes. The
+    /// canvas establishes its new reference size on the next layout update.
+    public func resetForImageChange() {
+        referenceSize = .zero; preview = nil; polygon = []; selection = []
+        history = [document]; historyIndex = 0
+        imageRevision += 1
     }
 
     public static func referenceSize(imageSize: CGSize, area: CGSize, displayScale: Double) -> CGSize {
@@ -96,15 +112,25 @@ enum MaskAlignment: String, CaseIterable {
         return .init(width: width / displayScale, height: height / displayScale)
     }
 
-    @discardableResult func commit(_ value: OcclusionDocument) -> Bool {
+    @discardableResult func commit(_ value: OcclusionDocument, removingNumbers: Bool = false) -> Bool {
         preview = nil
         guard isReadable, value != document else { return false }
         guard let output = write(value) else { return false }
         history = Array(history.prefix(historyIndex + 1)); history.append(value); historyIndex += 1
+        let removed = removingNumbers ? numberedMasks(in: document).subtracting(numberedMasks(in: value)) : []
         document = value
         selection.formIntersection(Set(value.shapes.map(\.id)))
         publish(output)
+        removedNumbers.formUnion(removed)
+        if isEditing, !showedRetainedCardNotice, let number = removed.min() {
+            showedRetainedCardNotice = true
+            retainedCardNotice = min(number, 500)
+        }
         return true
+    }
+
+    private func numberedMasks(in value: OcclusionDocument) -> Set<UInt16> {
+        Set(value.shapes.filter { !$0.isLabel && $0.data.number > 0 }.map { $0.data.number })
     }
 
     private func write(_ value: OcclusionDocument) -> String? {
@@ -211,7 +237,7 @@ enum MaskAlignment: String, CaseIterable {
     }
     func rejectLabelBraces() { errorKey = "io.label.braces" }
     func deleteSelection() {
-        var next = document; next.shapes.removeAll { selection.contains($0.id) }; commit(next)
+        var next = document; next.shapes.removeAll { selection.contains($0.id) }; commit(next, removingNumbers: true)
     }
     func fill(_ id: UUID, color: String) {
         var next = document
@@ -255,7 +281,7 @@ enum MaskAlignment: String, CaseIterable {
             let data = try codec.numbers(shapes: document.shapes.map(\.data), action: action)
             var next = document
             for i in data.indices { next.shapes[i].data = data[i] }
-            commit(next)
+            commit(next, removingNumbers: true)
         } catch { errorKey = "io.editor.unwritable" }
     }
 

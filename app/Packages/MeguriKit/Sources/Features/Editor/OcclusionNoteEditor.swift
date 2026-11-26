@@ -26,11 +26,7 @@ public struct OcclusionNoteEditor: View {
     private var draft: NoteEditorDraft { host.draft }
     private var session: OcclusionImageSession { host.occlusionImage }
     private var roles: OcclusionFieldRoles? { draft.occlusionRoles }
-    private var readingError: String? {
-        guard let roles else { return nil }
-        do { _ = try occlusionHasNumberedMask(draft.values[roles.occlusions]); return nil }
-        catch { return String(describing: error) }
-    }
+    private var readingError: String? { host.occlusionReadingError }
     private var masksShown: Bool { host.maskEditorVisible }
 
     public var body: some View {
@@ -70,7 +66,17 @@ public struct OcclusionNoteEditor: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("io.editor")
         .onChange(of: masksShown, initial: true) { _, shown in host.showFields(!shown) }
-        .task(id: roles.map { draft.values[$0.image] }) { await session.load(host: host) }
+        .onChange(of: roles.map { draft.values[$0.occlusions] }) { host.refreshMaskSession() }
+        .task(id: host.occlusionImageLoadKey) {
+            host.refreshMaskSession()
+            await session.load(host: host)
+        }
+        .alert(Text(verbatim: host.maskSession?.retainedCardNotice.map(IONoteText.cardRemains) ?? ""), isPresented: Binding(
+            get: { host.maskSession?.retainedCardNotice != nil },
+            set: { if !$0 { host.maskSession?.retainedCardNotice = nil } }
+        )) {
+            Button { host.maskSession?.retainedCardNotice = nil } label: { Text("OK", bundle: .module) }
+        }
         .fileImporter(isPresented: $filePicker, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
             guard let ticket = fileTicket else { return }
             fileTicket = nil
@@ -141,7 +147,7 @@ public struct OcclusionNoteEditor: View {
             ContentUnavailableView {
                 Text(verbatim: IONoteText.unreadableMasks(error, copying: true))
             } actions: {
-                Button { session.startsNewMasks = true } label: {
+                Button { host.drawNewMasks() } label: {
                     Text(verbatim: IONoteText.drawNew)
                 }.accessibilityIdentifier("io.editor.drawNewMasks")
             }
@@ -152,7 +158,7 @@ public struct OcclusionNoteEditor: View {
                         set: { value in
                             guard host.acceptsHostInput else { return }
                             host.setHostField(value, at: roles.occlusions); session.startsNewMasks = false
-                        }), isEditing: draft.noteID != nil)
+                        }), isEditing: draft.noteID != nil, session: host.maskSession)
                     .disabled(!masksShown || !host.acceptsHostInput || session.busy || session.replacing)
                     .opacity(session.replacing ? 0 : 1)
                     .accessibilityHidden(session.replacing)
