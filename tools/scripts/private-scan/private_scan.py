@@ -864,7 +864,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
         '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
     'app/Packages/MeguriKit/Tests/AppModelTests/BackupCancellationTests.swift':
-        '9f9c7b67a4354f50d6682b9463236280a375ebd5dd5774d5244ab564d8c546a0',
+        'a90f805688786a5a342c98ec3f16663ee81c4c38818c0046647a1e1d14661420',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
         '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
@@ -1465,7 +1465,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',
     'app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsView.swift': '612cc78856c293261cc45ace31edff79e8a44c8b0d7300ffdaaddf7172159108',
-    'app/Packages/MeguriKit/Tests/AppModelTests/BackupCoordinatorTests.swift': 'dcc5d9841079f09f3f8cdd8e525a4911fd952f8145d620ad67011c30b31ac977',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BackupCoordinatorTests.swift': 'ed138732feef5aa63eec03f8c0c5f47b7b47af618f028955e191b12c9b8bb89a',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '10614372d7279294c408d3638b01046d06c999d06d51f0daf413b17e2dee17ff',

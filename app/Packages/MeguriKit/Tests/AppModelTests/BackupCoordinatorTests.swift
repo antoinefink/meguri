@@ -19,7 +19,7 @@ actor BackupServiceProbe: MaintenanceService {
     var held = false
     var started = false
     var startWaiters: [UUID: AsyncStream<Void>.Continuation] = [:]
-    var releaseWaiter: CheckedContinuation<Void, Never>?
+    var releaseWaiters: [CheckedContinuation<Void, Never>] = []
     var beforeRestore: (@Sendable () async -> Void)?
     func configure(entries: [BackupEntry], refusal: MaintenanceFailure? = nil) {
         self.entries = entries; self.refusal = refusal
@@ -51,12 +51,16 @@ actor BackupServiceProbe: MaintenanceService {
             try Task.checkCancellation()
         }
     }
-    func release() { held = false; releaseWaiter?.resume(); releaseWaiter = nil }
+    func release() {
+        held = false
+        let waiting = releaseWaiters; releaseWaiters.removeAll()
+        waiting.forEach { $0.resume() }
+    }
     private func reachGate() async {
         started = true
         let waiting = startWaiters; startWaiters.removeAll()
         waiting.values.forEach { $0.yield(()); $0.finish() }
-        if held { await withCheckedContinuation { releaseWaiter = $0 } }
+        if held { await withCheckedContinuation { releaseWaiters.append($0) } }
     }
     func createBackup(operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ImportBackupReceipt {
         throw MaintenanceError.diskFull
@@ -133,6 +137,51 @@ actor BackupServiceProbe: MaintenanceService {
 }
 
 @MainActor @Suite struct BackupServiceProbeTests {
+    @Test(.timeLimit(.minutes(1)))
+    func oneReleaseJoinsHeldMaintenanceAndRestore() async throws {
+        let service = BackupServiceProbe()
+        await service.configureDue(deadline: 4_000, held: true)
+        let maintenanceOperation = MaintenanceOperation(), restoreOperation = MaintenanceOperation()
+        let name = "backup-2030-01-02-09.00.00.colpkg"
+        var maintenanceEnded = false, restoreEnded = false
+        let maintenance = Task {
+            defer { maintenanceEnded = true }
+            return try await service.runDueMaintenance(.opened, operation: maintenanceOperation, progress: { _ in })
+        }
+        let restore = Task {
+            defer { restoreEnded = true }
+            return try await service.restoreBackup(name: name, operation: restoreOperation, progress: { _ in })
+        }
+        let admissionLimit = ContinuousClock.now.advanced(by: .seconds(4))
+        while await service.releaseWaiters.count < 2, ContinuousClock.now < admissionLimit { await Task.yield() }
+        // These exact calls must both be suspended before the single release.
+        #expect(await service.releaseWaiters.count == 2)
+        #expect(await service.held)
+        #expect(await service.dueOperation === maintenanceOperation)
+        #expect(await service.restoreOperation === restoreOperation)
+        #expect(await service.triggers == [.opened])
+        #expect(await service.restoredNames == [name])
+        #expect(!maintenanceEnded && !restoreEnded)
+        await service.release()
+        let completionLimit = ContinuousClock.now.advanced(by: .seconds(4))
+        while !(maintenanceEnded && restoreEnded), ContinuousClock.now < completionLimit { await Task.yield() }
+        let completed = maintenanceEnded && restoreEnded
+        if !completed {
+            // Cancellation cannot recover a lost continuation. Join only work
+            // observed to finish, so a broken release fails within the bound.
+            maintenance.cancel(); restore.cancel()
+            if maintenanceEnded { _ = await maintenance.result }
+            if restoreEnded { _ = await restore.result }
+        }
+        try #require(completed, "One release must finish both held operations")
+        let maintenanceResult = await maintenance.result
+        let restoreResult = await restore.result
+        #expect(try maintenanceResult.get() == 4_000)
+        #expect(try restoreResult.get() == RestoredBackup(name: name, safetyBackup: "backup-predecessor.colpkg",
+            generation: 2, cloudPublicationPending: true, deadlineMilliseconds: 300_000))
+        #expect(await service.releaseWaiters.isEmpty)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func missingStartTimesOutAndCleanupReleasesAndJoinsDelayedWork() async throws {
         let service = BackupServiceProbe(), admission = BackupRaceGate()

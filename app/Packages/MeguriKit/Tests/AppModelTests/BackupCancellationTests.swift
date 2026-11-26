@@ -34,6 +34,7 @@ extension ReviewCollectionStartupTests {
         owner.studyPreparation.runsUnprompted = false
         var shutdown: Task<Bool, Never>?
         var restore: Task<Void, Never>?
+        let restoreGate = BackupRaceGate()
         do {
             try #require(try await CoreCollectionService().lifecycle() == .noCollection)
             await owner.start()
@@ -93,12 +94,15 @@ extension ReviewCollectionStartupTests {
                 } catch { Issue.record(error) }
             }
             await owner.backups.openedRestore()
-            await service.configureDue(deadline: nil, held: true)
-            await service.beforeRestore { @MainActor in terminalTaskWasCancelled = Task.isCancelled }
+            await service.beforeRestore { @MainActor in
+                await restoreGate.hold()
+                terminalTaskWasCancelled = Task.isCancelled
+            }
             let admittedRestore: Task<Void, Never> = try #require(owner.backups.restoreConfirmed(name: entry.name))
             var restoreEnded = false
             restore = Task { await admittedRestore.value; restoreEnded = true }
             try await waitForBackupCancellationStage("restore inspection admission") { await service.restoreOperation != nil }
+            try await restoreGate.waitUntilHeld()
             let operation = try #require(await service.restoreOperation)
             // Quiescence is the inspection boundary; close can follow it.
             #expect(predecessor.delegate.quiesced)
@@ -124,7 +128,7 @@ extension ReviewCollectionStartupTests {
             #expect(!predecessor.boundaries.contains("resume"))
             #expect(try await CoreDeckService().allDeckNames() == decks)
             #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
-            await service.release()
+            restoreGate.release()
             try await waitForBackupCancellationStage("terminal restore reconciliation") { restoreEnded }
             await restore?.value
             #expect(terminalTaskWasCancelled)
@@ -180,7 +184,7 @@ extension ReviewCollectionStartupTests {
             #expect(backends.count == 2)
             #expect(try await CoreCollectionService().lifecycle() == .noCollection)
         } catch {
-            await service.release(); await restore?.value; _ = await shutdown?.value
+            restoreGate.release(); await restore?.value; _ = await shutdown?.value
             if !(await owner.close()) { Issue.record("Cleanup close refused: \(owner.error ?? "unknown error")") }
             throw error
         }
