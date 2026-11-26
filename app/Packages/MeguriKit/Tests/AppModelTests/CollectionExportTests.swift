@@ -449,7 +449,9 @@ extension ReviewCollectionStartupTests {
         try #require(owner.state == .ready)
         let coordinator = owner.collectionExport
         do {
-            coordinator.presentDeck(1)
+            let deck = try #require(owner.decks.first { $0.name == "Lang" })
+            try #require(deck.counts.new + deck.counts.learning + deck.counts.review > 0)
+            coordinator.presentDeck(deck.id)
             #expect(coordinator.showsDeckOptions && coordinator.title == "Export Deck")
             #expect(coordinator.deckOptions == DeckExportOptions())
             coordinator.deckOptions = DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false)
@@ -457,13 +459,15 @@ extension ReviewCollectionStartupTests {
             await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
             try #require(coordinator.destinationPresented && coordinator.providerLease != nil, "\(coordinator.message ?? "missing deck save dialog")")
             let artifact = try #require(coordinator.artifact)
-            #expect(artifact.metadata.suggestedName == "Default.apkg")
+            #expect(artifact.metadata.suggestedName == "Lang.apkg")
+            let counts = try #require(artifact.metadata.deckCounts)
+            #expect(counts.notes > 0 && counts.cards > 0)
             let saved = root.appending(path: "selected.apkg")
             coordinator.save(to: saved); await coordinator.waitForCompletion()
             #expect(files.fileExists(atPath: saved.path))
             #expect(coordinator.stage == .idle && coordinator.artifact == nil && coordinator.providerLease == nil)
             #expect(owner.navigation.sheet == nil)
-            coordinator.presentDeck(1)
+            coordinator.presentDeck(deck.id)
             #expect(coordinator.deckOptions == DeckExportOptions(includeScheduling: true, includePresets: true, includeMedia: false))
             await coordinator.cancel()
             // The ordinary prepare entry must clear the closed deck options,
@@ -473,7 +477,7 @@ extension ReviewCollectionStartupTests {
             #expect(!coordinator.isDeckExport)
             #expect(coordinator.artifact?.metadata.suggestedName == "Meguri-Collection.colpkg")
             await coordinator.cancel()
-            coordinator.presentDeck(1); await coordinator.cancel()
+            coordinator.presentDeck(deck.id); await coordinator.cancel()
             coordinator.start()
             await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
             try #require(coordinator.destinationPresented)
@@ -483,12 +487,12 @@ extension ReviewCollectionStartupTests {
             #expect(owner.navigation.sheet == nil && coordinator.providerLease == nil)
             // A delayed bridge request retains the originating generation,
             // even when the replacement has exactly the same deck ID.
-            let delayed = DeckExportRequest(deckID: 1, options: coordinator.deckOptions,
+            let delayed = DeckExportRequest(deckID: deck.id, options: coordinator.deckOptions,
                                             expectedGeneration: owner.generation)
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready && owner.generation != delayed.expectedGeneration)
-            try #require(owner.fullDeckName(1) == "Default")
+            try #require(owner.fullDeckName(deck.id) == "Lang")
             do {
                 let unexpected = try await CoreCollectionExportService().prepare(deck: delayed,
                     operation: CollectionExportOperation(), progress: { _ in })
