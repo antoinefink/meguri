@@ -98,7 +98,7 @@ struct SidebarView: View {
         // the Mac sidebar: the list's type-select keeps the letters (H12).
         .background(ReturnKeyStudyMonitor(
             allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
-            act: { !navigation.sidebarInteractionPending && features.sidebarStudy(navigation.sidebarSelection) }))
+            act: studyOnReturn))
         #else
         // H12: with the list focused (a hardware keyboard), Return or S starts the selected
         // deck's review, or Today's Study on the Today row; once per press, never on a key's
@@ -110,6 +110,22 @@ struct SidebarView: View {
         }
         #endif
     }
+
+    #if os(macOS)
+    /// Take the key now, then use the existing Study path after this row commits.
+    func studyOnReturn() -> Bool {
+        guard navigation.sidebarInteractionPending else {
+            return features.sidebarStudy(navigation.sidebarSelection)
+        }
+        let item = navigation.displayedSidebarSelection
+        switch item {
+        case .deck, .section(.home):
+            navigation.afterMacSidebarSelection { _ = features.sidebarStudy(item) }
+            return true
+        case .section: return false
+        }
+    }
+    #endif
 
     private var textInputHasFocus: Bool {
         #if os(macOS)

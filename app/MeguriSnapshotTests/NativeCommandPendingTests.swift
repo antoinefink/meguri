@@ -7,30 +7,52 @@ import Testing
 /// Model-only command admission regressions: no window, app activation or Core calls.
 @MainActor @Suite struct NativeCommandPendingTests {
     #if os(macOS)
-    @Test func sidebarFrameHandoffBlocksFormerDestinationCommandsButAllowsNewNavigation() throws {
+    @Test func sidebarFrameHandoffBlocksFormerDestinationCommandsButAllowsNewNavigation() async throws {
         var configuration = LaunchConfiguration()
         configuration.deviceDefaults = nil
         let navigation = AppNavigation()
         let collection = ReviewCollection(configuration: configuration, navigation: navigation)
+        collection.loadDeckTree = {
+            CountedDeckTree(generation: 1, nextChangeAt: Int64.max, nodes: [
+                CountedDeckNode(id: 1, name: "A", filtered: false, studyCollapsed: false,
+                    browserCollapsed: false, counts: ReviewCounts(new: 1, learning: 0, review: 0), children: []),
+                CountedDeckNode(id: 2, name: "B", filtered: false, studyCollapsed: false,
+                    browserCollapsed: false, counts: ReviewCounts(new: 1, learning: 0, review: 0), children: []),
+            ])
+        }
+        collection.receiveLifecycle(.ready(generation: 1))
+        await collection.loadCounts()
+        collection.addNotePresentation.configure { _ in true }
         navigation.openDeckPage(DeckID(1))
+        let context = NativeCommandContext(collection: collection, host: .main)
+        try #require(context.shownDeck == 1)
+        try #require(context.fileActionsAvailable && context.canNewNote && context.canNewDeck)
+        try #require(context.canStudyShownDeck && context.canExportShownDeck && context.canDeleteShownDeck)
+        try #require(context.canRenameShownDeck && context.canAddSubdeck && context.canOpenDeckOptions && context.canCreateFiltered)
         navigation.selectFromSidebar(.section(.browse))
         let intent = try #require(navigation.macSidebarSelectionID)
-        let context = NativeCommandContext(collection: collection, host: .main)
         #expect(navigation.homeDeckPage == DeckID(1))
         #expect(context.shownDeck == nil)
         #expect(!context.fileActionsAvailable && !context.canNewNote && !context.canNewDeck)
         #expect(!context.canStudyShownDeck && !context.canExportShownDeck && !context.canDeleteShownDeck)
-        #expect(!context.canRenameShownDeck && !context.canOpenDeckOptions && !context.canCreateFiltered)
+        #expect(!context.canRenameShownDeck && !context.canAddSubdeck && !context.canOpenDeckOptions && !context.canCreateFiltered)
         #expect(!context.undoRoute(redo: false).enabled)
         #expect(context.browseCommands == nil && !context.canSaveNoteType)
-        // A direct/deep-link route supersedes the click without staging itself.
-        navigation.select(.section(.noteTypes))
+        try #require(context.canShowBrowse && context.canShowNoteTypes)
+        context.showNoteTypes()
         navigation.commitMacSidebarSelection(intent)
         #expect(navigation.section == .noteTypes)
         #expect(!navigation.sidebarInteractionPending)
         navigation.selectFromSidebar(.section(.home))
         #expect(!context.noteTypeSaveShown)
-        navigation.show(.browse)
+        navigation.selectFromSidebar(.deck(DeckID(2)))
+        let deckIntent = try #require(navigation.macSidebarSelectionID)
+        try #require(context.canShowBrowse && context.canShowNoteTypes)
+        context.showBrowse()
+        navigation.commitMacSidebarSelection(deckIntent)
+        #expect(navigation.section == .browse)
+        #expect(!navigation.sidebarInteractionPending)
+        try #require(context.browseCommands != nil && context.browseInspector != nil)
         navigation.selectFromSidebar(.section(.noteTypes))
         #expect(context.browseCommands == nil && context.browseInspector == nil)
         #expect(!context.canToggleBrowseMode && !context.canEditBrowseNote && !context.canDeleteNotes)

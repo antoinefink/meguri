@@ -59,6 +59,38 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
     func testReturnOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(XCUIKeyboardKey.return.rawValue, "Return") }
     func testSpaceOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(" ", "Space") }
 
+    func testClickingBrowseClearsTheArrowKeyFilterTarget() throws {
+        let (app, bundle) = try launch()
+        try openBrowse(app, bundle)
+        let whole = statusText(app)
+        let browse = element(app, "shell.root.sidebar.browse")
+        let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
+        let lastFilter = list.outlineRows.element(boundBy: list.outlineRows.count - 1)
+        let token = element(app, "browse.search.token.0")
+
+        // Jump to the last filter, past the shell's other section rows,
+        // without applying it (T9).
+        app.typeKey(.downArrow, modifierFlags: .command)
+        XCTAssertTrue(waitUntil { lastFilter.isSelected })
+        XCTAssertEqual(statusText(app), whole)
+
+        browse.click()
+        XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") })
+        for key in [" ", XCUIKeyboardKey.return.rawValue] {
+            app.typeKey(key, modifierFlags: [])
+            XCTAssertFalse(token.exists, "\(key.debugDescription) must not activate the obsolete filter target")
+            XCTAssertEqual(statusText(app), whole)
+            XCTAssertTrue(listSelected(app, "shell.root.sidebar.browse"))
+        }
+
+        // A fresh arrow selection still activates normally, proving that the
+        // preceding keys were sent to the sidebar rather than a text field.
+        app.typeKey(.downArrow, modifierFlags: .command)
+        XCTAssertTrue(waitUntil { lastFilter.isSelected })
+        app.typeKey(" ", modifierFlags: [])
+        XCTAssertTrue(token.waitForExistence(timeout: 10))
+    }
+
     private func keyRemovesTheFilter(_ key: String, _ name: String) throws {
         let (app, bundle) = try launch()
         try openBrowse(app, bundle)

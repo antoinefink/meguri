@@ -60,15 +60,16 @@ struct MacSidebarSelectionHandoff: NSViewRepresentable {
         // Common modes keep native input/menu tracking from bypassing the fence.
         link.add(to: .main, forMode: .common)
         backMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated {
+            let used = MainActor.assumeIsolated { () -> Bool in
                 guard let self, event.window === self.window,
                       self.navigation.sidebarInteractionPending,
                       event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                      event.charactersIgnoringModifiers == "[" else { return event }
+                      event.charactersIgnoringModifiers == "[" else { return false }
                 self.navigation.cancelMacSidebarSelection()
                 self.stop()
-                return nil
+                return true
             }
+            return used ? nil : event
         }
     }
 

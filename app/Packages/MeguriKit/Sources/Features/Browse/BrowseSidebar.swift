@@ -166,14 +166,15 @@ public struct BrowseSidebar<Header: View>: View {
         }, set: { rows in
             // Section rows must keep the native selection while the shell
             // waits for its display fence, including List's indirect writes.
-            if rows.count == 1, case .section(let section)? = rows.first, navigation != nil {
-                // Keep Browse's underlying selection for cancellation. The
-                // pending section above supplies the temporary native row.
-                selection = model.listSelection
+            if rows.count == 1, case .section(let section)? = rows.first,
+               section != .browse, navigation != nil {
+                // Leave the underlying filter selection and key target intact
+                // for cancellation; the getter supplies the pending section.
                 navigate(section)
                 return
             }
-            // A newer filter-row click keeps Browse and supersedes departure.
+            // Browse and filter selections supersede departure and follow the
+            // model's existing key-row and deletion-selection clearing path.
             navigation?.cancelMacSidebarSelection()
             deletionSelection.changed(from: selection, to: rows, byKey: Self.byKey(),
                                       commandClick: Self.click() == .command)
