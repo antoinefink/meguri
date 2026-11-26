@@ -95,6 +95,10 @@ extension ReviewCoordinatorTests {
         #expect(ReviewLeechNotice.lapses(after: .again, of: card(again: .review(state: review))) == 8)
         #expect(ReviewLeechNotice.lapses(after: .good, of: card(again: .review(state: review))) == 7)
         #expect(ReviewLeechNotice.lapses(after: .again, of: item) == nil, "a new card's next state has none")
+        // F4: preview repeats and finishing answers preserve the home schedule;
+        // neither supplies a new lapse count, even for a home review card.
+        #expect(ReviewLeechNotice.lapses(after: .again, of: card(again: .preview(scheduledSecs: 60, finished: false))) == nil)
+        #expect(ReviewLeechNotice.lapses(after: .again, of: card(again: .preview(scheduledSecs: 0, finished: true))) == nil)
     }
 
     @Test func answersThatAreNotLeechesShowNoIcon() async throws {
