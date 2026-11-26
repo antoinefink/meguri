@@ -34,6 +34,36 @@ import Testing
 
 /// W12, S12, D4–D8 through the actual model, including zero loss categories.
 @MainActor @Suite struct NoteTypeDeletionTests {
+    @Test(arguments: [true, false])
+    func matchingIdentityInANewCoreScopeReconfirmsBeforeEitherRoute(_ mp7: Bool) async {
+        let (model, backend) = await open()
+        let sync = RemovalSync()
+        if mp7 { model.meguriSync = sync; model.service = { .meguriSync } }
+        backend.removalGeneration = 41
+        model.delete(7)
+        await model.settle()
+        #expect(model.deletionQuestion?.expectedGeneration == 41)
+        backend.removalGeneration = 42 // Same name, ID and counts; UI epoch unchanged.
+        model.confirmDeletion()
+        await model.settle()
+        #expect(model.deletionQuestion?.expectedGeneration == 42)
+        #expect(backend.removals.isEmpty && sync.requests.isEmpty)
+        model.confirmDeletion()
+        await model.settle()
+        let requests = mp7 ? sync.requests.map(\.0) : backend.removals
+        #expect(requests.first?.expectedGeneration == 42)
+    }
+
+    @Test func changedScopeDuringCountsCannotPresentAMixedQuestion() async {
+        let (model, backend) = await open()
+        backend.removalGeneration = 41
+        backend.beforeRemovalCounts = { backend.removalGeneration = 42 }
+        model.delete(7)
+        await model.settle()
+        #expect(model.deletionQuestion == nil && model.failure == .notSaved)
+        #expect(backend.removals.isEmpty)
+    }
+
     private func open() async -> (NoteTypesModel, FakeNoteTypesBackend) {
         let backend = FakeNoteTypesBackend()
         let model = NoteTypesModel(backend: backend)
@@ -72,7 +102,7 @@ import Testing
         model.filter = "Sample"
         model.confirmDeletion()
         await model.settle()
-        #expect(backend.removals == [.init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31)])
+        #expect(backend.removals == [.init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31, expectedGeneration: 0)])
         #expect(!model.items.contains { $0.id == 7 } && model.selection == 8)
         #expect(!model.isEdited(7) && model.draft(7) == nil)
         #expect(model.filter.isEmpty && model.failure == nil && model.progress == nil)
@@ -186,7 +216,7 @@ import Testing
         #expect(model.deletionQuestion?.service == .other && model.canConfirmDeletion)
         model.confirmDeletion()
         await model.settle()
-        #expect(backend.removals == [.init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31)])
+        #expect(backend.removals == [.init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31, expectedGeneration: 0)])
         #expect(sync.requests.isEmpty && model.failure == nil)
     }
 
@@ -212,7 +242,7 @@ import Testing
         #expect(backend.removals.isEmpty && sync.requests.isEmpty)
         model.confirmDeletion()
         await model.settle()
-        let accepted = NotetypeRemoval(notetypeId: 7, confirmedNotes: 19, confirmedCards: 30)
+        let accepted = NotetypeRemoval(notetypeId: 7, confirmedNotes: 19, confirmedCards: 30, expectedGeneration: 0)
         #expect(backend.removals == (initiallyBound ? [accepted] : []))
         #expect(sync.requests.map { $0.0 } == (initiallyBound ? [] : [accepted]))
     }
@@ -281,7 +311,7 @@ import Testing
         model.confirmDeletion()
         await model.settle()
         #expect(sync.requests.count == 1 && sync.requests.first?.1 == reachable)
-        #expect(sync.requests.first?.0 == .init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31))
+        #expect(sync.requests.first?.0 == .init(notetypeId: 7, confirmedNotes: 20, confirmedCards: 31, expectedGeneration: 0))
         #expect(backend.removals.isEmpty && !model.isEdited(7))
     }
 

@@ -43,7 +43,7 @@ public struct BrowseSidebar<Header: View>: View {
         List(selection: listSelection) {
             Section {
                 #if os(macOS)
-                header.simultaneousGesture(TapGesture().onEnded { deletionSelection = BrowseSidebarDeleteSelection() })
+                header.simultaneousGesture(TapGesture().onEnded { clearDeletionSelection() })
                 #else
                 header
                 #endif
@@ -86,7 +86,7 @@ public struct BrowseSidebar<Header: View>: View {
             // A sidebar built again starts with no row for Return and Space to act on.
             model.forgetSidebarKeyRow()
             selection = model.listSelection
-            deletionSelection = BrowseSidebarDeleteSelection()
+            clearDeletionSelection()
             model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
             model.appear()
         }
@@ -97,6 +97,7 @@ public struct BrowseSidebar<Header: View>: View {
         // The rows shown changed: Return and Space never act on a row out of sight.
         .onChange(of: model.filter) { forgetKeyRow() }
         .onChange(of: model.folded) { forgetKeyRow() }
+        .onChange(of: model.tagDeletion.target([])) { _, _ in clearDeletionSelection() }
     }
 
     /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
@@ -152,6 +153,7 @@ public struct BrowseSidebar<Header: View>: View {
         Binding(get: { selection }, set: { rows in
             deletionSelection.changed(from: selection, to: rows, byKey: Self.byKey(),
                                       commandClick: Self.click() == .command)
+            captureDeletionTarget()
             selection = rows
             selectionChanged(rows)
         })
@@ -167,8 +169,7 @@ public struct BrowseSidebar<Header: View>: View {
         // or SwiftUI focus flag. This handler belongs to this List alone.
         guard let window = NSApp.keyWindow, window.attachedSheet == nil,
               BrowseResponder.sidebar(window.firstResponder) != nil else { return }
-        let names = BrowseSidebarDeleteSelection.tagNames(in: deletionSelection.rows, tree: model.tags)
-        let target = model.tagDeletion.target(names)
+        guard let target = deletionSelection.target else { return }
         model.tagDeletion.delete(target)
     }
     #endif
@@ -194,14 +195,23 @@ public struct BrowseSidebar<Header: View>: View {
         guard model.sidebarRowClicked(row, click: Self.click()) else { return }
         #if os(macOS)
         deletionSelection.clicked(row, commandClick: Self.click() == .command)
+        captureDeletionTarget()
         #endif
         if selection != model.listSelection { selection = model.listSelection }
     }
 
     private func forgetKeyRow() {
         model.forgetSidebarKeyRow()
-        deletionSelection = BrowseSidebarDeleteSelection()
+        clearDeletionSelection()
         if selection != model.listSelection { selection = model.listSelection }
+    }
+
+    private func clearDeletionSelection() {
+        deletionSelection = BrowseSidebarDeleteSelection()
+    }
+
+    private func captureDeletionTarget() {
+        deletionSelection.capture(deletion: model.tagDeletion, tree: model.tags)
     }
 
     @discardableResult private func activateByKey() -> Bool { model.activateSidebarRowByKey() }
@@ -243,7 +253,7 @@ public struct BrowseSidebar<Header: View>: View {
                     .accessibilityIdentifier("browse.sidebar.\(kind.rawValue)")
                     .contextMenu { sectionMenu(kind) }
                     #if os(macOS)
-                    .simultaneousGesture(TapGesture().onEnded { deletionSelection = BrowseSidebarDeleteSelection() })
+                    .simultaneousGesture(TapGesture().onEnded { clearDeletionSelection() })
                     #endif
             }
         }

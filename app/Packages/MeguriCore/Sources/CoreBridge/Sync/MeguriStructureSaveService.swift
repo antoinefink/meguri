@@ -117,19 +117,17 @@ extension CoreMeguriRoundService {
         _ request: NotetypeRemoval, reachable: Bool,
         onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
     ) async throws -> MeguriStructureOutcome {
+        guard let expectedGeneration = request.expectedGeneration, expectedGeneration != 0 else {
+            throw BridgeError.invalidArgument("Note type removal requires a collection scope")
+        }
         let drains = drains
         let (connection, credentials) = try await admittedInputs()
         let op = MeguriCoreBindings.ProviderStructureOp.remove(request: request.raw)
-        let expectedGeneration = request.expectedGeneration
         return try await owned(since: drains, busy: .refused(.busy)) {
             try await CoreEventStream.shared.start()
-            let call: BridgeCall = expectedGeneration == nil ? .providerStartStructureSave : .providerStartStructureSaveForGeneration
-            let started = try await MaintenanceLane.shared.call(call) {
-                if let expectedGeneration {
-                    return try connection.startStructureSaveForGeneration(credentials: credentials, op: op,
-                        reachable: reachable, generation: expectedGeneration)
-                }
-                return try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
+            let started = try await MaintenanceLane.shared.call(.providerStartStructureSaveForGeneration) {
+                try connection.startStructureSaveForGeneration(credentials: credentials, op: op,
+                    reachable: reachable, generation: expectedGeneration)
             }
             return try await Self.drive(started, onStage: onStage)
         }

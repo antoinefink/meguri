@@ -37,6 +37,7 @@ import Foundation
     /// The generation retained by the menu's originating collection scope.
     func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation
     func tagTree() async throws -> [TagNode]
+    func scopedTagTree() async throws -> CollectionScopedRead<[TagNode]>
     /// The seven flags' shown names (`tags/flags-and-marked` F4).
     func flagNames() async throws -> [String]
     /// T12.4: each item's rows in `mode` (nil when it cannot be counted).
@@ -62,7 +63,12 @@ import Foundation
 
 extension BrowseBackend {
     public func deleteTags(text: String) async throws -> CountMutation { throw BrowseCommandUnsupported() }
-    public func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation { throw BrowseCommandUnsupported() }
+    /// Compatibility for scripted backends; production overrides both methods.
+    public func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation { try await deleteTags(text: text) }
+    /// Synthetic scope for existing fakes. CoreBrowseBackend never accepts zero.
+    public func scopedTagTree() async throws -> CollectionScopedRead<[TagNode]> {
+        .init(value: try await tagTree(), generation: 0)
+    }
     /// No field columns to offer (the model's own tests).
     public func fieldNames(notetype: Int64) async throws -> [String] { [] }
 }
@@ -103,14 +109,10 @@ extension BrowseBackend {
         try await notetypeReads.readNotetype(id: notetype).fields.map(\.name)
     }
     public func deleteTags(text: String) async throws -> CountMutation {
-        let job = try await tags.startDeleteTags(text: text)
-        return try await withTaskCancellationHandler {
-            try await job.value()
-        } onCancel: {
-            Task { try? await job.job.cancel() }
-        }
+        throw BridgeError.invalidArgument("Tag deletion requires a collection scope")
     }
     public func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation {
+        guard expectedGeneration != 0 else { throw BridgeError.invalidArgument("Tag deletion requires a collection scope") }
         let job = try await tags.startDeleteTags(text: text, expectedGeneration: expectedGeneration)
         return try await withTaskCancellationHandler {
             try await job.value()
@@ -119,6 +121,9 @@ extension BrowseBackend {
         }
     }
     public func tagTree() async throws -> [TagNode] { try await tags.tagTree() }
+    public func scopedTagTree() async throws -> CollectionScopedRead<[TagNode]> {
+        try await CollectionGenerationRead.read { try await self.tagTree() }
+    }
     public func flagNames() async throws -> [String] { try await tags.flagNames() }
     public func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] {
         let job = try await CoreBrowseQuery.startFilterCounts(mode, items: items)

@@ -37,6 +37,16 @@ import Testing
     /// Each type count read waits this long first.
     var countsWait: Duration?
     var removalCounts = NotetypeRemovalCounts(notes: 20, cards: 31)
+    var removalGeneration: UInt64 = 0
+    func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        let generation = removalGeneration
+        let names = try await list()
+        let counts = try await typeCounts(id)
+        guard removalGeneration == generation else {
+            throw BridgeError.staleGeneration(planned: generation, current: removalGeneration)
+        }
+        return .init(value: .init(names: names, counts: counts), generation: generation)
+    }
     var beforeRemovalCounts: (@MainActor () async -> Void)?
     var beforeRemoval: (@MainActor () async -> Void)?
     var removalErrors: [any Error] = []

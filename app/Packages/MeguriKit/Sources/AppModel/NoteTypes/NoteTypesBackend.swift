@@ -12,6 +12,8 @@ import Foundation
     func read(_ id: Int64) async throws -> NotetypeRecord
     /// The note type's notes and cards (the detail's subtitle).
     func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts
+    /// The names and loss counts used by one deletion question, in one generation.
+    func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead>
     /// W3.1, per stored field ordinal.
     func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts
     /// `notetypes/draft-save` D2.
@@ -41,9 +43,23 @@ import Foundation
 }
 
 extension NoteTypesBackend {
+    public func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        // Scripted backends have no engine. Production supplies a checked scope.
+        let names = try await list()
+        let counts = try await typeCounts(id)
+        return .init(value: .init(names: names, counts: counts), generation: 0)
+    }
     /// Read-only test backends cannot accidentally remove anything.
     public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
         throw BridgeError.invalidArgument("Note type removal is unavailable")
+    }
+}
+
+public nonisolated struct NotetypeDeletionRead: Sendable {
+    public let names: [NotetypeName]
+    public let counts: NotetypeRemovalCounts
+    public init(names: [NotetypeName], counts: NotetypeRemovalCounts) {
+        self.names = names; self.counts = counts
     }
 }
 
@@ -58,6 +74,13 @@ extension NoteTypesBackend {
     public func read(_ id: Int64) async throws -> NotetypeRecord { try await service.readNotetype(id: id) }
     public func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts {
         try await run { try await self.service.startNotetypeRemovalCounts(notetypeId: id) }
+    }
+    public func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+        try await CollectionGenerationRead.read {
+            let names = try await self.list()
+            let counts = try await self.typeCounts(id)
+            return .init(names: names, counts: counts)
+        }
     }
     public func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts {
         try await run { try await self.service.startNotetypeFieldContentCounts(notetypeId: id) }
@@ -75,6 +98,9 @@ extension NoteTypesBackend {
         _ = try await job.value()
     }
     public func remove(_ request: NotetypeRemoval, progress: @escaping @MainActor (UInt64, UInt64?) -> Void) async throws {
+        guard let generation = request.expectedGeneration, generation != 0 else {
+            throw BridgeError.invalidArgument("Note type removal requires a collection scope")
+        }
         let job = try await service.startNotetypeRemoval(request)
         let reports = Task { @MainActor in
             for await report in job.job.progress { progress(report.completed, nil) }

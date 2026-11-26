@@ -67,6 +67,7 @@ public final class BrowseModel {
     public var tagsLoaded: Bool { tagsEpoch == epoch && tagsGeneration == generation() }
     private var tagsEpoch: UInt64?
     private var tagsGeneration: UInt64?
+    private var tagsCoreGeneration: UInt64?
     private var tagsRequested = false
     private var tagsToken: UInt64 = 0
     @ObservationIgnored private var tagsTask: Task<Void, Never>?
@@ -254,6 +255,10 @@ public final class BrowseModel {
         }
         tagDeletion.saveFirst = { [weak inspector] in await inspector?.flushForBackground() ?? true }
         tagDeletion.generation = { [weak self] in self?.generation() ?? 0 }
+        tagDeletion.expectedGeneration = { [weak self] in
+            guard let self, self.tagsLoaded else { return nil }
+            return self.tagsCoreGeneration
+        }
         tagDeletion.contains = { [weak self] name in
             guard let self else { return false }
             return !self.tagsReading && !self.tagsFailed && self.hasTag(name)
@@ -800,7 +805,7 @@ public final class BrowseModel {
         tagsToken &+= 1
         tagsTask?.cancel()
         tagsTask = nil
-        tagsEpoch = nil; tagsGeneration = nil
+        tagsEpoch = nil; tagsGeneration = nil; tagsCoreGeneration = nil
         tagsReading = false; tagsFailed = false
     }
 
@@ -816,11 +821,12 @@ public final class BrowseModel {
             guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
                   ready(), !Task.isCancelled else { return }
             do {
-                let tree = try await backend.tagTree()
+                let tree = try await backend.scopedTagTree()
                 guard token == tagsToken, self.epoch == epoch, self.generation() == generation,
                       ready(), !Task.isCancelled else { return }
-                tags = tree; tagExpansion = [:]
+                tags = tree.value; tagExpansion = [:]
                 tagsEpoch = epoch; tagsGeneration = generation
+                tagsCoreGeneration = tree.generation
                 tagsFailed = false
             } catch {
                 guard token == tagsToken, self.epoch == epoch, self.generation() == generation,

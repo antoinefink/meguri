@@ -40,6 +40,7 @@ public final class NoteTypesModel {
         public let name: String
         public let counts: NotetypeRemovalCounts
         public let service: NoteTypeSaveService
+        public let expectedGeneration: UInt64
     }
 
     /// A running save (D5 step 5): "Updating <i> of <n> notes"; with Meguri
@@ -1240,14 +1241,16 @@ public final class NoteTypesModel {
             committingForSave = false
             preparing = id
             do {
-                let names = try await backend.list()
+                let snapshot = try await backend.deletionSnapshot(id)
+                let names = snapshot.value.names
                 guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving,
                       names.count > 1, let name = names.first(where: { $0.id == id })?.name else { return }
-                let counts = try await backend.typeCounts(id)
+                let counts = snapshot.value.counts
                 guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
                 let deletionService = await readDeletionService()
                 guard self.epoch == epoch, !Task.isCancelled, writable(), !leaving else { return }
-                askDeletion(.init(notetypeId: id, name: name, counts: counts, service: deletionService ?? service()))
+                askDeletion(.init(notetypeId: id, name: name, counts: counts, service: deletionService ?? service(),
+                                  expectedGeneration: snapshot.generation))
             } catch {
                 guard self.epoch == epoch else { return }
                 failure = .notSaved
@@ -1277,19 +1280,21 @@ public final class NoteTypesModel {
             guard self.epoch == epoch, !Task.isCancelled else { return }
             defer { if self.epoch == epoch { confirming = false } }
             do {
-                let names = try await backend.list()
+                let snapshot = try await backend.deletionSnapshot(shown.notetypeId)
+                let names = snapshot.value.names
                 guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown else { return }
                 guard names.count > 1, let name = names.first(where: { $0.id == shown.notetypeId })?.name else {
                     closeQuestion()
                     reloadList()
                     return
                 }
-                let counts = try await backend.typeCounts(shown.notetypeId)
+                let counts = snapshot.value.counts
                 guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
                 guard let currentService = await readDeletionService() else { return }
                 guard self.epoch == epoch, !Task.isCancelled, deletionQuestion == shown, writable(), !leaving else { return }
-                if counts.notes > shown.counts.notes || counts.cards > shown.counts.cards || currentService != shown.service || name != shown.name {
-                    askDeletion(.init(notetypeId: shown.notetypeId, name: name, counts: counts, service: currentService))
+                if snapshot.generation != shown.expectedGeneration || counts.notes > shown.counts.notes || counts.cards > shown.counts.cards || currentService != shown.service || name != shown.name {
+                    askDeletion(.init(notetypeId: shown.notetypeId, name: name, counts: counts, service: currentService,
+                                      expectedGeneration: snapshot.generation))
                     return
                 }
                 guard currentService == .other || (meguriSync != nil && meguriSyncState == .ready) else { return }
@@ -1324,7 +1329,8 @@ public final class NoteTypesModel {
     private func submitDeletion(_ shown: DeletionQuestion, reachable: Bool) async {
         let id = shown.notetypeId
         let epoch = epoch
-        let request = NotetypeRemoval(notetypeId: id, confirmedNotes: shown.counts.notes, confirmedCards: shown.counts.cards)
+        let request = NotetypeRemoval(notetypeId: id, confirmedNotes: shown.counts.notes, confirmedCards: shown.counts.cards,
+                                      expectedGeneration: shown.expectedGeneration)
         progress = Progress(notetypeId: id, stage: shown.service == .other ? nil : (reachable ? .syncing : .saving), removing: true)
         do {
             if shown.service == .meguriSync {
@@ -1368,7 +1374,8 @@ public final class NoteTypesModel {
         switch error as? BridgeError {
         case .notetypeStructureRefused(.removalLossesChanged(let notes, let cards))?:
             askDeletion(.init(notetypeId: shown.notetypeId, name: shown.name,
-                              counts: .init(notes: notes, cards: cards), service: shown.service))
+                              counts: .init(notes: notes, cards: cards), service: shown.service,
+                              expectedGeneration: shown.expectedGeneration))
         case .notetypeStructureRefused(.lastNotetype)?:
             reloadList()
             failure = .notSaved

@@ -4,8 +4,41 @@ import Foundation
 import Testing
 
 @MainActor @Suite struct BrowseTagDeletionTests {
+    @Test func coreScopeIsCapturedForMenusKeyboardAndRetryIndependentlyOfUIEpoch() async {
+        let backend = TagDeletionBackend(), model = BrowseModel(backend: backend)
+        backend.coreGeneration = 41
+        model.generation = { 9001 }
+        await model.refreshTags()
+        let keyboardOrMenu = model.tagDeletion.target(["brask"])
+        backend.perform = { throw BridgeError.unavailable(reason: "synthetic") }
+        model.tagDeletion.delete(keyboardOrMenu)
+        await model.tagDeletion.waitForCompletion()
+        #expect(model.tagDeletion.failed == keyboardOrMenu)
+        #expect(backend.expectedGenerations == [41])
+        backend.coreGeneration = 42
+        await model.refreshTags() // Same names and UI epoch.
+        #expect(!model.tagDeletion.canDelete(keyboardOrMenu))
+        model.tagDeletion.delete(keyboardOrMenu)
+        await model.tagDeletion.waitForCompletion()
+        #expect(backend.expectedGenerations == [41])
+        backend.perform = {}
+        model.tagDeletion.delete(model.tagDeletion.target(["brask"]))
+        await model.tagDeletion.waitForCompletion()
+        #expect(backend.expectedGenerations == [41, 42])
+        #expect(model.tagDeletion.announcement?.count == 2)
+    }
+
+    @Test func absentReadScopeNeverDispatches() async {
+        let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        deletion.available = { true }; deletion.contains = { _ in true }
+        deletion.delete(deletion.target(["brask"]))
+        await deletion.waitForCompletion()
+        #expect(backend.texts.isEmpty)
+    }
+
     @Test func forwardsLiteralFullNamesAndReportsTheCoreCountIncludingZero() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        deletion.expectedGeneration = { 0 }
         deletion.available = { true }
         deletion.contains = { _ in true }
         var steps: [(CountMutation, String)] = []
@@ -28,6 +61,7 @@ import Testing
 
     @Test func refusesUnavailableMissingAndOldCollectionTargets() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        deletion.expectedGeneration = { 0 }
         deletion.available = { true }
         deletion.contains = { $0 == "Ink" }
         let old = deletion.target(["Ink"])
@@ -45,6 +79,7 @@ import Testing
     @Test func savesFirstAndDropsSuccessAndFailureFromAnOldCollection() async {
         for failing in [false, true] {
             let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+            deletion.expectedGeneration = { 0 }
             deletion.available = { true }
             deletion.contains = { _ in true }
             var saved = false, landed = false
@@ -63,6 +98,7 @@ import Testing
 
     @Test func replacementDuringInspectorFlushStartsNoTagJob() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        deletion.expectedGeneration = { 0 }
         deletion.available = { true }
         deletion.contains = { _ in true }
         deletion.saveFirst = { deletion.reset(); return true }
@@ -73,6 +109,7 @@ import Testing
 
     @Test func failedSaveDoesNotDeleteAndCoreFailureCanBeRetried() async {
         let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+        deletion.expectedGeneration = { 0 }
         deletion.available = { true }
         deletion.contains = { _ in true }
         deletion.saveFirst = { false }
@@ -126,6 +163,7 @@ import Testing
     @Test func dispatchAndCompletionRecheckReadinessAndGeneration() async {
         for duringSave in [true, false] {
             let backend = TagDeletionBackend(), deletion = BrowseTagDeletion(backend: backend)
+            deletion.expectedGeneration = { 0 }
             var ready = true, generation: UInt64 = 0
             deletion.available = { ready }
             deletion.generation = { generation }
@@ -151,11 +189,20 @@ import Testing
     let reads = FakeBrowseBackend()
     var texts: [String] = []
     var count: UInt64 = 2
+    var coreGeneration: UInt64 = 0
+    var expectedGenerations: [UInt64] = []
+    func scopedTagTree() async throws -> CollectionScopedRead<[TagNode]> {
+        .init(value: try await tagTree(), generation: coreGeneration)
+    }
+    func deleteTags(text: String, expectedGeneration: UInt64) async throws -> CountMutation {
+        expectedGenerations.append(expectedGeneration)
+        return try await deleteTags(text: text)
+    }
     var perform: @MainActor () async throws -> Void = {}
     func deleteTags(text: String) async throws -> CountMutation {
         texts.append(text)
         try await perform()
-        return CountMutation(summary: MutationSummary(seq: UInt64(texts.count), generation: 0, undoName: "Remove Tag",
+        return CountMutation(summary: MutationSummary(seq: UInt64(texts.count), generation: coreGeneration, undoName: "Remove Tag",
             changes: ChangeSet(wholeCollection: false, source: .userUndoable,
                 cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
                 revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [],

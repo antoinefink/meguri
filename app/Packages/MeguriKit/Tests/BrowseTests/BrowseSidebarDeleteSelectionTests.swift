@@ -1,9 +1,26 @@
-import AppModel
+@testable import AppModel
 @testable import Browse
 import CoreBridge
 import Testing
 
 @MainActor struct BrowseSidebarDeleteSelectionTests {
+    @Test func keyboardTargetRetainsTheDisplayedScopeWhenMatchingRowsReturn() throws {
+        let deletion = BrowseTagDeletion(backend: CoreBrowseBackend())
+        var scope: UInt64 = 41
+        deletion.expectedGeneration = { scope }
+        deletion.available = { true }; deletion.contains = { _ in true }
+        var selection = BrowseSidebarDeleteSelection()
+        selection.changed(from: browse, to: [.tag("Ink")], byKey: true, commandClick: false)
+        selection.capture(deletion: deletion, tree: tree)
+        let target = try #require(selection.target)
+        #expect(deletion.canDelete(target))
+        scope = 42 // Same tree and UI epoch; Delete must use the issued target.
+        #expect(selection.target == target)
+        #expect(!deletion.canDelete(target))
+        selection.capture(deletion: deletion, tree: tree)
+        #expect(selection.target != target)
+    }
+
     private let browse: Set<BrowseSidebarTag> = [.section(.browse)]
     private let tree = [
         TagNode(name: "Ink", fullName: "Ink", collapsed: false, implicit: true, children: [

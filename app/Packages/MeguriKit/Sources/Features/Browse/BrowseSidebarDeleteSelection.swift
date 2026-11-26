@@ -5,6 +5,12 @@ import CoreBridge
 /// sidebar restores its List selection to Browse after clicks (N21.1).
 struct BrowseSidebarDeleteSelection {
     private(set) var rows: Set<BrowseSidebarTag> = []
+    private(set) var target: BrowseTagDeletionTarget?
+
+    /// Capture when selection changes, never when the Delete key arrives.
+    mutating func capture(deletion: BrowseTagDeletion, tree: [TagNode]) {
+        target = deletion.target(Self.tagNames(in: rows, tree: tree))
+    }
 
     mutating func changed(from previous: Set<BrowseSidebarTag>, to next: Set<BrowseSidebarTag>,
                           byKey: Bool, commandClick: Bool) {
