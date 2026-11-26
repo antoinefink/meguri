@@ -5,7 +5,7 @@ import Observation
 /// F1–F6: drafts and operation admission, never scheduling or card membership.
 @Observable @MainActor
 public final class FilteredStudyModel {
-    public enum Failure: Equatable { case load, write, noMatches, refresh }
+    public enum Failure: Equatable { case load, write, noMatches, refresh, saved }
     public var definition = FilteredStudyModel.blankDefinition
     public var secondTerm = FilteredStudyTerm(search: "", limit: 20, order: 6)
     public var usesSecondTerm = false
@@ -66,6 +66,7 @@ public final class FilteredStudyModel {
     private var scopeDeck: Int64?
     private var emptyCandidate: FilteredStudyDefinition?
     private var savedDeck: Int64?
+    private var writeCommitted = false
     private var task: Task<Void, Never>?
 
     public init(owner: ReviewCollection, service: any FilteredStudyService = CoreFilteredStudyService()) {
@@ -144,6 +145,7 @@ public final class FilteredStudyModel {
         guard let owner else { return }
         revision &+= 1; generation = owner.generation
         editingDeck = deck; sourceDeck = source; failure = nil; loaded = false; savedDeck = nil
+        writeCommitted = false
         operationFailed = false; scopeDeck = nil; emptyCandidate = nil; self.route = route
         owner.navigation.present(route)
         intent = owner.navigation.intentRevision
@@ -161,7 +163,7 @@ public final class FilteredStudyModel {
             (sourceDeck.map { owner.deck($0)?.filtered == false } ?? true)
     }
     public func load() {
-        guard !busy, admitted else { return }
+        guard !busy, !writeCommitted, admitted else { return }
         busy = true; failure = nil
         let revision = revision, generation = generation
         task = Task {
@@ -192,7 +194,7 @@ public final class FilteredStudyModel {
         }
     }
     public var canSubmit: Bool {
-        guard !busy, loaded, admitted, savedDeck == nil else { return false }
+        guard !busy, loaded, admitted, !writeCommitted else { return false }
         if sourceDeck != nil {
             guard Int32(amountText) != nil else { return false }
             if modeIndex < 2 { return (-99_999...99_999).contains(amount) }
@@ -203,7 +205,7 @@ public final class FilteredStudyModel {
         return !definition.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             definition.terms.count == 1 && definition.terms[0].limit > 0 && (!usesSecondTerm || secondTerm.limit > 0)
     }
-    public var needsRefresh: Bool { savedDeck != nil && !busy }
+    public var needsRefresh: Bool { writeCommitted && failure != .saved && !busy }
     public var customRequest: CustomStudyRequest {
         let modes: [CustomStudyMode] = [.increaseNew, .increaseReview, .forgotten, .ahead, .previewNew, .byState]
         let states: [CustomStudyState] = [.new, .due, .review, .all]
@@ -240,8 +242,19 @@ public final class FilteredStudyModel {
                 let selected: Int64
                 if let source { selected = try await service.custom(deck: source, request: request, generation: generation) }
                 else { selected = try await service.save(deck: editing, definition: value, allowEmpty: allowEmpty, generation: generation) }
-                guard current(revision) else { return }
+                guard revision == self.revision, generation == owner?.generation else { return }
+                writeCommitted = true
                 savedDeck = selected
+                guard current(revision) else { return }
+                failure = .refresh
+                await publish(revision)
+            } catch BridgeError.commitCompleted {
+                // The mutation is durable even though its result (including a
+                // newly created deck's identity) is unavailable. Never replay it.
+                guard revision == self.revision, generation == owner?.generation else { return }
+                writeCommitted = true
+                guard current(revision) else { return }
+                failure = .refresh
                 await publish(revision)
             } catch {
                 guard current(revision) else { return }
@@ -253,11 +266,18 @@ public final class FilteredStudyModel {
         }
     }
     private func publish(_ revision: UInt64) async {
-        guard let owner, let savedDeck, current(revision), owner.foreground, !owner.resuming else { return }
+        guard let owner, writeCommitted, current(revision), owner.foreground, !owner.resuming else { return }
         owner.deckWriteFinished()
         do {
             guard try await owner.refreshDeckNames(generation: generation), current(revision) else {
                 if current(revision) { failure = .refresh }; return
+            }
+            guard let savedDeck else {
+                // Keep the refreshed workspace's selection. The saved result
+                // may have created a deck; neither its name nor source is an id.
+                failure = .saved
+                owner.refreshCounts()
+                return
             }
             // Selection writes through the normal collection route; its own stale-intent fence wins.
             let selection = owner.openDeckPage(deckID: savedDeck)
@@ -269,11 +289,12 @@ public final class FilteredStudyModel {
             guard revision == self.revision, generation == owner.generation, owner.navigation.sheet == route,
                   owner.navigation.homeDeckPage?.rawValue == savedDeck else { return }
             owner.navigation.dismissSheet(); self.route = nil; self.savedDeck = nil
+            writeCommitted = false; failure = nil
             owner.refreshCounts()
         } catch { if current(revision) { failure = .refresh } }
     }
     public func refresh() {
-        guard !busy, savedDeck != nil, let owner, generation == owner.generation,
+        guard needsRefresh, let owner, generation == owner.generation,
               owner.navigation.sheet == route else { return }
         intent = owner.navigation.intentRevision
         busy = true
@@ -283,7 +304,7 @@ public final class FilteredStudyModel {
     public func cancel() {
         guard !busy else { return }
         if let owner, owner.navigation.sheet == route { owner.navigation.dismissSheet() }
-        route = nil; revision &+= 1; savedDeck = nil; emptyCandidate = nil
+        route = nil; revision &+= 1; savedDeck = nil; writeCommitted = false; emptyCandidate = nil
     }
     /// Rebuild may legitimately produce an empty deck. No Swift-side search or scheduler.
     public func rebuild(_ deck: Int64) { mutate(deck, empty: false) }
@@ -295,7 +316,11 @@ public final class FilteredStudyModel {
         task = Task {
             defer { busy = false; task = nil }
             do {
-                if empty { try await service.empty(deck: deck, generation: expected) } else { try await service.rebuild(deck: deck, generation: expected) }
+                do {
+                    if empty { try await service.empty(deck: deck, generation: expected) } else { try await service.rebuild(deck: deck, generation: expected) }
+                } catch BridgeError.commitCompleted {
+                    // As with a saved definition, recover by reading committed state.
+                }
                 guard expected == owner.generation else { return }
                 owner.deckWriteFinished()
                 guard try await owner.refreshDeckNames(generation: expected) else { return }
@@ -307,7 +332,7 @@ public final class FilteredStudyModel {
         }
     }
     func invalidate() {
-        revision &+= 1; loaded = false; failure = nil; savedDeck = nil; emptyCandidate = nil; operationFailed = false
+        revision &+= 1; loaded = false; failure = nil; savedDeck = nil; writeCommitted = false; emptyCandidate = nil; operationFailed = false
         if let owner, route != nil, owner.navigation.sheet == route { owner.navigation.dismissSheet() }
         route = nil
     }

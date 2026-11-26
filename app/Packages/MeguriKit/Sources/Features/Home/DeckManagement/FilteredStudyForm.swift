@@ -152,7 +152,7 @@ private struct StudyFormFrame<Content: View>: View {
     }
     private var form: some View {
         Form {
-            Group { content() }.disabled(!model.loaded || model.busy || model.needsRefresh)
+            Group { content() }.disabled(!model.loaded || model.busy || model.needsRefresh || model.failure == .saved)
             if model.busy { ProgressView().accessibilityIdentifier(id + ".progress") }
             if let failure = model.failure {
                 Section {
@@ -173,19 +173,20 @@ private struct StudyFormFrame<Content: View>: View {
         .formStyle(.grouped)
     }
     private var cancel: some View {
-        Button { model.cancel() } label: { Text("Cancel", bundle: .module) }
+        Button { model.cancel() } label: { Text(model.failure == .saved ? "Close" : "Cancel", bundle: .module) }
             .keyboardShortcut(.cancelAction)
             .disabled(model.busy)
             .accessibilityIdentifier(id + ".cancel")
     }
     private var confirm: some View {
         Button {
-            if model.needsRefresh { model.refresh() } else { model.submit() }
+            if model.failure == .saved { model.cancel() }
+            else if model.needsRefresh { model.refresh() } else { model.submit() }
         } label: {
-            Text(model.needsRefresh ? "Refresh Decks" : model.sourceDeck != nil ? "Apply" : "Save and Build", bundle: .module)
+            Text(model.failure == .saved ? "Done" : model.needsRefresh ? "Refresh Decks" : model.sourceDeck != nil ? "Apply" : "Save and Build", bundle: .module)
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(!model.canSubmit && !model.needsRefresh)
+        .disabled(!model.canSubmit && !model.needsRefresh && model.failure != .saved)
         .accessibilityIdentifier(id + ".save")
     }
     private func message(_ failure: FilteredStudyModel.Failure) -> LocalizedStringKey {
@@ -197,6 +198,7 @@ private struct StudyFormFrame<Content: View>: View {
                 ? "No eligible cards matched. Edit the search or choose Save Empty Deck. The previous deck is unchanged."
                 : "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged."
         case .refresh: "The change was saved. Refresh decks to continue."
+        case .saved: "The change was saved. Close this sheet to continue."
         }
     }
 }
@@ -219,6 +221,9 @@ struct FilteredDeckActions: View {
         Button { collection.filteredStudy.edit(deck) } label: {
             Label { Text("Edit Filtered Deck…", bundle: .module) } icon: { Image(systemName: "pencil") }
         }
+        #if os(macOS)
+        .keyboardShortcut("o", modifiers: [.command, .option])
+        #endif
         .disabled(!collection.filteredStudy.canEdit(deck))
         .accessibilityIdentifier("home.filteredDeck.edit.\(deck)")
         Button { collection.filteredStudy.rebuild(deck) } label: {

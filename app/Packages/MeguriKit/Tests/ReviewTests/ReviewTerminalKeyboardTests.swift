@@ -29,6 +29,23 @@ import Testing
     }
 
     @Test(arguments: [" ", "\r", "\n", "\u{3}"])
+    func explicitlyFocusedCustomStudyKeepsFreshActivationKeysAndConsumesHeldGrades(input: String) throws {
+        let owner = ReviewTerminalKeyboard.Coordinator(presentedAt: 100)
+        owner.enabled = true
+        owner.customStudyFocused = true
+        var finished = 0
+        owner.done = { finished += 1 }
+        let event = try key(input)
+        #expect(owner.route(event) === event, "The focused Custom Study button owns native activation")
+        #expect(owner.route(try key(input, repeated: true)) == nil)
+        #expect(owner.route(try key(input, at: 100)) == nil)
+        #expect(finished == 0)
+        owner.customStudyFocused = false
+        #expect(owner.route(try key(input, at: 102)) == nil)
+        #expect(finished == 1, "Returning focus to content keeps default Done admission")
+    }
+
+    @Test(arguments: [" ", "\r", "\n", "\u{3}"])
     func contentKeysFinishOnceAndRepeatsNeverFinish(input: String) throws {
         let owner = ReviewTerminalKeyboard.Coordinator(presentedAt: 100)
         owner.enabled = true

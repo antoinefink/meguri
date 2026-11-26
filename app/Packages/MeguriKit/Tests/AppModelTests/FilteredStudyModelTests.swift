@@ -153,6 +153,79 @@ import Testing
         #expect(!owner.deckActions.canPresent(.subdeck(3)))
     }
 
+    @Test(arguments: [0, 1], [-5, 5])
+    func committedDailyAdjustmentRefreshesWithoutRepeatingSignedWrite(mode: Int, amount: Int) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        model.custom(1); await model.waitForOperation()
+        model.modeIndex = mode; model.amountText = String(amount)
+        service.customError = .commitCompleted(sequence: 42, message: "Saved result unavailable")
+        var reads = 0, selections = 0
+        owner.loadDeckTree = { reads += 1; throw BridgeError.internal("Read unavailable") }
+        owner.saveSelectedDeck = { _ in selections += 1; return 11 }
+        model.submit(); model.submit(); await model.waitForOperation()
+        #expect(service.customRequests.count == 1 && service.customRequests[0].amount == Int32(amount))
+        #expect(reads == 1 && model.failure == .refresh && model.needsRefresh && !model.canSubmit)
+        model.submit(); model.confirmEmpty(); model.load(); await model.waitForOperation()
+        #expect(service.writes == 1 && service.defaultsReads == 1 && reads == 1)
+        owner.loadDeckTree = { reads += 1; return Self.tree(generation: 11, review: 19) }
+        model.refresh(); await model.waitForOperation()
+        #expect(reads >= 2 && owner.deck(1)?.counts.review == 19)
+        #expect(model.failure == .saved && !model.needsRefresh && !model.canSubmit)
+        #expect(owner.navigation.sheet == .customStudy(1) && selections == 0)
+        model.submit(); model.confirmEmpty(); model.refresh(); await model.waitForOperation()
+        #expect(service.writes == 1 && selections == 0)
+        model.cancel()
+        #expect(owner.navigation.sheet == nil)
+    }
+
+    @Test(arguments: [0, 1], [-5, 5])
+    func precommitDailyAdjustmentFailurePreservesEditableDraftAndAllowsRetry(mode: Int, amount: Int) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        model.custom(1); await model.waitForOperation()
+        model.modeIndex = mode; model.amountText = String(amount)
+        model.includeTags = "keep this tag"
+        service.customError = .invalidArgument("Rejected before commit")
+        var reads = 0
+        owner.loadDeckTree = { reads += 1; return Self.tree(generation: 11) }
+        model.submit(); await model.waitForOperation()
+        #expect(model.failure == .write && model.canSubmit && !model.needsRefresh && reads == 0)
+        #expect(model.amountText == String(amount) && model.includeTags == "keep this tag")
+        model.amountText = String(amount + 1)
+        model.submit(); await model.waitForOperation()
+        #expect(service.customRequests.map(\.amount) == [Int32(amount), Int32(amount + 1)])
+        #expect(model.failure == .write && model.canSubmit && reads == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func committedDefinitionRefreshesWithoutGuessingADeckIdentity(editing: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        if editing { model.edit(3); await model.waitForOperation() }
+        else { model.create(search: "is:due") }
+        model.definition.name = "Saved definition"
+        service.saveError = .commitCompleted(sequence: 43, message: "Saved result unavailable")
+        var selections = 0
+        owner.saveSelectedDeck = { _ in selections += 1; return 11 }
+        owner.loadDeckTree = { Self.tree(generation: 11, review: 23) }
+        model.submit(); await model.waitForOperation()
+        #expect(service.writes == 1 && owner.deck(3)?.counts.review == 23)
+        #expect(model.failure == .saved && !model.canSubmit && !model.canSaveEmpty && !model.needsRefresh)
+        #expect(model.definition.name == "Saved definition" && owner.navigation.sheet == .filteredStudy)
+        #expect(selections == 0 && owner.navigation.homeDeckPage == nil)
+        model.submit(); model.confirmEmpty(); model.load(); await model.waitForOperation()
+        #expect(service.writes == 1 && selections == 0)
+    }
+
+    @Test(arguments: [false, true])
+    func committedEmptyAndRebuildRefreshTheirRealDeckState(empty: Bool) async {
+        let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
+        service.mutationError = .commitCompleted(sequence: 44, message: "Saved result unavailable")
+        owner.loadDeckTree = { Self.tree(generation: 11, review: 0) }
+        if empty { model.empty(3) } else { model.rebuild(3) }
+        await model.waitForOperation()
+        #expect(owner.deck(3)?.counts.review == 0 && !model.operationFailed)
+        #expect(service.emptied.count + service.rebuilt.count == 1)
+    }
+
     @Test func dailyAdjustmentBoundsIncludeZeroAndRefuseAdjacentValuesInBothForms() async {
         let service = FilteredStudySpy(), owner = await makeOwner(service), model = owner.filteredStudy
         model.custom(1); await model.waitForOperation()
@@ -232,8 +305,8 @@ import Testing
         owner.receiveLifecycle(.ready(generation: 11)); await owner.loadCounts()
         return owner
     }
-    private static func tree(generation: UInt64) -> CountedDeckTree {
-        let counts = ReviewCounts(new: 0, learning: 0, review: 4)
+    private static func tree(generation: UInt64, review: UInt32 = 4) -> CountedDeckTree {
+        let counts = ReviewCounts(new: 0, learning: 0, review: review)
         return .init(generation: generation, nextChangeAt: Int64.max, nodes: [
             .init(id: 1, name: "Source*_\"::OR", filtered: false, studyCollapsed: false, browserCollapsed: false, counts: counts, children: []),
             .init(id: 2, name: "Second", filtered: false, studyCollapsed: false, browserCollapsed: false, counts: counts, children: []),
@@ -247,6 +320,8 @@ import Testing
     var generations: [UInt64] = []
     var emptyConsents: [Bool] = []
     var saveError: BridgeError?
+    var customError: BridgeError?
+    var mutationError: BridgeError?
     func deckScope(deck: Int64, generation: UInt64) async throws(BridgeError) -> String {
         generations.append(generation); return scope
     }
@@ -274,10 +349,17 @@ import Testing
         if refuse { throw .invalidArgument("zero matches or invalid definition") }
         return 3
     }
-    func rebuild(deck: Int64, generation: UInt64) async throws(BridgeError) { generations.append(generation); rebuilt.append(deck) }
-    func empty(deck: Int64, generation: UInt64) async throws(BridgeError) { generations.append(generation); emptied.append(deck) }
+    func rebuild(deck: Int64, generation: UInt64) async throws(BridgeError) {
+        generations.append(generation); rebuilt.append(deck)
+        if let mutationError { throw mutationError }
+    }
+    func empty(deck: Int64, generation: UInt64) async throws(BridgeError) {
+        generations.append(generation); emptied.append(deck)
+        if let mutationError { throw mutationError }
+    }
     func custom(deck: Int64, request: CustomStudyRequest, generation: UInt64) async throws(BridgeError) -> Int64 {
         generations.append(generation); customRequests.append(request)
+        if let customError { throw customError }
         if refuse { throw .invalidArgument("zero matches") }
         return request.mode == .increaseNew || request.mode == .increaseReview ? deck : 3
     }

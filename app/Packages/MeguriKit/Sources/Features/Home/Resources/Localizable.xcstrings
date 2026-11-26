@@ -1825,6 +1825,16 @@
         }
       }
     },
+    "The change was saved. Close this sheet to continue.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The change was saved. Close this sheet to continue."
+          }
+        }
+      }
+    },
     "The change was saved. Refresh decks to continue.": {
       "localizations": {
         "en": {

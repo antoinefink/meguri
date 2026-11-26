@@ -22,3 +22,5 @@ The explicit empty-save confirmation changed the native form. Plancheck reviewed
 Plancheck reviewed the complete `core/crates/meguri-engine/src/decks/custom_study.rs` after the range and scope changes. It contains public F5 logic and takes deck and tag data from the collection at runtime. Verified SHA-256 `73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166`.
 
 Plancheck reviewed all 1,586 lines of `docs/design/native-interface-contract.md`, including the revised menu and key bindings. It contains public product decisions, examples and repo references. Its verified SHA-256 is `5f81c9b56335f87958c5d53bba3dd4dbe770cccda8bc1764b89f9aa182286dbe`.
+
+The keyboard shortcut and saved-state feedback changed the form. Independent reviewer planinterop examined its complete 13,239 bytes. The verified public digest for `FilteredStudyForm.swift` is `3c7cd4ebb07a6408449ccebce59ae624fb41be4ae044bf03a39e784821442310`.

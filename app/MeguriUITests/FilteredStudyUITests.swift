@@ -54,6 +54,15 @@ import XCTest
         }
         capture(app, "filtered-preview-reopened-definition-retains-edited-delays")
         try click("home.filteredStudy.cancel", app: app, bundle: bundle)
+        // Both deck-page keyboard entries reach the filtered definition editor.
+        let shortcuts: [XCUIKeyModifierFlags] = [[], [.command, .option]]
+        for modifiers in shortcuts {
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("o", modifierFlags: modifiers)
+            XCTAssertTrue(element(app, "home.filteredStudy.name").waitForExistence(timeout: 10))
+            XCTAssertEqual(element(app, "home.filteredStudy.name").value as? String, "Synthetic Preview")
+            try click("home.filteredStudy.cancel", app: app, bundle: bundle)
+        }
         try click("home.filteredDeck.empty.\(id)", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.deck.rebuild").waitForExistence(timeout: 15))
         XCTAssertFalse(element(app, "home.deck.study").exists)
