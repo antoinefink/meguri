@@ -216,13 +216,14 @@ import XCTest
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         // Filtered actions share ids between the page and its native menu.
-        // Scope menu actions to the collection view containing that deck's
-        // Study menu item, so the covered page cannot satisfy an assertion.
+        // Scope actions exclusively to the native menu or collection view
+        // containing that deck's Study item, even when the action is absent.
         if let deck = id.split(separator: ".").last, Int64(deck) != nil {
-            let menu = app.collectionViews.containing(.button, identifier: "home.deckMenu.study." + String(deck)).firstMatch
-            if menu.exists {
-                let item = menu.descendants(matching: .any).matching(identifier: id).firstMatch
-                if item.exists { return item }
+            for containers in [app.menus, app.collectionViews] {
+                let menu = containers.containing(.any, identifier: "home.deckMenu.study." + String(deck)).firstMatch
+                if menu.exists {
+                    return menu.descendants(matching: .any).matching(identifier: id).firstMatch
+                }
             }
         }
         let matches = app.descendants(matching: .any).matching(identifier: id)
