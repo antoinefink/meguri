@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import Vision
 import XCTest
 
 /// R3–R4: a compact production Window with the existing 26-entry inert preset.
@@ -98,7 +99,8 @@ final class BackupRestoreWindowUITests: XCTestCase {
         attachHistory("compact-initial-history")
         XCTAssertTrue(firstCell.exists && !firstCell.frame.isEmpty && initialViewport.contains(firstCell.frame),
             "The initial archive data cell must fit completely within the viewport")
-        assertFooterSeparation(window, viewport: viewport, cell: firstCell)
+        assertFooterSeparation(window.frame, viewportFrame: viewport.frame, cellFrame: firstCell.frame,
+            cancelFrame: windowCancel.frame, restoreFrame: apply.frame)
         let trackFrame = scrollbar.frame
         let thumbFrame = thumb.frame
         XCTAssertTrue(!trackFrame.isEmpty
@@ -125,18 +127,12 @@ final class BackupRestoreWindowUITests: XCTestCase {
         attachHistory("first-archive-focused")
         XCTAssertTrue(firstSelected, "The native Table must select the exact first filename before keyboard scrolling")
         window.typeKey(XCUIKeyboardKey.end.rawValue, modifierFlags: [])
-        let reachedOldest = wait {
-            let visible = viewport.frame.intersection(window.frame)
-            guard oldest.exists && oldestCell.exists else { return false }
-            let archiveFrame = oldest.frame
-            let cellFrame = oldestCell.frame
-            return !visible.isEmpty && !archiveFrame.isEmpty && !cellFrame.isEmpty
-                && visible.contains(archiveFrame) && visible.contains(cellFrame)
-                && oldest.isHittable
-        }
+        let reachedEnd = wait { normalizedScrollValue() == 1 }
         // continueAfterFailure is false: save the actual outcome before asserting.
-        attachHistory("after-native-scroll")
-        XCTAssertTrue(reachedOldest, "The exact oldest archive and its complete data cell must become visible and actionable")
+        if !reachedEnd {
+            attachHistory("after-native-scroll")
+        }
+        XCTAssertTrue(reachedEnd, "One native End must reach the scrollbar's exposed normalized value of 1")
         let finalViewport = viewport.frame.intersection(window.frame)
         XCTAssertTrue(scrollbar.exists && thumb.exists && !scrollbar.frame.isEmpty && !thumb.frame.isEmpty
             && scrollbar.frame.contains(thumb.frame) && finalViewport.contains(thumb.frame),
@@ -145,9 +141,22 @@ final class BackupRestoreWindowUITests: XCTestCase {
             XCTAssertGreaterThan(finalScrollValue, initialScrollValue,
                 "The native normalized scrollbar value must show progress after End")
         }
-        assertFooterSeparation(window, viewport: viewport, cell: oldestCell)
         try app.bringToFront(bundleIdentifier: bundle)
-        oldest.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        XCTAssertTrue(windowCancel.exists && windowCancel.isEnabled && windowCancel.isHittable
+            && apply.exists && apply.isEnabled && apply.isHittable)
+        // Capture native geometry and the window-relative pointer anchor before
+        // recognizing pixels. AX queries for offscreen cells can perturb the table.
+        let proofWindowFrame = window.frame
+        let proofViewportFrame = viewport.frame
+        let cancelFrame = windowCancel.frame
+        let restoreFrame = apply.frame
+        let pointerOrigin = window.coordinate(withNormalizedOffset: .zero)
+        let physicalRow = try oldestArchiveBand(window.screenshot(), windowFrame: proofWindowFrame)
+        assertFooterSeparation(proofWindowFrame, viewportFrame: proofViewportFrame, cellFrame: physicalRow,
+            cancelFrame: cancelFrame, restoreFrame: restoreFrame)
+        // No live AX reads or diagnostics between this physical proof and click.
+        pointerOrigin.withOffset(CGVector(dx: physicalRow.midX - proofWindowFrame.minX,
+            dy: physicalRow.midY - proofWindowFrame.minY)).click()
         // Same filename-bound AX value as the functional journey. Native Table
         // can put isSelected on an ancestor instead of the identified entry.
         XCTAssertTrue(wait {
@@ -173,7 +182,7 @@ final class BackupRestoreWindowUITests: XCTestCase {
             "Restore", "Restore", "settings.backups.apply")
         let cancelPredicate = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@", "Cancel", "Cancel", anchor)
         let confirmationTitle = app.staticTexts.matching(titlePredicate).firstMatch
-        let destructiveRestore = app.buttons.matching(restorePredicate).firstMatch
+        let destructiveRestore = confirmationAction(app, matching: restorePredicate)
         let confirmationContext = "Selected archive: \(filename); expected title: \(title)"
         try app.bringToFront(bundleIdentifier: bundle)
         apply.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
@@ -187,14 +196,14 @@ final class BackupRestoreWindowUITests: XCTestCase {
         XCTAssertTrue(wait {
             prompt = prompts.allElementsBoundByIndex.first {
                 $0.staticTexts.matching(titlePredicate).firstMatch.exists
-                    && $0.buttons.matching(restorePredicate).firstMatch.exists
-                    && $0.buttons.matching(cancelPredicate).firstMatch.exists
+                    && self.confirmationAction($0, matching: restorePredicate).exists
+                    && self.confirmationAction($0, matching: cancelPredicate).exists
                     && !self.element($0, anchor).exists
             }
             return prompt != nil
         }, "The native confirmation must contain its exact title, destructive Restore and Cancel. \(confirmationContext)")
         let confirmation = try XCTUnwrap(prompt)
-        let cancel = confirmation.buttons.matching(cancelPredicate).firstMatch
+        let cancel = confirmationAction(confirmation, matching: cancelPredicate)
         XCTAssertTrue(wait {
             confirmationTitle.exists && destructiveRestore.exists
                 && cancel.exists && cancel.isEnabled && cancel.isHittable
@@ -239,23 +248,109 @@ final class BackupRestoreWindowUITests: XCTestCase {
         XCTAssertFalse(element(app, "settings.backups.progress").exists, "Closing must not start restoration")
     }
 
-    private func assertFooterSeparation(_ window: XCUIElement, viewport: XCUIElement, cell: XCUIElement) {
-        let windowFrame = window.frame
-        let viewportFrame = viewport.frame
-        let cellFrame = cell.frame
+    private func assertFooterSeparation(_ windowFrame: CGRect, viewportFrame: CGRect, cellFrame: CGRect,
+                                        cancelFrame: CGRect, restoreFrame: CGRect) {
         let visible = viewportFrame.intersection(windowFrame)
-        XCTAssertFalse(visible.isEmpty, "The live history viewport must intersect its restore window")
-        XCTAssertTrue(visible.contains(cellFrame), "The complete archive data cell must fit within the live viewport")
-        for id in ["settings.backups.cancel", "settings.backups.apply"] {
-            let button = element(window, id)
-            let buttonFrame = button.frame
-            XCTAssertTrue(button.exists && !buttonFrame.isEmpty && button.isEnabled && button.isHittable)
+        XCTAssertFalse(visible.isEmpty, "The measured history viewport must intersect its restore window")
+        XCTAssertFalse(cellFrame.isEmpty, "The complete archive band must have positive dimensions")
+        XCTAssertTrue(visible.contains(cellFrame), "The complete archive band must fit within the measured viewport")
+        for (id, buttonFrame) in [("settings.backups.cancel", cancelFrame), ("settings.backups.apply", restoreFrame)] {
+            XCTAssertFalse(buttonFrame.isEmpty)
             XCTAssertTrue(windowFrame.contains(buttonFrame), "The native action must remain inside its window")
             XCTAssertLessThanOrEqual(viewportFrame.maxY, buttonFrame.minY, "History must end above \(id)")
             XCTAssertLessThanOrEqual(cellFrame.maxY, buttonFrame.minY, "The complete archive must end above \(id)")
             XCTAssertFalse(viewportFrame.intersects(buttonFrame) || cellFrame.intersects(buttonFrame),
                 "Neither the history viewport nor its complete data cell may overlap \(id)")
         }
+    }
+
+    private func oldestArchiveBand(_ screenshot: XCUIScreenshot, windowFrame: CGRect) throws -> CGRect {
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "native-backups-mac-final-physical-proof-synthetic"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        var diagnostics = "Window screen frame (top-left points): \(windowFrame)\n"
+        func attachDiagnostics() {
+            let text = XCTAttachment(string: diagnostics)
+            text.name = "native-backups-mac-final-physical-ocr-synthetic"
+            text.lifetime = .keepAlways
+            add(text)
+        }
+        guard let image = NSBitmapImageRep(data: screenshot.pngRepresentation)?.cgImage else {
+            diagnostics += "Could not decode the bound window screenshot.\n"
+            attachDiagnostics()
+            return try XCTUnwrap(nil as CGRect?, "The bound window screenshot must provide a CGImage")
+        }
+        let scaleX = CGFloat(image.width) / windowFrame.width
+        let scaleY = CGFloat(image.height) / windowFrame.height
+        // Physically isolate the date column so Vision cannot merge in Size.
+        // Keep FULL height, including the footer, to detect encroaching date text.
+        let crop = CGRect(x: 0, y: 0, width: (CGFloat(image.width) / 2).rounded(.down),
+            height: CGFloat(image.height))
+        diagnostics += "Image=\(image.width)x\(image.height); pixels/point=\(scaleX),\(scaleY)\n"
+            + "Date-column crop (top-left pixels)=\(crop)\n"
+        guard let cropped = image.cropping(to: crop) else {
+            diagnostics += "Could not crop the full-height date column.\n"
+            attachDiagnostics()
+            return try XCTUnwrap(nil as CGRect?, "The bound window date column must be available")
+        }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.01
+        do {
+            try VNImageRequestHandler(cgImage: cropped, options: [:]).perform([request])
+        } catch {
+            diagnostics += "Recognition failed: \(error)\n"
+            attachDiagnostics()
+            throw error
+        }
+        var dates: [(normalized: String, frame: CGRect)] = []
+        for observation in request.results ?? [] {
+            guard let text = observation.topCandidates(1).first?.string else { continue }
+            let normalized = text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+            let box = observation.boundingBox
+            // Vision is normalized bottom-left in the cropped image. CGImage
+            // pixels and XCTest screen/window points have top-left origins.
+            let pixels = CGRect(x: crop.minX + box.minX * CGFloat(cropped.width),
+                y: crop.minY + (1 - box.maxY) * CGFloat(cropped.height),
+                width: box.width * CGFloat(cropped.width), height: box.height * CGFloat(cropped.height))
+            let frame = CGRect(x: windowFrame.minX + pixels.minX / scaleX,
+                y: windowFrame.minY + pixels.minY / scaleY,
+                width: pixels.width / scaleX, height: pixels.height / scaleY)
+            diagnostics += "\(text.debugDescription) -> \(normalized); Vision=\(box); pixels=\(pixels); screen=\(frame)\n"
+            dates.append((normalized, frame))
+        }
+        // Literal dates in this en_US synthetic fixture; no fuzzy OCR matching.
+        let oldest = dates.filter { $0.normalized == "nov12026at80000am" }
+        let previous = dates.filter { $0.normalized == "nov22026at80000am" }
+        var band: CGRect?
+        if let last = oldest.first?.frame, let preceding = previous.first?.frame {
+            let pitch = last.midY - preceding.midY
+            band = CGRect(x: last.minX, y: last.midY - pitch / 2, width: last.width, height: pitch)
+            diagnostics += "Nov 1 matches=\(oldest.count); Nov 2 matches=\(previous.count); pitch=\(pitch)pt; band=\(String(describing: band))\n"
+        }
+        attachDiagnostics()
+        XCTAssertEqual(oldest.count, 1, "Exactly one complete Nov 1 timestamp must be rendered; see final OCR diagnostics")
+        XCTAssertEqual(previous.count, 1, "Exactly one complete Nov 2 timestamp must be rendered; see final OCR diagnostics")
+        let last = try XCTUnwrap(oldest.first?.frame)
+        let preceding = try XCTUnwrap(previous.first?.frame)
+        let row = try XCTUnwrap(band)
+        let pitch = last.midY - preceding.midY
+        XCTAssertTrue((16...40).contains(pitch), "Adjacent one-line dates must have a positive, reasonable native row pitch")
+        XCTAssertLessThan(preceding.maxY, last.minY, "Nov 2 must appear fully above Nov 1 in newest-first order")
+        XCTAssertEqual(last.minX, preceding.minX, accuracy: 2, "The dates must align in the same column")
+        XCTAssertEqual(last.height, preceding.height, accuracy: 2, "The dates must use the same one-line geometry")
+        let previousBand = CGRect(x: preceding.minX, y: preceding.midY - pitch / 2,
+            width: preceding.width, height: pitch)
+        XCTAssertTrue(row.contains(last) && previousBand.contains(preceding),
+            "Both complete date glyphs must fit their inferred one-line row bands")
+        for date in [last, preceding] {
+            XCTAssertTrue(date.minX > windowFrame.minX && date.maxX < windowFrame.minX + crop.width / scaleX,
+                "The physical crop must contain each complete date without clipping its glyphs")
+        }
+        return row
     }
 
     private func attachHistory(_ window: XCUIElement, viewport: XCUIElement, firstCell: XCUIElement,
@@ -303,6 +398,12 @@ final class BackupRestoreWindowUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         if window.exists && !window.frame.isEmpty { capture(window, "readiness") }
+    }
+
+    private func confirmationAction(_ context: XCUIElement, matching caption: NSPredicate) -> XCUIElement {
+        context.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
+            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue,
+        ])).matching(caption).firstMatch
     }
 
     private func element(_ context: XCUIElement, _ identifier: String) -> XCUIElement {
