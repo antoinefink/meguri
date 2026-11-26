@@ -4,9 +4,60 @@ import CoreBridge
 import Foundation
 import Testing
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 extension WebKitSuites {
     @Suite(.timeLimit(.minutes(2))) struct ReviewPagesMediaTests {
+        #if os(macOS)
+        @Test(arguments: [false, true])
+        func editedCardRefreshFocusesDisplayedPageAndPreservesOtherInput(answer: Bool) async throws {
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair), host = SpikeWindow(pair.container)
+            defer { pages.close(); host.close() }
+            let item = Self.item(1)
+            pages.renderHead = { _, _, _ in
+                [CardPayload(cardID: 1, question: "<p>Edited question</p><input id=entry>", answer: "<p>Edited answer</p><input id=entry>")]
+            }
+            try await pages.load()
+            try await pages.render(sessionID: 5, items: [item])
+            try await pages.present(item: item, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            let old = pair.current.webView
+            let window = try #require(old.window)
+            pair.ownsKeyboardFocus = true
+            #expect(window.makeFirstResponder(old))
+            pages.inputActive = false
+            pair.ownsKeyboardFocus = false
+            // Save refreshes through the production double buffer while the
+            // editor owns input; AppKit retains the old page's responder.
+            try await pages.present(item: item, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            if answer { try await pages.reveal(inputTime: ProcessInfo.processInfo.systemUptime) }
+            #expect(pair.current.webView !== old && pair.idle.webView === old)
+            #expect(pair.container.subviews.last === pair.current.webView)
+            #expect(window.firstResponder === old)
+            #expect(!old.acceptsFirstResponder)
+            #expect(ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(window.firstResponder === pair.current.webView)
+            #expect(window.firstResponder !== pair.idle.webView)
+            #expect(!old.acceptsFirstResponder, "the parked page stays ineligible for native input")
+            #expect(try await pair.current.string("return document.activeElement.id;") != "entry")
+            try await pair.current.run("document.getElementById('entry').focus(); document.getElementById('entry').value='retained';")
+            #expect(!ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(try await pair.current.string("return document.activeElement.value;") == "retained")
+            // A native field is never a repair target.
+            let input = NSTextView()
+            pair.container.addSubview(input)
+            #expect(window.makeFirstResponder(input))
+            #expect(!ReviewInputOwnership.restoreEditedCardResponder(in: pair))
+            #expect(window.firstResponder === input)
+            input.removeFromSuperview()
+        }
+        #endif
+
         @Test func coordinatorCapturesAudioBeforeRendering() async throws {
             let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: directory) }

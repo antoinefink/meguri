@@ -112,6 +112,9 @@ public final class ReviewCoordinator {
     /// Counts the sides shown: a held input applies only to the side it was given on.
     private var presentationRevision: UInt64 = 0
     private var refreshPending = false
+    #if os(macOS)
+    private var editedCardToRefocus: Int64?
+    #endif
     private var forceQuestion = false
     private var pendingAnswer: ReviewRecord.Answer?
     private var version: UInt64 = 0
@@ -684,8 +687,20 @@ public final class ReviewCoordinator {
         leaveForRefresh()
         underCard = showsCard
         let question = forceQuestion; forceQuestion = false; refreshPending = false
+        #if os(macOS)
+        let editedCard = editedCardToRefocus
+        editedCardToRefocus = nil
+        #endif
         operation = Task {
-            do { try await apply(client.head(sessionID: sessionID), question: question, intent: presentationIntent); try await persist() }
+            do {
+                try await apply(client.head(sessionID: sessionID), question: question, intent: presentationIntent)
+                try await persist()
+                #if os(macOS)
+                if let editedCard, item?.cardId == editedCard, showsCard, !paused, !editingNote, !closingAdmission {
+                    (surface as? ReviewPages)?.restoreFocusAfterEditing(cardID: editedCard)
+                }
+                #endif
+            }
             catch { fail(error) }
             completeOperation()
         }
@@ -1033,15 +1048,13 @@ public final class ReviewCoordinator {
         if !paused {
             (surface as? ReviewPages)?.inputActive = true
             if phase == .question || phase == .answer { timer.resume(at: uptime()) }
-            #if os(macOS)
-            // The keys come back to the card, as before the panel opened.
-            if let pages = surface.pair {
-                pages.ownsKeyboardFocus = true
-                ReviewInputOwnership.focusCard(pages.current.webView)
-            }
-            #endif
         }
         if saved {
+            #if os(macOS)
+            // The refresh swaps pages. Restore only its replacement after
+            // success and key return, preserving any other input owner.
+            editedCardToRefocus = paused ? nil : item?.cardId
+            #endif
             // The same card and side, presented again from the saved note. The
             // person's own step: the answers wait for the new labels (F3).
             presentedKey = nil

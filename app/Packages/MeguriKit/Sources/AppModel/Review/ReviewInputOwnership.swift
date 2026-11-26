@@ -12,6 +12,31 @@ public enum ReviewInputOwnership {
         cardFocused && !editing && !paused && !repeated
     }
     #if os(macOS)
+    /// Nil waits only for this editor to return the keys. A different window
+    /// or an inactive app relinquishes the one-use request.
+    static func editedCardWindowReady(in view: CardPlatformView) -> Bool? {
+        guard let window = view.window, NSApp?.isActive == true else { return false }
+        if NSApp.keyWindow?.identifier?.rawValue == "review.editCurrent.window" { return nil }
+        guard window.isKeyWindow,
+              window.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
+        return true
+    }
+
+    /// Only repair the exact parked native page retained across this edit's
+    /// swap. Other responders (including WebKit input descendants) keep focus.
+    @discardableResult
+    static func restoreEditedCardResponder(in pair: CardPagePair) -> Bool {
+        guard let window = pair.current.webView.window,
+              pair.idle.webView.window === window,
+              window.firstResponder === pair.idle.webView else { return false }
+        // CardNativeWebView accepts native focus only with this ownership.
+        let owned = pair.ownsKeyboardFocus
+        pair.ownsKeyboardFocus = true
+        if window.makeFirstResponder(pair.current.webView) { return true }
+        pair.ownsKeyboardFocus = owned
+        return false
+    }
+
     /// Replay belongs to the active review window, including its native
     /// controls. Text input, sheets and menu tracking retain their keys.
     public static func replayFocused(in container: CardPlatformView) -> Bool {

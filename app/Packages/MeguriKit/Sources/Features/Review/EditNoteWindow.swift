@@ -61,10 +61,11 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
     func close() {
         guard !closing else { return }
         closing = true
+        let returnKeys = window.isKeyWindow && NSApp.isActive
         window.close()
         if Self.current === self { Self.current = nil }
         // Main's close guard may have already continued its asynchronous close.
-        if let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
+        if returnKeys, let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
