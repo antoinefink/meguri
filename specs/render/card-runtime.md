@@ -585,6 +585,8 @@ The same physics guard caps diagonal and antidiagonal commands (including aliase
 
 The optional `html` extension is bundled and autoloads for commands such as `\style`; ordinary math does not load it. MathJax 4.1.3's nested-style join checks the existing declaration at an index derived from the incoming declaration's length. This incidental upstream limitation remains unchanged: Meguri does not monkeypatch HTML extension internals or modify vendor bytes.
 
+The optional `empheq` extension is unsupported: its eager MathML subtree copying occurs before a small shared expansion guard can bound allocation. The loader refuses this extension through the existing math diagnostic path; review continues. The optional `cases` extension depends on `empheq` and is also unavailable. Standard AMS `\begin{cases}` remains available.
+
 ### C10.9 jQuery
 
 The upstream jQuery 3.7.1 release (MIT), unmodified, so `$.fn.jquery === "3.7.1"` and `$ === jQuery` (R514). It is obtained directly from `https://code.jquery.com/jquery-3.7.1.min.js`, 87,533 bytes, SHA-256 `fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a`. The prepared vendor bytes were checked against this official upstream download; no Anki asset supplies them (R1960). It is listed in `THIRD_PARTY_NOTICES.md`. A card that loads another jQuery replaces the globals, as it would in Anki.

@@ -1183,6 +1183,9 @@
             || call(stringIndexOf, pathname, "\\") !== -1) {
           throw new ErrorCtor("Unbundled MathJax component refused");
         }
+        if (pathname === call(urlPathname, root) + "input/tex/extensions/empheq.js") {
+          throw new ErrorCtor("Unsupported optional MathJax extension: empheq");
+        }
       } catch (error) { reject(error); return; }
       const owner = mathOwner || mathStartupOwner;
       const script = call(createElement, doc, "script");
@@ -1321,29 +1324,34 @@
     };
   }
 
-  function limitMathUnits(engine) {
+  function limitMathChemistry(engine) {
     const tex = engine._.input.tex;
-    const units = tex.MapHandler.MapHandler.getMap("mhchem");
-    const physicalUnit = units.lookup("pu");
-    const parse = physicalUnit.func;
+    const chemistry = tex.MapHandler.MapHandler.getMap("mhchem");
     // Macro.func is getter-only in 4.1.3. Replace the entry so \let copies
     // this guard along with the original token and arguments.
-    units.add("pu", new tex.Token.Macro(physicalUnit.token, function (parser, name, ...args) {
-      const position = parser.i;
-      try {
-        const text = parser.GetArgument(name);
-        // mhchem eagerly duplicates nested unit fractions before TeX's
-        // limits apply. Bound raw input and fraction separators here,
-        // including macro-dispatched calls, without duplicating its grammar.
-        if (text.length > 256 || call(stringSplit, text, "/").length > 5) {
-          const TeXError = tex.TexError.default;
-          throw new TeXError("MeguriUnitLimit", "Physical units allow at most 256 characters and 4 fraction separators");
+    for (const command of ["ce", "pu"]) {
+      const macro = chemistry.lookup(command);
+      const parse = macro.func;
+      const size = command === "ce" ? 4096 : 256;
+      chemistry.add(command, new tex.Token.Macro(macro.token, function (parser, name, ...args) {
+        const position = parser.i;
+        try {
+          const text = parser.GetArgument(name);
+          // Both entry points can expand physical units before TeX's limits.
+          let fractions = 0;
+          for (let i = 0; i < text.length && fractions <= 4; i++) {
+            if (text[i] === "/") fractions++;
+          }
+          if (text.length > size || fractions > 4) {
+            const TeXError = tex.TexError.default;
+            throw new TeXError("MeguriUnitLimit", "mhchem allows at most " + size + " characters and 4 fraction separators");
+          }
+        } finally {
+          parser.i = position;
         }
-      } finally {
-        parser.i = position;
-      }
-      return call(parse, this, parser, name, ...args);
-    }, physicalUnit.args));
+        return call(parse, this, parser, name, ...args);
+      }, macro.args));
+    }
   }
 
   function loadMath() {
@@ -1371,7 +1379,7 @@
           const engine = win.MathJax;
           limitMathAlignments(engine);
           limitMathOptionalCommands(engine);
-          limitMathUnits(engine);
+          limitMathChemistry(engine);
           const Menu = engine._.ui.menu.Menu.Menu;
           engine.config.options.MenuClass = class extends Menu {
             mergeUserSettings() {}
@@ -1506,29 +1514,87 @@
   };
   defineProperty(mathFacade.startup, "promise", { get: mathStartup });
 
-  function mathText(node, ignored) {
-    const kind = call(nodeTypeOf, node);
-    if (kind === 3) return ignored ? "" : call(characterData, node);
-    if (kind === 8) return ""; // Upstream includes comments and wbr as empty text.
-    if (kind !== 1) return "\n";
-    const tag = call(stringLower, call(localNameOf, node));
-    if (tag === "br") return ignored ? "" : "\n";
-    if (tag === "wbr") return "";
+  const mathProcessClass = /(?:^| )mathjax_process(?: |$)/;
+  const mathIgnoreClass = /(?:^| )mathjax_ignore(?: |$)/;
+  const mathSkippedTags = /^(?:script|noscript|style|textarea|pre|code|math|select|option|mjx-container)$/i;
+
+  function mathClassMode(node) {
     const classes = call(getAttribute, node, "class") || "";
-    const process = call(regexpExec, /(?:^| )mathjax_process(?: |$)/, classes);
-    // DomStrings in the pinned bundle uses literal spaces for classes. Ignore
-    // is inherited, process resets it, but skipped containers aren't traversed.
-    if (call(getAttribute, node, "data-MJX") || (!process
-        && call(regexpExec, /^(?:script|noscript|style|textarea|pre|code|math|select|option|mjx-container)$/, tag))) return "\n";
-    ignored = !process && (ignored || call(regexpExec, /(?:^| )mathjax_ignore(?: |$)/, classes));
-    let text = "\n"; // Containers end upstream's current text string.
-    for (let child = call(firstChildOf, node); child; child = call(nextSiblingOf, child)) text += mathText(child, ignored);
-    return text + "\n";
+    if (call(regexpExec, mathProcessClass, classes)) return 1;
+    return call(regexpExec, mathIgnoreClass, classes) ? 2 : 0;
+  }
+
+  function hasMath(qa) {
+    let node = qa, scope = null, ignored = false;
+    let inline = -1, display = -1, slash = false, escaped = false;
+    // Walk parent/sibling links without a recursion stack or assembled strings.
+    while (node) {
+      const kind = call(nodeTypeOf, node);
+      let text = "";
+      if (kind === 3) text = call(characterData, node);
+      else if (kind !== 8) {
+        const tag = kind === 1 ? call(stringLower, call(localNameOf, node)) : "";
+        if (tag === "br") text = "\n";
+        else if (tag !== "wbr") {
+          inline = display = -1;
+          slash = escaped = false;
+          if (kind === 1) {
+            const mode = mathClassMode(node);
+            const child = call(firstChildOf, node);
+            if (child && !call(getAttribute, node, "data-MJX")
+                && (mode === 1 || !call(regexpExec, mathSkippedTags, tag))) {
+              if (mode) { scope = node; ignored = mode === 2; }
+              node = child;
+              continue;
+            }
+          }
+        }
+      }
+      if (!ignored) {
+        for (let i = 0; i < text.length; i++) {
+          const c = text[i];
+          // Opening matches ignore preceding escapes (processEscapes:false).
+          // The newest opening has the fewest outstanding braces of its kind.
+          if (slash && c === "(") inline = 0;
+          if (slash && c === "[") display = 0;
+          if (escaped) {
+            if ((c === ")" && inline === 0) || (c === "]" && display === 0)) return true;
+            escaped = false;
+          } else if (c === "\\") escaped = true;
+          else if (c === "{") {
+            if (inline >= 0) inline++;
+            if (display >= 0) display++;
+          } else if (c === "}") {
+            if (inline > 0) inline--;
+            if (display > 0) display--;
+          }
+          slash = c === "\\";
+        }
+      }
+      for (;;) {
+        if (node === qa) return false;
+        if (node === scope) {
+          scope = call(parentNodeOf, node);
+          ignored = false;
+          while (scope) {
+            const mode = mathClassMode(scope);
+            if (mode) { ignored = mode === 2; break; }
+            if (scope === qa) { scope = null; break; }
+            scope = call(parentNodeOf, scope);
+          }
+        }
+        const sibling = call(nextSiblingOf, node);
+        if (sibling) { node = sibling; break; }
+        node = call(parentNodeOf, node);
+        inline = display = -1;
+        slash = escaped = false;
+      }
+    }
+    return false;
   }
 
   function typesetSide(qa) {
-    const text = mathText(qa);
-    if (call(stringIndexOf, text, "\\(") < 0 && call(stringIndexOf, text, "\\[") < 0) return null;
+    if (!hasMath(qa)) return null;
     const ready = then(requestMath([qa]), noop, noop);
     // A template may have exhausted the wait on startup alone. Still request
     // rendering, but reveal without a second wait; late work checks its side.
@@ -1548,6 +1614,7 @@
       shownHooks[0] = update.onShown;
       // 2. Preload wait.
       await preloadAndWait(update.html);
+      if (update !== latest) return;
       // 3. Hide.
       let qa = findQA();
       setOpacity(qa, "0");
@@ -1572,6 +1639,7 @@
         } catch (error) {
           mathError(error, update);
         }
+        if (update !== latest) return;
       }
       // 5. Insert.
       held = [];
@@ -1579,12 +1647,15 @@
       labelGeneratedReplays(qa, update.replayIDs);
       // 6. Script walk.
       await walkScripts(qa);
+      if (update !== latest) return;
       // 7. Update hooks.
       await runHooks(updateHooks, "update-hook");
+      if (update !== latest) return;
       // Scripts and hooks can add math. Finish it before reveal/settled on
       // reviewer faces and previews alike; math failures still reveal the side.
       const mathReady = typesetSide(findQA());
       if (mathReady) await mathReady;
+      if (update !== latest) return;
       // 8. Show.
       qa = findQA();
       setOpacity(qa, "1");
@@ -1594,10 +1665,13 @@
       if (!presented) {
         if (queued()) return;
         if ((await parkUnpresented(update, qa)) !== "present") return;
+        if (update !== latest) return;
       }
       await runHooks(shownHooks, "shown-hook");
+      if (update !== latest) return;
       updateSignal("shown", update);
     } catch (error) {
+      if (update !== latest) return;
       updateSignal("updateFailed", update, { error: describe(error) });
     }
   }

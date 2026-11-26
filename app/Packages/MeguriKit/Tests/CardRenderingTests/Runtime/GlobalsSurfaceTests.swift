@@ -507,12 +507,28 @@ extension WebKitSuites.CardRuntimeSuites {
         }
 
         @Test(arguments: [#"\pu{9.8 m/s2}"#, #"\def\cardunit#1{\pu{#1}}\cardunit{9.8 m/s2}"#,
-                          #"\let\cardunit\pu\cardunit{9.8 m/s2}"#])
+                          #"\let\cardunit\pu\cardunit{9.8 m/s2}"#,
+                          #"\ce{\pu{9.8 m/s2}}"#, #"\let\cardchem\ce\cardchem{\pu{9.8 m/s2}}"#,
+                          #"\def\cardchem#1{\ce{#1}}\cardchem{\pu{9.8 m/s2}}"#])
         func physicalUnitsRetainSmallInputParsing(units: String) async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion("<p id='unit'>\\(\(units)\\)</p><p id='chem'>\\(\\ce{2H2 + O2 -> 2H2O}\\)</p>")
                 #expect(try await page.bool("document.querySelector('#unit svg path') !== null && document.querySelector('#chem svg path') !== null && !document.querySelector('#qa [data-mml-node=merror]')"))
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: ["ce", "pu"], [false, true])
+        func mhchemFractionBudgetAlsoCoversAliases(command: String, alias: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let tex = alias ? "\\let\\cardchem\\\(command)\\cardchem" : "\\\(command)"
+                try await page.showPresentedQuestion("<p>\\(\(tex){\\text{a/b/c/d/e/f}}\\)</p>")
+                #expect(try await page.bool("document.querySelector('#qa [data-mml-node=merror]') !== null && document.getElementById('qa').style.opacity === '1'"))
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && ($0["message"] as? String)?.contains("MeguriUnitLimit") == true
+                }, "\(harness.diagnostics.map(\.body))")
+                try await page.showPresentedAnswer(#"<p>\(\ce{2H2 + O2 -> 2H2O}\)</p>"#)
+                try await MathRenderingProbe.expect(in: page.webView, count: 1, label: "chemistry after budget refusal")
             }
         }
 
@@ -571,6 +587,22 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func unsupportedEmpheqReportsAndLeavesReviewUsable() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.announce(card: 88, generation: 1)
+                try await page.showPresentedQuestion(#"<p>\(\require{empheq}x+1\)</p>"#)
+                #expect(!harness.media.requests.contains { $0.path.hasSuffix("/empheq.js") })
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0.card == 88 && $0.generation == 1
+                        && ($0["message"] as? String)?.contains("empheq") == true
+                }, "\(harness.diagnostics.map(\.body))")
+                #expect(try await page.string("document.getElementById('qa').style.opacity") == "1")
+                try await page.showPresentedAnswer(#"<p>\(\cancel{x}+1\)</p>"#)
+                try await MathRenderingProbe.expect(in: page.webView, count: 1, label: "supported extension after refusal")
+                #expect(harness.remote.requests.isEmpty)
+            }
+        }
+
         @Test func onlyDelimitedMathIsScannedOnMixedFaces() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 let literal = #"\begin{aligned}a&=b\end{aligned} \ref{sample} \eqref{sample} $x$ $$y$$"#
@@ -601,6 +633,72 @@ extension WebKitSuites.CardRuntimeSuites {
                 #expect(try await page.bool("document.querySelector('mjx-container') === null"))
                 #expect(!harness.media.requests.contains { $0.path.contains("/mathjax/") })
                 #expect(harness.remote.requests.isEmpty)
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: [
+            #"<p>Ordinary <strong>nested</strong> study text.</p>"#,
+            #"<p>\(unfinished</p>"#, #"<p>\[unfinished</p>"#,
+            #"<p>\(mismatched\]</p>"#, #"<p>\(x\\)</p>"#,
+            #"<p>\({x\)</p>"#, #"<p>\(x<span>+1</span>\)</p>"#,
+            #"<p>\(x</p><p>\)</p>"#, #"<p>\(x</p><p>\[y</p>"#,
+            #"<p>\<br>(x\)</p>"#,
+            #"<div class='mathjax_ignore'><span class='mathjax_process'>plain</span>\(ignored\)</div>"#,
+        ])
+        func unmatchedOrSeparateTextGroupsDoNotLoadMath(html: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(html)
+                #expect(!harness.media.requests.contains { $0.path.contains("/mathjax/") })
+                #expect(try await page.bool("!document.querySelector('#qa mjx-container') && document.getElementById('qa').style.opacity === '1'"))
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test(arguments: [
+            #"<article><section><div><p>\<wbr>(x<!-- join -->+1\<!-- join -->)</p></div></section></article>"#,
+            #"<p>\[x<br>+1\]</p>"#, #"<p>\(\{x\)</p>"#, #"<p>\\(y\)</p>"#,
+            #"<p>\(\text{a)b}+1\)</p>"#, #"<p>\(unfinished \[z\]</p>"#,
+            #"<p>\({unfinished \(x\)</p>"#,
+            #"""
+            <script>
+            onUpdateHook.push(function () {
+              var p = document.createElement('p');
+              ['\\', '(x', '+1', '\\', ')'].forEach(function (s) { p.appendChild(document.createTextNode(s)); });
+              document.getElementById('qa').appendChild(p);
+            });
+            </script>
+            """#,
+        ])
+        func lazyMathMatchesDelimitersAcrossIncludedNodesAndNestedMarkup(html: String) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(html)
+                try await MathRenderingProbe.expect(in: page.webView, count: 1, label: "matched DOM text group")
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func supersededTypesettingCannotRevealTheReplacement() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                let path = "/_anki/mathjax/input/tex/extensions/cancel.js"
+                harness.media.hold(path)
+                try await page.run(#"""
+                    window.__oldUpdate = _updateQA('<p>\\(\\cancel{x}\\)</p>', '', function () {}, function () {});
+                    """#)
+                try await harness.until("optional component requested") { !harness.media.requests(for: path).isEmpty }
+                try await page.run("""
+                    window.__newUpdate = _updateQA('<p id="current">Current</p>', '', function () {
+                      return new Promise(function (resolve) { window.__releaseNew = resolve; });
+                    }, function () {});
+                    """)
+                try await harness.until("replacement hook entered") { try await page.bool("typeof __releaseNew === 'function'") }
+                harness.media.release(path)
+                try await page.run("await __oldUpdate;")
+                #expect(try await page.bool("document.getElementById('current') !== null && document.getElementById('qa').style.opacity === '0' && !document.querySelector('#qa mjx-container')"))
+                #expect(harness.signals("shown", from: page).count == 1)
+                try await page.run("__releaseNew(); await __newUpdate;")
+                #expect(harness.signals("shown", from: page).count == 2)
                 #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
             }
         }

@@ -1168,6 +1168,31 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: ["update", "shown"])
+        func overlappingUpdateQACannotRevealOrSignalForItsReplacement(phase: String) async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.present()
+                try await page.run("""
+                    var hold = function () { return new Promise(function (resolve) { window.__releaseOld = resolve; }); };
+                    window.__oldUpdate = _updateQA('<p>Old</p>', '',
+                      phase === 'update' ? hold : function () {}, phase === 'shown' ? hold : function () {});
+                    """, ["phase": phase])
+                try await harness.until("old hook entered") { try await page.bool("typeof __releaseOld === 'function'") }
+                try await page.run("""
+                    window.__newUpdate = _updateQA('<p id="current">Current</p>', '', function () {
+                      return new Promise(function (resolve) { window.__releaseNew = resolve; });
+                    }, function () { log('current-shown'); });
+                    """)
+                try await harness.until("new hook entered") { try await page.bool("typeof __releaseNew === 'function'") }
+                try await page.run("__releaseOld(); await __oldUpdate;")
+                #expect(try await page.bool("document.getElementById('current') !== null && document.getElementById('qa').style.opacity === '0'"))
+                #expect(harness.signals("shown", from: page).isEmpty)
+                try await page.run("__releaseNew(); await __newUpdate;")
+                #expect(try await page.log() == ["current-shown"])
+                #expect(harness.signals("shown", from: page).count == 1)
+            }
+        }
+
         // MARK: C3.1
 
         @Test func scriptsSeeThePreviousBodyClassesDuringInsertion() async throws {
