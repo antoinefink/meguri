@@ -179,7 +179,6 @@ public struct OcclusionNoteEditor: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .onGeometryChange(for: Double.self) { $0.size.height } action: { tagsHeight = $0 }
                                 .offset(y: layout.tagsTop)
-                                .accessibilityIdentifier("io.editor.tags")
                             }
                         }
                     }
@@ -238,9 +237,13 @@ public struct OcclusionNoteEditor: View {
         .padding(draft.occlusionAddRefused || session.fetchFailure != nil || session.sizeWarning != nil ? Spacing.small : 0)
     }
     private var imageFooter: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack { imageSummary; Spacer(); changeImageButton }
-            VStack(alignment: .leading) { imageSummary; changeImageButton }
+        // Put containment on a concrete stack: ViewThatFits forwards AX
+        // metadata to its chosen content, including the native button.
+        VStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack { imageSummary; Spacer(); changeImageButton }
+                VStack(alignment: .leading) { imageSummary; changeImageButton }
+            }
         }
         .padding(Spacing.small)
         .accessibilityElement(children: .contain)
@@ -383,6 +386,7 @@ public struct OcclusionNoteEditor: View {
         .onDrop(of: [.fileURL, .url, .image], isTargeted: nil) { providers in
             session.chooseProvider(providers, host: host)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("io.picker.container")
     }
 

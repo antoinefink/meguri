@@ -138,6 +138,7 @@ private struct MaskEditorContent: View {
                 session.editLabel(edit.id, text: text)
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("io.editor.maskEditor")
     }
 
