@@ -17,6 +17,7 @@ extension TestHooks {
     /// | `-MeguriNativeReviewFreezeSHA256`, `-MeguriNativeReviewFreezeBytes` | pinned freeze.json SHA256/size; only the compiled checkout's EmptyCollection fixture is allowed, before any case receipt; no Route/Now/TimeZone |
     /// | `-MeguriImportSource` | iOS only: absolute regular synthetic .colpkg copied to Documents/RF2 Import Tests/review.colpkg for the system picker; changes no collection or route |
     /// | `-MeguriFixture` | absolute path of a collection file (installed as `collection.anki2`) or of a collection directory (installed as the collection directory) |
+    /// | `-MeguriFixtureRunID` | Debug .dev only: canonical UUID for an isolated synthetic collection, backups and provider location; give Fixture only on the first launch, reuse the UUID on every relaunch |
     /// | `-MeguriOwnedProviderFixture` | `on` or `off` (default): Mac .dev only, isolated normal-provider launch of this checkout's local-review-1 recipe (owned-sync-review-1 only with admitted transport input) |
     /// | `-MeguriNow` | `YYYY-MM-DDTHH:MM:SS` with `Z` or `±HH:MM`; without one, the time is local to `-MeguriTimeZone` (or the system zone) |
     /// | `-MeguriTimeZone` | IANA id, e.g. `Asia/Tokyo` |
@@ -53,6 +54,7 @@ extension TestHooks {
         /// checkout; case resolves only build/mg/ui-test/<case>/expected-replay.
         var nativeReview: NativeReviewInput.Request?
         var fixture: URL?
+        var fixtureRunID: UUID?
         var ownedProviderFixture = false
         private(set) var ownedProviderSource: OwnedProviderFixture.Source = .localReview
         var importSource: URL?
@@ -97,7 +99,7 @@ extension TestHooks {
 
         static let prefix = "-Meguri"
         static let names = [
-            "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
+            "Fixture", "FixtureRunID", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
             "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings", "SyncRender", "StatsRollout",
             "HomeSnapshot", "HomeTrace",
@@ -130,6 +132,21 @@ extension TestHooks {
 
             if let value = values["OwnedProviderFixture"] {
                 ownedProviderFixture = try Self.onOff(value, "OwnedProviderFixture")
+            }
+            if let value = values["FixtureRunID"] {
+                #if DEBUG
+                guard bundleIdentifier == "com.antoinefink.meguri.dev",
+                      let id = UUID(uuidString: value), id.uuidString == value.uppercased(),
+                      ["OwnedProviderFixture", "Route", "ImportSource", "HomeSnapshot", "SyncRender", "Integrations"]
+                        .allSatisfy({ values[$0] == nil }),
+                      !values.keys.contains(where: { $0.hasPrefix("NativeReview") }),
+                      !arguments.contains("-ShowAnkiServerInterface") else {
+                    throw TestHookError("FixtureRunID requires a canonical UUID and a normal Debug Meguri Dev fixture launch")
+                }
+                fixtureRunID = id
+                #else
+                throw TestHookError("FixtureRunID requires Debug")
+                #endif
             }
             // Admit both sanctioned entries before selecting a second identity.
             // No ambient environment or caller-supplied URL grants that identity.
@@ -299,6 +316,10 @@ extension TestHooks {
             routes: RouteRegistry,
             ownedProvider: OwnedProviderFixture? = nil
         ) throws(TestHookError) -> ShellLaunch? {
+            if let fixtureRunID {
+                configuration.collectionLocation = try FixtureRun.location(id: fixtureRunID, fixture: fixture,
+                    bundleIdentifier: installer.bundleIdentifier)
+            }
             if ownedProviderFixture {
                 try validateOwnedProviderFixture(bundleIdentifier: installer.bundleIdentifier)
                 guard ownedProvider != nil else { throw TestHookError("OwnedProviderFixture requires its prepared owned context") }

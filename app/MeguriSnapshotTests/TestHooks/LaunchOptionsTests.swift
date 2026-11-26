@@ -13,6 +13,26 @@ import Darwin
 @Suite struct LaunchOptionsTests {
     typealias Options = TestHooks.LaunchOptions
 
+    #if DEBUG
+    @Test func fixtureRunRequiresCanonicalUUIDAndDevIdentity() throws {
+        let id = UUID()
+        let arguments = ["-MeguriFixtureRunID", id.uuidString]
+        #expect(try Options(arguments: arguments, bundleIdentifier: "com.antoinefink.meguri.dev").fixtureRunID == id)
+        #expect(throws: TestHookError.self) { try Options(arguments: arguments, bundleIdentifier: "com.antoinefink.meguri") }
+        for value in ["../Collection", "/tmp/fixture", "not-a-uuid", id.uuidString.replacingOccurrences(of: "-", with: "")] {
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: ["-MeguriFixtureRunID", value], bundleIdentifier: "com.antoinefink.meguri.dev")
+            }
+        }
+        for pair in [["-MeguriOwnedProviderFixture", "off"], ["-MeguriHomeSnapshot", "on"],
+                     ["-MeguriRoute", "review/answer"], ["-MeguriNativeReviewCase", "other"]] {
+            #expect(throws: TestHookError.self) {
+                try Options(arguments: arguments + pair, bundleIdentifier: "com.antoinefink.meguri.dev")
+            }
+        }
+    }
+    #endif
+
     private var nativeArguments: [String] { [
         "-MeguriNativeReviewRoot", "/owned/checkout", "-MeguriNativeReviewCase", "media-case",
         "-MeguriNativeReviewPlatform", "mac", "-MeguriNativeReviewFreezeSHA256", String(repeating: "a", count: 64),
