@@ -171,6 +171,8 @@ public struct BrowseSidebar<Header: View>: View {
             }
             return selection
         }, set: { rows in
+            // Ignore echoes of restored Browse selection so filter targets survive.
+            if rows == model.listSelection && selection == rows { return }
             // Section rows must keep the native selection while the shell
             // waits for its display fence, including List's indirect writes.
             if rows.count == 1, case .section(let section)? = rows.first,
