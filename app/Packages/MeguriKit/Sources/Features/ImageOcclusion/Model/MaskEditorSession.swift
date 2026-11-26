@@ -44,6 +44,9 @@ enum MaskAlignment: String, CaseIterable {
     private let isEditing: Bool
     public private(set) var referenceSize = CGSize.zero
     var onWrite: ((String) -> Void)?
+    private let acceptsWrite: (MaskEditorSession) -> Bool
+    private let writeField: ((String) -> Void)?
+    var hasIndependentWriter: Bool { writeField != nil }
     private var codec: OcclusionCodec?
     private var initial = OcclusionDocument()
     private var history: [OcclusionDocument] = []
@@ -59,9 +62,15 @@ enum MaskAlignment: String, CaseIterable {
     var canUngroup: Bool { document.items.contains { $0.count > 1 && selection.contains($0[0]) } }
     var displayed: OcclusionDocument { preview ?? document }
 
-    public init(field: String, isEditing: Bool, startingHideAll: Bool = true) {
+    /// A retained host can own the writer independently of canvas appearance.
+    /// Admission is checked before changing the document, field or history.
+    public init(field: String, isEditing: Bool, startingHideAll: Bool = true,
+                acceptsWrite: @escaping (MaskEditorSession) -> Bool = { _ in true },
+                write: ((String) -> Void)? = nil) {
         self.isEditing = isEditing
         self.field = field
+        self.acceptsWrite = acceptsWrite
+        writeField = write
         tool = isEditing ? .select : .rectangle
         load(field, isEditing: isEditing, startingHideAll: startingHideAll)
     }
@@ -119,7 +128,7 @@ enum MaskAlignment: String, CaseIterable {
 
     @discardableResult func commit(_ value: OcclusionDocument, removingNumbers: Bool = false) -> Bool {
         preview = nil
-        guard isReadable, value != document else { return false }
+        guard isReadable, value != document, acceptsWrite(self) else { return false }
         guard let output = write(value) else { return false }
         history = Array(history.prefix(historyIndex + 1)); history.append(value); historyIndex += 1
         let removed = removingNumbers ? numberedMasks(in: document).subtracting(numberedMasks(in: value)) : []
@@ -149,7 +158,8 @@ enum MaskAlignment: String, CaseIterable {
     private func publish(_ output: String) {
         errorKey = nil; field = output
         // Even an empty label can change the document without changing output.
-        onWrite?(output)
+        if let writeField { writeField(output) }
+        else { onWrite?(output) }
     }
 
     public func undo() {
@@ -158,7 +168,7 @@ enum MaskAlignment: String, CaseIterable {
     }
     public func redo() { polygon = []; restore(historyIndex + 1) }
     private func restore(_ index: Int) {
-        guard history.indices.contains(index), index != historyIndex,
+        guard history.indices.contains(index), index != historyIndex, acceptsWrite(self),
               let output = write(history[index]) else { return }
         historyIndex = index; document = history[index]; preview = nil
         selection.formIntersection(Set(document.shapes.map(\.id))); publish(output)

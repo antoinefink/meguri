@@ -109,11 +109,16 @@ private struct MaskEditorContent: View {
         .onKeyPress(phases: .down, action: keyPressed)
         .focusedValue(\.maskEditorCommands, commandContext)
         .onAppear {
-            let binding = $occlusions
-            session.onWrite = { binding.wrappedValue = $0 }
+            if !session.hasIndependentWriter {
+                let binding = $occlusions
+                session.onWrite = { binding.wrappedValue = $0 }
+            }
             session.receive(occlusions, isEditing: isEditing)
         }
-        .onDisappear { session.polygon = []; session.preview = nil; session.onWrite = nil }
+        .onDisappear {
+            session.polygon = []; session.preview = nil
+            if !session.hasIndependentWriter { session.onWrite = nil }
+        }
         .onChange(of: isEnabled, initial: true) { _, enabled in canvasFocused = enabled }
         .onChange(of: occlusions) { _, field in session.receive(field, isEditing: isEditing) }
         .inspector(isPresented: $showInspector) { inspector }

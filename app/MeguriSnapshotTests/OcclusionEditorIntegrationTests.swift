@@ -24,10 +24,11 @@ import UniformTypeIdentifiers
             let wide = root.appending(path: "wide.png"), tall = root.appending(path: "tall.png")
             try bitmap(width: 800, height: 200).write(to: wide)
             try bitmap(width: 200, height: 800).write(to: tall)
+            try await wait(window) { host.acceptsHostInput }
             host.occlusionImage.chooseFile(wide, host: host)
             await host.occlusionImage.completion?.value
             let session = try #require(host.maskSession), roles = try #require(host.draft.occlusionRoles)
-            try await wait(window) { session.referenceSize.width > 0 }
+            try await wait(window) { host.acceptsMaskInput && session.referenceSize.width > 0 }
             #expect(abs(session.referenceSize.width / session.referenceSize.height - 4) < 0.02)
             session.addBox(from: .init(x: 10, y: 10), to: .init(x: 60, y: 40))
             #expect(session.canUndo && host.draft.values[roles.occlusions] == session.field)
@@ -37,14 +38,20 @@ import UniformTypeIdentifiers
             host.occlusionImage.chooseFile(tall, host: host)
             await host.occlusionImage.completion?.value
             try await wait(window) {
-                session.referenceSize.height > 0 && abs(session.referenceSize.width / session.referenceSize.height - 0.25) < 0.02
+                host.acceptsMaskInput && session.referenceSize.height > 0 &&
+                    abs(session.referenceSize.width / session.referenceSize.height - 0.25) < 0.02
             }
             #expect(host.maskSession === session && session.document == document && session.tool == .ellipse)
             #expect(!session.canUndo && !session.canRedo && host.draft.values[roles.occlusions] == field)
             session.undo(); session.redo()
             #expect(host.draft.values[roles.occlusions] == field)
+            // Replacement retains the session, but its surface may rebuild.
+            // A subsequent real canvas edit must still reach this exact draft.
+            session.addBox(from: .init(x: 10, y: 10), to: .init(x: 30, y: 60))
+            let replacementEdited = session.field
+            #expect(replacementEdited != field && host.draft.values[roles.occlusions] == replacementEdited)
             let added = try #require(await owner.addNoteFlow.save())
-            #expect(try await CoreNoteService().readNote(id: added.id).fields[roles.occlusions] == field)
+            #expect(try await CoreNoteService().readNote(id: added.id).fields[roles.occlusions] == replacementEdited)
             #expect(await owner.addNoteFlow.requestClose())
         }
     }
@@ -76,19 +83,35 @@ import UniformTypeIdentifiers
             try await wait(window) { (browse.inspector.note?.runtime as? FieldEditorHost)?.occlusionImage.image != nil }
             let first = try #require(browse.inspector.note?.runtime as? FieldEditorHost)
             let session = try #require(first.maskSession)
-            try await wait(window) { session.referenceSize.width > 0 }
+            // The native layout and image can finish before openNote accepts
+            // input. Exercise the same admission as the visible canvas.
+            try await wait(window) {
+                (browse.inspector.note?.runtime as? FieldEditorHost) === first &&
+                    first.maskSession === session && first.acceptsMaskInput && session.referenceSize.width > 0
+            }
+            try await first.flush(hold: true)
+            session.addBox(from: .init(x: 10, y: 10), to: .init(x: 50, y: 40))
+            #expect(session.field == source && !session.canUndo && first.draft.values[roles.occlusions] == source)
+            try await first.release()
+            try await wait(window) { first.acceptsMaskInput }
             session.addBox(from: .init(x: 10, y: 10), to: .init(x: 50, y: 40))
             let edited = session.field
             #expect(edited != source && first.draft.values[roles.occlusions] == edited)
             browse.results.select([1])
             try await wait(window) {
                 guard let next = browse.inspector.note?.runtime as? FieldEditorHost else { return false }
-                return next !== first && next.occlusionImage.image != nil && (next.maskSession?.referenceSize.width ?? 0) > 0
+                return next !== first && next.acceptsMaskInput && (next.maskSession?.referenceSize.width ?? 0) > 0
             }
             let second = try #require(browse.inspector.note?.runtime as? FieldEditorHost)
             #expect(second.webView === first.webView && second.draft.identity != first.draft.identity)
             #expect(second.draft.values[roles.image] == first.draft.values[roles.image])
             #expect(second.occlusionImage.image?.size == CGSize(width: 800, height: 400))
+            #expect(second.draft.values[roles.occlusions] == source)
+            // Retiring the old owner must refuse changes even though its
+            // session still exists and the successor uses the same web view.
+            session.addBox(from: .init(x: 60, y: 10), to: .init(x: 100, y: 40))
+            session.undo()
+            #expect(session.field == edited && first.draft.values[roles.occlusions] == edited)
             #expect(second.draft.values[roles.occlusions] == source)
             #expect(ids == Set([try #require(first.draft.noteID), try #require(second.draft.noteID)]))
             #expect(try await notes.readNote(id: try #require(first.draft.noteID)).fields[roles.occlusions] == edited)

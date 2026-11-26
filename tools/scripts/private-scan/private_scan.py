@@ -839,7 +839,7 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "38632ad733fcbc9ce782b76974d4796c02ad55ddb8a6f657a2e44b590428071b",
     "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",
     "app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskEditorCommandTests.swift": "45a381178815c391e3c2de3c62086fc3fdb1504d7d2f398216671137cb27cd45",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "c4b6ee938977f446a3de0d4c3ab1dbe070364d8b9ffa0d3a5542abeec659d4b9",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/MaskEditorSession.swift": "8ffb2f13b36100a2f03c3a86f882a894df1a625a55bab5a164d2aec3937b2c87",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskAppearance.swift": "305387de7825b84b44734164254ff42482f184a2a2ba3b5bcc54b35ff6639988",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/AGENTS.md": "0a18dd5cafe468b6c92183a5c3dc4a4ee2a130071b3fbec1f203b2687dcf56c6",
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
@@ -1529,7 +1529,7 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "8592cb04d99039254ece7e389906bca1c34de50cc5b2cba22abff076da8d30d1",
+        "f8766122d5dc2e9820b842ba02ccc12d4b4a608321aa5841fc910e45cda5d803",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
         "f4cfb32a6987d170f6b435e40cb8ca839ac1887c14b753ca97bfb0f1ca959a30",

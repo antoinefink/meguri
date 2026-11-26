@@ -87,6 +87,34 @@ import Testing
         #expect(model.document.shapes[1].data.kind == .ellipse(rx: 0.02, ry: 0.03))
     }
 
+    @Test func independentWriterSurvivesSurfaceWriterRemovalAndRefusesUnacceptedHistory() {
+        var accepted = true
+        var field = ""
+        let model = MaskEditorSession(field: "", isEditing: false,
+            acceptsWrite: { _ in accepted }, write: { field = $0 })
+        model.setReferenceSizeIfNeeded(imageSize: .init(width: 1000, height: 1000),
+            area: .init(width: 1000, height: 1000), displayScale: 1)
+        model.onWrite = { _ in Issue.record("A surface must not replace the host writer") }
+        model.addBox(from: .init(x: 10, y: 10), to: .init(x: 50, y: 40))
+        let edited = model.field, document = model.document
+        #expect(!edited.isEmpty && field == edited && model.canUndo)
+        model.onWrite = nil
+        accepted = false
+        model.addBox(from: .init(x: 60, y: 10), to: .init(x: 100, y: 40))
+        model.undo()
+        #expect(model.document == document && model.field == edited && field == edited)
+        #expect(model.canUndo && !model.canRedo)
+        accepted = true
+        model.undo()
+        #expect(model.field.isEmpty && field.isEmpty && !model.canUndo && model.canRedo)
+        accepted = false
+        model.redo()
+        #expect(model.field.isEmpty && field.isEmpty && model.canRedo)
+        accepted = true
+        model.redo()
+        #expect(model.document == document && model.field == edited && field == edited)
+    }
+
     @Test func polygonNeedsThreePointsAndUndoDiscardsOnlyPreview() {
         let model = session(rect1)
         model.tool = .polygon

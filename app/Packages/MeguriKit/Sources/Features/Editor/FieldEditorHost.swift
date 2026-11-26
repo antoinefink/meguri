@@ -41,7 +41,18 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         let field = draft.values[roles.occlusions], image = draft.values[roles.image]
         if field != readOcclusionField {
             if let maskSession { maskSession.receive(field, isEditing: draft.noteID != nil) }
-            else { maskSession = MaskEditorSession(field: field, isEditing: draft.noteID != nil, startingHideAll: startingHideAll) }
+            else {
+                maskSession = MaskEditorSession(field: field, isEditing: draft.noteID != nil,
+                    startingHideAll: startingHideAll,
+                    acceptsWrite: { [weak self] session in
+                        guard let self else { return false }
+                        return self.maskSession === session && self.draft.occlusionRoles == roles && self.acceptsMaskInput
+                    }, write: { [weak self] value in
+                        guard let self else { return }
+                        self.setHostField(value, at: roles.occlusions)
+                        self.occlusionImage.startsNewMasks = false
+                    })
+            }
             readOcclusionField = field
             occlusionReadingError = maskSession?.readingError
         }
@@ -56,6 +67,12 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     var flushNativeTags: (@MainActor () -> Void)?
     public var acceptsHostInput: Bool { editable && !held && !draft.hostFieldsHeld && !closed && isCurrent() }
+    /// The canvas and its retained writer use the same production admission.
+    /// Layout/image readiness alone does not mean the field host is editable.
+    var acceptsMaskInput: Bool {
+        acceptsHostInput && maskEditorVisible && occlusionImage.image != nil &&
+            !occlusionImage.busy && !occlusionImage.replacing
+    }
     public var maskEditorVisible: Bool {
         guard draft.occlusionRoles != nil, draft.showsMaskEditor else { return false }
         return draft.noteID == nil || occlusionReadingError == nil
