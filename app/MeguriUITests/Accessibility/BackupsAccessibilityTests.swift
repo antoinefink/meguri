@@ -22,7 +22,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                     supplemental: { app, variant in
                         var findings: [AuditFinding] = []
                         var targets: [TouchTargetViolation] = []
-                        func audit(_ detail: String) throws {
+                        @MainActor func audit(_ detail: String) throws {
                             findings += try AccessibilityAudit.run(app, variant: "\(surface).\(state) \(detail), \(variant)",
                                                                   suppressions: suppressions)
                             targets += try TouchTargets.violations(in: app)
@@ -38,7 +38,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                             let controls = ["restore", "folder", "export"]
                             for name in controls {
                                 let control = app.buttons["settings.backups.\(name)"].firstMatch
-                                try self.reach(control, in: app)
+                                if try self.reach(control, in: app) { try audit(name) }
                                 let enabled = name == "folder" || (name == "restore" ? state != "loading" : state != "loading" && state != "error")
                                 XCTAssertEqual(control.isEnabled, enabled)
                                 if name == "folder" {
@@ -48,32 +48,29 @@ final class BackupsAccessibilityTests: XCTestCase {
                                     XCTAssertEqual(control.label, "Show in Files")
                                     #endif
                                 }
-                                try audit(name)
                             }
                             let media = app.staticTexts["settings.backups.mediaExplanation"].firstMatch
-                            try self.reach(media, in: app)
+                            if try self.reach(media, in: app) { try audit("media explanation") }
                             XCTAssertTrue(media.label.contains("Backups don’t include media files"))
                             if state != "error" {
                                 for field in ["interval", "daily", "weekly", "monthly"] {
                                     let input = app.textFields["settings.backups.limit.\(field)"].firstMatch
-                                    try self.reach(input, in: app)
+                                    if try self.reach(input, in: app) { try audit("limit.\(field)") }
                                     XCTAssertFalse(input.label.isEmpty)
                                     XCTAssertEqual(input.isEnabled, state != "loading")
                                     if state == "overflow" && (field == "interval" || field == "daily") {
                                         XCTAssertEqual(input.value as? String, "4294967295")
                                     }
-                                    try audit("limit.\(field)")
                                 }
                             }
                             if state == "typical" || state == "overflow" {
                                 let link = app.descendants(matching: .any).matching(identifier: "settings.backups.server").firstMatch
-                                try self.reach(link, in: app)
+                                if try self.reach(link, in: app) { try audit("server disclosure") }
                                 XCTAssertEqual(link.label, "Server Backups in Browser…")
                                 let disclosure = app.staticTexts["settings.backups.serverExplanation"].firstMatch
                                 XCTAssertTrue(disclosure.exists)
                                 XCTAssertTrue(disclosure.label.contains("Scheduled server backups include media"))
                                 XCTAssertTrue(disclosure.label.contains("restoring there replaces the server collection"))
-                                try audit("server disclosure")
                             }
                         } else {
                             let apply = app.buttons["settings.backups.apply"].firstMatch
@@ -97,7 +94,7 @@ final class BackupsAccessibilityTests: XCTestCase {
                                              "server-copy-2026-11-23-09.10.00.unverified.anki2", "backup-2026-11-22-08.00.00.colpkg"]
                                 for (index, name) in names.enumerated() {
                                     let row = app.descendants(matching: .any).matching(identifier: "settings.backups.entry.\(name)").firstMatch
-                                    try self.reach(row, in: app)
+                                    if try self.reach(row, in: app) { try audit("entry.\(index)") }
                                     XCTAssertTrue(row.label.contains(name), "The exact filename is read with the row")
                                     let sizes: [Int64] = [28_400_000, 27_900_000, 27_800_000, 27_600_000]
                                     XCTAssertTrue(row.label.contains(ByteCountFormatter.string(fromByteCount: sizes[index], countStyle: .file)))
@@ -106,7 +103,6 @@ final class BackupsAccessibilityTests: XCTestCase {
                                     if index == 2 || (index == 3 && state == "overflow") {
                                         XCTAssertTrue(row.label.contains("Can’t be restored"))
                                     }
-                                    try audit("entry.\(index)")
                                 }
                                 // The real native confirmation discloses the selected older copy's
                                 // date and the provider's publication/media decision. No restore runs.
@@ -135,13 +131,15 @@ final class BackupsAccessibilityTests: XCTestCase {
 
     /// Lazy native Forms and Lists must bring every tested row into the viewport,
     /// including at AX5. A missing or unreachable row fails, never skips its audit.
-    private func reach(_ element: XCUIElement, in app: XCUIApplication) throws {
+    /// Returns whether scrolling changed the viewport and requires another audit.
+    private func reach(_ element: XCUIElement, in app: XCUIApplication) throws -> Bool {
         let list = app.collectionViews.firstMatch
         let scroll = list.exists ? list : app.scrollViews.firstMatch
+        var scrolled = false
         for _ in 0..<24 {
             let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
             let frame = element.exists ? element.frame : .null
-            if !frame.isEmpty && viewport.contains(frame) && element.isHittable { return }
+            if !frame.isEmpty && viewport.contains(frame) && element.isHittable { return scrolled }
             let reach = viewport.height / 3
             let move = frame.isNull ? -reach : max(-reach, min(reach, viewport.midY - frame.midY))
             #if os(macOS)
@@ -151,7 +149,9 @@ final class BackupsAccessibilityTests: XCTestCase {
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
                         withVelocity: .slow, thenHoldForDuration: 0.2)
             #endif
+            scrolled = true
         }
         XCTFail("Unreachable backup content: \(element)\n\(app.debugDescription)")
+        return scrolled
     }
 }

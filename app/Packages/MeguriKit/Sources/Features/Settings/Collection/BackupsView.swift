@@ -102,7 +102,7 @@ struct BackupsContent: View {
                     Text("Backup settings are unavailable until the collection is ready.", bundle: .module)
                 }
             } header: { Text("Automatic Backups", bundle: .module) }
-            footer: { Text("Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field.", bundle: .module) }
+            footer: { Text("Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period.", bundle: .module) }
             if let url = presentation.serverBackupsURL {
                 Section {
                     Link(destination: url) { Text("Server Backups in Browser…", bundle: .module) }
@@ -138,6 +138,8 @@ private struct BackupLimitRow: View {
     var body: some View {
         LabeledContent {
             TextField(text: $draft) { Text(title, bundle: .module) }
+                .labelsHidden()
+                .accessibilityLabel(Text(title, bundle: .module))
                 .accessibilityIdentifier(identifier)
                 .multilineTextAlignment(.trailing)
                 #if os(iOS)

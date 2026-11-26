@@ -181,12 +181,12 @@
         }
       }
     },
-    "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field.": {
+    "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period. Values from other versions stay unchanged until you edit that field."
+            "value": "Synced settings. Interval: 5–9999 minutes. Retention: 0–9999 per period."
           }
         }
       }
