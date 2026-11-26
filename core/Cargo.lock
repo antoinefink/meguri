@@ -1926,6 +1926,7 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "data-encoding",
+ "flate2",
  "futures-core",
  "hmac",
  "libc",

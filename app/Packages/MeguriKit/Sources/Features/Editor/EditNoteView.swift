@@ -39,7 +39,7 @@ public struct EditNoteView: View {
             facts
             #endif
             if let host {
-                FieldEditorView(host: host)
+                OcclusionNoteEditor(host: host)
                     .id(ObjectIdentifier(host.webView))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -104,7 +104,7 @@ public struct EditNoteView: View {
         }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!flow.canSave || host?.editable != true)
+            .disabled(!flow.canSave || host?.editable != true || host?.occlusionImage.busy == true)
             .accessibilityIdentifier("review.editCurrent.done")
     }
     private func done() {

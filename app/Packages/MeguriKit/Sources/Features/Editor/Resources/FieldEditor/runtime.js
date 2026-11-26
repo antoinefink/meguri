@@ -8,6 +8,7 @@
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
     let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false, media = false, pictureID = 0;
+    let occlusionForm = null, formFrame = 0, lastFormLayout = "";
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -230,7 +231,7 @@
     }
     function tab(field, backwards) {
         saveCaret(field);
-        const available = fields.filter(value => !value.collapsed && !value.hidden);
+        const available = (occlusionForm?.ordered ?? fields).filter(value => !value.collapsed && !value.hidden);
         const next = available[available.indexOf(field) + (backwards ? -1 : 1)];
         if (next) focus(next);
         else { active(field).blur(); void emit("focusLeave", {direction: backwards ? "previous" : "next"}); }
@@ -670,10 +671,10 @@
                 }
             });
         }
-        if (browsing) {
-            const follow = () => reportCaret(field);
+        if (browsing || document.documentElement.classList.contains("mac")) {
+            const follow = () => { if (browsing || occlusionForm) reportCaret(field); };
             for (const type of ["input", "keyup", "mouseup", "focus"]) rich.addEventListener(type, follow);
-            source.addEventListener("input", () => { grow(source); follow(); });
+            source.addEventListener("input", () => { if (browsing) grow(source); follow(); });
             for (const type of ["keyup", "mouseup", "focus"]) source.addEventListener(type, follow);
         }
         return field;
@@ -695,13 +696,39 @@
             (Object.hasOwn(field, "hidden") && typeof field.hidden !== "boolean") ||
             !["rich", "html"].includes(field.mode)) throw new Error("Invalid field description");
     }
+    function configureOcclusionForm(message) {
+        keys(message, ["header", "backExtra", "viewport", "tagsHeight"]);
+        if (browsing || !document.documentElement.classList.contains("mac") ||
+            !fields.some(value => value.ord === message.header) || !fields.some(value => value.ord === message.backExtra) ||
+            !Number.isFinite(message.viewport) || message.viewport < 0 ||
+            !Number.isFinite(message.tagsHeight) || message.tagsHeight < 0) throw new Error("Invalid native form");
+        if (!occlusionForm) {
+            const slot = () => {
+                const row = document.createElement("div");
+                row.className = "nativeRow"; row.setAttribute("aria-hidden", "true");
+                return row;
+            };
+            occlusionForm = {image: slot(), tags: slot()};
+            const header = fields.find(value => value.ord === message.header);
+            const back = fields.find(value => value.ord === message.backExtra);
+            // Reorder only the display. Commits retain sorted stored ordinals.
+            const remaining = fields.filter(value => value !== header && value !== back);
+            occlusionForm.ordered = [header, back, ...remaining];
+            container.replaceChildren(header.section, occlusionForm.image, back.section,
+                ...remaining.map(value => value.section), occlusionForm.tags);
+            document.documentElement.classList.add("occlusionForm");
+        }
+        occlusionForm.viewport = message.viewport;
+        occlusionForm.tags.style.height = `${Math.max(22, message.tagsHeight)}px`;
+        reportFormLayout();
+    }
     async function receive(message) {
         if (message.type === "setTheme") {
             keys(message, ["type", "theme"]); keys(message.theme, []); return {};
         }
         if (message.type === "openNote") {
             keys(message, ["type", "protocol", "loadId", "mode", "fields", "focus", "theme", "options"]);
-            keys(message.options, ["closeHTMLTags", "shrinkImages"]);
+            keys(message.options, ["closeHTMLTags", "shrinkImages", "occlusionForm"], ["closeHTMLTags", "shrinkImages"]);
             if (message.protocol !== protocol || !["add", "edit", "browse", "content"].includes(message.mode) ||
                 !Number.isSafeInteger(message.loadId) || message.loadId <= loadId || !Array.isArray(message.fields) ||
                 message.fields.length === 0 || ![null, ...message.fields.map(value => value.ord)].includes(message.focus) ||
@@ -715,7 +742,11 @@
             // Edit Note shows the same media as the inspector (2026-11-24, option A).
             media = browsing || message.mode === "edit";
             document.documentElement.classList.toggle("inspector", browsing);
+            cancelAnimationFrame(formFrame); formFrame = 0;
+            occlusionForm = null; lastFormLayout = "";
+            document.documentElement.classList.remove("occlusionForm");
             held = true; container.replaceChildren(); fields = message.fields.map(value => makeField(value, message.mode));
+            if (Object.hasOwn(message.options, "occlusionForm")) configureOcclusionForm(message.options.occlusionForm);
             held = false; container.inert = false;
             focus(fields.find(field => field.ord === message.focus));
             await emit("loaded");
@@ -724,6 +755,12 @@
         if (message.loadId !== loadId) throw new Error("Stale editor load");
         const field = fields.find(value => value.ord === message.ord);
         switch (message.type) {
+        case "setOcclusionForm": {
+            keys(message, ["type", "loadId", "header", "backExtra", "viewport", "tagsHeight"]);
+            configureOcclusionForm({header: message.header, backExtra: message.backExtra,
+                viewport: message.viewport, tagsHeight: message.tagsHeight});
+            return {loadId};
+        }
         case "flush": {
             keys(message, ["type", "loadId", "hold"]);
             if (typeof message.hold !== "boolean") throw new Error("Invalid hold");
@@ -845,7 +882,24 @@
         if (event.composedPath().some(node => node.localName === "a")) event.preventDefault();
     }, true);
     document.addEventListener("submit", event => event.preventDefault(), true);
+    function reportFormLayout() {
+        if (!occlusionForm || formFrame) return;
+        formFrame = requestAnimationFrame(() => {
+            formFrame = 0;
+            if (!occlusionForm) return;
+            const {image, tags, viewport} = occlusionForm;
+            const other = document.body.getBoundingClientRect().height - image.getBoundingClientRect().height;
+            // 280 pt canvas plus room for native toolbar, footer and messages.
+            image.style.height = `${Math.max(400, viewport - other)}px`;
+            const imageBox = image.getBoundingClientRect(), tagsBox = tags.getBoundingClientRect();
+            const layout = {imageTop: imageBox.top + window.scrollY, imageHeight: imageBox.height,
+                tagsTop: tagsBox.top + window.scrollY, height: Math.ceil(document.body.getBoundingClientRect().height)};
+            const signature = JSON.stringify(layout);
+            if (signature !== lastFormLayout) { lastFormLayout = signature; void emit("occlusionFormLayout", layout); }
+        });
+    }
     new ResizeObserver(() => {
+        if (occlusionForm) { reportFormLayout(); return; }
         if (loadId) void emit("contentHeight", {height: browsing ? Math.ceil(document.body.getBoundingClientRect().height)
             : document.documentElement.scrollHeight});
     }).observe(document.body);

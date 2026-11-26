@@ -4260,6 +4260,17 @@
         }
       }
     },
+    "sync.settings.account.signOut": {
+      "comment": "User decision 2026-11-26; sync/status-strings T19.6. Account destination only; uses the Service to Off confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign Out…"
+          }
+        }
+      }
+    },
     "sync.settings.troubleshooting": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {

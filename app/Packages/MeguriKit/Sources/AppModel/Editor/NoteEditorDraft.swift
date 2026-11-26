@@ -81,9 +81,6 @@ public final class NoteEditorDraft {
         guard noteID != nil || !deck.filtered else {
             throw LayoutError(description: "Choose a normal deck before adding a note.")
         }
-        guard notetype.originalStockKind != 6 else {
-            throw LayoutError(description: "Image Occlusion notes cannot be edited in the field editor.")
-        }
         guard !notetype.fields.isEmpty else {
             throw LayoutError(description: "This note type has no fields. Run Check Database before editing it.")
         }
@@ -105,6 +102,35 @@ public final class NoteEditorDraft {
     }
 
     public var values: [String] { fields.map(\.target) }
+    public var occlusionRoles: OcclusionFieldRoles? { OcclusionFieldRoles(notetype: notetype) }
+    public var hostFields: Set<Int> {
+        occlusionRoles?.hidden ?? (notetype.originalStockKind == 6 ? [0] : [])
+    }
+    /// N20.8's note title excludes host-owned IO serialization. A custom
+    /// layout with an editable first field still names the note by that field.
+    /// Empty content goes through the window's localized Edit Note fallback.
+    public var windowTitleHTML: String? {
+        let index = hostFields.contains(0) ? occlusionRoles?.header : 0
+        return index.flatMap { fields.indices.contains($0) ? fields[$0].target : nil }
+    }
+    /// Native state survives switching between fields and masks and layout changes.
+    public var showsMaskEditor = true
+    public var hostFieldsHeld = false
+    /// Image tickets stay stale after a binding changes away and back, even
+    /// before an observation callback has had a chance to run.
+    public private(set) var occlusionImageRevision: UInt64 = 0
+    public var occlusionAddRefused = false
+    /// The caller already checked its retained host's identity and admission.
+    /// Page commits never address these fields, including an outstanding flush.
+    public func acceptHostField(_ value: String, at index: Int) {
+        guard !hostFieldsHeld, hostFields.contains(index), fields.indices.contains(index),
+              fields[index].target != value else { return }
+        if index == occlusionRoles?.image { occlusionImageRevision &+= 1 }
+        fields[index].target = value
+        fields[index].changed = value != fields[index].opened
+        occlusionAddRefused = false
+        revision &+= 1
+    }
     public var isBlank: Bool { pendingFields.isEmpty && fields.allSatisfy { Self.blankValue($0.target).isEmpty } }
     /// N17.1 enables Add. Typing counts before its commit arrives; a committed
     /// value follows the live field check, so markup with no content stays out.
@@ -129,7 +155,7 @@ public final class NoteEditorDraft {
     public func nextAfterAcknowledgedAdd() throws -> NoteEditorDraft {
         guard pendingFields.isEmpty else { throw BridgeError.unavailable(reason: "Flush the fields before adding.") }
         let next = try NoteEditorDraft(generation: generation, notetype: notetype, deck: deck,
-            values: fields.map { $0.definition.sticky ? $0.target : "" }, tags: tags)
+            values: fields.enumerated().map { !hostFields.contains($0.offset) && $0.element.definition.sticky ? $0.element.target : "" }, tags: tags)
         for index in fields.indices {
             next.fields[index].mode = fields[index].mode
             next.fields[index].collapsed = fields[index].collapsed
@@ -201,6 +227,7 @@ public final class NoteEditorDraft {
         var reloaded: [Int] = []
         for index in fields.indices where !pendingFields.contains(index) && fields[index].target == fields[index].baseline {
             guard fields[index].baseline != values[index] else { continue }
+            if index == occlusionRoles?.image { occlusionImageRevision &+= 1 }
             fields[index].baseline = values[index]; fields[index].target = values[index]; fields[index].opened = values[index]
             fields[index].changed = false
             reloaded.append(index)
@@ -237,7 +264,7 @@ public final class NoteEditorDraft {
     }
 
     public func markDirty(_ ord: Int) {
-        guard fields.indices.contains(ord) else { return }
+        guard fields.indices.contains(ord), !hostFields.contains(ord) else { return }
         pendingFields.insert(ord); revision &+= 1
     }
 
@@ -250,6 +277,7 @@ public final class NoteEditorDraft {
               commits.allSatisfy({ fields.indices.contains($0.ord) }) else {
             throw BridgeError.invalidArgument("Invalid editor field commit.")
         }
+        let commits = commits.filter { !hostFields.contains($0.ord) }
         let changed = commits.filter { !$0.unchanged }
         let targets = try await html.convert(changed.map(\.html), forDisplay: false)
         guard targets.count == changed.count else { throw BridgeError.internal("Invalid editor conversion result.") }
@@ -308,6 +336,25 @@ public final class NoteEditorDraft {
                 if let old = remaining.next() { mapped[index] = fields[old].target }
             }
         }
+        if changedType, let roles = OcclusionFieldRoles(notetype: notetype) {
+            mapped = Array(repeating: "", count: notetype.fields.count)
+            var used: Set<Int> = [], filled: Set<Int> = []
+            if let old = occlusionRoles {
+                for (source, target) in zip([old.occlusions, old.image], [roles.occlusions, roles.image]) {
+                    mapped[target] = values[source]; used.insert(source); filled.insert(target)
+                }
+            }
+            let destinations = notetype.fields.indices.filter { !roles.hidden.contains($0) }
+            for target in destinations where !filled.contains(target) {
+                if let source = fields.indices.first(where: {
+                    !used.contains($0) && !hostFields.contains($0) && fields[$0].definition.name == notetype.fields[target].name && !values[$0].isEmpty
+                }) { mapped[target] = values[source]; used.insert(source); filled.insert(target) }
+            }
+            var remaining = fields.indices.filter { !used.contains($0) && !hostFields.contains($0) && !values[$0].isEmpty }.makeIterator()
+            for target in destinations where !filled.contains(target) {
+                if let source = remaining.next() { mapped[target] = values[source] }
+            }
+        }
         let next = try NoteEditorDraft(generation: generation, notetype: notetype, deck: deck, values: mapped, tags: tags)
         if changedType {
             // A3 step 5: the same position, or the new type's last field.
@@ -326,7 +373,9 @@ public final class NoteEditorDraft {
     /// supplied on recovery for changed fields (F7).
     public func displayValues() async throws -> (targets: [String], baselines: [String]) {
         let count = fields.count
-        let converted = try await html.convert(values + fields.map(\.opened), forDisplay: true)
+        let pageValues = fields.enumerated().map { hostFields.contains($0.offset) ? "" : $0.element.target }
+        let pageBaselines = fields.enumerated().map { hostFields.contains($0.offset) ? "" : $0.element.opened }
+        let converted = try await html.convert(pageValues + pageBaselines, forDisplay: true)
         guard converted.count == count * 2 else { throw BridgeError.internal("Invalid editor conversion result.") }
         return (Array(converted.prefix(count)), Array(converted.suffix(count)))
     }

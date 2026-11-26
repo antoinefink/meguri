@@ -13,6 +13,40 @@ import Testing
 /// width threshold, the empty fields and Edit Note. Over a scripted search
 /// session, inspector reads and a field page with no WebKit.
 @MainActor @Suite struct BrowseInspectorTests {
+    @Test func occlusionMaskAndMetadataSaveOnRowChangeAndReopenWithoutRewritingMasks() async throws {
+        let fixture = try await Fixture()
+        let type = OcclusionFieldFlowTests.type(tags: [3, 2, 1, 0, 4])
+        fixture.backend.customNotetype = type
+        let masks = OcclusionFieldFlowTests.first + " \t<br/>" + OcclusionFieldFlowTests.second
+        for id in [Int64(10), 20] {
+            fixture.backend.notes[id] = .init(id: id, notetypeId: type.id,
+                fields: ["extra \(id)", "header \(id)", "<img src=\"missing.png\">", masks, ""], tags: ["kept"], guid: "g\(id)")
+        }
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let first = try #require(fixture.inspector.note), runtime = try #require(fixture.runtime)
+        #expect(first.draft.showsMaskEditor && first.draft.hostFields == [2, 3])
+        #expect(first.emptyFields == [4])
+        first.draft.acceptHostField(OcclusionFieldFlowTests.first, at: 3)
+        runtime.typeWithoutCommit(1, "edited header")
+        first.draft.setTags(["edited"])
+        fixture.select([1])
+        try await pollUntil { fixture.inspector.note?.noteID == 20 }
+        #expect(fixture.backend.saves.count == 1)
+        let saved = try #require(fixture.backend.saves.first)
+        #expect(saved.id == 10 && saved.fields == [1: "edited header", 3: OcclusionFieldFlowTests.first] && saved.tags == ["edited"])
+        // An obsolete source completion still holds only the departed draft.
+        first.draft.acceptHostField("late old draft", at: 3)
+        #expect(fixture.inspector.note?.draft.values[3] == masks)
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.noteID == 10 }
+        let reopened = try #require(fixture.inspector.note)
+        #expect(reopened.draft.values[3] == OcclusionFieldFlowTests.first && reopened.draft.values[1] == "edited header")
+        #expect(reopened.draft.values[0] == "extra 10" && reopened.draft.values[2] == "<img src=\"missing.png\">" && reopened.draft.tags == ["edited"])
+        fixture.select([])
+        try await pollUntil { fixture.inspector.content == .noSelection }
+        #expect(fixture.backend.saves.count == 1, "Untouched reopened masks have no patch")
+    }
     // MARK: What it shows (V7)
 
     @Test func itShowsNoSelectionOneNoteOrTheSummaryOfSeveralRows() async throws {
@@ -566,6 +600,7 @@ import Testing
     var fieldOrds: [UInt32] = [0, 1, 2]
     var fieldOrder = [0, 1, 2]
     var originalStockKind: Int32 = 0
+    var customNotetype: NotetypeRecord?
     private(set) var lastSeq: UInt64 = 100
 
     func releaseReads() {
@@ -581,6 +616,7 @@ import Testing
         return note
     }
     func notetype(_ id: Int64) async throws -> NotetypeRecord {
+        if let customNotetype { return customNotetype }
         let fields = fieldOrder.enumerated().map { position, index in
             NotetypeField(ord: fieldOrds[position], id: Int64(index), name: ["Front", "Back", "Extra"][index], sticky: false, rtl: false, fontName: "", fontSize: 20,
                           description: "", plainText: false, collapsed: false, excludeFromSearch: false)

@@ -126,6 +126,9 @@ struct SyncServiceName: View {
 struct SyncServiceRows: View {
     let collection: ReviewCollection
     let host: AppNavigation.SheetHost
+    /// The Account destination offers the same guarded change to Off.
+    var accountSignOut = false
+    @Environment(\.dismiss) private var dismiss
     @State private var destination: String?
     @State private var switchSource: SyncProviderSelection?
     @State private var refusedForOp = false
@@ -148,23 +151,12 @@ struct SyncServiceRows: View {
     /// V27.5: refused while an op could restore the binding before, or could not be read.
     private var opBlocksChange: Bool { sync.serviceChangeRefusedForOperation }
     var body: some View {
-        Picker(SyncText.value("sync.service.control"), selection: Binding(get: { selected }, set: choose)) {
-            Text(SyncText.value("sync.service.off")).tag("localOnly")
-                .accessibilityIdentifier("settings.sync.service.off")
-            Text(SyncText.value("sync.service.meguri")).tag("meguri")
-                .accessibilityIdentifier("settings.sync.service.meguri")
-            // A menu item is one line of text: the label follows the name.
-            Text(verbatim: "\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))")
-                .accessibilityLabel(SyncText.value("sync.service.iCloud.accessibility"))
-                .accessibilityIdentifier("settings.sync.service.iCloud")
-                .tag("iCloud")
-        }
+        control
         // MP6.5: the control stays enabled while the provider is blocked.
         .disabled(changing || sync.providerState?.phase == .handoffRecovery || collection.meguriSignInPreparing || sync.meguriBusy)
-        .accessibilityIdentifier("settings.sync.service")
         // Synthetic examples only: open the confirmation the example names.
         .task {
-            guard let request = sync.renderServiceSwitch else { return }
+            guard !accountSignOut, let request = sync.renderServiceSwitch else { return }
             // The window must be on screen before an alert can attach to it.
             try? await Task.sleep(for: .milliseconds(800))
             choose(request.destination)
@@ -172,6 +164,28 @@ struct SyncServiceRows: View {
         .modifier(ServiceSwitchQuestion(collection: collection, destination: $destination, source: switchSource) { value, shown in
             change(value, shown: shown)
         })
+        feedback
+    }
+    @ViewBuilder private var control: some View {
+        if accountSignOut {
+            Button(SyncText.value("sync.settings.account.signOut"), role: .destructive) { choose("localOnly") }
+                .accessibilityIdentifier("settings.sync.meguri.signOut")
+        } else {
+            Picker(SyncText.value("sync.service.control"), selection: Binding(get: { selected }, set: choose)) {
+                Text(SyncText.value("sync.service.off")).tag("localOnly")
+                    .accessibilityIdentifier("settings.sync.service.off")
+                Text(SyncText.value("sync.service.meguri")).tag("meguri")
+                    .accessibilityIdentifier("settings.sync.service.meguri")
+                // A menu item is one line of text: the label follows the name.
+                Text(verbatim: "\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))")
+                    .accessibilityLabel(SyncText.value("sync.service.iCloud.accessibility"))
+                    .accessibilityIdentifier("settings.sync.service.iCloud")
+                    .tag("iCloud")
+            }
+            .accessibilityIdentifier("settings.sync.service")
+        }
+    }
+    @ViewBuilder private var feedback: some View {
         if changing {
             ProgressView(SyncText.value("sync.service.changing"))
                 .accessibilityIdentifier("settings.sync.serviceChanging")
@@ -195,6 +209,7 @@ struct SyncServiceRows: View {
         }
     }
     private func choose(_ value: String) {
+        guard !accountSignOut || selected == "meguri" else { return }
         guard !collection.meguriSignInPreparing, !sync.meguriBusy, value != selected else { return }
         refusedForOp = false
         if opBlocksChange { refusedForOp = true; return }
@@ -217,6 +232,7 @@ struct SyncServiceRows: View {
             switch await collection.changeSyncService(to: target, from: source) {
             case .changed:
                 destination = nil
+                if accountSignOut { dismiss() }
                 if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
             case .superseded: destination = nil
             case .failed: failed = true
@@ -308,6 +324,7 @@ struct MeguriAccountRows: View {
                             .accessibilityIdentifier("settings.sync.meguri.account.address")
                         LabeledContent(SyncText.value("sync.meguri.username"), value: sync.meguriUsername ?? "")
                             .accessibilityIdentifier("settings.sync.meguri.account.username")
+                        SyncServiceRows(collection: collection, host: .main, accountSignOut: true)
                     }
                     .formStyle(.grouped)
                     .navigationTitle(SyncText.value("sync.settings.account"))

@@ -8,6 +8,9 @@
 // common;`), as it did in a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "remote_media.rs"]
+pub mod remote_media;
+
 /// `meguri_testkit::cloud::child_driver` starts its child process as this
 /// binary with `--exact cloud_child_entry`. Here the entries the files define
 /// are `<file>::cloud_child_entry`, so the child runs this one, the same call.

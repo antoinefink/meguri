@@ -40,7 +40,7 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
         super.init()
         controller.rootView = AnyView(form.modifier(CloseWhenFinished(flow: flow) { [weak self] in self?.close() }))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.title = Self.title(flow.draft?.values.first)
+        window.title = Self.title(flow.draft?.windowTitleHTML)
         window.identifier = NSUserInterfaceItemIdentifier("review.editCurrent.window")
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -61,10 +61,11 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
     func close() {
         guard !closing else { return }
         closing = true
+        let returnKeys = window.isKeyWindow && NSApp.isActive
         window.close()
         if Self.current === self { Self.current = nil }
         // Main's close guard may have already continued its asynchronous close.
-        if let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
+        if returnKeys, let parent, parent.isVisible { parent.makeKeyAndOrderFront(nil) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -78,7 +79,8 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
         if Self.current === self { Self.current = nil }
     }
 
-    /// The window names the note (HIG): its first field as plain text, else "Edit Note".
+    /// The window names the note (N20.8): its human-readable field as plain text,
+    /// else the localized "Edit Note".
     static func title(_ html: String?) -> String {
         var text = html ?? ""
         text = text.replacingOccurrences(of: #"\[sound:[^\]]*\]"#, with: " ", options: .regularExpression)

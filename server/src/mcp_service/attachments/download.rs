@@ -8,11 +8,17 @@ fn request_failed(error: reqwest::Error, stage: Detail) -> Error {
     failed(if error.is_timeout() { Detail::AttachmentTimeout } else { stage })
 }
 pub(super) fn target(value: &str) -> Result<url::Url> {
-    if value.len() > 4096 || value.bytes().any(|b|b.is_ascii_control() || b == b'\\') { return Err(failed(Detail::AttachmentUrl)); }
-    let url = url::Url::parse(value).map_err(|_| failed(Detail::AttachmentUrl))?;
-    if url.scheme() != "https" || url.host_str() != Some(HOST) || url.port_or_known_default() != Some(443)
-        || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some()
-        || value.split('/').nth(2).is_some_and(|a|a.contains('@')) { return Err(failed(Detail::AttachmentUrl)); }
+    if value.len() > 4096 { return Err(failed(Detail::AttachmentUrlLength)); }
+    if value.bytes().any(|b|b.is_ascii_control() || b == b'\\') { return Err(failed(Detail::AttachmentUrlCharacters)); }
+    let url = url::Url::parse(value).map_err(|_| failed(Detail::AttachmentUrlParse))?;
+    if url.scheme() != "https" { return Err(failed(Detail::AttachmentUrlScheme)); }
+    if url.host_str() != Some(HOST) { return Err(failed(Detail::AttachmentUrlHost)); }
+    if url.port_or_known_default() != Some(443) { return Err(failed(Detail::AttachmentUrlPort)); }
+    if !url.username().is_empty() || url.password().is_some() { return Err(failed(Detail::AttachmentUrlUserinfo)); }
+    if url.fragment().is_some() { return Err(failed(Detail::AttachmentUrlFragment)); }
+    // The third raw slash-separated segment can include a no-path query, as well
+    // as empty user information normalized away by parsing. Retain the check and order.
+    if value.split('/').nth(2).is_some_and(|a|a.contains('@')) { return Err(failed(Detail::AttachmentUrlRawAt)); }
     Ok(url)
 }
 fn public(ip: IpAddr) -> bool {
@@ -79,14 +85,54 @@ mod tests {
     use super::*;
     #[test]
     fn refuses_untrusted_urls_and_special_addresses_without_io() {
-        for value in ["http://files.oaiusercontent.com/x","https://files.oaiusercontent.com.evil.test/x", "https://files.oaiusercontent.com:444/x", "https://user@files.oaiusercontent.com/x", "https://@files.oaiusercontent.com/x", "https://files.oaiusercontent.com/x#secret", "https://127.0.0.1/x"] {
-            let error=target(value).unwrap_err();
-            assert_eq!(error,failed(Detail::AttachmentUrl));
+        for (value,detail) in [
+            (format!("{}\\", "x".repeat(4096)),Detail::AttachmentUrlLength),
+            ("https://files.oaiusercontent.com/x\n".into(),Detail::AttachmentUrlCharacters),
+            ("http:\\untrusted.example.test".into(),Detail::AttachmentUrlCharacters),
+            ("".into(),Detail::AttachmentUrlParse),
+            ("https://[invalid-host".into(),Detail::AttachmentUrlParse),
+            ("https://files.oaiusercontent.com:invalid/x".into(),Detail::AttachmentUrlParse),
+            ("http://user@untrusted.example.test:444/x#secret".into(),Detail::AttachmentUrlScheme),
+            ("https://files.oaiusercontent.com.evil.test:444/x#secret".into(),Detail::AttachmentUrlHost),
+            ("https://127.0.0.1/x".into(),Detail::AttachmentUrlHost),
+            ("https://user@files.oaiusercontent.com:444/x#secret".into(),Detail::AttachmentUrlPort),
+            ("https://user@files.oaiusercontent.com/x#secret".into(),Detail::AttachmentUrlUserinfo),
+            ("https://:secret@files.oaiusercontent.com/x".into(),Detail::AttachmentUrlUserinfo),
+            ("https://files.oaiusercontent.com/x#secret".into(),Detail::AttachmentUrlFragment),
+            ("https://files.oaiusercontent.com/x#".into(),Detail::AttachmentUrlFragment),
+            ("https://@files.oaiusercontent.com/x#secret".into(),Detail::AttachmentUrlFragment),
+            ("https://@files.oaiusercontent.com/x".into(),Detail::AttachmentUrlRawAt),
+            ("https://:@files.oaiusercontent.com/x".into(),Detail::AttachmentUrlRawAt),
+        ] {
+            let error=target(&value).unwrap_err();
+            assert_eq!(error,failed(detail));
             assert_eq!(error.to_string(),"attachment_unavailable");
         }
-        assert!(target("https://files.oaiusercontent.com/generated?secret=fixture").is_ok());
+        for value in ["https://files.oaiusercontent.com/generated?secret=fixture",
+            "https://FILES.OAIUSERCONTENT.COM:443/generated?secret=fixture",
+            "https://files.oaiusercontent.com/x@fixture?secret=@fixture"] {
+            assert!(target(value).is_ok());
+        }
+        let prefix="https://files.oaiusercontent.com/";
+        assert!(target(&format!("{prefix}{}","x".repeat(4096-prefix.len()))).is_ok());
         for ip in ["0.0.0.0","10.0.0.1","100.64.0.1","127.0.0.1","169.254.169.254","172.16.0.1","192.168.1.1","192.0.2.1","198.18.0.1","198.51.100.1","203.0.113.1","224.0.0.1","255.255.255.255","::1","::ffff:8.8.8.8","64:ff9b::808:808","2001:db8::1","2002:808:808::1","fc00::1","fe80::1","3fff::1"] { assert!(!public(ip.parse().unwrap()),"{ip}"); }
         for ip in ["8.8.8.8","1.1.1.1","2606:4700:4700::1111"] { assert!(public(ip.parse().unwrap())); }
+    }
+    #[test]
+    fn raw_at_detail_is_distinct_from_parsed_userinfo() {
+        for value in ["https://files.oaiusercontent.com?secret=@fixture",
+            "https://@files.oaiusercontent.com/x", "https://:@files.oaiusercontent.com/x"] {
+            let parsed=url::Url::parse(value).unwrap();
+            assert!(parsed.username().is_empty());
+            assert!(parsed.password().is_none());
+            assert_eq!(target(value).unwrap_err(),failed(Detail::AttachmentUrlRawAt));
+        }
+        assert_eq!(target("https://user:secret@files.oaiusercontent.com/x").unwrap_err(),
+            failed(Detail::AttachmentUrlUserinfo));
+        assert_eq!(target("https://files.oaiusercontent.com?secret=@fixture#fragment").unwrap_err(),
+            failed(Detail::AttachmentUrlFragment));
+        assert!(target("https://files.oaiusercontent.com?secret=fixture").is_ok());
+        assert!(target("https://files.oaiusercontent.com/?secret=@fixture").is_ok());
     }
     #[test]
     fn address_failures_have_only_the_fixed_address_detail() {

@@ -347,7 +347,7 @@ public final class BrowseInspector {
             show(.note)
             return
         }
-        let empty = loaded.note.fields.indices.filter { FieldEmptiness.isEmpty(loaded.note.fields[$0]) }
+        let empty = loaded.note.fields.indices.filter { !draft.hostFields.contains($0) && FieldEmptiness.isEmpty(loaded.note.fields[$0]) }
         if !emptyFieldsOpen(loaded.notetype.id) { draft.hiddenFields = Set(empty) }
         let shown = BrowseInspectorNote(noteID: loaded.note.id, notetype: loaded.notetype, draft: draft, cards: loaded.cards,
                                         cardIndex: loaded.cardIndex, emptyFields: empty)
@@ -510,14 +510,20 @@ public final class BrowseInspector {
               let type = try? await backend.notetype(stored.notetypeId) else { return false }
         // A schema change must not bypass the editor's count/layout checks
         // or turn an ordinary field edit into an Image Occlusion edit.
-        guard (try? NoteEditorDraft(editing: stored, notetype: type, deck: note.draft.deck,
-                                    generation: patch.generation ?? generation())) != nil else { return false }
+        guard (type.originalStockKind == 6) == (note.notetype.originalStockKind == 6),
+              let fresh = try? NoteEditorDraft(editing: stored, notetype: type, deck: note.draft.deck,
+                                              generation: patch.generation ?? generation()) else { return false }
         var fields: [Int: String] = [:]
         for (ord, html) in patch.fields {
             guard note.notetype.fields.indices.contains(ord) else { return false }
             let old = note.notetype.fields[ord]
             guard let position = type.fields.firstIndex(where: { $0.id != nil && $0.id == old.id }) ?? type.fields.firstIndex(where: { $0.name == old.name })
             else { return false }
+            guard note.draft.hostFields.contains(ord) == fresh.hostFields.contains(position) else { return false }
+            if let old = note.draft.occlusionRoles, let new = fresh.occlusionRoles {
+                guard (ord == old.occlusions) == (position == new.occlusions),
+                      (ord == old.image) == (position == new.image) else { return false }
+            }
             // Two edits on one field of the new layout: nothing is sent.
             guard fields[position] == nil else { return false }
             fields[position] = html
@@ -573,7 +579,8 @@ public final class BrowseInspector {
     public func editNote() {
         guard canEditNote, let note, let runtime = note.runtime else { return }
         show()
-        let first = note.draft.fields.indices.first { !note.draft.hiddenFields.contains($0) } ?? 0
+        if note.draft.occlusionRoles != nil { note.draft.showsMaskEditor = true; return }
+        let first = note.draft.fields.indices.first { !note.draft.hiddenFields.contains($0) && !note.draft.hostFields.contains($0) } ?? 0
         Task { try? await runtime.focusField(first) }
     }
 

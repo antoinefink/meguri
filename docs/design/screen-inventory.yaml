@@ -549,7 +549,14 @@ screens:
     states: [empty, typical, overflow, error, loading]
     variants: pairwise
     references: [toolbar, inspector]
-    purpose: Draw, group and edit masks over an image.
+    purpose: >-
+      Draw, group and edit masks over an image. In the Mac Add Note and Edit Note windows,
+      the image is a field in the same form as Header, Back Extra, Comments and Tags
+      (Option B, chosen 2026-11-26). Above the canvas are the drawing tools, fill colour,
+      undo and redo, card mode, zoom and actions. Below it are the filename, mask and card
+      counts, and Change Image. An empty Image field offers image sources. The canvas
+      grows with the window. The window's existing title, note type, deck and bottom
+      actions keep their positions.
 
   - id: browse.browser
     title: Browser
@@ -1013,14 +1020,18 @@ screens:
       `adopt` or `publish` op could restore the binding before or could not be read (V27.5),
       `sync.switch.busy`, `sync.service.blocked`. (2) Meguri Sync only: the sign-in fields (Server
       Address, Username, Password, one prominent Sign In, the T19.3 footer) until signed in, then
-      the Account row with the username, pushing Server Address and Username. (3) Status: symbol,
+      the Account row with the username, pushing Server Address, Username and a native Sign Out…
+      button (user decision, 2026-11-26; N15.2, MP6.4). Sign Out… reuses Service → Off's confirmation,
+      guarded handoff, progress and refusal/error feedback. Cancel keeps Account open; only success
+      returns to usable Sync settings at Off, where choosing Meguri Sync shows editable Server
+      Address, Username and Password. Pending work and data keep MP6.4's protections. (3) Status: symbol,
       title and detail of T19.4 or T19.5; a needs you status has its one action as a button; an
       issues row pushes the issues list (`sync.issues.title`), or Affected Files for Meguri Sync's
       blocked media. (4) Sync Automatically with its footer, while a service is selected; disabled,
       showing the stored value, until the service is connected (P25.3). (5) Sync Now, through
       syncNowAvailability(), with its reason when unavailable. (6) Troubleshooting, pushing
       settings.troubleshooting. With iCloud selected the privacy footer follows. While the value is
-      Off the section has the Service row and its footer only. No media toggle, Pause, Sign Out,
+      Off the section has the Service row and its footer only. The parent has no media toggle, Pause, Sign Out,
       Stop Using, Advanced or Review Conflicts row. Over a review on iPhone and iPad the Sync section
       alone is presented in a sheet (settings.sync.content, Done). Empty: Off. Typical: a connected
       service, up to date. Loading: a service change or setup running. Error: a needs you status
@@ -1031,7 +1042,9 @@ screens:
       settings.sync.meguri.username, settings.sync.meguri.password, settings.sync.meguri.signIn,
       settings.sync.meguri.signInFooter, settings.sync.meguri.signInError,
       settings.sync.meguri.signInProgress, settings.sync.meguri.account,
-      settings.sync.meguri.account.content, settings.sync.meguri.affectedList, settings.sync.status,
+      settings.sync.meguri.account.content, settings.sync.meguri.account.address,
+      settings.sync.meguri.account.username, settings.sync.meguri.signOut,
+      settings.sync.meguri.affectedList, settings.sync.status,
       settings.sync.statusAction, settings.sync.connectionError, settings.sync.issues,
       settings.sync.automatic, settings.sync.syncNow, settings.sync.troubleshooting,
       settings.sync.privacyFooter, settings.sync.content, settings.sync.done, sync.issues.list,

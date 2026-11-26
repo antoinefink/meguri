@@ -27,6 +27,8 @@ extension AddNoteFieldRuntime {
 /// on *all* replacement consumers acquiring pre-operation editor admission.
 @Observable @MainActor
 public final class AddNoteFlow {
+    /// A picker action, never a stored note type id. Core ensures it on demand.
+    public static let imageOcclusionChoice: Int64 = -206
     public typealias RuntimeFactory = @MainActor (NoteEditorDraft, @escaping @MainActor () -> Bool) throws -> any AddNoteFieldRuntime
     public let preparation: AddNoteDraft
     public var draft: NoteEditorDraft? { preparation.draft }
@@ -95,7 +97,7 @@ public final class AddNoteFlow {
     }
 
     /// N17.1: Add also waits for content in the first field.
-    public var canAdd: Bool { canSave && draft?.firstFieldHasContent == true }
+    public var canAdd: Bool { canSave && (draft?.occlusionRoles != nil || draft?.firstFieldHasContent == true) }
     private var canChangeSelection: Bool {
         canSave && runtime?.draft === draft && startedEpoch == epoch
     }
@@ -118,13 +120,31 @@ public final class AddNoteFlow {
                 if choicesPending { choicesPending = false; refreshChoices() }
             }
             guard let decks = try? await CoreDeckService().allDeckNames(),
-                  let types = try? await CoreNotetypeService().notetypeNames(),
+                  var types = try? await CoreNotetypeService().notetypeNames(),
                   isPresented, let current = self.draft, current.generation == draft.generation,
                   decks.generation == current.generation else { return }
+            guard let choices = try? await Self.imageOcclusionChoices(types, read: { id in
+                try await CoreNotetypeService().readNotetype(id: id)
+            }), isPresented, self.draft === current,
+                  owner?.ownsAddGeneration(current.generation) == true else { return }
+            types = choices
             deckChoices = Self.deckChoices(names: decks.decks, selected: current.deck.id,
                                            defaultShown: owner?.deck(1) != nil)
             notetypeChoices = types
         }
+    }
+
+    /// N9/O10: a stock-kind marker alone cannot open the mask editor. Keep
+    /// the stand-in choice until a type with all four role positions exists.
+    static func imageOcclusionChoices(_ types: [NotetypeName],
+        read: (Int64) async throws -> NotetypeRecord) async rethrows -> [NotetypeName] {
+        for type in types {
+            if OcclusionFieldRoles(notetype: try await read(type.id)) != nil { return types }
+        }
+        var name = "Image Occlusion"
+        while types.contains(where: { $0.name == name }) { name += "+" }
+        return (types + [.init(id: imageOcclusionChoice, name: name)])
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// A2: choosing another deck selects it and changes nothing else.
@@ -146,7 +166,11 @@ public final class AddNoteFlow {
             try await page.flush(hold: true)
             guard owns(draft, epoch: expected), runtime === page, draft.pendingFields.isEmpty else { throw Self.ownerChanged }
             let revision = draft.preparationRevision
-            let notetype = try await CoreNotetypeService().readNotetype(id: id)
+            let selectedID: Int64
+            if id == Self.imageOcclusionChoice {
+                selectedID = try await CoreNotetypeService().ensureImageOcclusionNotetype(expectedGeneration: draft.generation).id
+            } else { selectedID = id }
+            let notetype = try await CoreNotetypeService().readNotetype(id: selectedID)
             let lifecycle = try await CoreCollectionService().lifecycle()
             guard owns(draft, epoch: expected), runtime === page, draft.preparationRevision == revision,
                   lifecycle == .ready(generation: draft.generation) else { throw Self.ownerChanged }
@@ -450,6 +474,13 @@ public final class AddNoteFlow {
             }
             let request = AddScreenNoteRequest(expectedGeneration: draft.generation, notetype: draft.notetype,
                 fields: draft.values, tags: draft.tags, deckId: draft.deck.id)
+            if let roles = draft.occlusionRoles,
+               (try? occlusionHasNumberedMask(draft.values[roles.occlusions])) != true {
+                draft.occlusionAddRefused = true
+                draft.showsMaskEditor = true
+                await release(host, draft: draft, epoch: expected)
+                return nil
+            }
             let check = try await CoreNoteService().checkNoteFields(notetypeId: request.notetype.id, fields: request.fields, ownNote: nil)
             await afterCheckingFields?()
             guard exact() else { throw Self.ownerChanged }
