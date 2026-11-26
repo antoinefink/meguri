@@ -50,7 +50,7 @@ import XCTest
         try assertCommandAvailability(filtered: true, app: app, bundle: bundle)
         try click("home.filteredDeck.edit.\(id)", app: app, bundle: bundle)
         for (field, value) in [("again", "60"), ("hard", "120"), ("good", "0"), ("second.limit", "5")] {
-            XCTAssertEqual(element(app, "home.filteredStudy." + field).value as? String, value)
+            XCTAssertEqual(try visible("home.filteredStudy." + field, app: app, bundle: bundle).value as? String, value)
         }
         capture(app, "filtered-preview-reopened-definition-retains-edited-delays")
         try click("home.filteredStudy.cancel", app: app, bundle: bundle)
@@ -84,7 +84,8 @@ import XCTest
     func testFinishedNormalDeckCustomPreviewUsesLiteralTagsAndPreservesSchedules() throws {
         let (app, bundle) = try launch()
         defer { app.terminate() }
-        try selectDeck("Custom Source", app: app, bundle: bundle)
+        let source = try selectDeck("Custom Source", app: app, bundle: bundle)
+        let sourceID = try XCTUnwrap(HomeControls.deckID(source.identifier))
         try click("home.deck.study", app: app, bundle: bundle)
         try answer("easy", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "review.session.done").waitForExistence(timeout: 15))
@@ -93,7 +94,10 @@ import XCTest
         capture(app, "custom-study-finished-review-native-entry")
         try click("home.customStudy.cancel", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.customStudy.sheet").waitForNonExistence(timeout: 10))
-        try click("review.session.done", app: app, bundle: bundle)
+        // Custom Study ends the terminal review before presenting its sheet.
+        XCTAssertTrue(element(app, "home.deck.page." + sourceID).waitForExistence(timeout: 15),
+                      "Cancel returns to the Custom Source deck page")
+        XCTAssertTrue(element(app, "home.deck.customStudy").exists)
         // Capture after the regular scheduled answer, before any preview answer.
         let expected = try browseIDs("deck:\"Custom Source\" -deck:\"Custom Source::Literal\"", count: 2, app: app, bundle: bundle)
         let excluded = try browseIDs("deck:\"Custom Source::Literal\"", count: 1, app: app, bundle: bundle)
@@ -216,19 +220,31 @@ import XCTest
             @MainActor func infoSelected() -> Bool { info.isSelected || (info.value as? Int) == 1 || (info.value as? String) == "1" }
             if !infoSelected() { info.click() }
             XCTAssertTrue(wait { infoSelected() }, "Info tab is selected independently of its loading content")
-            XCTAssertTrue(wait { self.element(app, "cardInfo.row.card_id").value as? String == card })
+            XCTAssertTrue(element(app, "cardInfo.row.card_id").waitForExistence(timeout: 15))
+            // AppKit need not export a SwiftUI row's accessibilityValue as
+            // XCUIElement.value. C8's fresh JSON identifies the selected card.
+            let raw = try rawSchedule(card, app: app, bundle: bundle)
             var values: [String: String] = [:]
             for key in ["card_id", "deck", "due", "interval", "stability", "difficulty", "card_type", "reviews", "lapses"] {
                 let field = element(app, "cardInfo.row." + key)
                 XCTAssertTrue(field.waitForExistence(timeout: 10), key)
-                let value = try XCTUnwrap(field.value as? String, key)
+                let value = infoRowText(field)
                 XCTAssertFalse(value.isEmpty, key)
                 values[key] = value
             }
-            values["raw.schedule"] = try rawSchedule(card, app: app, bundle: bundle)
+            values["raw.schedule"] = raw
             result[card] = values
         }
         return result
+    }
+
+    /// Keep the actual native row text in the before/after comparison, including
+    /// exports that put text in a label or child rather than the row's value.
+    private func infoRowText(_ row: XCUIElement) -> String {
+        ([row] + row.descendants(matching: .staticText).allElementsBoundByIndex)
+            .flatMap { [$0.label, $0.value as? String ?? ""] }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
     }
 
     /// C8's existing user export reads the stored row. Compare exact schedule
@@ -238,17 +254,20 @@ import XCTest
         let copy = element(app, "cardInfo.copyDebug")
         let scroll = app.scrollViews.matching(identifier: "cardInfo.card").firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
-        for _ in 0..<20 {
-            if copy.exists && copy.isHittable { break }
-            scroll.scroll(byDeltaX: 0, deltaY: -400)
-        }
+        try app.bringToFront(bundleIdentifier: bundle)
+        XCTAssertTrue(bringIntoView(copy, in: scroll, app: app), "Copy Debug Info is visible in its scroll view")
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         defer { pasteboard.clearContents() }
         let previousChange = pasteboard.changeCount
         try click("cardInfo.copyDebug", app: app, bundle: bundle)
-        XCTAssertTrue(wait { pasteboard.changeCount != previousChange && pasteboard.string(forType: .string) != nil },
-                      "Wait for this card's asynchronous debug export")
+        XCTAssertTrue(wait {
+            guard pasteboard.changeCount != previousChange,
+                  let json = pasteboard.string(forType: .string),
+                  let dump = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+                  let row = dump["card"] as? [String: Any] else { return false }
+            return (row["id"] as? NSNumber)?.stringValue == card
+        }, "Wait for this selected card's asynchronous debug export: " + card)
         let json = try XCTUnwrap(pasteboard.string(forType: .string))
         let dump = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         let row = try XCTUnwrap(dump["card"] as? [String: Any])
@@ -307,17 +326,39 @@ import XCTest
         return row
     }
     private func click(_ id: String, app: XCUIApplication, bundle: String) throws {
-        let target = element(app, id)
+        let target = try visible(id, app: app, bundle: bundle)
+        target.click()
+    }
+    private func visible(_ id: String, app: XCUIApplication, bundle: String) throws -> XCUIElement {
         try app.bringToFront(bundleIdentifier: bundle)
-        let scroll = app.sheets.scrollViews.firstMatch
-        if scroll.exists {
-            for _ in 0..<8 {
-                if target.exists && target.isHittable { break }
-                scroll.scroll(byDeltaX: 0, deltaY: -250)
-            }
+        let target = element(app, id)
+        let filtered = element(app, "home.filteredStudy.sheet")
+        let custom = element(app, "home.customStudy.sheet")
+        let form = filtered.exists ? filtered : custom
+        let prefix = filtered.exists ? "home.filteredStudy." : "home.customStudy."
+        // Footer buttons are outside the Form; inputs may not have an AX node
+        // until scrolled into view, so do not require target.exists to scroll.
+        if form.exists, id.hasPrefix(prefix), ![prefix + "cancel", prefix + "save"].contains(id) {
+            let scroll = form.scrollViews.firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 10), "Native study form scroll view")
+            XCTAssertTrue(bringIntoView(target, in: scroll, app: app), id + " is inside the form viewport")
         }
         XCTAssertTrue(wait { target.exists && target.isEnabled && target.isHittable }, id)
-        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        return target
+    }
+    private func bringIntoView(_ target: XCUIElement, in scroll: XCUIElement, app: XCUIApplication) -> Bool {
+        for _ in 0..<20 {
+            let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+            guard !viewport.isEmpty else { return false }
+            let frame = target.exists ? target.frame : .zero
+            if !frame.isEmpty, viewport.contains(frame), target.isHittable { return true }
+            // isHittable alone can be true for clipped grouped-form controls.
+            // Follow the target in either direction, including on a reopened form.
+            let reach = viewport.height / 3
+            let delta = frame.isEmpty ? -reach : max(-reach, min(reach, viewport.midY - frame.midY))
+            scroll.scroll(byDeltaX: 0, deltaY: delta)
+        }
+        return false
     }
     private func fill(_ id: String, _ value: String, app: XCUIApplication, bundle: String) throws {
         try click(id, app: app, bundle: bundle)
@@ -325,24 +366,29 @@ import XCTest
     }
     private func choose(_ id: String, _ title: String, app: XCUIApplication, bundle: String) throws {
         try click(id, app: app, bundle: bundle)
-        let item = app.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@", title, title)).firstMatch
+        let item = menuItem(title, app: app)
         XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertTrue(item.isEnabled, title)
         try app.bringToFront(bundleIdentifier: bundle)
         item.click()
     }
     private func assertCommandAvailability(filtered: Bool, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         app.menuBars.menuBarItems["Deck"].click()
-        for action in ["rebuildFilteredDeck", "emptyFilteredDeck"] {
-            let command = element(app, "home.commands." + action)
+        // SwiftUI command identifiers are often absent from AppKit's menu tree.
+        for title in ["Rebuild", "Empty"] {
+            let command = menuItem(title, app: app)
             XCTAssertTrue(command.waitForExistence(timeout: 10))
-            XCTAssertEqual(command.isEnabled, filtered, action)
+            XCTAssertEqual(command.isEnabled, filtered, title)
         }
-        let custom = element(app, "home.commands.customStudy")
+        let custom = menuItem("Custom Study…", app: app)
         XCTAssertTrue(custom.waitForExistence(timeout: 10))
         XCTAssertEqual(custom.isEnabled, !filtered)
         capture(app, filtered ? "filtered-deck-enabled-native-commands" : "normal-deck-disabled-filtered-commands")
         app.typeKey(.escape, modifierFlags: [])
+    }
+    private func menuItem(_ title: String, app: XCUIApplication) -> XCUIElement {
+        app.menuItems.matching(NSPredicate(format: "title == %@ OR label == %@", title, title)).firstMatch
     }
     private func deckPage(_ app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
