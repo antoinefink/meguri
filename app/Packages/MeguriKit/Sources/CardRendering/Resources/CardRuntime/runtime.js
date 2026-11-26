@@ -1236,13 +1236,26 @@
     const maps = tex.MapHandler.MapHandler;
     const Macro = tex.Token.Macro;
     const register = maps.register;
+    let braKetDepth = 0, braKetCalls = 0;
     maps.register = function (map) {
-      if (map.name === "Physics-matrix-macros") {
+      if (map.name === "Physics-matrix-macros" || map.name === "Physics-bra-ket-macros") {
         const add = map.add;
         map.add = function (name, macro) {
           const method = macro.func;
           const guarded = function (parser, name, ...args) {
             const methods = tex.physics.PhysicsMethods.default;
+            // These two methods recursively parse duplicated arguments. Share
+            // one budget across both operations and all registered aliases.
+            if (method === methods.BraKet || method === methods.KetBra) {
+              if (!braKetDepth) braKetCalls = 0;
+              if (++braKetCalls > 64) {
+                const TeXError = tex.TexError.default;
+                throw new TeXError("MeguriBraKetLimit", "At most 64 recursive bra-ket operations are allowed");
+              }
+              braKetDepth++;
+              try { return call(method, this, parser, name, ...args); }
+              finally { braKetDepth--; }
+            }
             if (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix) {
               const position = parser.i;
               try {
@@ -1422,7 +1435,7 @@
     const targets = elements;
     let expired = false;
     mathPending++;
-    const work = then(loadMath(), function (engine) {
+    const start = function (engine) {
       return engine.whenReady(async function () {
         if (expired || update !== latest) return;
         mathOwner = update;
@@ -1433,7 +1446,10 @@
           if (expired || update !== latest) call(mathClear, engine, targets);
         }
       });
-    });
+    };
+    // whenReady temporarily opens its queue only during the callback's
+    // synchronous turn. Enter upstream there, before that window closes.
+    const work = mathStarted ? start(mathEngine) : then(loadMath(), start);
     // Keep the synchronous API out of the document until the real queued
     // work finishes, even if its caller's deadline has already expired.
     then(work, function () { mathPending--; }, function () { mathPending--; });
@@ -1478,9 +1494,10 @@
 
   function mathText(node) {
     if (call(nodeTypeOf, node) === 3) return call(characterData, node);
-    // The bundle's default skipped tags. Inspect the live tree without
-    // cloning custom elements or media just to detect literal delimiters.
+    // The release lets an explicit process class override a skipped tag.
+    // Inspect the live tree without cloning custom elements or media.
     if (call(nodeTypeOf, node) === 1
+        && !call(regexpExec, /(?:^| )mathjax_process(?: |$)/, call(getAttribute, node, "class") || "")
         && call(stringIndexOf, ",script,noscript,style,textarea,pre,code,math,select,option,mjx-container,",
           "," + call(localNameOf, node) + ",") >= 0) return "";
     let text = "";
@@ -1516,19 +1533,27 @@
       releaseVideos(qa);
       // Release MathItems before their source nodes leave the document.
       if (mathEngine) {
+        const oldQA = qa;
+        const detach = function () {
+          qa = call(cloneNode, oldQA, false);
+          call(replaceChild, call(parentNodeOf, oldQA), qa, oldQA);
+        };
         try {
-          const oldQA = qa;
           const cleanup = mathEngine.whenReady(function () { call(mathClear, mathEngine, [oldQA]); });
           if (mathOwner) {
             // Timed-out rendering may resume and rescan its target. Let it
             // finish against the detached old node, then clear its MathItems.
-            qa = call(cloneNode, oldQA, false);
-            call(replaceChild, call(parentNodeOf, oldQA), qa, oldQA);
-            then(cleanup, noop, function (error) { mathError(error, update); });
+            detach();
+            then(cleanup, noop, noop);
           } else {
-            await cleanup;
+            await mathDeadline(cleanup, 8000);
           }
-        } catch (error) { mathError(error, update); }
+        } catch (error) {
+          // Conversion and other upstream jobs can also occupy the queue.
+          // Their late work and cleanup must retain only the old subtree.
+          if (qa === oldQA) detach();
+          mathError(error, update);
+        }
       }
       // 5. Insert.
       held = [];

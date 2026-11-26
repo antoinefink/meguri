@@ -45,9 +45,11 @@ extension WebKitSuites {
             let front = try await prepared.webView.callAsyncJavaScript(
                 "return document.querySelectorAll('#qa mjx-container svg').length;", arguments: [:], in: nil, contentWorld: .page)
             #expect(front as? Int == 1)
-            CATransaction.begin()
-            _ = try pair.present(update)
-            CATransaction.commit()
+            do {
+                CATransaction.begin()
+                defer { CATransaction.commit() }
+                _ = try pair.present(update)
+            }
             _ = try await pair.showAnswer()
             let back = try await pair.current.webView.callAsyncJavaScript(
                 "return document.querySelectorAll('#qa mjx-container[display=\"true\"] svg').length;", arguments: [:], in: nil, contentWorld: .page)
