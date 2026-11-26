@@ -15,7 +15,7 @@ final class BackupsAccessibilityTests: XCTestCase {
         for surface in ["settings", "restore"] {
             for state in ["empty", "typical", "overflow", "error", "loading"] {
                 let route = surface == "settings" ? "settings/backups/\(state)" : "settings/backups/restore/\(state)"
-                let anchor = surface == "settings" ? "settings.backups.content" : "settings.backups.restoreContent"
+                let anchor = surface == "settings" ? "settings.backups.content" : "settings.backups.cancel"
                 let result = try AccessibilityAudit.runAllVariants(
                     state: "\(surface).\(state)", launch: MeguriLaunch(locale: "en_US", animations: false, route: route),
                     waitFor: anchor, suppressions: suppressions,

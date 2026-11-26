@@ -1091,9 +1091,9 @@ PUBLIC_ARTIFACTS = {
         '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
     # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
-        'bc7d1bec20468401e2be0ec8d63f455f19574291252daae69a901b5ebb62ab94',
+        '0b4a1aa4b8af598fbd1f97d80e2894620413acf003708a745ff5c7339e33b596',
     'docs/design/screen-inventory.yaml':
-        '1f9f3ed258e137a48c8fbfd194e148bd6c07f2bc806346776fcb5a69fba41620',
+        'cef48495e450b6ea42f401447b3165101f09f2119a751c34bef2e697a6d36a5d',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',

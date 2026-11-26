@@ -228,7 +228,6 @@ struct BackupRestoreContent: View {
                             .accessibilityIdentifier("settings.backups.entry.\(entry.name)")
                         }
                     }
-                    .accessibilityIdentifier("settings.backups.list")
                 }
                 if let error = presentation.failure {
                     BackupFailureText(error: error, candidateActive: presentation.candidateActive, uncertain: presentation.activationUncertain, restore: true)

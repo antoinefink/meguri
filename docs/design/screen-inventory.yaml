@@ -1145,8 +1145,13 @@ screens:
       authenticated /collection page without native credentials, query or fragment. The footer states
       that scheduled server backups include media and restoration there replaces the server collection.
       Stable identifiers: settings.backups.open, settings.backups.create, settings.backups.restore,
-      settings.backups.list, settings.backups.entry.<exact filename>, settings.backups.apply and
-      settings.backups.cancel. Scheduling observes core deadline events, collection replacement,
+      settings.backups.restoreContent, settings.backups.entry.<exact filename>, settings.backups.apply and
+      settings.backups.cancel. The toolbar’s settings.backups.cancel is the common sheet witness and
+      capture anchor on Mac and touch. SwiftUI may merge restoreContent into the native list; no second
+      list identifier is required. History readiness requires actual entry children and enabled Restore…,
+      while loading has Loading Backups… progress and empty content offers Try Again. Unique app entry
+      IDs support queries without depending on the platform’s native container shape.
+      Scheduling observes core deadline events, collection replacement,
       foreground/background and Mac quit independently of this page; another foreground scene retains
       the shared collection when one scene closes.
   - id: settings.maintenance

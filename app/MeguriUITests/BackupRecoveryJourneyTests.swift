@@ -13,6 +13,9 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     private let originalBack = "Synthetic recovery answer QZ83"
     private let editMarker = "postbackupQZ92"
     private let entryPrefix = "settings.backups.entry."
+    // Native sheet toolbar action on both platforms, independent of the
+    // CollectionView/outline/group shape SwiftUI chooses for restoreContent.
+    private let historyAnchor = "settings.backups.cancel"
     private let runID = UUID()
     private var launchedMinutes: Set<Int> = []
     private var bundle = ""
@@ -102,14 +105,14 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertEqual(element(app, entryPrefix + older).value as? String, "Not selected",
             "The older archive must start unselected while newer backups exist")
         try select(older, app)
-        try capture(app, anchor: "settings.backups.list", state: "history-older-backup-selected")
-        let historyWindow = try captureWindow(app, anchor: "settings.backups.list")
+        try capture(app, anchor: historyAnchor, state: "history-older-backup-selected")
+        let historyWindow = try captureWindow(app, anchor: historyAnchor)
         let outside = try confirmationDismissalPoint(historyWindow)
         let confirmation = try advanceToConfirmation(app, filename: older)
         capture(historyWindow, state: "confirmation-restore-older-backup")
         try cancelConfirmation(confirmation, app, outside: outside)
-        XCTAssertTrue(element(app, "settings.backups.cancel").waitForExistence(timeout: 10), "Cancellation keeps the restore sheet open")
-        XCTAssertTrue(element(app, "settings.backups.list").waitForExistence(timeout: 10))
+        try waitForHistory(app)
+        XCTAssertFalse(element(app, "settings.backups.progress").exists, "Cancellation must not start restore work")
         XCTAssertTrue(wait { self.selectionMatches(older, app) },
             "Cancellation keeps the specifically selected older entry")
         XCTAssertEqual(entryNames(app), beforeCancel, "Cancelling confirmation must not create a safety backup")
@@ -146,7 +149,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         try openHistory(app)
         XCTAssertTrue(entryNames(app).isSuperset(of: [older, newer, safety]),
             "The original archive and the pre-restore safety copy must survive process termination")
-        try capture(app, anchor: "settings.backups.list", state: "history-safety-copy-after-relaunch")
+        try capture(app, anchor: historyAnchor, state: "history-safety-copy-after-relaunch")
         // Restore the newly identified safety archive, not the later manual
         // archive: recovering the edit proves the predecessor was preserved.
         try restore(safety, app)
@@ -310,8 +313,16 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func waitForHistory(_ app: XCUIApplication) throws {
-        XCTAssertTrue(element(app, "settings.backups.list").waitForExistence(timeout: 20))
-        XCTAssertTrue(wait { !self.entryNames(app).isEmpty && self.element(app, "settings.backups.apply").isEnabled },
+        XCTAssertTrue(element(app, historyAnchor).waitForExistence(timeout: 20))
+        XCTAssertTrue(wait {
+            let apply = self.element(app, "settings.backups.apply")
+            // The shared content anchor also exists during loading and empty
+            // states. Actual entries, rather than the container ID, prove a list.
+            return !self.entryNames(app).isEmpty && apply.exists && apply.isEnabled
+                && !self.element(app, "settings.backups.loading").exists
+                && !self.element(app, "settings.backups.progress").exists
+                && !self.element(app, "settings.backups.retry").exists
+        },
             "Real history must load an eligible, preselected backup")
         try assertRunHistory(app)
     }
@@ -334,7 +345,10 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func entryNames(_ app: XCUIApplication) -> Set<String> {
-        Set(element(app, "settings.backups.list").descendants(matching: .any)
+        // iPhone's CollectionView adopts restoreContent from the VStack; Mac
+        // uses different native containers. Entry IDs are unique in the app,
+        // so neither platform depends on an extra accessible parent/list node.
+        Set(app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", entryPrefix))
             .allElementsBoundByIndex.map { String($0.identifier.dropFirst(entryPrefix.count)) })
     }
@@ -356,26 +370,6 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func advanceToConfirmation(_ app: XCUIApplication, filename: String) throws -> XCUIElement {
-        try act(element(app, "settings.backups.apply"), app)
-        // System confirmation buttons lose app identifiers (app/AGENTS.md).
-        let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
-            XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.sheet.rawValue,
-            XCUIElement.ElementType.alert.rawValue, XCUIElement.ElementType.dialog.rawValue,
-        ])).containing(.button, identifier: "Restore")
-        var found: XCUIElement?
-        XCTAssertTrue(wait {
-            // Exclude the presenting restore sheet if it contains the native
-            // prompt as a descendant; prefer the innermost native surface.
-            found = contexts.allElementsBoundByIndex.filter {
-                self.destructiveRestore($0).exists
-                    && !$0.buttons.matching(identifier: "settings.backups.cancel").firstMatch.exists
-            }.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
-            return found != nil
-        })
-        let confirmation = try XCTUnwrap(found, "A native confirmation must own the destructive Restore button")
-        // Exact caption + confirmation context exclude the parent's Restore…
-        // (settings.backups.apply), even when the parent sheet is also visible.
-        XCTAssertTrue(destructiveRestore(confirmation).isEnabled)
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
         parser.calendar = Calendar(identifier: .gregorian); parser.timeZone = .gmt
@@ -384,23 +378,64 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.calendar = parser.calendar; formatter.timeZone = .gmt
+        // Match production BackupPresentation.timestamp: medium wall date/time,
+        // including seconds and the locale's exact (possibly nonbreaking) spaces.
         formatter.dateStyle = .medium; formatter.timeStyle = .medium
-        let title = "Replace the current collection with the backup from \(formatter.string(from: date))?"
-        XCTAssertTrue(confirmation.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@ OR value == %@", title, title)).firstMatch.waitForExistence(timeout: 10),
+        let timestamp = formatter.string(from: date)
+        let row = element(app, entryPrefix + filename)
+        XCTAssertTrue(row.label.contains(filename) && row.label.contains(timestamp))
+        XCTAssertTrue(selectionMatches(filename, app))
+        let title = "Replace the current collection with the backup from \(timestamp)?"
+        try act(element(app, "settings.backups.apply"), app)
+        // System confirmations lose app action IDs. iOS 27 may expose a menu
+        // rather than a popover; native menu actions may be menu items.
+        let contexts = app.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
+            XCUIElement.ElementType.popover.rawValue, XCUIElement.ElementType.menu.rawValue,
+            XCUIElement.ElementType.sheet.rawValue, XCUIElement.ElementType.alert.rawValue,
+            XCUIElement.ElementType.dialog.rawValue,
+        ]))
+        var found: XCUIElement?
+        XCTAssertTrue(wait {
+            // Bind the exact title and action to the same native prompt. The
+            // presenting sheet's toolbar actions cannot qualify that context.
+            found = contexts.allElementsBoundByIndex.filter {
+                self.destructiveRestore($0).exists && self.containsText(title, in: $0)
+                    && !$0.descendants(matching: .any).matching(identifier: self.historyAnchor).firstMatch.exists
+            }.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+            return found != nil
+        },
             "Confirmation must name the date and time of the exact selected archive: \(filename)")
+        let confirmation = try XCTUnwrap(found, "A native confirmation must own the destructive Restore action")
+        XCTAssertTrue(destructiveRestore(confirmation).isEnabled)
+        XCTAssertTrue(containsText("The current collection is backed up first. This replaces the collection on this device. Media files are kept.",
+            in: confirmation))
         return confirmation
     }
 
+    private func containsText(_ expected: String, in context: XCUIElement) -> Bool {
+        text(context) == expected || context.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", expected, expected)).firstMatch.exists
+    }
+
+    private func confirmationAction(_ title: String, excluding identifier: String, in context: XCUIElement) -> XCUIElement {
+        #if os(macOS)
+        let caption = NSPredicate(format: "(label == %@ OR title == %@) AND identifier != %@", title, title, identifier)
+        #else
+        let caption = NSPredicate(format: "label == %@ AND identifier != %@", title, identifier)
+        #endif
+        return context.descendants(matching: .any).matching(NSPredicate(format: "elementType IN %@", [
+            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.menuItem.rawValue,
+        ])).matching(caption).firstMatch
+    }
+
     private func destructiveRestore(_ confirmation: XCUIElement) -> XCUIElement {
-        confirmation.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
-            "Restore", "settings.backups.apply")).firstMatch
+        confirmationAction("Restore", excluding: "settings.backups.apply", in: confirmation)
     }
 
     private func confirmationDismissalPoint(_ window: XCUIElement) throws -> XCUICoordinate? {
         #if os(iOS)
         // Capture geometry before the modal tree hides the presenting controls.
-        let bar = window.navigationBars.firstMatch
+        let bar = window.navigationBars.containing(.button, identifier: historyAnchor).firstMatch
         XCTAssertTrue(bar.exists)
         return window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
             dx: bar.frame.midX - window.frame.minX, dy: bar.frame.midY - window.frame.minY))
@@ -410,8 +445,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func cancelConfirmation(_ confirmation: XCUIElement, _ app: XCUIApplication, outside: XCUICoordinate?) throws {
-        let cancel = confirmation.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@",
-            "Cancel", "settings.backups.cancel")).firstMatch
+        let cancel = confirmationAction("Cancel", excluding: historyAnchor, in: confirmation)
         if cancel.exists && cancel.isHittable {
             try act(cancel, app)
         } else {
@@ -437,7 +471,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         // sheet closing after terminal delivery establishes durable completion.
         XCTAssertTrue(element(app, "settings.backups.cancel").waitForNonExistence(timeout: 30),
             "The sheet's toolbar Cancel must disappear after durable replacement")
-        XCTAssertFalse(element(app, "settings.backups.list").exists)
+        XCTAssertTrue(entryNames(app).isEmpty)
     }
 
     private func cancelHistory(_ app: XCUIApplication) throws {
@@ -481,7 +515,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, anchor: String, state: String) throws {
-        if element(app, "settings.backups.list").exists { try assertRunHistory(app) }
+        if anchor == historyAnchor { try assertRunHistory(app) }
         capture(try captureWindow(app, anchor: anchor), state: state)
     }
 
