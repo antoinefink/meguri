@@ -407,9 +407,11 @@ fn selected_name_lookup_ignores_unrelated_malformed_deck_blobs() {
     let root = tempfile::tempdir().unwrap();
     let config = config(root.path(), root.path().join("backups"), Arc::new(StatvfsSpace));
     let host = CoreHost::open(config.clone()).unwrap();
+    host.close().unwrap();
     let db = meguri_storage::raw::PlainDatabase::open(&config.collection_directory.join("collection.anki2")).unwrap();
     db.execute_batch("INSERT INTO decks (id,name,mtime_secs,usn,common,kind) VALUES (200,'Unrelated',0,0,x'ff',x'ff')").unwrap();
     db.close().unwrap();
+    let host = CoreHost::open(config).unwrap();
     let output = host.write_deck_export(&host.collection().unwrap(), &CancelToken::new(), &ProgressSink::new(), 1,
         meguri_package::DeckExportOptions { include_scheduling: false, include_presets: false, include_media: false }).unwrap();
     assert_eq!(output.deck_counts, Some(meguri_package::DeckExportCounts { notes: 0, cards: 0, media: 0 }));
