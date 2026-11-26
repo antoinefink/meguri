@@ -33,6 +33,8 @@ struct CollectionExportPresentation {
     var title = "Preparing Export…"
     var progress: Progress?
     var message: String?
+    var summary: String?
+    var confirmsEmptyDeck = false
     init() {}
     init(_ coordinator: CollectionExportCoordinator) {
         navigationTitle = coordinator.title; identifierPrefix = coordinator.identifierPrefix
@@ -46,7 +48,10 @@ struct CollectionExportPresentation {
         if coordinator.stage == .preparing, let value = coordinator.progress, let total = value.total, total > 0 {
             progress = .init(completed: min(value.completed, total), total: total)
         }
+        summary = coordinator.deckExportSummary
+        confirmsEmptyDeck = coordinator.confirmsEmptyDeck
         message = coordinator.message ?? coordinator.availabilityMessage
+        if confirmsEmptyDeck { message = "This deck contains zero notes. You can save an empty deck package." }
     }
 }
 /// Production rendering is also used by the registered snapshot fixtures.
@@ -74,6 +79,12 @@ struct CollectionExportContent: View {
                         .accessibilityIdentifier("\(presentation.identifierPrefix).progress")
                     }
                 }
+                if let summary = presentation.summary {
+                    Section {
+                        Text(verbatim: summary)
+                            .accessibilityIdentifier("\(presentation.identifierPrefix).summary")
+                    }
+                }
                 if let message = presentation.message {
                     Section {
                         Text(LocalizedStringKey(message), bundle: .module)
@@ -96,6 +107,13 @@ struct CollectionExportContent: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                if presentation.confirmsEmptyDeck {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(action: choose) { Text("Save…", bundle: .module) }
+                            .keyboardShortcut(.defaultAction)
+                            .accessibilityIdentifier("\(presentation.identifierPrefix).save")
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     // A plain titled button, so the system draws its own bar button.
                     Button(presentation.saved ? String(localized: "Done", bundle: .module) : String(localized: "Cancel", bundle: .module),

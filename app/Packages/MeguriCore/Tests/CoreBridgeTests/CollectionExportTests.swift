@@ -52,13 +52,42 @@ private final class ExportAccessWitness: CollectionExportDestinationAccess {
     @Test func boundedReceiptPreservesAdmissionAndSnapshotFacts() {
         let receipt = CoreBridge.CollectionExportMetadata(MeguriCoreBindings.CollectionExportMetadata(
             operationId: 42, sourceGeneration: 3, admissionSeq: 100, snapshotModifiedMs: 77,
-            byteLength: 3_000_000_000, suggestedName: "Meguri-Collection.colpkg", sha256: Data(repeating: 7, count: 32)))
+            byteLength: 3_000_000_000, suggestedName: "Meguri-Collection.colpkg", sha256: Data(repeating: 7, count: 32), deckCounts: nil))
         #expect(receipt.operationID == 42 && receipt.sourceGeneration == 3 && receipt.admissionSequence == 100)
         #expect(receipt.snapshotModifiedMilliseconds == 77 && receipt.byteLength == 3_000_000_000)
         #expect(receipt.sha256.count == 32 && receipt.suggestedName.hasSuffix(".colpkg"))
         let failure = CoreBridge.CollectionExportFailure(MeguriCoreBindings.CollectionExportFailure(
             cause: .Cancelled, publicationUncertain: true, destination: "/synthetic/saved.colpkg"))
         #expect(failure.cause == .cancelled && failure.publicationUncertain)
+    }
+    @Test func deckCountsAndRefusalsSurviveGeneratedBindings() {
+        let metadata = CoreBridge.CollectionExportMetadata(MeguriCoreBindings.CollectionExportMetadata(
+            operationId: 1, sourceGeneration: 2, admissionSeq: 3, snapshotModifiedMs: 4,
+            byteLength: 5, suggestedName: "Deck.apkg", sha256: Data(repeating: 0, count: 32),
+            deckCounts: .init(notes: 0, cards: 2, media: 3)))
+        #expect(metadata.deckCounts?.notes == 0 && metadata.deckCounts?.cards == 2 && metadata.deckCounts?.media == 3)
+        let cases: [(MeguriCoreBindings.CoreError, CoreBridge.DeckExportRefusal)] = [
+            (.NotFound(table: .decks, key: "42"), .missingDeck),
+            (.ExportInvalidIds, .invalidIDs), (.ExportNeedsCheckDatabase, .needsCheckDatabase)
+        ]
+        for (cause, refusal) in cases {
+            let receipt = CoreBridge.CollectionExportFailure(MeguriCoreBindings.CollectionExportFailure(
+                cause: cause, publicationUncertain: false, destination: nil))
+            #expect(receipt.deckRefusal == refusal && !receipt.publicationUncertain)
+        }
+    }
+    @Test func collectionOnlyServiceRejectsDeckWithoutCallingCollectionPreparation() async {
+        let service = CollectionOnlyExportService()
+        do {
+            _ = try await service.prepare(deck: DeckExportRequest(deckID: 42, options: .init(), expectedGeneration: 1),
+                                          operation: CollectionExportOperation(), progress: { _ in })
+            Issue.record("An unsupported deck request must be refused")
+        } catch { #expect((error as? BridgeError) == .unsupported(feature: "Selected-deck export")) }
+        #expect(service.calls.withLock { $0 } == 0)
+        do {
+            _ = try await service.prepare(deck: nil, operation: CollectionExportOperation(), progress: { _ in })
+        } catch { #expect((error as? BridgeError) == .cancelled) }
+        #expect(service.calls.withLock { $0 } == 1)
     }
     @Test(arguments: [false, true])
     func cancelledSwiftTaskKeepsCoordinatedAccessUntilActualIOEnds(fails: Bool) async throws {
@@ -123,4 +152,14 @@ extension EventTests {
         await operation.attach(job)
         #expect(await job.outcome() == .cancelled)
     }
+}
+
+/// The original collection-only service surface remains a valid conformer.
+private final class CollectionOnlyExportService: CollectionExportService {
+    let calls = Mutex(0)
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        calls.withLock { $0 += 1 }
+        throw BridgeError.cancelled
+    }
+    func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {}
 }

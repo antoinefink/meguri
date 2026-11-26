@@ -35,6 +35,7 @@ impl AtomicFile {
         let dir = parent(destination);
         let temp = tempfile::Builder::new()
             .prefix(&format!(".meguri-tmp-{}-", purpose.name()))
+            .rand_bytes(6) // reserved recovery filename: six ASCII alphanumeric characters
             .tempfile_in(dir)?;
         Ok(Self {
             destination: destination.to_owned(),

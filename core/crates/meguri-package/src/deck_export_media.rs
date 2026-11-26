@@ -28,6 +28,11 @@ pub(crate) fn fields(out: &mut BTreeSet<String>, field: &str, svg: bool) {
         add(out, &name);
     }
     for captures in LATEX.captures_iter(field) {
+        // Consume empty pairs too: a nonempty regex alone could span an empty
+        // pair's closing tag and swallow the adjacent nonempty block.
+        if captures.iter().skip(1).flatten().any(|body| body.as_str().is_empty()) {
+            continue;
+        }
         let text = if let Some(body) = captures.get(1) {
             body.as_str().to_owned()
         } else if let Some(body) = captures.get(2) {
@@ -79,6 +84,27 @@ mod tests {
         assert!(out.contains("latex-fcd127ffa1016069006ad91f3f361248f9bdf272.png"));
         assert!(out.contains("x&y.png"));
         assert!(out.contains("é.mp3"));
+    }
+    #[test]
+    fn adjacent_empty_latex_pairs_do_not_capture_neighbors_or_empty_images() {
+        for (open, close) in [("[latex]", "[/latex]"), ("[$]", "[/$]"), ("[$$]", "[/$$]")] {
+            for svg in [false, true] {
+                let mut expected = BTreeSet::new();
+                fields(&mut expected, &format!("{open}x{close}"), svg);
+                assert_eq!(expected.len(), 1);
+                let mut actual = BTreeSet::new();
+                fields(&mut actual, &format!("{open}{close}{open}x{close}{open}{close}{open}{close}{open}x{close}"), svg);
+                assert_eq!(actual, expected);
+                let mut empty = BTreeSet::new();
+                fields(&mut empty, &format!("{open}{close}{open}{close}"), svg);
+                assert!(empty.is_empty());
+            }
+        }
+        let mut expected = BTreeSet::new();
+        fields(&mut expected, "[latex]x[/latex][$]y[/$][$$]z[/$$]", false);
+        let mut mixed = BTreeSet::new();
+        fields(&mut mixed, "[$][/$][latex]x[/latex][$$][/$$][$]y[/$][latex][/latex][$$]z[/$$][$][/$]", false);
+        assert_eq!(mixed, expected);
     }
     #[test]
     fn static_patterns_keep_spec_matching_rules() {

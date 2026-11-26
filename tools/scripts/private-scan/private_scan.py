@@ -835,8 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
-    "core/crates/meguri-ffi/src/collection_export.rs": "07f043190bbdfe85a01c528583edb02177be0a3bae9737ee3e7db72e437dc599",
-    "core/crates/meguri-host/src/collection_export.rs": "ec3d9176ec7a6a776b40d311a8e0f6c590921488a49c962ebd95ba1acb9f9e65",
+    "core/crates/meguri-package/tests/deck_export.rs": "d3556478eb2f8b362fb09188bc1a784c7805db262d94a7cf196bd4090a94ea61",
+    "core/crates/meguri-ffi/src/collection_export.rs": "b7eeae7c8e3a500640b0a22e6b736cb9876b4d4b05986c6019044a847559c3cb",
+    "core/crates/meguri-host/src/collection_export.rs": "d8b35cd6ade111ff36283dc0e461c8ff1a88ed00c96f5f422ff0b8616bf3dd3e",
     "app/MeguriUITests/TouchNoteTypeDeletionUITests.swift":
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",

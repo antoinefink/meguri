@@ -81,9 +81,11 @@ impl ReadSnapshot<'_> {
             .query_row("SELECT name FROM decks WHERE id=?1", [deck_id], |r| r.get(0))
             .optional()?
             .ok_or(DeckExportReadError::DeckNotFound(deck_id))?;
-        // Native hierarchy separators, with the collection's own collation;
-        // wildcard characters in a deck name have no special meaning.
-        let selected = "SELECT n.id FROM notes n WHERE EXISTS (SELECT 1 FROM cards c JOIN decks d ON d.id=c.did WHERE c.nid=n.id AND (d.name=?1 COLLATE unicase OR substr(d.name,1,length(?1)+1)=(?1 || char(31)) COLLATE unicase))";
+        // The name index compares complete folded strings, so a parent whose
+        // spelling expands under case folding still bounds the same subtree.
+        // U+001F is the hierarchy separator; U+0020 is its exclusive successor.
+        // Start at decks/cards rather than probing every note in the collection.
+        let selected = "SELECT id FROM notes WHERE id IN (SELECT c.nid FROM cards c WHERE c.did IN (SELECT id FROM decks WHERE name=?1 COLLATE unicase OR (name >= (?1 || char(31)) COLLATE unicase AND name < (?1 || char(32)) COLLATE unicase)))";
         let ids = |sql: &str| -> Result<Vec<i64>, DeckExportReadError> {
             let mut statement = self.conn().prepare(sql)?;
             let mut rows = statement.query([&name])?;
@@ -94,7 +96,7 @@ impl ReadSnapshot<'_> {
             }
             Ok(out)
         };
-        let notes = ids(&format!("{selected} ORDER BY n.id"))?;
+        let notes = ids(&format!("{selected} ORDER BY id"))?;
         let cards = ids(&format!("SELECT id FROM cards WHERE nid IN ({selected}) ORDER BY id"))?;
         let revlog = if scheduling {
             ids(&format!(

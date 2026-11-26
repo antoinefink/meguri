@@ -4,10 +4,15 @@ import Synchronization
 internal import MeguriCoreBindings
 
 public protocol CollectionExportService: Sendable {
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection
     func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection
     func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws
 }
 extension CollectionExportService {
+    public func prepare(deck: DeckExportRequest?, operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        guard deck == nil else { throw BridgeError.unsupported(feature: "Selected-deck export") }
+        return try await prepare(operation: operation, progress: progress)
+    }
     public func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
         try await prepare(deck: nil, operation: operation, progress: progress)
     }

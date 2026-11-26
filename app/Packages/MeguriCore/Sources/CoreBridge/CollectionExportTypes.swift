@@ -23,6 +23,14 @@ public struct DeckExportRequest: Sendable, Equatable {
     }
 }
 
+public struct DeckExportCounts: Sendable, Equatable {
+    public let notes: UInt64
+    public let cards: UInt64
+    public let media: UInt64
+    init(_ raw: MeguriCoreBindings.DeckExportCounts) {
+        notes = raw.notes; cards = raw.cards; media = raw.media
+    }
+}
 public struct CollectionExportMetadata: Sendable, Equatable {
     public let operationID: UInt64
     public let sourceGeneration: UInt64
@@ -31,20 +39,33 @@ public struct CollectionExportMetadata: Sendable, Equatable {
     public let byteLength: UInt64
     public let suggestedName: String
     public let sha256: [UInt8]
+    public let deckCounts: DeckExportCounts?
     init(_ raw: MeguriCoreBindings.CollectionExportMetadata) {
         operationID = raw.operationId; sourceGeneration = raw.sourceGeneration; admissionSequence = raw.admissionSeq
         snapshotModifiedMilliseconds = raw.snapshotModifiedMs; byteLength = raw.byteLength
         suggestedName = raw.suggestedName; sha256 = Array(raw.sha256)
+        deckCounts = raw.deckCounts.map(DeckExportCounts.init)
     }
+}
+public enum DeckExportRefusal: Sendable, Equatable {
+    case missingDeck, invalidIDs, needsCheckDatabase
 }
 public struct CollectionExportFailure: Error, Sendable, Equatable {
     public let cause: BridgeError
+    public let deckRefusal: DeckExportRefusal?
     public let publicationUncertain: Bool
     public let destination: URL?
-    init(cause: BridgeError, destination: URL) {
+    init(cause: BridgeError, destination: URL, deckRefusal: DeckExportRefusal? = nil) {
+        self.deckRefusal = deckRefusal
         self.cause = cause; publicationUncertain = false; self.destination = destination
     }
     init(_ raw: MeguriCoreBindings.CollectionExportFailure) {
+        switch raw.cause {
+        case .NotFound(table: .decks, key: _): deckRefusal = .missingDeck
+        case .ExportInvalidIds: deckRefusal = .invalidIDs
+        case .ExportNeedsCheckDatabase: deckRefusal = .needsCheckDatabase
+        default: deckRefusal = nil
+        }
         cause = BridgeError(raw.cause); publicationUncertain = raw.publicationUncertain
         destination = raw.destination.map { URL(fileURLWithPath: $0) }
     }

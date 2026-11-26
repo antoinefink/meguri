@@ -37,6 +37,12 @@ impl Drop for Flow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeckExportCounts {
+    pub notes: u64,
+    pub cards: u64,
+    pub media: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CollectionExportMetadata {
     pub operation_id: u64,
     pub source_generation: u64,
@@ -45,6 +51,7 @@ pub struct CollectionExportMetadata {
     pub byte_length: u64,
     pub suggested_name: String,
     pub sha256: Vec<u8>,
+    pub deck_counts: Option<DeckExportCounts>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CollectionExportFailure {
@@ -436,6 +443,9 @@ fn prepare_export(
                 byte_length,
                 suggested_name: output.suggested_name,
                 sha256: sha256.to_vec(),
+                deck_counts: output.deck_counts.map(|counts| DeckExportCounts {
+                    notes: counts.notes, cards: counts.cards, media: counts.media,
+                }),
             },
             removal: Mutex::new(meguri_host::CollectionExportRemoval::default()),
             state: Mutex::new(ArtifactState {
@@ -704,6 +714,7 @@ pub fn save_file_for_memory_regression(
             byte_length,
             suggested_name: "Meguri-Collection.colpkg".into(),
             sha256: hash.to_vec(),
+            deck_counts: None,
         },
         state: Mutex::new(ArtifactState {
             discarded: false,
@@ -1263,6 +1274,8 @@ mod tests {
             match &error {
                 EngineError::ExportSourceChanged => "ExportSourceChanged",
                 EngineError::ExportSourceInvalid => "ExportSourceInvalid",
+                EngineError::ExportInvalidIds => "ExportInvalidIds",
+                EngineError::ExportNeedsCheckDatabase => "ExportNeedsCheckDatabase",
                 EngineError::ExportFormatLimit => "ExportFormatLimit",
                 EngineError::SyncNote(_) => "SyncNote",
                 EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",
@@ -1803,6 +1816,8 @@ mod source_refusal_projection_tests {
             (EngineError::ExportSourceChanged, CoreError::ExportSourceChanged),
             (EngineError::ExportSourceInvalid, CoreError::ExportSourceInvalid),
             (EngineError::ExportFormatLimit, CoreError::ExportFormatLimit),
+            (EngineError::ExportInvalidIds, CoreError::ExportInvalidIds),
+            (EngineError::ExportNeedsCheckDatabase, CoreError::ExportNeedsCheckDatabase),
             (EngineError::Cancelled, CoreError::Cancelled),
             (
                 EngineError::Storage(StorageError::InsufficientSpace {

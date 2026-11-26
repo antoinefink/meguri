@@ -438,7 +438,7 @@ fn changed_media_cancellation_and_retained_alias_preserve_output() {
             _ => {
                 let retained = f.dir.path().join("retained.apkg");
                 fs::hard_link(&media, &retained).unwrap();
-                assert!(plan.protect_retained_outputs(&[retained.clone()], &check).is_err());
+                assert!(plan.protect_retained_outputs(std::slice::from_ref(&retained), &check).is_err());
                 assert_eq!(fs::read(retained).unwrap(), b"referenced");
                 continue;
             }
@@ -513,7 +513,7 @@ fn missing_deck_refuses_before_creating_anything() {
             include_media: true,
         },
     );
-    assert!(matches!(result,Err(Error::ExportSourceInvalid {detail}) if detail.contains("DeckNotFound")));
+    assert!(matches!(result, Err(Error::DeckNotFound { id: 987654 })));
     assert!(!path.exists());
     assert_eq!(before, super::apkg_import::listing(&f));
 }
@@ -544,7 +544,7 @@ fn missing_preset_refuses_only_when_presets_are_requested_and_empty_deck_is_vali
         include_media: false,
     };
     assert!(
-        matches!(preflight_deck_export_from_live(&reader,&path,&context,100,options),Err(Error::ExportSourceInvalid {detail}) if detail.contains("deck_config"))
+        matches!(preflight_deck_export_from_live(&reader,&path,&context,100,options),Err(Error::ExportNeedsCheckDatabase))
     );
     assert!(!path.exists());
     assert!(
@@ -568,4 +568,79 @@ fn missing_preset_refuses_only_when_presets_are_requested_and_empty_deck_is_vali
     let session = super::apkg_import::inspect(&target, &empty).unwrap();
     assert_eq!(session.facts().notes, 0);
     assert_eq!(session.facts().cards, 0);
+}
+
+#[test]
+fn subtree_selection_compares_complete_folded_names_and_literal_wildcards() {
+    for (parent, child) in [("Straße", "STRASSE"), ("STRASSE", "Straße"), ("100%_", "100%_")] {
+        let f = Fixture::new(6);
+        let cards = f.cards.clone();
+        let names = [parent.to_owned(), format!("{child}\u{1f}Child"), format!("{child}\u{1f}Child\u{1f}Grandchild"),
+            format!("{child}!\u{1f}Adjacent"), format!("{child}2\u{1f}Prefix"), "100XX\u{1f}Wildcard".into()];
+        f.collection.run(OpSpec::named("folded export scope", OpSource::Maintenance), move |ctx| {
+            for (index, (name, card)) in names.iter().zip(&cards).enumerate() {
+                let mut deck = meguri_engine::decks::new_deck(name.clone());
+                deck.id = DeckId(100 + index as i64);
+                ctx.scope().put(&deck)?;
+                let mut card = ctx.scope().card(*card)?.unwrap();
+                card.deck_id = deck.id;
+                ctx.scope().put(&card)?;
+            }
+            Ok(())
+        }).unwrap();
+        let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+        let snapshot = reader.begin_snapshot().unwrap();
+        let selected = snapshot.select_deck_export(100, true, false, NOW, &|| false).unwrap();
+        let mut expected_cards: Vec<_> = f.cards[..3].iter().map(|id| id.0).collect();
+        expected_cards.sort();
+        assert_eq!(selected.cards, expected_cards);
+        assert_eq!(selected.notes.len(), 3);
+    }
+}
+
+#[test]
+fn written_counts_follow_the_final_pinned_selection() {
+    let f = seeded();
+    let path = f.dir.path().join("final-counts.apkg");
+    let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+    let context = CollectionPackageWriteContext {
+        collection_directory: f.collection.path().parent().unwrap(), purpose: Purpose::Export,
+        finalisation: Finalisation::ExclusiveCreate, clock: f.clock.as_ref(), random: f.random.as_ref(),
+        space: &StatvfsSpace, is_cancelled: &|| false,
+    };
+    let options = DeckExportOptions { include_scheduling: true, include_presets: false, include_media: false };
+    let plan = preflight_deck_export_from_live(&reader, &path, &context, 100, options).unwrap();
+    assert_eq!(plan.note_count(), 2);
+    let card = f.cards[1];
+    f.collection.run(OpSpec::named("move before final export", OpSource::Maintenance), move |ctx| {
+        let mut card = ctx.scope().card(card)?.unwrap();
+        card.deck_id = DeckId(300);
+        ctx.scope().put(&card)?;
+        Ok(())
+    }).unwrap();
+    let output = write_deck_export_from_live(&reader, &path, &context, plan).unwrap();
+    assert_eq!(output.deck_counts, Some(meguri_package::DeckExportCounts { notes: 1, cards: 2, media: 0 }));
+}
+
+#[test]
+fn future_selected_card_refuses_with_typed_check_database_guidance() {
+    let f = seeded();
+    let original = f.cards[0];
+    f.collection.run(OpSpec::named("future export id", OpSource::Maintenance), move |ctx| {
+        let mut card = ctx.scope().card(original)?.unwrap();
+        card.id = CardId(NOW + 86_400_001);
+        ctx.scope().put(&card)?;
+        Ok(())
+    }).unwrap();
+    let reader = f.collection.reader(ReaderRole::Maintenance).unwrap();
+    let path = f.dir.path().join("invalid-ids.apkg");
+    let context = CollectionPackageWriteContext {
+        collection_directory: f.collection.path().parent().unwrap(), purpose: Purpose::Export,
+        finalisation: Finalisation::ExclusiveCreate, clock: f.clock.as_ref(), random: f.random.as_ref(),
+        space: &StatvfsSpace, is_cancelled: &|| false,
+    };
+    let result = preflight_deck_export_from_live(&reader, &path, &context, 100,
+        DeckExportOptions { include_scheduling: false, include_presets: false, include_media: false });
+    assert!(matches!(result, Err(Error::ExportInvalidIds)));
+    assert!(!path.exists());
 }

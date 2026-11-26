@@ -41,6 +41,17 @@ public final class CollectionExportCoordinator {
         guard let owner, let artifact else { return false }
         return !busy && providerLease == nil && !stale && !discardRequested && owner.generation == artifact.metadata.sourceGeneration
     }
+    public var confirmsEmptyDeck: Bool {
+        isDeckExport && artifact?.metadata.deckCounts?.notes == 0 && stage == .ready && canSave
+    }
+    public var deckExportSummary: String? {
+        guard isDeckExport, let counts = artifact?.metadata.deckCounts else { return nil }
+        func count(_ value: UInt64, _ one: String, _ many: String) -> String {
+            "\(value.formatted()) \(value == 1 ? one : many)"
+        }
+        return [count(counts.notes, "note", "notes"), count(counts.cards, "card", "cards"),
+                count(counts.media, "media file", "media files")].joined(separator: " · ")
+    }
     public var canRetryCompletion: Bool { !busy && completionRetryNeeded && providerLease != nil }
     /// N17.3: one plain line; the phase detail stays in diagnostics.
     public var plainProgressTitle: String {
@@ -106,7 +117,7 @@ public final class CollectionExportCoordinator {
     /// and a finished or cancelled save discards the prepared file and closes.
     public private(set) var continuous = false
     /// Whether the save dialog can be shown again for the retained file.
-    public var canChooseAgain: Bool { continuous && canSave && stage != .saved }
+    public var canChooseAgain: Bool { continuous && canSave && stage != .saved && !confirmsEmptyDeck }
     /// Export Collection: prepare at once, with progress, then ask where to save.
     public func start() {
         guard canPresent else { return }
@@ -186,7 +197,7 @@ public final class CollectionExportCoordinator {
             if continuous {
                 // Without its sheet there is nobody to ask or to tell.
                 if !sheetShows { await abandonContinuous() }
-                else if stage == .ready, canSave { chooseDestination() }
+                else if stage == .ready, canSave, !confirmsEmptyDeck { chooseDestination() }
             }
         }
     }
@@ -353,6 +364,8 @@ public final class CollectionExportCoordinator {
             message = "The collection was replaced. Export again to save the current collection."
         } else if destination {
             message = "The file could not be saved. The completed export is retained; choose another destination and try again."
+        } else if let refusal = (error as? CollectionExportFailure)?.deckRefusal {
+            message = deckRefusalMessage(refusal)
         } else if let cause = (error as? CollectionExportFailure)?.cause ?? (error as? BridgeError),
                   let refusal = sourceRefusalMessage(cause) {
             message = refusal
@@ -365,8 +378,17 @@ public final class CollectionExportCoordinator {
                 : "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
         }
     }
+    private func deckRefusalMessage(_ refusal: DeckExportRefusal) -> String {
+        switch refusal {
+        case .missingDeck: "The selected deck no longer exists. Close this export and select another deck."
+        case .invalidIDs: "Some note, card or review IDs are too far in the future. Run Check Database, then export again."
+        case .needsCheckDatabase: "The selected deck contains damaged records or missing references. Run Check Database, then export again."
+        }
+    }
     private func sourceRefusalMessage(_ cause: BridgeError) -> String? {
         switch cause {
+        case .notFound(table: .decks, key: _) where isDeckExport:
+            return "The selected deck no longer exists. Close this export and select another deck."
         case .exportSourceChanged:
             return "The media source changed during export. Start a fresh export after changes finish."
         case .exportSourceInvalid:

@@ -6,7 +6,7 @@ mod deck_export_media;
 mod export_capture;
 mod file_export;
 pub use deck_export::{
-    DeckExportOptions, DeckExportPlan, preflight_deck_export_from_live, write_deck_export_from_live,
+    DeckExportCounts, DeckExportOptions, DeckExportPlan, preflight_deck_export_from_live, write_deck_export_from_live,
 };
 pub use export_capture::ExportSourceValidation;
 pub use file_export::{
@@ -73,6 +73,9 @@ pub enum CollectionPackageWriteError {
         detail: String,
     },
     ExportFormatLimit,
+    DeckNotFound { id: i64 },
+    ExportInvalidIds,
+    ExportNeedsCheckDatabase,
     TooNew,
     UnsupportedFormat,
     UnsupportedMedia,

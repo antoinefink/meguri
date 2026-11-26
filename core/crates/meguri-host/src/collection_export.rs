@@ -36,6 +36,7 @@ pub struct WrittenCollectionExport {
     pub space: std::sync::Arc<dyn meguri_storage::space::SpaceProvider>,
     pub written: LiveCollectionPackageWritten,
     pub suggested_name: String,
+    pub deck_counts: Option<meguri_package::DeckExportCounts>,
     source_validation: meguri_package::ExportSourceValidation,
 }
 
@@ -106,11 +107,10 @@ impl CoreHost {
         let reader = collection.reader(ReaderRole::Maintenance)?;
         let suggested_name = if let Some((id, _)) = deck {
             let snapshot = reader.snapshot()?;
-            let rows = snapshot.deck_rows()?;
-            let selected = rows.iter().find(|row| row.id.0 == id).ok_or_else(|| EngineError::InvalidArgument {
-                message: "The selected deck no longer exists".into(),
+            let name = snapshot.deck_name(meguri_model::ids::DeckId(id))?.ok_or_else(|| EngineError::NotFound {
+                table: meguri_storage::Table::Decks, key: id.to_string(),
             })?;
-            meguri_package::DeckExportPlan::suggested_name_for_deck(&selected.name)
+            meguri_package::DeckExportPlan::suggested_name_for_deck(&name)
         } else {
             "Meguri-Collection.colpkg".into()
         };
@@ -189,6 +189,7 @@ impl CoreHost {
             directory,
             path,
             written: completed.written,
+            deck_counts: completed.deck_counts,
             suggested_name,
             source_validation: completed.source_validation,
             protected_directories: protected,
@@ -202,6 +203,11 @@ fn io(error: std::io::Error) -> EngineError {
 
 fn package_error(error: meguri_package::CollectionPackageWriteError) -> EngineError {
     match error {
+        meguri_package::CollectionPackageWriteError::DeckNotFound { id } => EngineError::NotFound {
+            table: meguri_storage::Table::Decks, key: id.to_string(),
+        },
+        meguri_package::CollectionPackageWriteError::ExportInvalidIds => EngineError::ExportInvalidIds,
+        meguri_package::CollectionPackageWriteError::ExportNeedsCheckDatabase => EngineError::ExportNeedsCheckDatabase,
         meguri_package::CollectionPackageWriteError::Cancelled => EngineError::Cancelled,
         meguri_package::CollectionPackageWriteError::ExportSourceChanged => EngineError::ExportSourceChanged,
         meguri_package::CollectionPackageWriteError::ExportSourceInvalid { .. } => EngineError::ExportSourceInvalid,
@@ -336,6 +342,11 @@ enum RemovalPhase {
     RootSync,
     Done,
 }
+fn atomic_export_temporary(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(".meguri-tmp-export-"))
+        .is_some_and(|suffix| suffix.len() == 6 && suffix.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
 fn directory_identity(path: &Path) -> Result<(u64, u64), EngineError> {
     let meta = path.symlink_metadata().map_err(io)?;
     if !meta.file_type().is_dir() {
@@ -348,7 +359,7 @@ impl CollectionExportRemoval {
         let root = directory.parent().ok_or_else(invalid)?;
         check_layout(root, protected)?;
         if self.proof.is_none() {
-            let (operation, _, filename) = ownership(directory)?;
+            let (operation, state, filename) = ownership(directory)?;
             let directory_id = directory_identity(directory)?;
             let root_id = directory_identity(root)?;
             let directory_handle = fs::File::open(directory).map_err(io)?;
@@ -372,16 +383,23 @@ impl CollectionExportRemoval {
                     if !meta.file_type().is_dir() {
                         return Err(invalid());
                     }
+                    // Validate the entire tree before unlinking any entry. A
+                    // process killed during compression leaves only AtomicFile's
+                    // reserved regular file, and only safe ownership permits it.
+                    let mut files = Vec::new();
                     for entry in fs::read_dir(&output).map_err(io)? {
                         let entry = entry.map_err(io)?;
-                        if entry.file_name() != filename.as_str() || !entry.file_type().map_err(io)?.is_file()
+                        let name = entry.file_name();
+                        if !entry.file_type().map_err(io)?.is_file()
+                            || (name != filename.as_str()
+                                && !(state == "safe" && atomic_export_temporary(&name)))
                         {
                             return Err(invalid());
                         }
+                        files.push(entry.path());
                     }
-                    let package = output.join(&filename);
-                    if package.symlink_metadata().is_ok() {
-                        fs::remove_file(package).map_err(io)?;
+                    for file in files {
+                        fs::remove_file(file).map_err(io)?;
                     }
                     fs::remove_dir(output).map_err(io)?;
                 }
@@ -534,6 +552,11 @@ mod export_refusal_tests {
             EngineError::ExportFormatLimit
         );
         assert_eq!(package_error(PackageError::Cancelled), EngineError::Cancelled);
+        assert_eq!(package_error(PackageError::DeckNotFound { id: 42 }), EngineError::NotFound {
+            table: meguri_storage::Table::Decks, key: "42".into(),
+        });
+        assert_eq!(package_error(PackageError::ExportInvalidIds), EngineError::ExportInvalidIds);
+        assert_eq!(package_error(PackageError::ExportNeedsCheckDatabase), EngineError::ExportNeedsCheckDatabase);
         for error in [
             PackageError::DiskFull,
             PackageError::InsufficientSpace {

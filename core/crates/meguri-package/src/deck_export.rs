@@ -30,6 +30,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Counts from the pinned selection actually written, not the earlier preflight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeckExportCounts {
+    pub notes: u64,
+    pub cards: u64,
+    pub media: u64,
+}
 #[derive(Clone, Copy)]
 pub struct DeckExportOptions {
     pub include_scheduling: bool,
@@ -106,18 +113,10 @@ impl DeckExportPlan {
 fn read_error(error: DeckExportReadError) -> Error {
     match error {
         DeckExportReadError::Cancelled => Error::Cancelled,
-        DeckExportReadError::DeckNotFound(id) => Error::ExportSourceInvalid {
-            detail: format!("DeckNotFound: deck {id} no longer exists"),
-        },
-        DeckExportReadError::InvalidIds => Error::ExportSourceInvalid {
-            detail: "InvalidIds: run Check Database before exporting".into(),
-        },
-        DeckExportReadError::MissingReference { table, id } => Error::ExportSourceInvalid {
-            detail: format!("NeedsCheckDatabase: missing {table} record {id}"),
-        },
-        DeckExportReadError::Storage(meguri_storage::StorageError::Row(error)) => Error::ExportSourceInvalid {
-            detail: format!("NeedsCheckDatabase: unreadable record: {error}"),
-        },
+        DeckExportReadError::DeckNotFound(id) => Error::DeckNotFound { id },
+        DeckExportReadError::InvalidIds => Error::ExportInvalidIds,
+        DeckExportReadError::MissingReference { .. }
+        | DeckExportReadError::Storage(meguri_storage::StorageError::Row(_)) => Error::ExportNeedsCheckDatabase,
         DeckExportReadError::Storage(error) => error.into(),
     }
 }
@@ -503,6 +502,11 @@ pub fn write_deck_export_from_live(
     writer::publish_snapshot_with_media(&path, staging.path(), destination, context, Some(&plan.validation))?;
     Ok(MediaCollectionExportWritten {
         written: LiveCollectionPackageWritten { snapshot_modified },
+        deck_counts: Some(DeckExportCounts {
+            notes: selection.notes.len() as u64,
+            cards: selection.cards.len() as u64,
+            media: plan.validation.files.len() as u64,
+        }),
         source_validation: plan.validation,
     })
 }
