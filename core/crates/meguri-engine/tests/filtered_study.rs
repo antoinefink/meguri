@@ -122,7 +122,10 @@ fn every_order_gathers_before_limiting_including_fsrs_and_history() {
         let ids = seed(&h, home, cards);
         let log_ids = ids.clone();
         h.collection.run(OpSpec::named("history", OpSource::UserNonUndoable), move |ctx| {
-            for i in 1..3 { let log = revlog(log_ids[i]); ctx.scope().add_revlog(&log)?; }
+            for &id in &log_ids[1..3] {
+                let log = revlog(id);
+                ctx.scope().add_revlog(&log)?;
+            }
             Ok(())
         }).unwrap();
         let selected = filtered::save(&h.collection, None, definition("Study", "deck:Home", 2, order, true), false).unwrap().value;
