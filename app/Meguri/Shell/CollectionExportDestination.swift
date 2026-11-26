@@ -14,6 +14,14 @@ struct CollectionExportDestination: View {
             .sheet(isPresented: Binding(get: { coordinator.destinationPresented }, set: { _ in })) {
                 if let lease = coordinator.providerLease {
                     CollectionFilesPicker(coordinator: coordinator, url: lease.url)
+                        .safeAreaInset(edge: .top) {
+                            if let summary = coordinator.deckExportSummary {
+                                Text(verbatim: summary)
+                                    .multilineTextAlignment(.center)
+                                    .padding()
+                                    .accessibilityIdentifier("home.deckExport.destinationSummary")
+                            }
+                        }
                         .interactiveDismissDisabled()
                 }
             }
@@ -30,8 +38,10 @@ private struct MacCollectionSavePanel: NSViewRepresentable {
         guard coordinator.destinationPresented, context.coordinator.panel == nil, let window = view.window else { return }
         let panel = NSSavePanel()
         context.coordinator.panel = panel
-        panel.allowedContentTypes = [UTType(importedAs: "com.antoinefink.meguri.collection-package")]
-        panel.nameFieldStringValue = coordinator.artifact?.metadata.suggestedName ?? "Meguri-Collection.colpkg"
+        panel.allowedContentTypes = [UTType(importedAs: coordinator.isDeckExport
+            ? "com.antoinefink.meguri.deck-package" : "com.antoinefink.meguri.collection-package")]
+        panel.nameFieldStringValue = coordinator.artifact?.metadata.suggestedName ?? (coordinator.isDeckExport ? "Meguri-Deck.apkg" : "Meguri-Collection.colpkg")
+        if let summary = coordinator.deckExportSummary { panel.message = summary }
         panel.canCreateDirectories = true
         panel.beginSheetModal(for: window) { response in
             context.coordinator.panel = nil

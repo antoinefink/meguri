@@ -18,6 +18,8 @@ pub mod connections;
 #[cfg(feature = "test-hooks")]
 pub mod counting_vfs;
 mod day_writes;
+pub mod deck_export;
+pub mod deck_package;
 pub mod derived;
 mod durability;
 mod error;
@@ -32,7 +34,6 @@ pub mod media;
 pub mod normal_stage;
 pub mod one_way;
 pub mod open;
-pub mod deck_package;
 pub mod package_inspection;
 pub mod paging;
 pub mod paths;

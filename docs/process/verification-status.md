@@ -2,6 +2,13 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+The selected-deck package branch passed 25 focused package, host and FFI cases
+(`core-test/20261126T121257Z-27087`), five associated unit cases and 21
+media-capture and package cases after the final protection change
+(`core-test/20261126T121753Z-50849`). The fresh-import check covers all eight
+scheduling, presets and media combinations. See the [deck export review log](review-log/selected-deck-export-20261126.md)
+and [PR #235](https://github.com/antoinefink/meguri/pull/235) for native verification.
+
 The tag and note type deletion branch passed 44 focused Swift tests
 (`swift-test/20261126T075530Z-61387`) and 40 provider and FFI tests
 (`core-test/20261126T074341Z-34877`). The iPad deletion journeys passed

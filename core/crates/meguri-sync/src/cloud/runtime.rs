@@ -156,6 +156,8 @@ impl RuntimeError {
                 match error {
                     EngineError::ExportSourceChanged => "ExportSourceChanged",
                     EngineError::ExportSourceInvalid => "ExportSourceInvalid",
+                    EngineError::ExportInvalidIds => "ExportInvalidIds",
+                    EngineError::ExportNeedsCheckDatabase => "ExportNeedsCheckDatabase",
                     EngineError::ExportFormatLimit => "ExportFormatLimit",
                     EngineError::SyncNote(_) => "SyncNote",
                     EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",

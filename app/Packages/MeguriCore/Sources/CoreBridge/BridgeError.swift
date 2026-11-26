@@ -92,6 +92,10 @@ extension BridgeError {
         case .ExportSourceChanged: self = .exportSourceChanged
         case .ExportSourceInvalid: self = .exportSourceInvalid
         case .ExportFormatLimit: self = .exportFormatLimit
+        // The export receipt carries these bounded causes. Generic job errors
+        // keep the existing unavailable category used by diagnostics.
+        case .ExportInvalidIds: self = .unavailable(reason: "ExportInvalidIds")
+        case .ExportNeedsCheckDatabase: self = .unavailable(reason: "ExportNeedsCheckDatabase")
         case .Cancelled: self = .cancelled
         case .Busy(let runningOp): self = .busy(runningOperation: runningOp)
         case .Unavailable(let reason): self = .unavailable(reason: reason)

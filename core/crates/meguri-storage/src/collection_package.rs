@@ -122,6 +122,12 @@ pub(crate) fn finalise_snapshot(destination: &Path) -> Result<(), StorageError> 
     Ok(())
 }
 
+/// Close-mode verification for a newly authored, operation-owned export DB.
+/// Never pass the live collection or a published file.
+pub fn finalise_export_snapshot(destination: &Path) -> Result<(), StorageError> {
+    finalise_snapshot(destination)
+}
+
 pub const NOTICE: &str =
     "This file needs a newer version of Anki. Please update to Anki 2.1.50 or later, then import the file again.";
 

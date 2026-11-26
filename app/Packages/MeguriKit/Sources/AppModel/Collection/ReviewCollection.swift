@@ -600,7 +600,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private let exportService: any CollectionExportService
     public var collectionExport: CollectionExportCoordinator {
         if let exportOwner { return exportOwner }
-        let value = CollectionExportCoordinator(owner: self, service: exportService, recordDiagnostic: configuration.recordDiagnostic)
+        let value = CollectionExportCoordinator(owner: self, service: exportService, defaults: configuration.deviceDefaults, recordDiagnostic: configuration.recordDiagnostic)
         exportOwner = value
         return value
     }

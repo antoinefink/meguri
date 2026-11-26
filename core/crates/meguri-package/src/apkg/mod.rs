@@ -28,6 +28,7 @@ use meguri_storage::space::SpaceProvider;
 pub use apply::{apply, apply_confirming, apply_on, read_options};
 pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
+pub(crate) use gather::CardShaper;
 pub use session::{ImportSession, inspect};
 
 /// The most rows an import may bring: the package's notes and cards, and
