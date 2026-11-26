@@ -7162,7 +7162,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - Computed styles: `body` margin 20px, `#typeans` box-sizing, `.typeGood` background, `#_flag` fixed right 10px. `--canvas` is `#f5f5f5` in light and `#2c2c2c` in dark. `html` text-size-adjust is 100% (R479–R487).
 - S13: `.card{background:white}` is overridden by `body.nightMode`; `.card.nightMode{…}` wins; `prefers-color-scheme: dark` agrees with the classes; `.latex` is inverted; IO mask colors are unchanged (R488, R489, R491, R492).
 - `$.fn.jquery === "3.7.1"`, and `MathJax.typesetPromise()` resolves (R514, R515).
-- `\(x^2\)` source text stays visible (R563).
+- `\(x^2\)` renders as an equation. A formula that needs an unsupported extension shows its original TeX (R563, C10.8).
 
 **Verification:** All CardRenderingTests runtime suites pass on the macOS host and the iOS simulator via `tools/mg`; the similarity scan reports no flagged blocks for `app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/`.
 
