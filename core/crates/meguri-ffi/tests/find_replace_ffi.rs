@@ -67,6 +67,7 @@ fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> JobOutcome {
 
 /// The outcomes of the jobs `ids`, in that order, whichever order they end
 /// in (`finish` drops the events of other jobs).
+#[cfg(feature = "test-hooks")]
 fn finish_all(rx: &mpsc::Receiver<CoreEvent>, ids: &[u64]) -> Vec<JobOutcome> {
     let mut outcomes: Vec<Option<JobOutcome>> = vec![None; ids.len()];
     while outcomes.iter().any(Option::is_none) {

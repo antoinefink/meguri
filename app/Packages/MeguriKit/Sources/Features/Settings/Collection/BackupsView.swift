@@ -36,6 +36,7 @@ public struct BackupsView: View {
             } footer: {
                 if let receipt = model.created {
                     Text("Created \(receipt.name) (\(BackupPresentation.size(receipt.sizeBytes)))", bundle: .module)
+                        .accessibilityIdentifier("settings.backups.created")
                 }
                 if let error = model.failure { BackupFailureText(error: error, candidateActive: model.candidateActive, uncertain: model.activationUncertain, restore: false) }
                 if case .uncertain = model.backupPublication {

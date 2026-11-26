@@ -289,12 +289,12 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     }
 
     private func createdFilename(_ app: XCUIApplication) throws -> String {
+        let receipt = app.staticTexts.matching(identifier: "settings.backups.created").firstMatch
         var filename: String?
         XCTAssertTrue(wait {
-            let results = app.staticTexts.allElementsBoundByIndex.map { self.text($0) }
-            filename = results.compactMap { value in
-                value.firstMatch(of: /Created (backup-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.colpkg)/).map { String($0.1) }
-            }.first
+            guard receipt.exists else { return false }
+            filename = self.text(receipt).wholeMatch(of: /Created (backup-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.colpkg) \(.+\)/)
+                .map { String($0.1) }
             return filename != nil && self.element(app, "settings.backups.create").isEnabled
         }, "Back Up Now must report the actual Created filename and finish")
         let created = try XCTUnwrap(filename)
