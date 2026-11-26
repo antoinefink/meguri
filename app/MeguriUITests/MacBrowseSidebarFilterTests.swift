@@ -74,15 +74,17 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         addTeardownBlock { @MainActor in
             guard self.testRun?.hasSucceeded == false else { return }
             let responder = self.element(app, "browse.debug.responder")
-            let evidence = XCTAttachment(string: """
-                Status: \(self.statusText(app)); query: \(String(describing: query.value))
-                Focus: \(responder.exists ? responder.debugDescription : "no responder readout")
-                Outline values and native selections:
-                \(list.debugDescription)
-                Window:
-                \(app.windows.firstMatch.debugDescription)
-                ""
-            )
+            let status = self.statusText(app)
+            let queryDescription = String(describing: query.value)
+            let focusDescription = responder.exists ? responder.debugDescription : "no responder readout"
+            let evidence = XCTAttachment(string: [
+                "Status: \(status); query: \(queryDescription)",
+                "Focus: \(focusDescription)",
+                "Outline values and native selections:",
+                list.debugDescription,
+                "Window:",
+                app.windows.firstMatch.debugDescription,
+            ].joined(separator: "\n"))
             evidence.name = "browse-keyboard-target-AX"
             evidence.lifetime = .keepAlways
             self.add(evidence)

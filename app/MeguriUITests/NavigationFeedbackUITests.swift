@@ -112,6 +112,31 @@ import XCTest
     func testWarmNavigationKeepsLoadedContent() throws {
         defer { app?.terminate() }
         try launchFeedback()
+
+        func assertWarmHandoff(from previous: String, to destination: String, section: String) {
+            let loading = app.activityIndicators.matching(NSPredicate(format: "label IN %@",
+                ["Loading Today", "Loading Statistics", "Searching Browse", "Loading Note Types"])).firstMatch
+            // One AX query witnesses either side of the display-fenced handoff.
+            // Separate old/new queries can straddle the frame and falsely report a blank.
+            let content = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier IN %@", [previous, destination])).firstMatch
+            XCTAssertFalse(loading.exists, "Warm navigation must not start loading")
+            XCTAssertTrue(content.exists, "Previous or cached destination content stays visible")
+            let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"),
+                object: element(destination))
+            let noLoading = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: loading)
+            noLoading.isInverted = true
+            let noBlank = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: content)
+            noBlank.isInverted = true
+            // The VM gets at most two seconds for a cached page's next display frame;
+            // monitor content and loading throughout that interval, including after arrival.
+            XCTAssertEqual(XCTWaiter().wait(for: [arrived, noLoading, noBlank], timeout: 2), .completed,
+                "Cached \(section) arrives without loading or a blank detail")
+            XCTAssertTrue(element(destination).exists)
+            XCTAssertFalse(loading.exists)
+            assertSelected("shell.root.sidebar.\(section)")
+        }
+
         try clickSection("stats")
         try waitForState("filled=true")
         let knowledge = element("stats.box.knowledgeOverTime.plot")
@@ -136,24 +161,27 @@ import XCTest
         try command("refresh.list")
         XCTAssertTrue(element(basic).exists)
         try clickSection("home")
+        assertWarmHandoff(from: "noteTypes.fields.table", to: "home.today.studyAll", section: "home")
         try command("hold.home")
         try command("refresh.home")
         XCTAssertTrue(element("home.today.studyAll").exists)
         assertNoProgress("Loading Today")
         try command("hold.stats")
         try clickSection("stats")
+        assertWarmHandoff(from: "home.today.studyAll", to: "stats.box.knowledgeOverTime.plot", section: "stats")
         try waitForState("filled=false")
         XCTAssertTrue(knowledge.waitForExistence(timeout: 5))
         XCTAssertEqual(knowledge.label, loadedKnowledge, "Kept chart remains during an unfinished refresh")
         assertNoProgress("Loading Statistics")
         try clickSection("browse")
+        assertWarmHandoff(from: "stats.box.knowledgeOverTime.plot", to: "browse.results.table", section: "browse")
         XCTAssertTrue(wait(NSPredicate(format: "exists == true AND (label CONTAINS '1,204' OR value CONTAINS '1,204')"), element("browse.status.text")))
         XCTAssertEqual(displayedText(element("browse.status.text")), browseStatus)
         XCTAssertTrue(browseContent.exists)
         XCTAssertEqual(displayedText(browseContent), loadedBrowseContent, "The loaded result cell remains on return")
         assertNoProgress("Searching Browse")
         try clickSection("noteTypes")
-        XCTAssertTrue(element("noteTypes.fields.table").waitForExistence(timeout: 5))
+        assertWarmHandoff(from: "browse.results.table", to: "noteTypes.fields.table", section: "noteTypes")
         assertNoProgress("Loading Note Types")
         let after = try command("query")
         for key in ["browse", "record"] {
