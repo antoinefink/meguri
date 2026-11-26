@@ -37,7 +37,7 @@ import Testing
         // A completion for the abandoned request cannot affect the new section.
         navigation.finishDeckSelection(intent: intent)
         #expect(navigation.section == .browse)
-        navigation.beginDeckSelection(deck: DeckID(2))
+        _ = navigation.beginDeckSelection(deck: DeckID(2))
         #expect(context.browseCommands == nil)
         #expect(context.browseInspector == nil)
         #expect(!context.canToggleBrowseMode && !context.canEditBrowseNote && !context.canDeleteNotes)
