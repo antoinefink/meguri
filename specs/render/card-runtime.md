@@ -16,7 +16,7 @@ Not covered here: serving media and the page document from the media origin and 
 - **Update**: replacing the content of `#qa` with one side HTML and running its scripts and hooks (C6).
 - **Presented**: a page is presented while it is the page the user sees. Native code marks a page presented right after the swap that brings it to the front, and unpresented when it goes back behind (U67). A page starts unpresented. A preview page is presented as soon as it is shown.
 - **Page world**: the JavaScript world that card scripts run in. **Isolated world**: a separate WebKit content world that shares the DOM but not JavaScript objects with the page world. Card scripts cannot reach it.
-- **Runtime**: Meguri's page-world script (`runtime.js`) plus the vendored jQuery. **Interaction script**: Meguri's isolated-world script (`interaction.js`). **Native**: Meguri's Swift side (U67).
+- **Runtime**: Meguri's page-world script (`runtime.js`) loads with jQuery and loads the bundled MathJax engine on demand (C10.8). **Interaction script**: Meguri's isolated-world script (`interaction.js`). **Native**: Meguri's Swift side (U67).
 - **Card script**: any script that is not Meguri's: scripts inside side HTML, scripts they load or create, and the scripts of `reviewExtra` (C2.3).
 - **Identity** of an update: the card id and prepare generation native gives to the updates it starts (C6.8).
 
@@ -575,9 +575,15 @@ Owner override (2026-11-26, supersedes the card-runtime no-op in R515/R563 and D
 
 Both faces and previews typeset `\(…\)` inline and `\[…\]` display math after side scripts/update hooks and before reveal/settled. Dollars remain ordinary text. Side replacement clears old MathItems. Startup/typesetting failures are reported without blocking review; ordinary cards fetch no MathJax assets. Once started the upstream template API is available, including `typeset`, `typesetPromise`, `typesetClear` and `startup.promise`. Before startup, `typeset` requests asynchronous typesetting, `typesetPromise` and `startup.promise` await the real runtime. Field editing and stored input stay literal.
 
+After startup, with no pending asynchronous typesetting, `typeset(elements)` uses the original synchronous API: already-loaded glyphs produce DOM before it returns, and synchronous exceptions are reported for the requesting side and rethrown. Calls made during startup or pending asynchronous typesetting use the existing side-scoped, eight-second bounded queue. SVG is selected explicitly at startup so optional font extensions such as `bbm` request their bundled SVG components.
+
 AMS alignment declarations (`alignat`, `alignat*`, `alignedat`, `xalignat`, `xalignat*`, `xxalignat`), including macro-expanded uses and `alignedat` placement arguments, are capped at 64 alignment pairs per expression before column allocation. Exceeding the cap produces a normal TeX error and review continues. This is an application integration pinned to MathJax 4.1.3; upstream package bytes remain unmodified.
 
 Optional physics `IdentityMatrix` and `XMatrix` commands (including aliases, starred forms and macro-expanded calls) are capped at 64 per dimension before table construction. The guard binds at lazy command-map registration without eagerly loading physics; upstream number parsing and small-case behavior are preserved.
+
+The same physics guard caps diagonal and antidiagonal commands (including aliases and macro-expanded calls) at 64 entries before expansion. It counts with the upstream brace-aware comma reader and then rewinds, leaving ordinary parsing to the built-in method. Coverage uses normal small inputs only; the resource issue is inspected from source without a reproduction or stress workload.
+
+The optional `html` extension is bundled and autoloads for commands such as `\style`; ordinary math does not load it. MathJax 4.1.3's nested-style join checks the existing declaration at an index derived from the incoming declaration's length. This incidental upstream limitation remains unchanged: Meguri does not monkeypatch HTML extension internals or modify vendor bytes.
 
 ### C10.9 jQuery
 
@@ -876,7 +882,7 @@ These are the traps the implementer writes into `CardRuntime/AGENTS.md`:
 
 - **Globals.** The runtime runs inside a function scope. Only C9.1 names are written to the global object. All `var`, `function`, `let`, `const` and `class` forms stay inside that scope.
 - **Classic-script semantics for cards.** Never change a card script's `type`, never add `"use strict"` or a wrapper to card code, never snapshot the script list before the walk (C6.5), and never re-run scripts by `cloneNode`.
-- **No Anki assets** (R1960). The runtime, base stylesheet and tests are written from this spec. Only upstream jQuery 3.7.1 is vendored, unmodified, with its notice.
+- **No Anki assets** (R1960). The runtime, base stylesheet and tests are written from this spec. Meguri bundles unmodified upstream jQuery 3.7.1, MathJax 4.1.3 and its SVG font data with their license notices.
 - **Run first.** The runtime, its capture-phase IME tracking (C10.4) and its listener hooks (C13) are in place before any other page script, `reviewExtra` included.
 - **Page-world handlers.** Register only iOS `cb` for the exact tap protocol and iOS `meguri` for the exact replay command strings (C9.3). Neither exposes internal/general signals. Mac has no page-world `webkit`; internal traffic stays isolated (C14).
 - **Token values are exact text** (C4.1, C4.2). Do not normalize colours.

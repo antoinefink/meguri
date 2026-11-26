@@ -1117,6 +1117,9 @@
   let mathLoading = null;
   let mathEngine = null;
   let mathTypeset = null;
+  let mathTypesetSync = null;
+  let mathStarted = false;
+  let mathPending = 0;
   let mathClear = null;
   let mathOwner = null;
   let mathStartupOwner = null;
@@ -1239,13 +1242,28 @@
           const name = input[1];
           const methods = engine._.input.tex.physics.PhysicsMethods.default;
           const method = this.parserFor(name);
-          if (method === methods.IdentityMatrix || method === methods.XMatrix) {
+          if (method === methods.IdentityMatrix || method === methods.XMatrix || method === methods.DiagonalMatrix) {
             const position = parser.i;
             try {
               const command = "\\" + name;
               let rows, columns;
               let valid = true;
-              if (method === methods.IdentityMatrix) {
+              if (method === methods.DiagonalMatrix) {
+                // Count with upstream's brace-aware delimiter reader, without
+                // constructing the entry list or expanding the matrix.
+                if (parser.GetNext() === "{") {
+                  const start = parser.i;
+                  parser.GetArgument(command);
+                  const end = parser.i;
+                  parser.i = start + 1;
+                  let entries = 0;
+                  while (parser.i < end) {
+                    if (++entries > 64) break;
+                    try { parser.GetUpTo(command, ","); } catch (_) { break; }
+                  }
+                  rows = columns = entries;
+                }
+              } else if (method === methods.IdentityMatrix) {
                 // IdentityMatrix accepts parseInt prefixes, unlike XMatrix.
                 rows = parseInteger(parser.GetArgument(command), 10);
                 columns = rows;
@@ -1294,6 +1312,7 @@
       },
       startup: {
         typeset: false,
+        output: "svg",
         ready: function () {
           const engine = win.MathJax;
           limitMathAlignments(engine);
@@ -1304,6 +1323,7 @@
           };
           engine.startup.defaultReady();
           mathEngine = engine;
+          mathTypesetSync = engine.typeset;
           mathTypeset = engine.typesetPromise;
           mathClear = engine.typesetClear;
           // Keep template calls bounded and side-scoped after startup too.
@@ -1357,6 +1377,7 @@
         // Keep the original privately, while template waits remain bounded.
         defineProperty(engine.startup, "promise", { get: mathStartup });
         return then(startup, function () {
+          mathStarted = true;
           mathStartupOwner = null;
           return engine;
         });
@@ -1370,6 +1391,7 @@
     const update = latest;
     const targets = elements || [findQA()];
     let expired = false;
+    mathPending++;
     const work = then(loadMath(), function (engine) {
       return engine.whenReady(async function () {
         if (expired || update !== latest) return;
@@ -1382,6 +1404,9 @@
         }
       });
     });
+    // Keep the synchronous API out of the document until the real queued
+    // work finishes, even if its caller's deadline has already expired.
+    then(work, function () { mathPending--; }, function () { mathPending--; });
     const waiting = mathDeadline(work, 8000);
     then(waiting, noop, function (error) {
       expired = true;
@@ -1402,7 +1427,19 @@
         return jax.formatError(error);
       },
     },
-    typeset: function typeset(elements) { requestMath(elements); },
+    typeset: function typeset(elements) {
+      if (!mathStarted || mathPending) { requestMath(elements); return; }
+      const update = latest;
+      mathOwner = update;
+      try {
+        return call(mathTypesetSync, mathEngine, elements || [findQA()]);
+      } catch (error) {
+        mathError(error, update);
+        throw error;
+      } finally {
+        mathOwner = null;
+      }
+    },
     typesetPromise: function typesetPromise(elements) { return requestMath(elements); },
     typesetClear: function typesetClear(elements) { if (mathClear) call(mathClear, mathEngine, elements); },
     startup: {},

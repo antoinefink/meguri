@@ -381,6 +381,61 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test func warmMathTypesetProducesDOMSynchronously() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p><script>window.__mathAPI = MathJax;</script>"#)
+                try await page.announce(card: 87, generation: 2)
+                try await page.showPresentedAnswer(#"""
+                    <p id="m">\(x+1\)</p><p id="retained">\(x+1\)</p><p id="later">\(x+1\)</p>
+                    <script>
+                    onUpdateHook.push(function () {
+                      var m = document.getElementById('m');
+                      var result = MathJax.typeset([m]);
+                      m.dataset.immediate = String(result === undefined && !!m.querySelector('svg path'));
+                      __mathAPI.typeset([document.getElementById('retained')]);
+                      m.dataset.retained = String(!!document.querySelector('#retained svg path'));
+                      m.dataset.scoped = String(!document.querySelector('#later mjx-container'));
+                    });
+                    </script>
+                    """#)
+                for attribute in ["immediate", "retained", "scoped"] {
+                    #expect(try await page.string("document.getElementById('m').dataset.\(attribute)") == "true")
+                }
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+                // Ordinary TeX errors still report the requesting side.
+                try await page.run(#"""
+                    var m = document.getElementById('m');
+                    MathJax.typesetClear([m]);
+                    m.textContent = '\\(\\frac{1}\\)';
+                    MathJax.typeset([m]);
+                    """#)
+                #expect(try await page.bool("document.querySelector('#m [data-mml-node=merror]') !== null"))
+                #expect(harness.diagnostics.contains {
+                    $0["kind"] as? String == "math" && $0.card == 87 && $0.generation == 2 && $0.side == "answer"
+                        && ($0["message"] as? String)?.contains("Missing") == true
+                }, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
+        @Test func optionalMathExtensionsUseBundledSVGAndLazyHTML() async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                try await page.showPresentedQuestion(#"<p>\(x+1\)</p>"#)
+                let htmlPath = "/_anki/mathjax/input/tex/extensions/html.js"
+                #expect(!harness.media.requests.contains { $0.path == htmlPath })
+                try await page.showPresentedAnswer(#"""
+                    <p id="font">\(\require{bbm}\mathbbm{1}\)</p>
+                    <p id="styled">\(\style{color: red}{x}\)</p>
+                    """#)
+                #expect(try await page.bool("MathJax.config.startup.output === 'svg' && document.querySelector('#font svg path') !== null"))
+                #expect(try await page.bool("document.querySelector('#styled svg path') !== null && !document.querySelector('#qa [data-mml-node=merror]')"))
+                #expect(harness.media.requests.contains { $0.path == "/_anki/mathjax/fonts/mathjax-bbm-font-extension/svg.js" })
+                #expect(harness.media.requests.contains { $0.path == htmlPath })
+                #expect(!harness.media.requests.contains { $0.path.contains("chtml") })
+                #expect(harness.remote.requests.isEmpty)
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func dollarsAndOrdinaryCardsDoNotLoadMath() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 try await page.showPresentedQuestion(#"""
@@ -523,6 +578,19 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        @Test(arguments: ["diagonalmatrix", "dmat", "antidiagonalmatrix", "admat"], [false, true])
+        func physicsDiagonalMatricesRetainSmallInputParsing(variant: String, throughMacro: Bool) async throws {
+            try await WebTestHarness.withPage(log: false) { harness, page async throws in
+                let matrix = "\\\(variant){a,{b,c},\\frac{1}{2}}"
+                let tex = throughMacro ? "\\def\\carddiagonal{\(matrix)}\\carddiagonal" : matrix
+                try await page.showPresentedQuestion("<div id='m'>\\[\\require{physics}\\mqty{\(tex)}\\]</div>")
+                #expect(try await page.bool("document.querySelector('#m svg path') !== null && !document.querySelector('#m [data-mml-node=merror]')"))
+                #expect(try await page.bool("document.querySelector('#m mjx-assistive-mml mtable').children.length === 3"))
+                #expect(harness.remote.requests.isEmpty)
+                #expect(harness.diagnostics.isEmpty, "\(harness.diagnostics.map(\.body))")
+            }
+        }
+
         @Test func mathIgnoresSavedMenuSettingsWithoutChangingThem() async throws {
             try await WebTestHarness.withPage(log: false) { harness, page async throws in
                 let settings = #"{"enrich":true,"speech":true,"braille":true,"assistiveMml":false,"inTabOrder":true,"renderer":"CHTML"}"#
@@ -597,6 +665,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     window.__cardRequire = require;
                     // Includes a retained facade and a second queued request.
                     onUpdateHook.push(async function () {
+                      __mathAPI.typeset([document.getElementById('m')]);
                       await Promise.allSettled([
                         __mathAPI.typesetPromise(), __mathAPI.typesetPromise([document.getElementById('m')])
                       ]);
