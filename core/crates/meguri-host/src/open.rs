@@ -738,7 +738,9 @@ impl CoreHost {
                 return Err(EngineError::StaleGeneration { planned: expected, current });
             }
             if !self.original_resource_authority(&collection).is_live() {
-                return Err(EngineError::unavailable("command's original host closed"));
+                return Err(EngineError::CollectionUnavailable {
+                    reason: "command's original host closed".into(),
+                });
             }
         }
         Ok(collection)

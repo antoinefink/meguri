@@ -2,22 +2,57 @@
 use super::*;
 use crate::notetype_structure::{NotetypeRemoval, remove_notetype_on};
 use crate::tags::delete_tags_on;
-use meguri_engine::{Collection, EngineError, Generation, notetypes, notes, tags, undo::{UndoScope, UndoStatus}};
-use meguri_model::{changes::OpSource, ids::{DeckId, NoteId, NotetypeId}};
-use meguri_storage::{raw::{RawRows, SqlValue}, ReaderRole};
-use std::{path::{Path, PathBuf}, time::Duration};
+use meguri_engine::{
+    Collection, EngineError, Generation, notetypes, notes, tags,
+    undo::{UndoScope, UndoStatus},
+};
+use meguri_model::{
+    changes::OpSource,
+    ids::{DeckId, NoteId, NotetypeId},
+};
+use meguri_storage::{
+    ReaderRole,
+    raw::{RawRows, SqlValue},
+};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 fn seed(host: &meguri_host::CoreHost, label: &str) -> (NotetypeId, NoteId) {
     let c = host.collection().unwrap();
-    let nt = notetypes::add(&c, notetypes::NewNotetype {
-        name: "Shared Type".into(), fields: vec!["Front".into(), "Back".into()],
-        templates: vec![notetypes::NewTemplate { name: "Shared Card".into(),
-            front: "{{Front}}".into(), back: "{{Back}}".into(), ..Default::default() }],
-        ..Default::default()
-    }).unwrap().value.id;
-    let note = notes::add(&c, notes::AddNote { notetype_id: nt, fields: vec![label.into(), "answer".into()],
-        tags: vec!["Shared".into()], deck_id: DeckId(1), guid: None, update_add_defaults: false },
-        OpSource::UserUndoable).unwrap().value.id;
+    let nt = notetypes::add(
+        &c,
+        notetypes::NewNotetype {
+            name: "Shared Type".into(),
+            fields: vec!["Front".into(), "Back".into()],
+            templates: vec![notetypes::NewTemplate {
+                name: "Shared Card".into(),
+                front: "{{Front}}".into(),
+                back: "{{Back}}".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .value
+    .id;
+    let note = notes::add(
+        &c,
+        notes::AddNote {
+            notetype_id: nt,
+            fields: vec![label.into(), "answer".into()],
+            tags: vec!["Shared".into()],
+            deck_id: DeckId(1),
+            guid: None,
+            update_add_defaults: false,
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap()
+    .value
+    .id;
     // Retain both an undo and a redo step: a refused command must preserve both.
     tags::add_to_notes(&c, &[note], "Redo", &tags::RunOptions::default()).unwrap();
     c.undo(UndoScope::Global).unwrap();
@@ -47,27 +82,48 @@ struct Facts {
 }
 fn facts(c: &Collection, root: &Path) -> Facts {
     let reader = c.reader(ReaderRole::Query).unwrap();
-    let tables = reader.execute_raw("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", &[]).unwrap();
-    let rows = tables.rows.into_iter().map(|row| {
-        let SqlValue::Text(name) = &row[0] else { panic!("table name") };
-        let data = reader.execute_raw(&format!("SELECT * FROM \"{}\"", name.replace('"', "\"\"")), &[]).unwrap();
-        (name.clone(), data)
-    }).collect();
-    Facts { rows, seq: c.last_seq().0, undo: c.peek_undo(UndoScope::Global).unwrap(),
+    let tables = reader
+        .execute_raw("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", &[])
+        .unwrap();
+    let rows = tables
+        .rows
+        .into_iter()
+        .map(|row| {
+            let SqlValue::Text(name) = &row[0] else {
+                panic!("table name")
+            };
+            let data = reader
+                .execute_raw(&format!("SELECT * FROM \"{}\"", name.replace('"', "\"\"")), &[])
+                .unwrap();
+            (name.clone(), data)
+        })
+        .collect();
+    Facts {
+        rows,
+        seq: c.last_seq().0,
+        undo: c.peek_undo(UndoScope::Global).unwrap(),
         redo: c.peek_redo(UndoScope::Global).unwrap(),
-        files: [files(&root.join("backups")), files(&root.join("installation"))].concat() }
+        files: [files(&root.join("backups")), files(&root.join("installation"))].concat(),
+    }
 }
 fn stale<T>(result: Result<T, CoreError>, planned: Generation, current: Generation) {
-    assert!(matches!(result, Err(CoreError::StaleGeneration { planned: p, current: c }) if p == planned.0 && c == current.0));
+    assert!(
+        matches!(result, Err(CoreError::StaleGeneration { planned: p, current: c }) if p == planned.0 && c == current.0)
+    );
 }
 fn removal(id: NotetypeId) -> NotetypeRemoval {
-    NotetypeRemoval { notetype_id: id.0, confirmed_notes: 1, confirmed_cards: 1 }
+    NotetypeRemoval {
+        notetype_id: id.0,
+        confirmed_notes: 1,
+        confirmed_cards: 1,
+    }
 }
 fn finish(host: &meguri_host::CoreHost, events: &meguri_engine::changes::stream::Subscription, id: u64) {
     loop {
         let event = events.recv_timeout(Duration::from_secs(20)).unwrap();
         if let meguri_engine::changes::stream::EventKind::JobFinished { id: got, outcome } = &event.kind
-            && got.0 == id {
+            && got.0 == id
+        {
             assert_eq!(*outcome, meguri_engine::JobOutcome::Succeeded);
             break;
         }
@@ -90,10 +146,13 @@ fn replacement_before_deletion_admission_preserves_b_with_the_same_tag_and_type(
     replacement.close().unwrap();
     let replacement_path = replacement_config.collection_directory.join("collection.anki2");
     let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
-    slot.enter_exclusive(false).unwrap().replace(move |live| {
-        std::fs::rename(replacement_path, live).map_err(meguri_storage::StorageError::from)?;
-        Ok(())
-    }).unwrap();
+    slot.enter_exclusive(false)
+        .unwrap()
+        .replace(move |live| {
+            std::fs::rename(replacement_path, live).map_err(meguri_storage::StorageError::from)?;
+            Ok(())
+        })
+        .unwrap();
     drop(slot);
 
     let c = host.collection().unwrap();
@@ -105,7 +164,9 @@ fn replacement_before_deletion_admission_preserves_b_with_the_same_tag_and_type(
     tags::add_to_notes(&c, &[identities.1], "Undo sentinel", &tags::RunOptions::default()).unwrap();
     tags::add_to_notes(&c, &[identities.1], "Redo sentinel", &tags::RunOptions::default()).unwrap();
     c.undo(UndoScope::Global).unwrap();
-    let connection = owner(host.clone()).configure_meguri("https://deletion.synthetic.example/".into()).unwrap();
+    let connection = owner(host.clone())
+        .configure_meguri("https://deletion.synthetic.example/".into())
+        .unwrap();
     assert!(host.derived().wait_idle(Duration::from_secs(5)));
     let before = facts(&c, root.path());
     assert!(matches!(before.undo, UndoStatus::Available(_)) && matches!(before.redo, UndoStatus::Available(_)));
@@ -114,20 +175,40 @@ fn replacement_before_deletion_admission_preserves_b_with_the_same_tag_and_type(
     // after all Swift suspension points and before any job is registered.
     stale(delete_tags_on(host.clone(), "Shared".into(), planned.0), planned, current);
     assert_eq!(facts(&c, root.path()), before);
-    stale(remove_notetype_on(host.clone(), removal(identities.0), planned.0), planned, current);
+    stale(
+        remove_notetype_on(host.clone(), removal(identities.0), planned.0),
+        planned,
+        current,
+    );
     assert_eq!(facts(&c, root.path()), before);
 
     for reachable in [true, false] {
-        let credentials = ProviderCredentials { connection: connection.information().unwrap(),
-            username: "synthetic".into(), hostkey: "synthetic-key".into() };
-        stale(connection.start_structure_save_for_generation(credentials,
-            structure::ProviderStructureOp::Remove { request: removal(identities.0) }, reachable, planned.0), planned, current);
+        let credentials = ProviderCredentials {
+            connection: connection.information().unwrap(),
+            username: "synthetic".into(),
+            hostkey: "synthetic-key".into(),
+        };
+        stale(
+            connection.start_structure_save_for_generation(
+                credentials,
+                structure::ProviderStructureOp::Remove {
+                    request: removal(identities.0),
+                },
+                reachable,
+                planned.0,
+            ),
+            planned,
+            current,
+        );
         assert_eq!(facts(&c, root.path()), before);
         // Independently exercise the actual host admission, bypassing the
         // facade's early check. Neither access nor the save may be invoked.
-        let result = host.start_meguri_structure_save_for_generation(planned,
+        let result = host.start_meguri_structure_save_for_generation(
+            planned,
             Arc::new(|| panic!("stale admission requested provider access")),
-            Box::new(|_, _| panic!("stale admission invoked removal")), reachable);
+            Box::new(|_, _| panic!("stale admission invoked removal")),
+            reachable,
+        );
         assert!(matches!(result, Err(meguri_host::MeguriStructureRefusal::Engine(
             EngineError::StaleGeneration { planned: p, current: c })) if p == planned && c == current));
         assert_eq!(facts(&c, root.path()), before);
@@ -143,8 +224,15 @@ fn replacement_before_deletion_admission_preserves_b_with_the_same_tag_and_type(
     finish(&host, &events, removed.handle.id);
     assert!(removed.result.result().unwrap().unwrap().removed);
     c.undo(UndoScope::Global).unwrap();
-    assert!(c.reader(ReaderRole::Query).unwrap().execute_raw("SELECT flds FROM notes", &[]).unwrap().rows
-        .iter().any(|row| row == &[SqlValue::Text("B sentinel\u{1f}answer".into())]));
+    assert!(
+        c.reader(ReaderRole::Query)
+            .unwrap()
+            .execute_raw("SELECT flds FROM notes", &[])
+            .unwrap()
+            .rows
+            .iter()
+            .any(|row| row == &[SqlValue::Text("B sentinel\u{1f}answer".into())])
+    );
     host.close().unwrap();
 }
 
