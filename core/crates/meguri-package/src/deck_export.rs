@@ -8,7 +8,6 @@ use crate::{
     writer,
 };
 use meguri_model::{
-    card::{CardQueue, CardType},
     clock::FixedClock,
     col::Col,
     config::ConfigEntry,
@@ -287,30 +286,7 @@ fn build(
         dirty: 0,
         legacy: Default::default(),
     };
-    let mut config = Vec::new();
-    for (key, value) in [
-        ("activeDecks", "[1]"),
-        ("addToCur", "true"),
-        ("collapseTime", "1200"),
-        ("curDeck", "1"),
-        ("dayLearnFirst", "false"),
-        ("dueCounts", "true"),
-        ("estTimes", "true"),
-        ("newSpread", "0"),
-        ("nextPos", "1"),
-        ("sched2021", "true"),
-        ("schedVer", "2"),
-        ("sortBackwards", "false"),
-        ("sortType", "\"noteFld\""),
-        ("timeLim", "0"),
-    ] {
-        config.push(ConfigEntry {
-            key: key.into(),
-            value: value.as_bytes().to_vec(),
-            usn: Usn(0),
-            mtime: EpochSecs(0),
-        });
-    }
+    let mut config = meguri_engine::bootstrap::base_config();
     if let Some(offset) = selected.creation_offset {
         config.push(ConfigEntry {
             key: "creationOffset".into(),
@@ -319,12 +295,9 @@ fn build(
             mtime: EpochSecs(instant.div_euclid(1000)),
         });
     }
-    let mut next = selected.next_position;
     let builder = CollectionBuilder::create(path, &col, &config, &OpenOptions::new(&frozen, context.random))?;
     let mut scope = builder.begin(StampMode::Raw, &frozen)?;
     builder.analyze_initial()?;
-    // Author factory rows only when no selected row replaces them. Never copy
-    // any source config/stock type, and never delete source content from a copy.
     if !selected.decks.contains_key(&1)
         && !selected
             .decks
@@ -384,58 +357,20 @@ fn build(
                 options.include_scheduling || !(t.eq_ignore_ascii_case("marked") || t.eq_ignore_ascii_case("leech"))
             })
             .collect();
-        note.tags = if tags.is_empty() {
-            String::new()
-        } else {
-            format!(" {} ", tags.join(" "))
-        };
+        note.tags = meguri_engine::tags::canonical::join_note_tags(&tags);
         note.flags = 0;
         note.data.clear();
         scope.put(&note)?;
     }
+    let mut shaper = crate::apkg::CardShaper::new(
+        options.include_scheduling,
+        selected.return_home,
+        selected.next_position,
+    );
     for id in &selected.cards {
         cancelled(context.is_cancelled)?;
         let mut card = snapshot.card(CardId(*id))?.expect("validated snapshot card");
-        if options.include_scheduling {
-            if selected.return_home && card.original_deck_id.0 > 0 {
-                card.original_deck_id = DeckId(0);
-                if card.original_due != 0 {
-                    card.due = card.original_due;
-                }
-                if card.queue.stored() >= 0 {
-                    card.queue = meguri_sched::model::card_sched::queue_for_type(card.card_type, card.due);
-                }
-                card.original_due = 0;
-            }
-        } else {
-            let last = if card.card_type == CardType::New {
-                Some(if card.original_deck_id.0 > 0 {
-                    card.original_due
-                } else {
-                    card.due
-                } as u32)
-            } else {
-                card.data.new_position
-            };
-            card.due = last.unwrap_or_else(|| {
-                let position = next;
-                next = next.wrapping_add(1);
-                position
-            }) as i32;
-            card.card_type = CardType::New;
-            card.queue = CardQueue::New;
-            card.interval = 0;
-            card.ease_factor = 0;
-            card.reps = 0;
-            card.lapses = 0;
-            if card.original_deck_id.0 != 0 {
-                card.original_due = 0;
-            }
-            card.original_deck_id = DeckId(0);
-            card.flags = 0;
-            card.data.new_position = None;
-            card.data.memory_state = None;
-        }
+        shaper.shape(&mut card);
         scope.put(&card)?;
     }
     for id in &selected.revlog {

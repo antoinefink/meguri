@@ -115,13 +115,10 @@ impl ReadSnapshot<'_> {
         let mut homes = BTreeSet::new();
         let mut origins = BTreeSet::new();
         let mut current_decks = BTreeSet::new();
+        let mut card_decks = self.conn().prepare("SELECT did,odid FROM cards WHERE id=?1")?;
         for id in &cards {
             check(cancel)?;
-            let (did, odid): (i64, i64) =
-                self.conn()
-                    .query_row("SELECT did,odid FROM cards WHERE id=?1", [id], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })?;
+            let (did, odid): (i64, i64) = card_decks.query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
             deck_ids.insert(did);
             current_decks.insert(did);
             if odid == 0 {
@@ -174,12 +171,10 @@ impl ReadSnapshot<'_> {
             decks.insert(id, self.deck(DeckId(id))?.ok_or_else(|| missing("decks", id))?);
         }
         let mut mids = BTreeSet::new();
+        let mut note_types = self.conn().prepare("SELECT mid FROM notes WHERE id=?1")?;
         for id in &notes {
             check(cancel)?;
-            mids.insert(
-                self.conn()
-                    .query_row("SELECT mid FROM notes WHERE id=?1", [id], |r| r.get::<_, i64>(0))?,
-            );
+            mids.insert(note_types.query_row([id], |r| r.get::<_, i64>(0))?);
         }
         let mut notetypes = BTreeMap::new();
         for id in mids {

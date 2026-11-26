@@ -25,6 +25,25 @@ pub fn create(path: &Path, clock: &dyn Clock, random: &dyn RandomSource) -> Resu
         dirty: 0,
         legacy: Default::default(),
     };
+    let mut config = base_config();
+    config.push(ConfigEntry {
+        key: "creationOffset".into(),
+        value: timing.creation_offset.to_string().into_bytes(),
+        usn: Usn(0),
+        mtime: EpochSecs(0),
+    });
+    meguri_storage::bootstrap::create(path, &col, &config, &frozen, |scope| {
+        scope.put(&crate::deck_config::defaults())?;
+        let mut deck = crate::decks::new_deck("Default".into());
+        deck.id = DeckId(1);
+        scope.put(&deck)?;
+        crate::notetypes::stock::add_to_new_collection(scope, random)?;
+        Ok(())
+    })
+}
+
+/// B4 base entries; callers supply creationOffset and any stock note type selection.
+pub fn base_config() -> Vec<ConfigEntry> {
     let mut config = Vec::new();
     for (key, value) in [
         ("activeDecks", "[1]"),
@@ -49,18 +68,5 @@ pub fn create(path: &Path, clock: &dyn Clock, random: &dyn RandomSource) -> Resu
             mtime: EpochSecs(0),
         });
     }
-    config.push(ConfigEntry {
-        key: "creationOffset".into(),
-        value: timing.creation_offset.to_string().into_bytes(),
-        usn: Usn(0),
-        mtime: EpochSecs(0),
-    });
-    meguri_storage::bootstrap::create(path, &col, &config, &frozen, |scope| {
-        scope.put(&crate::deck_config::defaults())?;
-        let mut deck = crate::decks::new_deck("Default".into());
-        deck.id = DeckId(1);
-        scope.put(&deck)?;
-        crate::notetypes::stock::add_to_new_collection(scope, random)?;
-        Ok(())
-    })
+    config
 }
