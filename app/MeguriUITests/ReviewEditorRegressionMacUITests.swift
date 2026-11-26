@@ -57,10 +57,10 @@ import XCTest
         try requireMenu("initial-review")
         note.click(); command.click()
         XCTAssertTrue(window.waitForExistence(timeout: 15))
-        let fields = window.descendants(matching: .any).matching(identifier: "editor.fields").firstMatch.textViews
-        XCTAssertTrue(wait { fields.count > 0 && fields.element(boundBy: 0).isHittable })
-        fields.element(boundBy: 0).click(); app.typeKey("a", modifierFlags: .command)
-        app.typeText("Synthetic saved review command regression")
+        // Edit opens with its first rich-text field focused.
+        let savedTitle = "Synthetic saved review command regression"
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText(savedTitle)
         let save = window.buttons["review.editCurrent.done"]
         XCTAssertTrue(wait { save.exists && save.isEnabled && save.isHittable })
         save.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
@@ -70,8 +70,7 @@ import XCTest
         try requireMenu("save")
         app.typeKey("e", modifierFlags: .command)
         XCTAssertTrue(window.waitForExistence(timeout: 15), "Cmd-E must work again after Save")
-        XCTAssertTrue(wait { fields.count > 0 && (fields.element(boundBy: 0).value as? String ?? "")
-            .contains("Synthetic saved review command regression") })
+        XCTAssertTrue(wait { window.title == savedTitle }, "Reopening must show the saved first field as the window title")
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 15))
         try requireMenu("unchanged-close")
