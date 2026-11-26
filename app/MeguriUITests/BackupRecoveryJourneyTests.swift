@@ -126,11 +126,12 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         XCTAssertEqual(element(app, entryPrefix + older).value as? String, "Not selected",
             "The older archive must start unselected while newer backups exist")
         try select(older, app)
+        try assertRunHistory(app)
+        let historyWindow = try captureWindow(app, anchor: historyAnchor)
+        capture(historyWindow, state: "history-older-backup-selected")
         #if os(iOS)
         try assertShortHistoryGeometry(app, names: beforeCancel)
         #endif
-        try capture(app, anchor: historyAnchor, state: "history-older-backup-selected")
-        let historyWindow = try captureWindow(app, anchor: historyAnchor)
         let outside = try confirmationDismissalPoint(historyWindow)
         let confirmation = try advanceToConfirmation(app, filename: older)
         capture(historyWindow, state: "confirmation-restore-older-backup")
@@ -630,7 +631,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
     #if os(iOS)
     private func assertShortHistoryGeometry(_ app: XCUIApplication, names: Set<String>) throws {
         XCTAssertEqual(names.count, 3, "This stage exercises three real, ordinary eligible archives")
-        let rows = names.map { element(app, entryPrefix + $0) }
+        let rows = names.sorted().map { element(app, entryPrefix + $0) }
         let window = try captureWindow(app, anchor: historyAnchor)
         if UIDevice.current.userInterfaceIdiom == .phone, window.frame.height > window.frame.width {
             let navigation = app.navigationBars.containing(.button, identifier: historyAnchor).firstMatch
@@ -644,7 +645,7 @@ final class BackupRecoveryJourneyTests: XCTestCase {
         // SwiftUI may omit the sheet node. Its existing content identifier is
         // still scoped to the presented picker, excluding background windows.
         let content = element(app, "settings.backups.restoreContent")
-        XCTAssertTrue(wait {
+        let fits = wait {
             let surface = sheet.exists ? sheet.frame : content.frame
             guard !surface.isEmpty, window.frame.contains(surface),
                   rows.allSatisfy({ $0.exists && !$0.frame.isEmpty && surface.contains($0.frame) }),
@@ -653,7 +654,22 @@ final class BackupRecoveryJourneyTests: XCTestCase {
             // Points/row geometry, never screenshot pixels. A half-screen iPad
             // sheet or the old iPhone's ~180 pt trailing gap must fail.
             return gap >= 0 && gap <= max(96, last.frame.height * 2)
-        }, "Three simple rows must be visible with at most two rows of trailing space")
+        }
+        var diagnostics = ""
+        if !fits {
+            let windowFrame = window.frame
+            let sheetFrame: CGRect? = sheet.exists ? sheet.frame : nil
+            let contentFrame = content.frame
+            let surface = sheetFrame ?? contentFrame
+            let rowFrames = rows.map { (identifier: $0.identifier, exists: $0.exists, frame: $0.frame) }
+            let last = rowFrames.max(by: { $0.frame.maxY < $1.frame.maxY })?.frame
+            let gap = last.map { String(describing: surface.maxY - $0.maxY) } ?? "unavailable"
+            let allowed = last.map { String(describing: max(96, $0.height * 2)) } ?? "unavailable"
+            diagnostics = "window=\(windowFrame); surfaceSource=\(sheetFrame == nil ? "content" : "sheet"); "
+                + "sheet=\(sheetFrame.map { String(describing: $0) } ?? "absent"); content=\(contentFrame); "
+                + "surface=\(surface); rows=\(rowFrames); bottomGap=\(gap); allowedBound=\(allowed)"
+        }
+        XCTAssertTrue(fits, "Three simple rows must be visible with at most two rows of trailing space. \(diagnostics)")
     }
 
     private func frameSettingsReceipt(_ app: XCUIApplication) throws {

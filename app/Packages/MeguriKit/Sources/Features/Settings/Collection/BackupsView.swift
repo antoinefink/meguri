@@ -265,26 +265,29 @@ struct BackupRestoreContent: View {
                    minHeight: BackupRestoreWindowLayout.minimumSize.height)
         #else
         NavigationStack { restoreBody }
-            // Form sizing can impose its own minimum height on iPad.
-            .presentationSizing(.page)
-            .presentationDetents(restoreDetents)
+            .presentationSizing(BackupRestorePresentationSizing(
+                regularWidth: horizontalSizeClass == .regular, shortHeight: shortHistoryHeight))
+            .presentationDetents(horizontalSizeClass == .regular ? [.large] : restoreDetents)
             .interactiveDismissDisabled(presentation.busy || confirmation)
         #endif
     }
     #if os(iOS)
     private var restoreDetents: Set<PresentationDetent> {
+        guard let height = shortHistoryHeight else { return [.large] }
+        return [.height(height), .large]
+    }
+    private var shortHistoryHeight: CGFloat? {
         guard textSize <= .large, !hasWrappedRow, presentation.entries.count <= 5,
               presentation.work == nil, presentation.failure == nil, presentation.listFailure == nil,
               !presentation.candidateActive, !presentation.activationUncertain, presentation.safetyBackup == nil,
               presentation.entries.allSatisfy({
                   $0.kind == .backup && !unavailable($0) && duplicateIndex($0) == nil
-              }) else { return [.large] }
-        if case .uncertain = presentation.backupPublication { return [.large] }
+              }) else { return nil }
+        if case .uncertain = presentation.backupPublication { return nil }
         // Reserve three rows before discovery too: opening a short history must
         // not first flash a large sheet. Real errors/work use the large detent.
         let rows = presentation.entries.isEmpty ? 3 : presentation.entries.count
-        let height = min(compactRowHeight * CGFloat(rows) + compactChromeHeight, compactRowHeight * 8)
-        return [.height(height), .large]
+        return min(compactRowHeight * CGFloat(rows) + compactChromeHeight, compactRowHeight * 8)
     }
     #endif
     private var restoreBody: some View {
@@ -480,6 +483,23 @@ struct BackupRestoreContent: View {
         }
     }
 }
+
+#if os(iOS)
+private struct BackupRestorePresentationSizing: PresentationSizing {
+    let regularWidth: Bool
+    let shortHeight: CGFloat?
+
+    func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        // Keep phone detents and one NavigationStack across size-class changes.
+        guard regularWidth else { return PagePresentationSizing.page.proposedSize(for: root, context: context) }
+        let proposal = FormPresentationSizing.form.proposedSize(for: root, context: context)
+        // Both page and form sizing have native height floors. Keep the system
+        // form width, but let an eligible short history supply its own height.
+        guard let shortHeight else { return proposal }
+        return .init(width: proposal.width, height: shortHeight)
+    }
+}
+#endif
 
 private struct BackupProgress: View {
     let work: BackupCoordinator.Work?
