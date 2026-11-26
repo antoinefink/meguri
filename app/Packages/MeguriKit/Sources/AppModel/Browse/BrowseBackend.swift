@@ -3,7 +3,7 @@ import Foundation
 
 /// The core reads Browse's shell uses (U270). Production is
 /// `CoreBrowseBackend`; tests and the test hooks' routes pass their own.
-/// Every call reads and writes nothing, except `setTagsCollapsed`, a
+/// Reads are pure. Writes include tag deletion, `setTagsCollapsed`, a
 /// person's own toggle of a tag's disclosure, the saved searches' Save
 /// Search…, Rename… and Delete, and the column set and mode writes.
 @MainActor public protocol BrowseBackend: AnyObject, Sendable {
@@ -32,6 +32,8 @@ import Foundation
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow]
     /// `notetypes/editor-actions` A2's order.
     func notetypes() async throws -> [NotetypeName]
+    /// T9: deletes registry entries and matching note tags in one undoable job.
+    func deleteTags(text: String) async throws -> CountMutation
     func tagTree() async throws -> [TagNode]
     /// The seven flags' shown names (`tags/flags-and-marked` F4).
     func flagNames() async throws -> [String]
@@ -57,6 +59,7 @@ import Foundation
 }
 
 extension BrowseBackend {
+    public func deleteTags(text: String) async throws -> CountMutation { throw BrowseCommandUnsupported() }
     /// No field columns to offer (the model's own tests).
     public func fieldNames(notetype: Int64) async throws -> [String] { [] }
 }
@@ -95,6 +98,14 @@ extension BrowseBackend {
     public func notetypes() async throws -> [NotetypeName] { try await notetypeReads.notetypeList() }
     public func fieldNames(notetype: Int64) async throws -> [String] {
         try await notetypeReads.readNotetype(id: notetype).fields.map(\.name)
+    }
+    public func deleteTags(text: String) async throws -> CountMutation {
+        let job = try await tags.startDeleteTags(text: text)
+        return try await withTaskCancellationHandler {
+            try await job.value()
+        } onCancel: {
+            Task { try? await job.job.cancel() }
+        }
     }
     public func tagTree() async throws -> [TagNode] { try await tags.tagTree() }
     public func flagNames() async throws -> [String] { try await tags.flagNames() }

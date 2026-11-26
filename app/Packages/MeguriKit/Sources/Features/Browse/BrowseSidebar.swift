@@ -90,15 +90,22 @@ public struct BrowseSidebar<Header: View>: View {
     }
 
     /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
-    /// a note type's Edit Note Type… (W14). Other rows have no menu.
+    /// a note type's Edit Note Type… (W14), and Delete Tag (T9, S9.3).
     @ViewBuilder private func rowMenu(_ rows: Set<BrowseSidebarTag>) -> some View {
-        if rows.count == 1, let row = rows.first {
+        let names = tagNames(in: rows)
+        if names.count > 1, names.count == rows.count {
+            BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target(names),
+                                  identifier: "browse.sidebar.tag.delete")
+        } else if rows.count == 1, let row = rows.first {
             switch row {
             case .saved(let name):
                 Button { model.startRenaming(name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
                     .accessibilityIdentifier("browse.sidebar.saved.rename")
                 Button { model.deleteSavedSearch(name) } label: { Text("browse.savedSearch.delete", bundle: .module) }
                     .accessibilityIdentifier("browse.sidebar.saved.delete")
+            case .tag(let name):
+                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([name]),
+                                      identifier: "browse.sidebar.tag.delete")
             case .notetype(let id):
                 Button { model.editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
                     .accessibilityIdentifier("browse.sidebar.notetype.edit")
@@ -109,6 +116,14 @@ public struct BrowseSidebar<Header: View>: View {
                 EmptyView()
             }
         }
+    }
+
+    private func tagNames(in rows: Set<BrowseSidebarTag>) -> [String] {
+        guard rows.allSatisfy({ if case .tag = $0 { true } else { false } }) else { return [] }
+        func walk(_ nodes: [TagNode]) -> [String] {
+            nodes.flatMap { (rows.contains(.tag($0.fullName)) ? [$0.fullName] : []) + walk($0.children) }
+        }
+        return walk(model.tags)
     }
 
     // MARK: Selection (T9)
@@ -431,8 +446,13 @@ public struct BrowseSidebar<Header: View>: View {
     }
 
     fileprivate func tagRow(_ node: TagNode) -> some View {
-        row(.tag(node.fullName), label: node.name, identifier: "tag.\(Self.identifier(node.fullName))", icon: .symbol("tag"),
+        return row(.tag(node.fullName), label: node.name, identifier: "tag.\(Self.identifier(node.fullName))", icon: .symbol("tag"),
             help: node.fullName.replacingOccurrences(of: "::", with: " › "))
+            #if !os(macOS)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([node.fullName]))
+            }
+            #endif
     }
 
     /// A tag's name as an identifier's last part (letters, digits, `_` and `-`).

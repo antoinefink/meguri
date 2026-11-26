@@ -7,8 +7,8 @@ import Observation
 /// and counts (`browser/workspace` V6, T12.4). Held by `ReviewCollection`
 /// above the layout switch, so leaving Browse for Today, a deck or review
 /// and coming back finds it as it was (V1); a relaunch starts as T14 says.
-/// Every read here is pure: nothing writes the collection but a person's
-/// toggle of a tag's disclosure.
+/// Reads are pure; explicit tag, saved-search and row actions write through
+/// the core's mutation services.
 @Observable @MainActor
 public final class BrowseModel {
     /// A user saved search (`browser/config-keys` K7.1), in the sidebar's
@@ -54,8 +54,13 @@ public final class BrowseModel {
     @ObservationIgnored private var fieldsStale = true
     @ObservationIgnored private var fieldsTask: Task<Void, Never>?
     public private(set) var tags: [TagNode] = [] {
-        didSet { tagsRevision &+= 1; updateShownTags() }
+        didSet {
+            tagIdentities = Set(Self.tagNames(tags))
+            tagsRevision &+= 1
+            updateShownTags()
+        }
     }
+    private(set) var tagIdentities: Set<String> = []
     /// Flags 1 to 7's shown names (F4).
     public private(set) var flagNames: [String] = []
     /// Each row's count in the current mode (T12.3 step 4); a row without
@@ -117,6 +122,8 @@ public final class BrowseModel {
     /// The results table (U270a): the query's rows in the mode.
     public let results: BrowseResults
     /// The commands on its rows (U275).
+    public var showingTags = false
+    public let tagDeletion: BrowseTagDeletion
     public let commands: BrowseCommands
     /// The pane beside the table (U273).
     public let inspector: BrowseInspector
@@ -193,6 +200,8 @@ public final class BrowseModel {
         let commands = BrowseCommands(results: results,
                                       sheetReads: sheetReads ?? (backend as? any BrowseSheetReads) ?? CoreBrowseSheetReads())
         self.commands = commands
+        let tagDeletion = BrowseTagDeletion(backend: backend)
+        self.tagDeletion = tagDeletion
         let device = store.load()
         let inspector = BrowseInspector(backend: inspectorBackend, results: results, commands: commands,
                                         device: device.inspector ?? BrowseInspectorDevice(),
@@ -229,6 +238,19 @@ public final class BrowseModel {
         }
         commands.notetypes = { [weak self] in self?.notetypes ?? [] }
         commands.duplicatesFound = { [weak self] found, field in self?.showDuplicates(found, field: field) }
+        tagDeletion.available = { [weak commands] in
+            guard let commands else { return false }
+            return commands.ready() && !commands.busy && commands.deleteQuestion == nil && commands.sheet == nil
+                && commands.findReplaceSheet == nil && commands.findDuplicatesSheet == nil
+        }
+        tagDeletion.saveFirst = { [weak inspector] in await inspector?.flushForBackground() ?? true }
+        tagDeletion.contains = { [weak self] name in self?.hasTag(name) ?? false }
+        tagDeletion.finished = { [weak self] result, title in
+            guard let self else { return }
+            if result.summary.undoName != nil { self.commands.stepRecorded(result.summary.seq, title) }
+            self.reload()
+        }
+        commands.otherWorkBusy = { [weak tagDeletion] in tagDeletion?.busy ?? false }
     }
 
     // MARK: Find Duplicates' token (V10)
@@ -664,6 +686,11 @@ public final class BrowseModel {
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         if changes.wholeCollection || !changes.notetypes.isEmpty { fieldsStale = true }
         results.changesCommitted(changes, seq: seq)
+        // Registry deletion and its Undo change which notes a tag query finds.
+        // Keep the query (including a deleted value), but read its results again.
+        if changes.tags.contains(where: { $0.change == .removed || $0.change == .added }) {
+            results.runAgain()
+        }
         inspector.changesCommitted(changes, seq: seq)
         // The selection's counts (suspended, buried, note types) may have changed.
         if changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty { commands.rowsChanged() }
@@ -691,6 +718,7 @@ public final class BrowseModel {
         fieldsStale = true
         // A save on its way went with the old epoch: Save can be tried again.
         if savingSearch?.saving == true { savingSearch?.markFailed() }
+        tagDeletion.reset()
         commands.reset()
         results.collectionReady()
         inspector.reset()
@@ -716,12 +744,14 @@ public final class BrowseModel {
     /// The collection was replaced: the next open is a first open (T14).
     public func collectionReplaced() {
         epoch &+= 1
+        tagDeletion.reset()
         commands.reset()
         results.collectionReplaced()
         inspector.reset()
         countsTask?.cancel()
         opened = false
         openInFlight = false
+        showingTags = false
         mode = .cards
         unwrittenMode = nil
         replacements &+= 1

@@ -55,6 +55,12 @@ public struct BrowseView: View {
                 ToolbarItem(placement: .primaryAction) { inspectorToggle }
                 #else
                 ToolbarItem(placement: .principal) { modePicker }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.showingTags = true } label: {
+                        Label { Text("browse.tags.title", bundle: .module) } icon: { Image(systemName: "tag") }
+                    }
+                    .accessibilityIdentifier("browse.tags.show")
+                }
                 #endif
             }
             .browseSearchField(model)
