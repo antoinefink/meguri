@@ -952,6 +952,9 @@ PUBLIC_ARTIFACTS = {
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
+    'docs/process/review-log/mcp-automatic-media-20261123.md':
+        'ec6b73e380d5d8534b76613f23168cb36d3ef6b5a1b3287d773d5171ff000233',
     # Complete-content PUBLIC review: mcp-automatic-media, 2026-11-23.
     'server/src/mcp_transport/descriptors.rs':
         'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
@@ -967,8 +970,9 @@ PUBLIC_ARTIFACTS = {
         '9a46822ad1682fee5b4226c231efd779b9171e883e75610c1bb0276933c9536d',
     'server/src/collection/mcp/search_index.rs':
         '22ba70723d6e216a853814908300f82a1b8e7eecee8b90e82398b8dd92da27b8',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/mcp_service/authority_tests.rs':
-        'ce8b31f955e6aac28cf117bcb041cee67566273a6c6583bd560285c46b23a4bc',
+        '38f0a0354d502cceeca6c085126caa415f7144a0732e957d1f670166ddd319a9',
     # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
     'server/src/mcp_service/export.rs':
         '463edb515478d490e6d07a1010edada22a852bbd3c451000228d245ad35fca1d',
@@ -992,8 +996,9 @@ PUBLIC_ARTIFACTS = {
         '35fcbf999f5235196af4ae965cd2bf75b9482e5bfc83f16a566260f35d577522',
     'server/src/mcp_transport/mod.rs':
         '759e5513925799c9abc1f377d8b0bd6fba30c8ae20d9eb475f9ce24d30c56b42',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/mcp_transport/tests.rs':
-        '8d70b80220be300bab08739d2bc2bdfdf79e274f9dc6b1d833d3ada4ae5d546a',
+        'feebf05769e58fccc778a2d7c1c37cec59961269888dd69ebf7fcad88a33a4bb',
     'server/src/collection/mcp/tests.rs':
         '78ee3ea5c3baaeac36c969d1d284165afba8651aeba1301ad8119cdebd0e7ccd',
     'server/src/collection/mcp/tests/size_scaling.rs':
@@ -1126,8 +1131,9 @@ PUBLIC_ARTIFACTS = {
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     # Complete-content PUBLIC review: mcp_refresh_review, 2026-11-26.
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/README.md':
-        '39ee9aa5a30633b4e6fe148a8044450c34896b19a95e66dd72295f887d627d40',
+        'ee4041ab3f408901badd62dea2f688e18c265fef297775816158df4ee77d9d6e',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
@@ -1318,8 +1324,9 @@ PUBLIC_ARTIFACTS = {
         "b3b339bbf4952ca3a149323b191eeed5fa906b6ceba71c95c4d06579c5fb924b",
     "specs/servers/meguri-sync-web.md":
         "51efa64d58253ad3b092d70c50be807dc30823bd069256875ab7975b21c6f852",
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     "specs/servers/meguri-collection-mcp.md":
-        "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
+        "eb25747d1e1cb4b4986a595d482bd07a9eddf08077c604d064c415dd2bbe8c0d",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
@@ -1373,8 +1380,9 @@ PUBLIC_ARTIFACTS = {
     # each entry admits only its exact path and complete reviewed bytes.
     'server/DEPENDENCIES.md':
         '33c9b563af531ec0b5cd6b02b0b43d3dec2c5db2aa025d7528a23a896ac79a23',
+    # Complete-content PUBLIC review: diag_review, 2026-11-26.
     'server/src/error.rs':
-        '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
+        'b9262c4e82ce8c39f5590b12fb68f265b26283a138a10a6d14b458765fa626f4',
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
