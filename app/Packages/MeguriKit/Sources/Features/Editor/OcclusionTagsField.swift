@@ -39,7 +39,7 @@ struct OcclusionTagsField: View {
 }
 
 #if os(macOS)
-private struct NativeOcclusionTags: NSViewRepresentable {
+struct NativeOcclusionTags: NSViewRepresentable {
     let host: FieldEditorHost
     func makeCoordinator() -> Coordinator { Coordinator(host: host) }
     func makeNSView(context: Context) -> NSTokenField {
@@ -50,6 +50,14 @@ private struct NativeOcclusionTags: NSViewRepresentable {
         field.setAccessibilityLabel(String(localized: "Tags", bundle: .module))
         field.setAccessibilityIdentifier("io.editor.tags.input")
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        if host.usesOcclusionForm {
+            host.nativeTagsControl = field
+            host.focusLeave = { [weak host, weak field] previous in
+                guard let host, host.acceptsHostInput, let field else { return }
+                if previous { host.webView.window?.selectPreviousKeyView(nil) }
+                else { field.window?.makeFirstResponder(field) }
+            }
+        }
         host.flushNativeTags = { [weak field] in
             guard let field, field.currentEditor() != nil else { return }
             field.window?.endEditing(for: field)
@@ -59,7 +67,7 @@ private struct NativeOcclusionTags: NSViewRepresentable {
     func updateNSView(_ field: NSTokenField, context: Context) {
         // A new draft gets a new native control, so an unfinished token can
         // never be committed with a replacement draft's tags or note id.
-        field.isEnabled = host.acceptsHostInput && !host.maskEditorVisible
+        field.isEnabled = host.acceptsHostInput && (host.usesOcclusionForm || !host.maskEditorVisible)
         if field.currentEditor() == nil, (field.objectValue as? [String]) != host.draft.tags { field.objectValue = host.draft.tags }
     }
     static func dismantleNSView(_ field: NSTokenField, coordinator: Coordinator) {

@@ -1577,3 +1577,15 @@ Cause: the open set the collection ready before Home's first deck tree was read,
 ### N27.8 What this replaces
 
 - N2's "distinct collection-loading state" and the "Opening collection…" loading view on Home; N14.1's loading state for Today. The failed, unavailable, no-file and empty-deck states stay distinct.
+
+## N28. Image occlusion in Mac Add Note and Edit Note
+
+Antoine chose [Option B](https://gist.github.com/antoinefink/37d10fe428338756450369f3529d3e3b) on 2026-11-26. This is the screen contract for `imageOcclusion.editor` in those two windows. Native visual acceptance follows inspection of the built app.
+
+- Keep the existing title, note type, deck, HTML button and bottom actions. Add Note lets the user choose the note type and deck. Edit Note displays them as read-only.
+- Show Header, Image, Back Extra, Comments and Tags together in that order. Align field labels with the note type and deck. Use the note type's actual field names and retain its additional fields. Keep rich-text and HTML editing available. The single form supersedes the mode toggle in `editor/image-occlusion-notes` O3 for these windows.
+- Put the drawing controls, canvas and footer inside one bordered Image field. Centre the image on a neutral ground. Give the canvas the remaining window height, with about 280 pt at its smallest. A short window scrolls.
+- Group Select, Rectangle, Ellipse, Polygon and Text Label in an icon-only segmented control. Follow it with the fill colour well and reset, a separator, Undo and Redo. At the trailing end, show Cards with its current mode, the zoom menu showing Fit when fitted, and the actions menu.
+- Keep selection information, label editing and movement accessible through the canvas, keyboard, context menu and VoiceOver. The actions menu retains selection, duplication, grouping, alignment, polygon completion, translucency and deletion.
+- Show the filename, mask count and card count below the image, with Change Image… at the trailing edge. Count each numbered mask and each distinct card ordinal. Two grouped masks make one card. Exclude text labels from the counts.
+- Before an image is chosen, show the image picker inside the field. Show media progress, errors, size warnings and missing occlusion messages there. Show the toolbar and footer once an image is available. Replacing it uses the existing confirmation.

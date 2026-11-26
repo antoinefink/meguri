@@ -55,6 +55,13 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             }
             readOcclusionField = field
             occlusionReadingError = maskSession?.readingError
+            if usesOcclusionForm, let shapes = try? OcclusionCodec(field: field).shapes {
+                let masks = shapes.filter {
+                    if case .text = $0.kind { return false }
+                    return $0.number > 0
+                }
+                occlusionCounts = (masks.count, Set(masks.map(\.number)).count)
+            } else { occlusionCounts = nil }
         }
         if let referenceImageField, referenceImageField != image { maskSession?.resetForImageChange() }
         referenceImageField = image
@@ -65,6 +72,77 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         occlusionImage.startsNewMasks = true
         maskSession?.receive("", isEditing: false)
     }
+    struct OcclusionFormLayout: Equatable {
+        var imageTop = 0.0
+        var imageHeight = 400.0
+        var tagsTop = 408.0
+    }
+    private(set) var occlusionFormLayout: OcclusionFormLayout?
+    private var occlusionFormViewport = 0.0
+    private var occlusionTagsHeight = 28.0
+    private(set) var occlusionCounts: (masks: Int, cards: Int)?
+
+    /// Reserve native rows in the retained field page. No field is reloaded or
+    /// serialized when the window changes size or focus moves to the canvas.
+    func layoutOcclusionForm(viewport: Double, tagsHeight: Double) async {
+        occlusionFormViewport = viewport; occlusionTagsHeight = tagsHeight
+        guard usesOcclusionForm, editable, let expected = activeLoad else { return }
+        do { try await configureOcclusionForm(load: expected) }
+        catch {
+            if !Task.isCancelled, activeLoad == expected { fail(error, load: expected) }
+        }
+    }
+    private var occlusionFormOptions: [String: Any]? {
+        guard usesOcclusionForm, let roles = draft.occlusionRoles else { return nil }
+        return ["header": roles.header, "backExtra": roles.backExtra,
+            "viewport": occlusionFormViewport, "tagsHeight": occlusionTagsHeight]
+    }
+    private func configureOcclusionForm(load expected: UInt64) async throws {
+        guard var command = occlusionFormOptions else { return }
+        command["type"] = "setOcclusionForm"; command["loadId"] = expected
+        _ = try await call(command, load: expected)
+        try requireCurrent(expected)
+    }
+
+    #if os(macOS)
+    private final class MaskActivationFocus {
+        weak var responder: NSView?
+        let event: NSEvent?
+        init(responder: NSView, event: NSEvent?) { self.responder = responder; self.event = event }
+    }
+    @ObservationIgnored private var maskActivationFocus: MaskActivationFocus?
+    @ObservationIgnored weak var nativeTagsControl: NSControl?
+    #endif
+    /// The legacy canvas focuses itself when it becomes enabled. Capture a
+    /// text responder before image readiness/release enables it, so decoding
+    /// an image in the background cannot interrupt typing in this form.
+    func preserveTextFocusForMaskActivation() {
+        #if os(macOS)
+        guard usesOcclusionForm, let responder = webView.window?.firstResponder as? NSView,
+              responder is NSTextView || responder === webView || responder.isDescendant(of: webView) else { return }
+        // AppKit's shared field editor can detach when the canvas focuses.
+        // Restore its owning token control so editing is attached correctly.
+        let target: NSView
+        if let control = nativeTagsControl, control.currentEditor() === responder { target = control }
+        else { target = responder }
+        maskActivationFocus = .init(responder: target, event: NSApp.currentEvent)
+        #endif
+    }
+    func restoreTextFocusAfterMaskActivation() {
+        #if os(macOS)
+        guard let focus = maskActivationFocus else { return }
+        maskActivationFocus = nil
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, self.usesOcclusionForm, self.acceptsMaskInput,
+                  let responder = focus.responder, let window = self.webView.window,
+                  responder.window === window, NSApp.currentEvent === focus.event else { return }
+            // A deliberate click/key since capture supersedes this restoration.
+            window.makeFirstResponder(responder)
+        }
+        #endif
+    }
+
     var flushNativeTags: (@MainActor () -> Void)?
     public var acceptsHostInput: Bool { editable && !held && !draft.hostFieldsHeld && !closed && isCurrent() }
     /// The canvas and its retained writer use the same production admission.
@@ -73,7 +151,16 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         acceptsHostInput && maskEditorVisible && occlusionImage.image != nil &&
             !occlusionImage.busy && !occlusionImage.replacing
     }
+    /// Option B applies only to macOS Add/Edit; Browse keeps its legacy switch.
+    var usesOcclusionForm: Bool {
+        #if os(macOS)
+        !browsing && draft.occlusionRoles != nil
+        #else
+        false
+        #endif
+    }
     public var maskEditorVisible: Bool {
+        if usesOcclusionForm { return true }
         guard draft.occlusionRoles != nil, draft.showsMaskEditor else { return false }
         return draft.noteID == nil || occlusionReadingError == nil
     }
@@ -261,7 +348,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public var modeField: Int? {
         guard editable, let ord = draft.focusedField, draft.fields.indices.contains(ord),
               (browsing || !draft.fields[ord].collapsed), !draft.hiddenFields.contains(ord),
-              !draft.hostFields.contains(ord), !(draft.occlusionRoles != nil && draft.showsMaskEditor) else { return nil }
+              !draft.hostFields.contains(ord), (usesOcclusionForm || !(draft.occlusionRoles != nil && draft.showsMaskEditor)) else { return nil }
         return ord
     }
     public var focusedMode: NoteEditorDraft.Mode? { modeField.map { draft.fields[$0].mode } }
@@ -362,14 +449,20 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             return value
         }
         let shownFocus = draft.focusedField.flatMap { draft.hostFields.contains($0) ? nil : $0 }
-        let focus = !browsing && !(draft.occlusionRoles != nil && draft.showsMaskEditor) ? shownFocus ?? draft.fields.indices.first(where: {
+        let defaultFocus = usesOcclusionForm ? draft.occlusionRoles?.header : nil
+        let focus = !browsing && (usesOcclusionForm || !(draft.occlusionRoles != nil && draft.showsMaskEditor)) ? shownFocus ?? defaultFocus ?? draft.fields.indices.first(where: {
             !draft.fields[$0].collapsed && !draft.hiddenFields.contains($0) && !draft.hostFields.contains($0)
         }) : nil
+        #if os(macOS)
+        (webView as? FieldEditorMacWebView)?.inForm = usesOcclusionForm
+        #endif
+        var options: [String: Any] = ["closeHTMLTags": false, "shrinkImages": false]
+        if let occlusionFormOptions { options["occlusionForm"] = occlusionFormOptions }
         openedLoad = expected
         let mode = browsing ? "browse" : draft.noteID == nil ? "add" : "edit"
         _ = try await call(["type": "openNote", "protocol": 1, "loadId": expected, "mode": mode, "fields": fields,
             "focus": focus.map { $0 as Any } ?? NSNull(), "theme": [String: String](),
-            "options": ["closeHTMLTags": false, "shrinkImages": false]], load: expected)
+            "options": options], load: expected)
         try requireCurrent(expected)
         guard editable else { throw EditorRuntimeError.unavailable }
         held = false
@@ -415,7 +508,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         // input-state change that would cancel the still-current source.
         guard held || draft.hostFieldsHeld else { return }
         _ = try await call(["type": "release", "loadId": expected], load: expected)
-        try requireCurrent(expected); held = false; draft.hostFieldsHeld = false
+        try requireCurrent(expected)
+        preserveTextFocusForMaskActivation()
+        held = false; draft.hostFieldsHeld = false
     }
     /// Edit mode: the page loads again the fields the draft took from the
     /// stored note after a change made elsewhere (B3 `setField`).
@@ -641,6 +736,12 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
                 canRedo = EditorBridgeMessage.boolean(message.body["canRedo"])!
             }
         case "focusLeave": draft.setFocus(nil); focusLeave?(message.body["direction"] as? String == "previous")
+        case "occlusionFormLayout":
+            guard usesOcclusionForm else { throw EditorRuntimeError.invalidMessage }
+            occlusionFormLayout = .init(imageTop: EditorBridgeMessage.number(message.body["imageTop"])!,
+                imageHeight: EditorBridgeMessage.number(message.body["imageHeight"])!,
+                tagsTop: EditorBridgeMessage.number(message.body["tagsTop"])!)
+            contentHeight = EditorBridgeMessage.number(message.body["height"])!
         case "contentHeight": contentHeight = EditorBridgeMessage.number(message.body["height"])!
         case "caret":
             caret = EditorBridgeMessage.number(message.body["top"])!...EditorBridgeMessage.number(message.body["bottom"])!
@@ -862,7 +963,8 @@ private final class EditorMessageRelay: NSObject, WKScriptMessageHandlerWithRepl
 }
 
 /// A mount for the retained view, with WebKit as the sole scroll/focus owner
-/// for fields. The surrounding native form must not wrap it in a ScrollView.
+/// for fields. The integrated Mac IO form reserves native rows in this page
+/// and, like Browse, gives scrolling to its enclosing native view.
 public struct FieldEditorView: View {
     public let host: FieldEditorHost
     public init(host: FieldEditorHost) { self.host = host }
@@ -896,6 +998,7 @@ private struct FieldEditorMount: UIViewRepresentable {
 /// scroll view.
 final class FieldEditorMacWebView: WKWebView {
     var inInspector = false
+    var inForm = false
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
         // WebKit's background switch has no public setter on the Mac; KVC reaches it
@@ -904,7 +1007,7 @@ final class FieldEditorMacWebView: WKWebView {
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     override func scrollWheel(with event: NSEvent) {
-        if inInspector, let next = nextResponder { next.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
+        if inInspector || inForm, let next = nextResponder { next.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
     }
 }
 #endif

@@ -10,11 +10,16 @@ import UniformTypeIdentifiers
 @Observable @MainActor
 final class OcclusionImageSession {
     private nonisolated struct FetchFailure: Error { let cause: String }
-    private(set) var image: OcclusionImageInput?
+    @ObservationIgnored private weak var focusHost: FieldEditorHost?
+    private(set) var image: OcclusionImageInput? {
+        willSet { if newValue != nil { focusHost?.preserveTextFocusForMaskActivation() } }
+    }
     private(set) var loadedField: String?
     private(set) var loadRetry: UInt64 = 0
     private var loadFailed = false
-    private(set) var busy = false
+    private(set) var busy = false {
+        willSet { if busy && !newValue { focusHost?.preserveTextFocusForMaskActivation() } }
+    }
     private(set) var gettingMedia = false
     var error: String?
     var fetchFailure: String?
@@ -32,6 +37,7 @@ final class OcclusionImageSession {
 
     func reserveSource(host: FieldEditorHost) -> UUID? {
         guard host.acceptsHostInput, !busy else { return nil }
+        focusHost = host
         cancel(); busy = true; error = nil
         let source = ImageSourceRequest()
         sourceRequest = source
@@ -200,6 +206,7 @@ final class OcclusionImageSession {
     }
 
     func load(host: FieldEditorHost) async {
+        focusHost = host
         guard let roles = host.draft.occlusionRoles else { return }
         let field = host.draft.values[roles.image]
         guard !busy, field != loadedField else { return }
@@ -281,6 +288,7 @@ final class OcclusionImageSession {
                        source: ImageSourceRequest = ImageSourceRequest(),
                        prepare: @escaping @Sendable (Bool) async throws -> OcclusionImageInput) {
         guard host.acceptsHostInput, !busy, let roles = host.draft.occlusionRoles else { return }
+        focusHost = host
         cancel(); busy = true; error = nil; fetchFailure = nil; sourceRequest = source
         watchDraft(host, source: source)
         let expected = request, original = host.draft.values[roles.image]

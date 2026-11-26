@@ -1,6 +1,7 @@
 import AppModel
 import CoreBridge
 import ImageOcclusion
+import DesignSystem
 import SwiftUI
 import UniformTypeIdentifiers
 #if os(macOS)
@@ -10,8 +11,8 @@ import PhotosUI
 import UIKit
 #endif
 
-/// One native entry for Add, Edit Current and Browse. The field page and
-/// canvas stay mounted across the Mask Editor toggle; a toggle never saves.
+/// Add/Edit use the integrated Mac form. Browse and touch retain their
+/// existing fields/masks presentation and the same generation-bound host.
 public struct OcclusionNoteEditor: View {
     public let host: FieldEditorHost
     public init(host: FieldEditorHost) { self.host = host }
@@ -30,42 +31,20 @@ public struct OcclusionNoteEditor: View {
     private var masksShown: Bool { host.maskEditorVisible }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            if roles != nil { controls }
-            if draft.notetype.originalStockKind == 6, roles == nil {
-                Text(verbatim: IONoteText.noRoles)
-                    .padding().accessibilityIdentifier("io.editor.noRoles")
-            }
-            if let error = readingError, draft.noteID != nil {
-                Text(verbatim: IONoteText.unreadableMasks(error, copying: false))
-                    .padding().accessibilityIdentifier("io.editor.unreadable")
-            }
-            ZStack {
-                VStack(spacing: 0) {
-                    FieldEditorView(host: host)
-                        .id(ObjectIdentifier(host.webView))
-                    if draft.notetype.originalStockKind == 6, !host.browsing {
-                        OcclusionTagsField(host: host).id(draft.identity)
-                    }
-                }
-                    .opacity(masksShown ? 0 : 1)
-                    .allowsHitTesting(!masksShown)
-                    .accessibilityHidden(masksShown)
-                if roles != nil {
-                    maskContent
-                        .opacity(masksShown ? 1 : 0)
-                        .allowsHitTesting(masksShown)
-                        .accessibilityHidden(!masksShown)
-                }
-            }
-            if draft.occlusionAddRefused {
-                Text(verbatim: IONoteText.noOcclusions).padding()
-                    .accessibilityIdentifier("io.add.noOcclusions")
-            }
+        Group {
+            #if os(macOS)
+            if host.usesOcclusionForm { integratedForm }
+            else { legacyBody }
+            #else
+            legacyBody
+            #endif
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("io.editor.container")
-        .onChange(of: masksShown, initial: true) { _, shown in host.showFields(!shown) }
+        .onChange(of: masksShown, initial: true) { _, shown in host.showFields(host.usesOcclusionForm || !shown) }
+        .onChange(of: host.acceptsMaskInput, initial: true) { _, enabled in
+            if enabled { host.restoreTextFocusAfterMaskActivation() }
+        }
         .onChange(of: roles.map { draft.values[$0.occlusions] }) { host.refreshMaskSession() }
         .onAppear { session.retryFailedLoad() }
         .task(id: host.occlusionImageLoadKey) {
@@ -99,12 +78,12 @@ public struct OcclusionNoteEditor: View {
             Button(role: .cancel) {} label: { Text("Cancel", bundle: .module) }
         } message: { Text(verbatim: IONoteText.changeMessage) }
         .alert(Text("Couldn't Get Media", bundle: .module), isPresented: Binding(
-            get: { session.fetchFailure != nil }, set: { if !$0 { session.fetchFailure = nil } }
+            get: { !host.usesOcclusionForm && session.fetchFailure != nil }, set: { if !$0 { session.fetchFailure = nil } }
         )) {
             Button { session.fetchFailure = nil } label: { Text("OK", bundle: .module) }
         } message: { Text(verbatim: session.fetchFailure ?? "") }
         .alert(Text("This File Won't Sync", bundle: .module), isPresented: Binding(
-            get: { session.sizeWarning != nil }, set: { if !$0 { session.answerSize(false) } }
+            get: { !host.usesOcclusionForm && session.sizeWarning != nil }, set: { if !$0 { session.answerSize(false) } }
         )) {
             Button { session.answerSize(true) } label: { Text("Add Anyway", bundle: .module) }
             Button(role: .cancel) { session.answerSize(false) } label: { Text("Cancel", bundle: .module) }
@@ -127,6 +106,162 @@ public struct OcclusionNoteEditor: View {
         }
         #endif
     }
+
+    private var legacyBody: some View {
+        VStack(spacing: 0) {
+            if roles != nil { controls }
+            if draft.notetype.originalStockKind == 6, roles == nil {
+                Text(verbatim: IONoteText.noRoles)
+                    .padding().accessibilityIdentifier("io.editor.noRoles")
+            }
+            if let error = readingError, draft.noteID != nil {
+                Text(verbatim: IONoteText.unreadableMasks(error, copying: false))
+                    .padding().accessibilityIdentifier("io.editor.unreadable")
+            }
+            ZStack {
+                VStack(spacing: 0) {
+                    FieldEditorView(host: host)
+                        .id(ObjectIdentifier(host.webView))
+                    if draft.notetype.originalStockKind == 6, !host.browsing {
+                        OcclusionTagsField(host: host).id(draft.identity)
+                    }
+                }
+                    .opacity(masksShown ? 0 : 1)
+                    .allowsHitTesting(!masksShown)
+                    .accessibilityHidden(masksShown)
+                if roles != nil {
+                    maskContent
+                        .opacity(masksShown ? 1 : 0)
+                        .allowsHitTesting(masksShown)
+                        .accessibilityHidden(!masksShown)
+                }
+            }
+            if draft.occlusionAddRefused {
+                Text(verbatim: IONoteText.noOcclusions).padding()
+                    .accessibilityIdentifier("io.add.noOcclusions")
+            }
+        }
+    }
+
+    #if os(macOS)
+    @State private var tagsHeight = 28.0
+    @State private var formPosition = ScrollPosition()
+    @State private var formVisible = CGRect.zero
+    /// One field page, with native rows at reserved positions. It never
+    /// remounts or flushes a field simply because the canvas receives focus.
+    private var integratedForm: some View {
+        GeometryReader { viewport in
+            ScrollView {
+                FieldEditorView(host: host)
+                    .focusedValue(\.maskEditorCommands, nil)
+                    .frame(height: max(host.contentHeight, viewport.size.height))
+                    .overlay(alignment: .topLeading) {
+                        if let layout = host.occlusionFormLayout, let roles {
+                            ZStack(alignment: .topLeading) {
+                                NoteFormFieldRow {
+                                    Text(verbatim: draft.fields[roles.image].definition.name + ":")
+                                } content: {
+                                    imageField
+                                }
+                                .padding(.horizontal, Spacing.medium)
+                                .frame(height: layout.imageHeight)
+                                .offset(y: layout.imageTop)
+                                NoteFormFieldRow {
+                                    Text("Tags:", bundle: .module)
+                                } content: {
+                                    NativeOcclusionTags(host: host).id(draft.identity)
+                                        .frame(maxWidth: .infinity)
+                                        .focusedValue(\.maskEditorCommands, nil)
+                                }
+                                .padding(.horizontal, Spacing.medium)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onGeometryChange(for: Double.self) { $0.size.height } action: { tagsHeight = $0 }
+                                .offset(y: layout.tagsTop)
+                                .accessibilityIdentifier("io.editor.tags")
+                            }
+                        }
+                    }
+            }
+            .scrollPosition($formPosition)
+            .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in formVisible = rect }
+            .onChange(of: host.caret) { _, caret in
+                guard host.fieldFocused, let caret else { return }
+                if caret.lowerBound < formVisible.minY {
+                    formPosition.scrollTo(y: max(0, caret.lowerBound - Spacing.small))
+                } else if caret.upperBound > formVisible.maxY {
+                    formPosition.scrollTo(y: max(0, caret.upperBound - formVisible.height + Spacing.small))
+                }
+            }
+            .task(id: FormSize(viewport: viewport.size.height, tags: tagsHeight, editable: host.editable)) {
+                await host.layoutOcclusionForm(viewport: viewport.size.height, tagsHeight: tagsHeight)
+            }
+        }
+    }
+    private struct FormSize: Equatable { let viewport: Double; let tags: Double; let editable: Bool }
+
+    private var imageField: some View {
+        VStack(spacing: 0) {
+            maskContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+            inlineImageMessages
+            if session.image != nil, !session.replacing {
+                Divider()
+                imageFooter
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .border(Color(nsColor: .separatorColor))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("io.editor.imageField")
+    }
+    @ViewBuilder private var inlineImageMessages: some View {
+        VStack(alignment: .leading) {
+            if draft.occlusionAddRefused {
+                Text(verbatim: IONoteText.noOcclusions).accessibilityIdentifier("io.add.noOcclusions")
+            }
+            if let failure = session.fetchFailure {
+                Text("Couldn't Get Media", bundle: .module)
+                Text(verbatim: failure)
+                Button { session.fetchFailure = nil } label: { Text("OK", bundle: .module) }
+            }
+            if let name = session.sizeWarning {
+                Text("This File Won't Sync", bundle: .module)
+                let size = ByteCountFormatter.string(fromByteCount: Int64(session.sizeWarningBytes), countStyle: .file)
+                Text("“\(name)” is \(size). Files this size don't sync to your other devices.", bundle: .module)
+                HStack {
+                    Button { session.answerSize(true) } label: { Text("Add Anyway", bundle: .module) }
+                    Button { session.answerSize(false) } label: { Text("Cancel", bundle: .module) }
+                }
+            }
+        }
+        .padding(draft.occlusionAddRefused || session.fetchFailure != nil || session.sizeWarning != nil ? Spacing.small : 0)
+    }
+    private var imageFooter: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack { imageSummary; Spacer(); changeImageButton }
+            VStack(alignment: .leading) { imageSummary; changeImageButton }
+        }
+        .padding(Spacing.small)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("io.editor.imageFooter")
+    }
+    private var imageSummary: some View {
+        Label {
+            VStack(alignment: .leading) {
+                Text(verbatim: session.image?.name ?? "").lineLimit(1).truncationMode(.middle)
+                    .help(Text(verbatim: session.image?.name ?? ""))
+                if let counts = host.occlusionCounts {
+                    Text("\(counts.masks) masks make \(counts.cards) cards", bundle: .module)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } icon: { Image(systemName: "photo") }
+    }
+    private var changeImageButton: some View {
+        Button { changeImage = true } label: { Text("Change Image…", bundle: .module) }
+            .disabled(!host.acceptsHostInput || session.busy)
+            .accessibilityIdentifier("io.editor.changeImage")
+    }
+    #endif
 
     private var controls: some View {
         HStack {
@@ -151,24 +286,21 @@ public struct OcclusionNoteEditor: View {
             ContentUnavailableView {
                 Text(verbatim: IONoteText.unreadableMasks(error, copying: true))
             } actions: {
-                Button { host.drawNewMasks() } label: {
-                    Text(verbatim: IONoteText.drawNew)
-                }.accessibilityIdentifier("io.editor.drawNewMasks")
+                if !host.usesOcclusionForm || draft.noteID == nil {
+                    Button { host.drawNewMasks() } label: {
+                        Text(verbatim: IONoteText.drawNew)
+                    }.accessibilityIdentifier("io.editor.drawNewMasks")
+                }
             }
         } else if let image = session.image, let roles {
             ZStack {
-                MaskEditorView(image: Image(decorative: image.pixels, scale: 1), imageSize: image.size,
-                    occlusions: Binding(get: { session.startsNewMasks && readingError != nil ? "" : draft.values[roles.occlusions] },
-                        set: { value in
-                            guard host.acceptsHostInput else { return }
-                            host.setHostField(value, at: roles.occlusions); session.startsNewMasks = false
-                        }), isEditing: draft.noteID != nil, session: host.maskSession)
+                maskEditor(image: image, roles: roles)
                     .disabled(!host.acceptsMaskInput)
                     .opacity(session.replacing ? 0 : 1)
                     .accessibilityHidden(session.replacing)
                 if session.replacing { picker }
             }
-        } else if !session.replacing, draft.noteID != nil || roles.map({ !draft.values[$0.image].isEmpty }) == true {
+        } else if !host.usesOcclusionForm, !session.replacing, draft.noteID != nil || roles.map({ !draft.values[$0.image].isEmpty }) == true {
             ContentUnavailableView {
                 Label { Text(verbatim: session.error ?? IONoteText.noImage) } icon: { Image(systemName: "photo") }
             }
@@ -176,6 +308,26 @@ public struct OcclusionNoteEditor: View {
         } else {
             picker
         }
+    }
+
+    @ViewBuilder private func maskEditor(image: OcclusionImageInput, roles: OcclusionFieldRoles) -> some View {
+        let binding = Binding(get: { session.startsNewMasks && readingError != nil ? "" : draft.values[roles.occlusions] },
+            set: { value in
+                guard host.acceptsHostInput else { return }
+                host.setHostField(value, at: roles.occlusions); session.startsNewMasks = false
+            })
+        #if os(macOS)
+        if host.usesOcclusionForm {
+            MaskEditorView(image: Image(decorative: image.pixels, scale: 1), imageSize: image.size,
+                occlusions: binding, isEditing: draft.noteID != nil, session: host.maskSession, formStyle: true)
+        } else {
+            MaskEditorView(image: Image(decorative: image.pixels, scale: 1), imageSize: image.size,
+                occlusions: binding, isEditing: draft.noteID != nil, session: host.maskSession)
+        }
+        #else
+        MaskEditorView(image: Image(decorative: image.pixels, scale: 1), imageSize: image.size,
+            occlusions: binding, isEditing: draft.noteID != nil, session: host.maskSession)
+        #endif
     }
 
     private var picker: some View {
@@ -197,7 +349,7 @@ public struct OcclusionNoteEditor: View {
                 } label: { Text(verbatim: IONoteText.chooseFile) }
                     .accessibilityIdentifier("io.picker.chooseFile")
                 Button(action: paste) { Text(verbatim: IONoteText.paste) }
-                    .keyboardShortcut(masksShown ? KeyboardShortcut("v", modifiers: .command) : nil)
+                    .keyboardShortcut(masksShown && !host.usesOcclusionForm ? KeyboardShortcut("v", modifiers: .command) : nil)
                     .accessibilityIdentifier("io.picker.paste")
                 #if os(iOS)
                 PhotosPicker(selection: $photo, matching: .images) { Text(verbatim: IONoteText.photoLibrary) }
