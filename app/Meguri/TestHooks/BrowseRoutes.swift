@@ -18,6 +18,8 @@ extension TestHooks {
     ///   field (`browser/sidebar` S6).
     /// - `browse/sidebar/today`: Today selected: the decks, with the Browse
     ///   row under Today.
+    /// - `browse/sidebar/keyboard-target`: an empty query, Browse last in
+    ///   the shell header, and only Suspended matching the sidebar labels.
     /// - `browse/table/typical`: Deck: Languages, Cards, one row selected.
     /// - `browse/table/notes`: the same in Notes.
     /// - `browse/table/no-results`: a query that finds nothing.
@@ -36,6 +38,7 @@ extension TestHooks {
             registry.registerShell("browse/sidebar/typical") { _ in launch(.typical) }
             registry.registerShell("browse/sidebar/filtered") { _ in launch(.filtered) }
             registry.registerShell("browse/sidebar/today") { _ in launch(.today) }
+            registry.registerShell("browse/sidebar/keyboard-target") { _ in launch(.keyboardTarget) }
             registry.registerShell("browse/table/typical") { _ in launch(.table) }
             registry.registerShell("browse/table/notes") { _ in launch(.notes) }
             registry.registerShell("browse/table/no-results") { _ in launch(.noResults) }
@@ -47,7 +50,7 @@ extension TestHooks {
             registry.registerShell("browse/search/contains") { _ in launch(.contains) }
         }
 
-        enum State { case typical, filtered, today, table, notes, noResults, emptyCollection, error, large, tokens, saveSearch, contains }
+        enum State { case typical, filtered, today, keyboardTarget, table, notes, noResults, emptyCollection, error, large, tokens, saveSearch, contains }
 
         @MainActor static func launch(_ state: State) -> ShellLaunch {
             let cards = switch state {
@@ -67,6 +70,10 @@ extension TestHooks {
             #else
             features.availableSections = [.home, .browse, .settings]
             #endif
+            if state == .keyboardTarget {
+                features.availableSections.removeAll { $0 == .browse }
+                features.availableSections.append(.browse)
+            }
             features.sidebarDecks = { _ in AnyView(HomeSidebarPreview.decks(selection: nil)) }
             let placeholder = features.sectionRoot
             features.sectionRoot = { section, navigation in
@@ -85,7 +92,7 @@ extension TestHooks {
                 FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false), .value([.state(.suspended)], negated: false)])
             case .table, .notes, .error: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
             case .noResults: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(7)], negated: false), .value([.state(.learning)], negated: false)])
-            case .emptyCollection, .large: FilterQuery()
+            case .emptyCollection, .large, .keyboardTarget: FilterQuery()
             case .saveSearch: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
             case .contains: FilterQuery(tokens: [.value([.field("Front", .contains("zindro"))], negated: false)])
             case .tokens:
@@ -96,6 +103,7 @@ extension TestHooks {
             return ShellLaunch(features: features, probe: false) { navigation in
                 navigation.select(.section(state == .today ? .home : .browse))
                 if state == .filtered { model.filter = "voc" }
+                if state == .keyboardTarget { model.filter = "Suspended" }
                 if state == .notes { model.setMode(.notes) }
                 Task { @MainActor in
                     await model.prepareForTestHooks(query: query)

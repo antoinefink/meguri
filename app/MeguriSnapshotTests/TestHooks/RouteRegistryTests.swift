@@ -23,6 +23,7 @@ private let expectedBackupsRestorePresentation: InitialPresentation.Style = .she
             "browse/search/save-search",
             "browse/search/tokens",
             "browse/sidebar/filtered",
+            "browse/sidebar/keyboard-target",
             "browse/sidebar/today",
             "browse/sidebar/typical",
             "browse/table/empty-collection",

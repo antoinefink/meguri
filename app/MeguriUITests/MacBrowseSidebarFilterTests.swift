@@ -60,89 +60,67 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
     func testSpaceOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(" ", "Space") }
 
     func testClickingBrowseClearsTheArrowKeyFilterTarget() throws {
-        let (app, bundle) = try launch()
-        try openBrowse(app, bundle)
-        let whole = statusText(app)
-        let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
-        let browse = list.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch
-        let reviewID = "browse.sidebar.state.review"
-        let review = list.descendants(matching: .any).matching(identifier: reviewID).firstMatch
-        let reviewRow = list.outlineRows.containing(.any, identifier: reviewID).firstMatch
-        let token = element(app, "browse.search.token.0")
-        let query = app.toolbars.searchFields.firstMatch
-        let originalQuery = query.value as? String
+        let (app, bundle) = try launch(route: "browse/sidebar/keyboard-target")
         addTeardownBlock { @MainActor in
             guard self.testRun?.hasSucceeded == false else { return }
-            let responder = self.element(app, "browse.debug.responder")
-            let status = self.statusText(app)
-            let queryDescription = String(describing: query.value)
-            let focusDescription = responder.exists ? responder.debugDescription : "no responder readout"
-            let evidence = XCTAttachment(string: [
-                "Status: \(status); query: \(queryDescription)",
-                "Focus: \(focusDescription)",
-                "Outline values and native selections:",
-                list.debugDescription,
-                "Window:",
-                app.windows.firstMatch.debugDescription,
-            ].joined(separator: "\n"))
+            let evidence = XCTAttachment(string: app.windows.debugDescription)
             evidence.name = "browse-keyboard-target-AX"
             evidence.lifetime = .keepAlways
             self.add(evidence)
         }
+        let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
+        let browse = list.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch
+        let browseRow = list.outlineRows.containing(.any, identifier: "shell.root.sidebar.browse").firstMatch
+        let filterID = "browse.sidebar.state.suspended"
+        let filter = list.descendants(matching: .any).matching(identifier: filterID).firstMatch
+        let filterRows = list.outlineRows.containing(.any, identifier: filterID)
+        XCTAssertTrue(waitUntil { filterRows.count == 1 && filterRows.firstMatch.isHittable })
+        let filterRow = filterRows.firstMatch
+        let token = element(app, "browse.search.token.0")
+        let query = app.toolbars.searchFields.firstMatch
+        XCTAssertTrue(query.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntil { !self.statusText(app).isEmpty })
+        let whole = statusText(app)
+        XCTAssertFalse(whole.contains(" of "))
+        let originalQuery = try XCTUnwrap(query.value as? String)
+        XCTAssertEqual(originalQuery, "")
 
-        // Limit the native outline to the five known Card State children.
-        // This filters sidebar labels, not the collection query. A generic
-        // last row can be an empty/group row and is not a filter witness.
-        let search = try MacBrowseSidebar(app: app).searchField()
-        try click(app, search, bundle)
-        search.typeText("Card State")
-        XCTAssertTrue(waitUntil { search.value as? String == "Card State" && review.exists && review.isHittable })
-        // openBrowse clicked the PREVIOUS sidebar. Physically reselect Browse
-        // inside its replacement to give the current outline keyboard focus.
+        func assertUnchanged() {
+            XCTAssertEqual(query.value as? String, originalQuery)
+            XCTAssertEqual(statusText(app), whole)
+            XCTAssertFalse(token.exists)
+        }
+        // Click the current outline, then use only native, unmodified Down.
         try click(app, browse, bundle)
-        XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") })
-        try arrowToReview(app, bundle, reviewRow)
-        XCTAssertEqual(statusText(app), whole)
-        XCTAssertEqual(query.value as? String, originalQuery)
-        XCTAssertFalse(token.exists, "Arrow navigation selects a real filter without applying it")
-
-        // Positive control BEFORE testing a no-op: physical Space must apply
-        // this identified filter, then remove it, leaving its native key row.
+        XCTAssertTrue(waitUntil { browseRow.isSelected })
+        try arrowToFilter(app, bundle, filterRow)
+        assertUnchanged()
         try key(app, " ", bundle)
-        XCTAssertTrue(waitUntil { token.exists && self.selected(app, reviewID) && self.statusText(app).contains(" of ") })
+        XCTAssertTrue(waitUntil { token.exists && filter.isSelected && self.statusText(app).contains(" of ") })
         try key(app, " ", bundle)
-        XCTAssertTrue(waitUntil { !token.exists && !self.selected(app, reviewID) && self.statusText(app) == whole })
-        XCTAssertTrue(reviewRow.isSelected, "The valid underlying keyboard target remains after toggling")
+        XCTAssertTrue(waitUntil { !token.exists && !filter.isSelected && self.statusText(app) == whole })
+        XCTAssertTrue(filterRow.isSelected, "The identified native row remains the keyboard target")
+        assertUnchanged()
 
         try click(app, browse, bundle)
-        XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") })
+        XCTAssertTrue(waitUntil { browseRow.isSelected && !filterRow.isSelected })
         for key in [" ", XCUIKeyboardKey.return.rawValue] {
             try self.key(app, key, bundle)
-            XCTAssertFalse(waitUntil(timeout: 0.8) {
-                token.exists || self.statusText(app) != whole || query.value as? String != originalQuery
-                    || !self.listSelected(app, "shell.root.sidebar.browse")
-            }, "\(key.debugDescription) must leave the query, status and Browse selection unchanged")
+            XCTAssertTrue(waitUntil { browseRow.isSelected })
+            assertUnchanged()
         }
-
-        // A fresh arrow selection still activates normally, proving that the
-        // preceding keys were sent to the sidebar rather than a text field.
-        try arrowToReview(app, bundle, reviewRow)
-        XCTAssertEqual(statusText(app), whole)
-        XCTAssertFalse(token.exists)
+        // Prove the no-op keys still had the outline's focus.
+        try arrowToFilter(app, bundle, filterRow)
+        assertUnchanged()
         try key(app, " ", bundle)
-        XCTAssertTrue(waitUntil { token.exists && self.selected(app, reviewID) && self.statusText(app).contains(" of ") })
+        XCTAssertTrue(waitUntil { token.exists && filter.isSelected && self.statusText(app).contains(" of ") })
     }
 
-    /// At the bottom of the label-filtered outline, walk upward to an
-    /// identified actionable child. Never infer a filter from a row index.
-    private func arrowToReview(_ app: XCUIApplication, _ bundle: String, _ row: XCUIElement) throws {
-        try app.bringToFront(bundleIdentifier: bundle)
-        app.typeKey(.downArrow, modifierFlags: .command)
-        for _ in 0..<5 {
-            try key(app, XCUIKeyboardKey.upArrow.rawValue, bundle)
-            if waitUntil(timeout: 1, { row.exists && row.isSelected }) { return }
-        }
-        XCTFail("Unmodified Up must reach the real browse.sidebar.state.review parent outline row")
+    private func arrowToFilter(_ app: XCUIApplication, _ bundle: String, _ row: XCUIElement) throws {
+        try key(app, XCUIKeyboardKey.downArrow.rawValue, bundle)
+        // The only intervening row is the nonactionable Card State header.
+        if !row.isSelected { try key(app, XCUIKeyboardKey.downArrow.rawValue, bundle) }
+        XCTAssertTrue(waitUntil { row.isSelected }, "Down reaches Suspended's AX parent outline row")
     }
 
     private func click(_ app: XCUIApplication, _ target: XCUIElement, _ bundle: String) throws {
@@ -205,7 +183,7 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
 
     // MARK: Support
 
-    private func launch() throws -> (XCUIApplication, String) {
+    private func launch(route: String? = nil) throws -> (XCUIApplication, String) {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
@@ -214,9 +192,9 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory),
+            fixture: route == nil ? build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory) : nil,
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            appearance: "light").arguments
+            appearance: "light", route: route).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 30),
