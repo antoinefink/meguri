@@ -148,7 +148,11 @@ import XCTest
     }
 
     func testFreshManyFieldAddWindowCapturesTheOpeningField() throws {
-        let (app, _) = try launch()
+        let screen = try XCTUnwrap(NSScreen.main).frame
+        // NSArgumentDomain overrides the autosaved frame for this VM launch only.
+        // Keep the embedded spaces in AppKit's default key as one argument.
+        let (app, bundle) = try launch(extra: ["-NSWindow Frame MeguriAddNote",
+            "\(screen.minX + 60) \(screen.minY + 60) 550 350 \(screen.minX) \(screen.minY) \(screen.width) \(screen.height)"])
         defer { app.terminate() }
         try selectDeck("Synthetic Many Fields", app: app)
         app.typeKey("n", modifierFlags: .command)
@@ -160,20 +164,27 @@ import XCTest
         let fields = editor.textViews
         XCTAssertTrue(wait { fields.count == 14 && fields.element(boundBy: 0).isHittable })
         fields.element(boundBy: 0).click(); app.typeText("Synthetic opening prompt")
-        app.typeKey(.tab, modifierFlags: []); app.typeText("Synthetic opening answer")
         let add = window.buttons["editor.add.save"]
         XCTAssertTrue(wait { add.isEnabled }); add.click()
         XCTAssertTrue(element(app, "editor.add.result").waitForExistence(timeout: 10))
         XCTAssertTrue(wait { !add.isEnabled })
-        // Add persists the type; a fresh window exercises eager startup focus.
+        // Add persists the type; reopen at the user's short, scrollable size.
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 10))
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         XCTAssertTrue(wait { (type.value as? String ?? "").contains("Synthetic Text and Audio, 14 Fields") && fields.count == 14 })
+        XCTAssertEqual(window.frame.width, 550, accuracy: 10)
+        XCTAssertEqual(window.frame.height, 350, accuracy: 10)
+        let first = fields.element(boundBy: 0), last = fields.element(boundBy: 13)
+        XCTAssertTrue(first.isHittable)
+        XCTAssertGreaterThan(last.frame.maxY, editor.frame.maxY, "later rows must extend past the viewport")
+        XCTAssertFalse(last.isHittable, "this capture requires a scrollable form")
+
+        first.click(); app.typeText("x")
+        XCTAssertTrue(wait { (first.value as? String ?? "").contains("x") }, "the first textbox must own typed input")
+        XCTAssertEqual(try inputEvidence(bundle: bundle)["addWindowKey"], "true")
         capture(window, "add-note-fresh-many-field-native-window-synthetic")
-        XCTAssertTrue(fields.element(boundBy: 0).isHittable)
-        XCTAssertGreaterThanOrEqual(fields.element(boundBy: 0).frame.minY, editor.frame.minY)
     }
 
     func testNewNoteReentryUsesTheSelectedDeckAndKeepsTheDirtyDraft() throws {
