@@ -15,6 +15,8 @@ extension TestHooks {
     /// - `notetypes/fields/typical`: Vocabulary's Fields tab with no draft.
     /// - `notetypes/fields/inspector-hidden`: the same with the Mac's inspector hidden.
     /// - `notetypes/list/typical`: on iPad, the list of note types alone.
+    /// - `notetypes/delete/meguri-sync`: native deletion question; confirming
+    ///   the first counts renews it with larger losses. No collection or server.
     /// - `notetypes/fields/edited`: a draft that deletes Tavrin Notes and adds
     ///   Origin: "Edited" in the list, "Save…" in the toolbar.
     /// - `notetypes/save/losses`: that draft's Save sheet with iCloud or no
@@ -59,6 +61,7 @@ extension TestHooks {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
             registry.registerShell("notetypes/fields/inspector-hidden") { _ in launch(.inspectorHidden) }
             registry.registerShell("notetypes/list/typical") { _ in launch(.list) }
+            registry.registerShell("notetypes/delete/meguri-sync") { _ in launch(.deletion) }
             registry.registerShell("notetypes/fields/edited") { _ in launch(.edited) }
             registry.registerShell("notetypes/save/losses") { _ in launch(.question(.other)) }
             registry.registerShell("notetypes/save/meguri-sync") { _ in launch(.question(.meguriSync)) }
@@ -106,6 +109,7 @@ extension TestHooks {
         enum State {
             /// The list alone: on iPad no note type is opened (on the Mac, as typical).
             case list
+            case deletion
             case typical, edited
             /// The Fields tab with the Mac's inspector hidden.
             case inspectorHidden
@@ -127,6 +131,9 @@ extension TestHooks {
 
         @MainActor static func launch(_ state: State, sync: SampleMeguriSync = .init()) -> ShellLaunch {
             let backend = SampleNoteTypesBackend()
+            if case .deletion = state {
+                backend.deletionCounts = [.init(notes: 412, cards: 786), .init(notes: 413, cards: 788)]
+            }
             let model = NoteTypesModel(backend: backend, preview: NoteTypePreview(backend: SamplePreviewBackend()))
             // The preview's toggle is not kept from one run to the next.
             model.preview.defaults = nil
@@ -139,6 +146,7 @@ extension TestHooks {
             }
             if case .question(let service) = state { model.service = { service } }
             if case .progress = state { model.service = { .meguriSync } }
+            if case .deletion = state { model.service = { .meguriSync } }
             model.meguriSync = sync
             var features = ShellSample.features(.typical)
             features.todayRoot = true
@@ -172,9 +180,14 @@ extension TestHooks {
                     }
                     await model.prepareForTestHooks(select: id)
                     #if os(iOS)
-                    if case .list = state {} else { navigation.push(.noteType(id)) }
+                    switch state {
+                    case .list, .deletion: break
+                    default: navigation.push(.noteType(id))
+                    }
                     #endif
                     switch state {
+                    case .deletion:
+                        model.delete(id)
                     case .cards(let cards):
                         model.tab = .cards
                         model.selectedCard[id] = 0
@@ -264,6 +277,22 @@ extension TestHooks {
 
     /// A made-up collection's note types, in memory (sample content only).
     @MainActor final class SampleNoteTypesBackend: NoteTypesBackend {
+        /// Only deletion snapshots consume the script; detail/header reads do
+        /// not advance it. The last answer stays for a Cancel and fresh ask.
+        var deletionCounts: [NotetypeRemovalCounts] = []
+
+        func deletionSnapshot(_ id: Int64) async throws -> CollectionScopedRead<NotetypeDeletionRead> {
+            let names = try await list()
+            let counts: NotetypeRemovalCounts
+            if let first = deletionCounts.first {
+                counts = first
+                if deletionCounts.count > 1 { deletionCounts.removeFirst() }
+            } else {
+                counts = try await typeCounts(id)
+            }
+            return .init(value: .init(names: names, counts: counts), generation: 0)
+        }
+
         static let vocabulary: Int64 = 1_700_000_100_009
         static let cloze: Int64 = 1_700_000_100_004
         static let phrases: Int64 = 1_700_000_100_007
