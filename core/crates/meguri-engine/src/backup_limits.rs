@@ -80,3 +80,31 @@ pub fn save(collection: &Collection, limits: BackupLimits) -> Result<OpResult<bo
         move |ctx| save_in(ctx.scope(), limits),
     )
 }
+
+/// A Settings edit carries only the member the caller actually changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupLimitPatch {
+    Daily(u32),
+    Weekly(u32),
+    Monthly(u32),
+    MinimumIntervalMins(u32),
+}
+
+/// Re-derive untouched limits on the writer, in the same transaction as the save.
+pub fn update(collection: &Collection, patch: BackupLimitPatch) -> Result<OpResult<BackupLimits>, EngineError> {
+    collection.run(
+        OpSpec::named("save_backup_settings", OpSource::UserNonUndoable),
+        move |ctx| {
+            let scope = ctx.scope();
+            let mut limits = read(scope)?;
+            match patch {
+                BackupLimitPatch::Daily(value) => limits.daily = value,
+                BackupLimitPatch::Weekly(value) => limits.weekly = value,
+                BackupLimitPatch::Monthly(value) => limits.monthly = value,
+                BackupLimitPatch::MinimumIntervalMins(value) => limits.minimum_interval_mins = value,
+            }
+            save_in(scope, limits)?;
+            read(scope)
+        },
+    )
+}

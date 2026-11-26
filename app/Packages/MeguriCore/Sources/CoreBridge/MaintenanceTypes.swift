@@ -107,6 +107,18 @@ public struct BackupLimits: Sendable, Equatable {
         .init(daily: daily, weekly: weekly, monthly: monthly, minimumIntervalMins: minimumIntervalMinutes)
     }
 }
+/// Only this member changes; the writer preserves the current remaining limits.
+public enum BackupLimitPatch: Sendable, Equatable {
+    case daily(UInt32), weekly(UInt32), monthly(UInt32), minimumIntervalMinutes(UInt32)
+    var raw: MeguriCoreBindings.BackupLimitPatch {
+        switch self {
+        case .daily(let value): .daily(value: value)
+        case .weekly(let value): .weekly(value: value)
+        case .monthly(let value): .monthly(value: value)
+        case .minimumIntervalMinutes(let value): .minimumIntervalMins(value: value)
+        }
+    }
+}
 public enum MaintenanceTrigger: Sendable, Equatable {
     case opened, background, quit, backgroundProcessing, deadline
     var raw: MeguriCoreBindings.MaintenanceTrigger {

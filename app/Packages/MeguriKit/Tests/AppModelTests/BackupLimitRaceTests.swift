@@ -33,6 +33,27 @@ import Testing
         #expect(model.limits?.weekly == 7)
     }
 
+    @Test(.timeLimit(.minutes(1)))
+    func cachedLimitsEditKeepsRemoteMembersAndDisplaysConfirmedStoredLimits() async throws {
+        let write = BackupRaceGate()
+        defer { write.release() }
+        let service = HeldBackupLimits(read: BackupRaceGate(), write: write)
+        let host = LimitRaceHost()
+        let model = BackupCoordinator(host: host, service: service)
+        await model.refresh()
+        #expect(model.limits?.monthly == 9)
+        await service.holdNextWrite()
+        let edit = Task { await model.editLimit(.weekly, value: 4) }
+        try await write.waitUntilHeld()
+        await service.remoteMonthly(23)
+        write.release()
+        await edit.value
+        let confirmed = BackupLimits(daily: .max, weekly: 4, monthly: 23, minimumIntervalMinutes: .max)
+        #expect(model.limits == confirmed)
+        #expect(await service.written == [confirmed])
+        #expect(try await service.backupLimits() == confirmed)
+    }
+
     @Test func untouchedDraftAdoptsRemoteRefreshWithoutSavingOrValidatingLegacyValues() {
         var draft = BackupLimitDraft()
         draft.reset(to: 10)
@@ -77,6 +98,7 @@ private actor HeldBackupLimits: MaintenanceService {
     func holdNextRead() { holdRead = true }
     func holdNextWrite() { holdWrite = true }
     func remoteWeekly(_ value: UInt32) { limits.weekly = value }
+    func remoteMonthly(_ value: UInt32) { limits.monthly = value }
     func backupLimits() async throws -> BackupLimits {
         let snapshot = limits
         if holdRead { holdRead = false; await read.hold() }
@@ -87,6 +109,17 @@ private actor HeldBackupLimits: MaintenanceService {
         limits = value; written.append(value); return true
     }
     func listBackups() async throws -> [BackupEntry] { [] }
+    func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits {
+        if holdWrite { holdWrite = false; await write.hold() }
+        switch patch {
+        case .daily(let value): limits.daily = value
+        case .weekly(let value): limits.weekly = value
+        case .monthly(let value): limits.monthly = value
+        case .minimumIntervalMinutes(let value): limits.minimumIntervalMinutes = value
+        }
+        written.append(limits)
+        return limits
+    }
     func status() async throws -> MaintenanceStatus { throw MaintenanceError.collectionUnavailable }
     func createBackup(operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ImportBackupReceipt { throw MaintenanceError.collectionUnavailable }
     func restoreBackup(name: String, operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> RestoredBackup { throw MaintenanceError.collectionUnavailable }

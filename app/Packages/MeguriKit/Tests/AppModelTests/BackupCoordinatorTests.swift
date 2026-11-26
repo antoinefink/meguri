@@ -68,6 +68,16 @@ actor BackupServiceProbe: MaintenanceService {
     func listBackups() async throws -> [BackupEntry] { entries }
     func backupLimits() async throws -> BackupLimits { limits }
     func setBackupLimits(_ limits: BackupLimits) async throws -> Bool { self.limits = limits; written.append(limits); return true }
+    func updateBackupLimit(_ patch: BackupLimitPatch) async throws -> BackupLimits {
+        switch patch {
+        case .daily(let value): limits.daily = value
+        case .weekly(let value): limits.weekly = value
+        case .monthly(let value): limits.monthly = value
+        case .minimumIntervalMinutes(let value): limits.minimumIntervalMinutes = value
+        }
+        written.append(limits)
+        return limits
+    }
     func status() async throws -> MaintenanceStatus { throw MaintenanceError.collectionUnavailable }
 }
 

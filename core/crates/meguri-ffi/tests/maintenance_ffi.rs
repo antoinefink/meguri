@@ -287,6 +287,47 @@ impl Drop for Gate {
 }
 
 #[test]
+fn single_limit_patch_returns_current_stored_members_through_real_writer() {
+    let _serial = SERIAL.lock().unwrap();
+    let _f = Fixture::new();
+    let cached = maintenance::backup_limits().unwrap();
+    let c = collection_for_testing().unwrap();
+    c.run(
+        OpSpec::named("remote backup limits", OpSource::SyncIncoming),
+        |ctx| {
+            ctx.scope().put_config_entry(&meguri_model::config::ConfigEntry {
+                key: "backups".into(),
+                usn: meguri_model::usn::Usn(7),
+                mtime: meguri_model::time::EpochSecs(123),
+                value: br#"{"daily":4294967295,"weekly":10,"monthly":23,"minimum_interval_mins":4294967295,"extra":true}"#.to_vec(),
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(cached.monthly, 9);
+    let reader = c.reader(ReaderRole::Query).unwrap();
+    let expected = BackupLimits {
+        daily: u32::MAX,
+        weekly: 4,
+        monthly: 23,
+        minimum_interval_mins: u32::MAX,
+    };
+    let confirmed = maintenance::update_backup_limit(BackupLimitPatch::Weekly { value: 4 }).unwrap();
+    assert_eq!(confirmed, expected);
+    assert_eq!(
+        BackupLimits::from(meguri_engine::backup_limits::read(&*reader).unwrap()),
+        expected
+    );
+    assert_eq!(
+        maintenance::update_backup_limit(BackupLimitPatch::Weekly { value: 4 }).unwrap(),
+        expected
+    );
+    drop(reader);
+    assert_eq!(maintenance::backup_limits().unwrap(), expected);
+}
+
+#[test]
 fn forced_backup_real_receipt_progress_listing_labels_and_config_operation() {
     let _serial = SERIAL.lock().unwrap();
     let f = Fixture::new();

@@ -183,22 +183,24 @@ public final class BackupCoordinator {
     }
 
     public func editLimit(_ field: LimitField, value: UInt32) async {
-        guard canEditLimits, var current = limits else { return }
-        // UI edits are bounded, but every untouched UInt32 is preserved exactly.
+        guard canEditLimits, let current = limits else { return }
+        let patch: BackupLimitPatch
+        let previous: UInt32
+        let bounded = field == .interval ? min(max(value, 5), 9999) : min(value, 9999)
         switch field {
-        case .daily: current.daily = min(value, 9999)
-        case .weekly: current.weekly = min(value, 9999)
-        case .monthly: current.monthly = min(value, 9999)
-        case .interval: current.minimumIntervalMinutes = min(max(value, 5), 9999)
+        case .daily: patch = .daily(bounded); previous = current.daily
+        case .weekly: patch = .weekly(bounded); previous = current.weekly
+        case .monthly: patch = .monthly(bounded); previous = current.monthly
+        case .interval: patch = .minimumIntervalMinutes(bounded); previous = current.minimumIntervalMinutes
         }
-        guard current != limits else { return }
+        guard bounded != previous else { return }
         let expected = ownership
         limitsRevision &+= 1
         savingLimits = true
         defer { savingLimits = false }
         do {
-            _ = try await service.setBackupLimits(current)
-            if expected == ownership { limits = current }
+            let confirmed = try await service.updateBackupLimit(patch)
+            if expected == ownership { limits = confirmed }
         } catch { if expected == ownership { failure = Self.cause(error) } }
     }
 

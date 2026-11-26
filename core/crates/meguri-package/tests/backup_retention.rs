@@ -462,6 +462,113 @@ fn limits_write_keeps_other_members_and_equal_values_keep_bytes_stamps_and_histo
 }
 
 #[test]
+fn single_limit_patch_uses_current_writer_members_and_returns_stored_limits() {
+    use backup_limits::BackupLimitPatch;
+    let f = Fixture::new(0);
+    let c = &f.collection;
+    backup_limits::save(c, BackupLimits::default()).unwrap();
+    let cached = backup_limits::read(&*c.reader(ReaderRole::Query).unwrap()).unwrap();
+    c.run(
+        OpSpec::named("remote backup settings", OpSource::SyncIncoming),
+        |ctx| {
+            ctx.scope().put_config_entry(&meguri_model::config::ConfigEntry {
+                key: "backups".into(),
+                usn: meguri_model::usn::Usn(7),
+                mtime: meguri_model::time::EpochSecs(123),
+                value: br#"{"extra":[1,1.0,{"nested":true}],"daily":4294967295,"weekly":10,"monthly":23,"minimum_interval_mins":4294967295}"#.to_vec(),
+            })?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(cached.monthly, 9);
+    // Occupy Query so the mutation must read through its actual writer scope.
+    let reader = c.reader(ReaderRole::Query).unwrap();
+    let expected = BackupLimits {
+        daily: u32::MAX,
+        weekly: 4,
+        monthly: 23,
+        minimum_interval_mins: u32::MAX,
+    };
+    let result = backup_limits::update(c, BackupLimitPatch::Weekly(4)).unwrap();
+    assert_eq!(result.value, expected);
+    assert_eq!(backup_limits::read(&*reader).unwrap(), expected);
+    assert!(result.undo.is_none());
+    assert_eq!(result.changes.config_keys.len(), 1);
+    assert_eq!(result.changes.config_keys[0].key, "backups");
+    let before = reader.config_entry("backups").unwrap();
+    assert_eq!(
+        before.as_ref().unwrap().entry.value,
+        br#"{"daily":4294967295,"weekly":4,"monthly":23,"minimum_interval_mins":4294967295,"extra":[1,1.0,{"nested":true}]}"#
+    );
+    assert_eq!(before.as_ref().unwrap().entry.usn.0, -1);
+    let modified = reader.col().unwrap().modified;
+    f.clock.step_ms(3_600_000);
+    let noop = backup_limits::update(c, BackupLimitPatch::Weekly(4)).unwrap();
+    assert_eq!(noop.value, expected);
+    assert!(noop.changes.is_empty());
+    assert_eq!(reader.config_entry("backups").unwrap(), before);
+    assert_eq!(reader.col().unwrap().modified, modified);
+    drop(reader);
+    f.host.close().unwrap();
+}
+
+#[test]
+fn single_limit_patch_defaults_invalid_members_together_and_keeps_full_range() {
+    use backup_limits::BackupLimitPatch;
+    let f = Fixture::new(0);
+    let c = &f.collection;
+    for (stored, initial) in [
+        (
+            r#"{"daily":5,"weekly":-1,"monthly":3,"minimum_interval_mins":60,"extra":true}"#,
+            BackupLimits::default(),
+        ),
+        (
+            r#"{"daily":5,"daily":5,"weekly":4,"monthly":3,"minimum_interval_mins":60,"extra":true}"#,
+            BackupLimits::default(),
+        ),
+        (
+            "[4294967295,4,3,4294967295]",
+            BackupLimits {
+                daily: u32::MAX,
+                weekly: 4,
+                monthly: 3,
+                minimum_interval_mins: u32::MAX,
+            },
+        ),
+    ] {
+        c.run(
+            OpSpec::named("seed legacy backup limits", OpSource::Maintenance),
+            move |ctx| {
+                ctx.scope().set_config("backups", &ConfigValue::parse(stored.as_bytes()).unwrap())?;
+                Ok(())
+            },
+        )
+        .unwrap();
+        let result = backup_limits::update(c, BackupLimitPatch::Weekly(0)).unwrap();
+        assert_eq!(result.value, BackupLimits { weekly: 0, ..initial });
+        for (patch, expected) in [
+            (
+                BackupLimitPatch::Daily(u32::MAX),
+                BackupLimits { daily: u32::MAX, weekly: 0, ..initial },
+            ),
+            (
+                BackupLimitPatch::Monthly(u32::MAX),
+                BackupLimits { daily: u32::MAX, weekly: 0, monthly: u32::MAX, ..initial },
+            ),
+            (
+                BackupLimitPatch::MinimumIntervalMins(0),
+                BackupLimits { daily: u32::MAX, weekly: 0, monthly: u32::MAX, minimum_interval_mins: 0 },
+            ),
+        ] {
+            assert_eq!(backup_limits::update(c, patch).unwrap().value, expected);
+            assert_eq!(backup_limits::read(&*c.reader(ReaderRole::Query).unwrap()).unwrap(), expected);
+        }
+    }
+    f.host.close().unwrap();
+}
+
+#[test]
 fn blob_only_limits_reads_preserve_raw_bytes_and_row_stamps() {
     use meguri_storage::raw::SqlValue;
     use std::time::Duration;

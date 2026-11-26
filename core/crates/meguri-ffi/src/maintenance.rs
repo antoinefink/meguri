@@ -488,6 +488,29 @@ pub fn set_backup_limits(limits: BackupLimits) -> Result<bool, CoreError> {
         .value)
     })
 }
+/// Narrow retention mutation; whole-set callers keep set_backup_limits.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BackupLimitPatch {
+    Daily { value: u32 },
+    Weekly { value: u32 },
+    Monthly { value: u32 },
+    MinimumIntervalMins { value: u32 },
+}
+#[uniffi::export]
+pub fn update_backup_limit(patch: BackupLimitPatch) -> Result<BackupLimits, CoreError> {
+    callback::enter("update_backup_limit");
+    short_call(|| {
+        use meguri_engine::backup_limits::{self, BackupLimitPatch as Patch};
+        let c = runtime::host().map_err(EngineError::from)?.collection()?;
+        let patch = match patch {
+            BackupLimitPatch::Daily { value } => Patch::Daily(value),
+            BackupLimitPatch::Weekly { value } => Patch::Weekly(value),
+            BackupLimitPatch::Monthly { value } => Patch::Monthly(value),
+            BackupLimitPatch::MinimumIntervalMins { value } => Patch::MinimumIntervalMins(value),
+        };
+        Ok(backup_limits::update(&c, patch)?.value.into())
+    })
+}
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum BackupKind {
     Backup,
