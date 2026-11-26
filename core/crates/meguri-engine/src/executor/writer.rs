@@ -571,6 +571,7 @@ fn run_op<T>(
         // its shown answer, or immediately when no card can remain shown.
         undo_notes.clear = None;
     }
+    let filtered_decks = crate::session::filtered_lifecycle::affected(&spec, scope.journal())?;
     // Commit and take the seq under the commit lock, so a snapshot begun
     // under it knows exactly which commits it sees (O6).
     let ((committed, derived), reservation) = {
@@ -601,6 +602,7 @@ fn run_op<T>(
         shared.undo.safety_commit_pending();
         let reservation = shared.stream.reserve();
         *last = reservation.seq();
+        shared.filtered_lifecycle.lock().unwrap().record(*last, filtered_decks);
         shared.coverage.commit_finished(
             shared,
             collection.writer(),

@@ -42,6 +42,7 @@ pub(crate) struct ExecShared {
     /// One captured value per writer incarnation; never held across callbacks.
     pub(crate) open_evidence: Mutex<Option<crate::collection::OpenEvidence>>,
     pub(crate) coverage: crate::wal_coverage::Coverage,
+    pub(crate) filtered_lifecycle: Mutex<crate::session::filtered_lifecycle::FilteredLifecycle>,
     pub(crate) review_journal: Mutex<Option<std::sync::Weak<crate::session::journal::Journal>>>,
     pub(crate) replaying_review: std::sync::atomic::AtomicBool,
     pub(crate) review_accepting: std::sync::atomic::AtomicBool,
@@ -111,6 +112,7 @@ impl ExecShared {
             open_evidence: Mutex::new(None),
             coverage: Default::default(),
             answer_caches: Default::default(),
+            filtered_lifecycle: Mutex::default(),
             review_journal: Mutex::default(),
             active_session: Mutex::default(),
             review_accepting: std::sync::atomic::AtomicBool::new(true),

@@ -880,6 +880,7 @@ impl ReviewService {
                     crate::rendering::KeyBatch::new(&*rows, crate::rendering::RenderMode::Review, session_platform());
                 let item = project_item(
                     &mut render_keys,
+                    &rows.filtered_lifecycle,
                     &q,
                     &Overlay::default(),
                     e.id,
@@ -1312,6 +1313,7 @@ impl ReviewService {
         let mut models = FsrsCache::default();
         let (token, states, captured) = capture_state(
             &*rows,
+            &rows.filtered_lifecycle,
             &p.overlay,
             card,
             at,
@@ -2196,6 +2198,7 @@ fn project_review_note(
 #[allow(clippy::too_many_arguments)]
 fn capture_state(
     rows: &impl ReadRows,
+    lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     overlay: &Overlay,
     id: CardId,
     at: i64,
@@ -2247,6 +2250,7 @@ fn capture_state(
         },
     });
     let token = token::with_filtered_options(token, inputs.filtered.as_ref());
+    let token = if inputs.filtered.is_some() { lifecycle.token(token, card.deck_id) } else { token };
     let input = StateInput {
         card: &card,
         preset: &inputs.preset,
@@ -2271,6 +2275,7 @@ fn capture_state(
 #[allow(clippy::too_many_arguments)]
 fn project_item(
     render_keys: &mut crate::rendering::KeyBatch<'_, impl ReadRows>,
+    lifecycle: &super::filtered_lifecycle::FilteredLifecycle,
     q: &SessionQueue,
     overlay: &Overlay,
     id: CardId,
@@ -2283,7 +2288,7 @@ fn project_item(
     models: &mut FsrsCache,
 ) -> Result<HeadItem, EngineError> {
     let rows = render_keys.rows();
-    let (token, states, captured) = capture_state(rows, overlay, id, at, today, boundary, chooser, undo, models)?;
+    let (token, states, captured) = capture_state(rows, lifecycle, overlay, id, at, today, boundary, chooser, undo, models)?;
     let Captured { card, inputs, .. } = &captured;
     let siblings = sibling_ids(rows, overlay, card, &inputs.preset, undo)?;
     let mut predicted = [None; 4];
@@ -2525,6 +2530,7 @@ fn project_snapshot(
     for e in entries {
         let item = project_item(
             &mut render_keys,
+            &rows.filtered_lifecycle,
             &p.queue,
             &p.overlay,
             e.id,

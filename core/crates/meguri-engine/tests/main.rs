@@ -142,6 +142,8 @@ pub mod schema_gate;
 pub mod session;
 #[path = "session_controlled.rs"]
 pub mod session_controlled;
+#[path = "session_filtered_lifecycle.rs"]
+pub mod session_filtered_lifecycle;
 #[path = "session_freshness.rs"]
 pub mod session_freshness;
 #[path = "session_held.rs"]
