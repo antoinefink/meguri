@@ -13,19 +13,8 @@ public struct MaskEditorView: View {
     private let imageSize: CGSize
     private let isEditing: Bool
     @Binding private var occlusions: String
-    @State private var session: MaskEditorSession
-    @State private var viewport = CanvasViewport()
-    @State private var showInspector = false
-    @State private var labelEdit: LabelEdit?
-    @State private var fill = Color(.sRGB, red: 1, green: 235.0 / 255, blue: 162.0 / 255, opacity: 1)
-    @State private var showFill = false
-    @AppStorage("imageOcclusion.translucent") private var translucent = false
-    @Environment(\.displayScale) private var displayScale
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    #endif
-    @FocusState private var canvasFocused: Bool
-
+    @State private var retainedSession: MaskEditorSession?
+    private let suppliedSession: MaskEditorSession?
     public init(image: Image, imageSize: CGSize, occlusions: Binding<String>, isEditing: Bool) {
         self.init(image: image, imageSize: imageSize, occlusions: occlusions, isEditing: isEditing, session: nil)
     }
@@ -35,10 +24,49 @@ public struct MaskEditorView: View {
     public init(image: Image, imageSize: CGSize, occlusions: Binding<String>, isEditing: Bool,
                 session: MaskEditorSession?) {
         self.image = image; self.imageSize = imageSize; self._occlusions = occlusions; self.isEditing = isEditing
-        _session = State(initialValue: session ?? MaskEditorSession(field: occlusions.wrappedValue, isEditing: isEditing))
+        suppliedSession = session
     }
 
     public var body: some View {
+        Group {
+            if let session = suppliedSession ?? retainedSession {
+                MaskEditorContent(image: image, imageSize: imageSize, isEditing: isEditing,
+                                  occlusions: $occlusions, session: session)
+            } else {
+                ProgressView()
+            }
+        }
+        .onAppear {
+            if suppliedSession == nil && retainedSession == nil {
+                retainedSession = MaskEditorSession(field: occlusions, isEditing: isEditing)
+            }
+        }
+    }
+}
+
+private struct MaskEditorContent: View {
+    let image: Image
+    let imageSize: CGSize
+    let isEditing: Bool
+    @Binding var occlusions: String
+    @Bindable var session: MaskEditorSession
+    @State private var viewport = CanvasViewport()
+    @State private var showInspector = false
+    @State private var labelEdit: LabelEdit?
+    @State private var fill = MaskAppearance.defaultColor
+    @State private var showFill = false
+    @AppStorage("imageOcclusion.translucent") private var translucent = false
+    @Environment(\.displayScale) private var displayScale
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+    @FocusState private var canvasFocused: Bool
+
+    #if os(macOS)
+    @State private var windowScope = MaskEditorWindowScope()
+    #endif
+
+    var body: some View {
         VStack(spacing: 0) {
             if !compact { toolRow; Divider() }
             if let key = session.errorKey {
@@ -51,13 +79,17 @@ public struct MaskEditorView: View {
                     MaskCanvas(image: image, session: session, viewport: $viewport,
                                translucent: translucent, fill: selectedFill, editLabel: beginLabelEdit)
                         .focusable().focused($canvasFocused)
-                        .onKeyPress(phases: .down, action: keyPressed)
                         .onAppear { resize(geometry.size) }
                         .onChange(of: geometry.size) { _, size in resize(size) }
                 }
             } else { Spacer() }
             if compact { Divider(); toolRow }
         }
+        #if os(macOS)
+        .background { MaskEditorWindowReader(scope: windowScope) }
+        #endif
+        .onKeyPress(phases: .down, action: keyPressed)
+        .focusedValue(\.maskEditorCommands, commandContext)
         .onAppear {
             let binding = $occlusions
             session.onWrite = { binding.wrappedValue = $0 }
@@ -89,7 +121,7 @@ public struct MaskEditorView: View {
         #endif
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let converted = source.converted(to: space, intent: .defaultIntent, options: nil),
-              let channels = converted.components, channels.count >= 3 else { return "#ffeba2" }
+              let channels = converted.components, channels.count >= 3 else { return MaskAppearance.defaultFill }
         let components = Array(channels.prefix(3))
         return "#" + components.map { String(format: "%02x", Int((min(1, max(0, $0)) * 255).rounded(.toNearestOrAwayFromZero))) }.joined()
     }
@@ -104,14 +136,14 @@ public struct MaskEditorView: View {
                 zoomMenu
                 inspectorButton
             }
-            HStack {
-                Menu { toolChoices } label: { Label(ioString(session.tool.key), systemImage: session.tool.symbol) }
-                modeMenu
-                Spacer()
-                historyButtons
-                actionsMenu
-                zoomMenu
-                inspectorButton
+            VStack {
+                HStack {
+                    Menu { toolChoices } label: { Label(ioString(session.tool.key), systemImage: session.tool.symbol) }
+                    modeMenu
+                    Spacer()
+                    inspectorButton
+                }
+                HStack { historyButtons; Spacer(); actionsMenu; zoomMenu }
             }
         }
         .padding()
@@ -124,7 +156,7 @@ public struct MaskEditorView: View {
                     .accessibilityIdentifier("io.tool.\(tool.rawValue)")
             }
         }
-        .pickerStyle(.segmented).labelsHidden()
+        .pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
     }
     private var toolChoices: some View {
         ForEach(MaskEditorTool.allCases) { tool in
@@ -159,7 +191,7 @@ public struct MaskEditorView: View {
             Button(ioString("io.command.ungroup"), action: session.ungroup).disabled(!session.canUngroup)
             Menu(ioString("io.command.align")) {
                 ForEach(MaskAlignment.allCases, id: \.self) { alignment in
-                    Button(ioString(alignmentKey(alignment))) { session.align(alignment) }
+                    Button(ioString(alignment.key)) { session.align(alignment) }
                 }
             }.disabled(session.selection.isEmpty)
             Button(ioString("io.command.closePolygon"), action: session.closePolygon).disabled(session.polygon.count < 3)
@@ -183,7 +215,7 @@ public struct MaskEditorView: View {
         Button { showInspector.toggle() } label: { Label(ioString("io.inspector"), systemImage: "sidebar.trailing") }
             .labelStyle(.iconOnly).accessibilityIdentifier("io.inspector.toggle")
             .popover(isPresented: $showFill) {
-                ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false).padding()
+                fillPicker.padding()
             }
     }
     private var inspector: some View {
@@ -208,9 +240,50 @@ public struct MaskEditorView: View {
                 }
             }
             Section(ioString("io.tool.fill")) {
-                ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false)
+                fillPicker
             }
         }.formStyle(.grouped)
+            .onKeyPress(phases: .down, action: keyPressed)
+            .focusedValue(\.maskEditorCommands, commandContext)
+    }
+
+    private var fillPicker: some View {
+        VStack(alignment: .leading) {
+            ColorPicker(ioString("io.tool.fill"), selection: $fill, supportsOpacity: false)
+            ScrollView(.horizontal) {
+                HStack {
+                    swatch(MaskAppearance.defaultFill)
+                    if let palette = session.palette {
+                        ForEach(Array(palette.value.colors.enumerated()), id: \.offset) { index, color in
+                            swatch(color, suffix: ".slot.\(index)")
+                                .contextMenu {
+                                    Button(ioString("io.palette.remove")) {
+                                        Task { await palette.change(.remove(color)) }
+                                    }
+                                    .disabled(palette.busy)
+                                }
+                        }
+                    }
+                }
+            }
+            if let palette = session.palette {
+                Button(ioString("io.palette.add")) {
+                    let color = selectedFill
+                    Task { await palette.change(.add(color)) }
+                }
+                .disabled(palette.busy)
+                if let error = palette.error { Text(error).foregroundStyle(.secondary) }
+            }
+        }
+        .task { await session.palette?.reload() }
+    }
+
+    private func swatch(_ color: String, suffix: String = "") -> some View {
+        Button { fill = maskColor(color, fallback: MaskAppearance.defaultColor) } label: {
+            Image(systemName: "circle.fill").foregroundStyle(maskColor(color, fallback: MaskAppearance.defaultColor))
+        }
+        .accessibilityLabel(color)
+        .accessibilityIdentifier("io.palette.swatch." + color.dropFirst() + suffix)
     }
 
     private func chooseTool(_ tool: MaskEditorTool) {
@@ -230,53 +303,69 @@ public struct MaskEditorView: View {
               case let .text(text, _, _) = shape.data.kind else { return }
         labelEdit = .init(id: id, text: text)
     }
-    private func alignmentKey(_ alignment: MaskAlignment) -> String {
-        "io.command.align" + alignment.rawValue.prefix(1).uppercased() + alignment.rawValue.dropFirst()
+    private var commandsAvailable: Bool {
+        guard labelEdit == nil, !showFill, session.isReadable else { return false }
+        #if os(macOS)
+        guard let window = windowScope.window, window.isKeyWindow, window.attachedSheet == nil,
+              !(window.firstResponder is NSTextView) else { return false }
+        #endif
+        return true
+    }
+    private var commandContext: MaskEditorCommandContext {
+        .init(enabled: commandEnabled, action: perform)
+    }
+    private func commandEnabled(_ command: MaskEditorCommand) -> Bool {
+        guard commandsAvailable else { return false }
+        switch command {
+        case .undo: return session.canUndo
+        case .redo: return session.canRedo
+        case .selectAll: return !session.document.shapes.isEmpty
+        case .delete, .duplicate: return !session.selection.isEmpty
+        case .group: return session.canGroup
+        case .ungroup: return session.canUngroup
+        case .closePolygon: return session.polygon.count >= 3
+        default: return command.alignment == nil || !session.selection.isEmpty
+        }
+    }
+    private func perform(_ command: MaskEditorCommand) {
+        guard commandEnabled(command) else { return }
+        if let tool = command.tool { chooseTool(tool); return }
+        if let alignment = command.alignment { session.align(alignment); return }
+        switch command {
+        case .undo: session.undo()
+        case .redo: session.redo()
+        case .selectAll: session.selectAll()
+        case .delete: session.deleteSelection()
+        case .duplicate: session.duplicate()
+        case .group: session.group()
+        case .ungroup: session.ungroup()
+        case .zoomOut: zoom(1 / 1.1)
+        case .zoomIn: zoom(1.1)
+        case .zoomToFit: viewport.fit()
+        case .translucent: translucent.toggle()
+        case .closePolygon: session.closePolygon()
+        default: break
+        }
     }
     private func keyPressed(_ press: KeyPress) -> KeyPress.Result {
-        guard canvasFocused, labelEdit == nil, !showFill, session.isReadable else { return .ignored }
-        let command = press.modifiers.contains(.command), shift = press.modifiers.contains(.shift)
+        guard commandsAvailable else { return .ignored }
         if press.key == .escape, !session.polygon.isEmpty { session.polygon = []; return .handled }
-        if press.key == .return, session.polygon.count >= 3 { session.closePolygon(); return .handled }
-        if press.key == .delete || press.key == .deleteForward {
-            guard !session.selection.isEmpty else { return .ignored }; session.deleteSelection(); return .handled
+        let modifiers = press.modifiers.intersection([.command, .shift, .option, .control])
+        if press.characters.lowercased() == "m", modifiers.isEmpty { return .handled }
+        let character: String
+        switch press.key {
+        case .delete: character = "\u{7f}"
+        case .deleteForward: character = "\u{f728}"
+        case .return: character = "\r"
+        default: character = press.characters.lowercased()
         }
-        let key = press.characters.lowercased()
-        if command {
-            switch key {
-            case "z":
-                if shift { guard session.canRedo else { return .ignored }; session.redo() }
-                else { guard session.canUndo else { return .ignored }; session.undo() }
-            case "y": guard session.canRedo else { return .ignored }; session.redo()
-            case "a": session.selectAll()
-            default: return .ignored
-            }
-            return .handled
+        guard let binding = MaskEditorCommand.bindings.first(where: {
+            $0.character == character && $0.modifiers == modifiers
+        }) else { return .ignored }
+        guard commandEnabled(binding.command) else {
+            return binding.command == .undo || binding.command == .redo ? .ignored : .handled
         }
-        guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
-        if shift {
-            let mapping: [String: MaskAlignment] = ["l": .left, "h": .center, "r": .right, "t": .top, "v": .middle, "b": .bottom]
-            guard let alignment = mapping[key], !session.selection.isEmpty else { return .ignored }
-            session.align(alignment); return .handled
-        }
-        switch key {
-        case "s": chooseTool(.select)
-        case "r": chooseTool(.rectangle)
-        case "e": chooseTool(.ellipse)
-        case "p": chooseTool(.polygon)
-        case "t": chooseTool(.text)
-        case "c": chooseTool(.fill)
-        case "[": zoom(1 / 1.1)
-        case "]": zoom(1.1)
-        case "f": viewport.fit()
-        case "l": translucent.toggle()
-        case "d": session.duplicate()
-        case "g": session.group()
-        case "u": session.ungroup()
-        case "a": session.selectAll()
-        case "m": break
-        default: return .ignored
-        }
+        perform(binding.command)
         return .handled
     }
 }

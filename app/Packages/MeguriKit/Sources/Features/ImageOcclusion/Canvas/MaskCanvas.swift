@@ -18,32 +18,35 @@ struct MaskCanvas: View {
     @State private var selectionAtStart: Set<UUID> = []
     @State private var isNavigating = false
     @State private var pointer: CGPoint?
+    @State private var handleDragActive = false
+    @State private var handleDragCancelled = false
 
     var body: some View {
-        Canvas { context, _ in
-            context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
-            context.scaleBy(x: viewport.zoom, y: viewport.zoom)
-            context.draw(image, in: CGRect(origin: .zero, size: viewport.reference))
-            for shape in session.displayed.shapes { draw(shape, in: &context) }
-            drawPolygon(in: &context)
-            if let selectionBox {
-                context.stroke(Path(selectionBox), with: .color(.accentColor), style: .init(lineWidth: 1 / viewport.zoom, dash: [4 / viewport.zoom]))
+        ZStack(alignment: .topLeading) {
+            // A real Image supplies the fitted image's native AX frame. It does
+            // not take pointer/touch input from the canvas gesture beneath it.
+            image.resizable()
+                .frame(width: viewport.imageRect.width, height: viewport.imageRect.height)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(ioString("io.a11y.canvas"))
+                .accessibilityIdentifier("io.editor.canvas")
+                .position(x: viewport.imageRect.midX, y: viewport.imageRect.midY)
+                .allowsHitTesting(false)
+            Canvas { context, _ in
+                context.translateBy(x: viewport.origin.x, y: viewport.origin.y)
+                context.scaleBy(x: viewport.zoom, y: viewport.zoom)
+                for shape in session.displayed.shapes { draw(shape, in: &context) }
+                drawPolygon(in: &context)
+                if let selectionBox {
+                    context.stroke(Path(selectionBox), with: .color(.accentColor), style: .init(lineWidth: 1 / viewport.zoom, dash: [4 / viewport.zoom]))
+                }
+                if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
+                    context.stroke(Path(box), with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
+                }
             }
-            if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
-                context.stroke(Path(box), with: .color(.accentColor), lineWidth: 1 / viewport.zoom)
-            }
-        }
-        .contentShape(Rectangle())
-        .onContinuousHover { phase in
-            switch phase {
-            case let .active(location): pointer = viewport.referencePoint(location)
-            case .ended: pointer = nil
-            }
-        }
-        .coordinateSpace(name: "io.canvas")
-        .gesture(DragGesture(minimumDistance: 0).onChanged(dragChanged).onEnded(dragEnded))
-        .overlay { handles }
-        .overlay {
+            .accessibilityHidden(true)
+            accessibleItems
+            handles
             CanvasNavigationInput(
                 navigate: { factor, delta, anchor in
                     cancelDrag(); isNavigating = true
@@ -54,46 +57,92 @@ struct MaskCanvas: View {
                 panStarted: { cancelDrag(); isNavigating = true }
             )
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case let .active(location): pointer = viewport.referencePoint(location)
+            case .ended: pointer = nil
+            }
+        }
+        .coordinateSpace(name: "io.canvas")
+        .gesture(DragGesture(minimumDistance: 0).onChanged(dragChanged).onEnded(dragEnded))
         .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(ioString("io.a11y.canvas"))
         .accessibilityIdentifier("io.canvas")
-        .accessibilityChildren {
-            ForEach(session.document.items, id: \.self) { item in
-                if let first = session.document.shapes.first(where: { $0.id == item[0] }) {
-                    let box = viewport.screenRect(session.document.bounds(of: Set(item), in: viewport.reference) ?? .zero)
-                    Color.clear
-                        .frame(width: max(1, box.width), height: max(1, box.height))
-                        .position(x: box.midX, y: box.midY)
-                        .accessibilityLabel(itemLabel(item, first: first))
-                        .accessibilityIdentifier(first.data.number > 0 ? "io.mask.\(first.data.number)" : "io.label.\(first.id.uuidString)")
-                        .accessibilityAddTraits(session.selection.contains(first.id) ? [.isSelected, .isButton] : [.isButton])
-                        .accessibilityAction { session.select(first.id) }
-                        .accessibilityAction(named: Text(ioString("io.command.delete"))) {
-                            session.select(first.id); session.deleteSelection()
-                        }
-                        .accessibilityAction(named: Text(ioString("io.command.duplicate"))) {
-                            session.select(first.id); session.duplicate()
-                        }
-                        .accessibilityAction(named: Text(ioString("io.command.group"))) {
-                            session.select(first.id, extending: true); session.group()
-                        }
-                        .accessibilityAction(named: Text(ioString("io.command.ungroup"))) {
-                            session.select(first.id); session.ungroup()
-                        }
-                        .accessibilityAdjustableAction { direction in
-                            session.select(first.id)
-                            let delta = direction == .increment ? 5.0 : -5.0
-                            session.commit(session.moved(dx: delta, dy: 0, finishing: true))
-                        }
+    }
+
+    // These are layout-backed controls, rather than virtual accessibilityChildren
+    // whose position has no relationship to the Canvas's native screen frame.
+    private var accessibleItems: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(session.displayed.accessibilityItems(in: viewport), id: \.identifier) { item in
+                Button { session.select(item.first.id) } label: {
+                    Rectangle().fill(.clear)
+                        .frame(width: item.frame.width, height: item.frame.height)
                 }
+                .buttonStyle(.plain)
+                .frame(width: item.frame.width, height: item.frame.height)
+                .accessibilityElement(children: .ignore)
+                .accessibilityRespondsToUserInteraction(true)
+                .accessibilityLabel(itemLabel(item.ids, first: item.first))
+                .accessibilityIdentifier(item.identifier)
+                .accessibilityAddTraits(session.selection.contains(item.first.id) ? [.isSelected] : [])
+                .accessibilityActions {
+                    Button(ioString("io.command.delete")) {
+                        session.select(item.first.id); session.deleteSelection()
+                    }
+                    Button(ioString("io.command.duplicate")) {
+                        session.select(item.first.id); session.duplicate()
+                    }
+                    if canGroup(with: item) {
+                        Button(ioString("io.command.group")) {
+                            session.selection.formUnion(item.ids); session.group()
+                        }
+                    }
+                    if item.ids.count > 1 {
+                        Button(ioString("io.command.ungroup")) {
+                            session.select(item.first.id); session.ungroup()
+                        }
+                    }
+                    ForEach(MaskAlignment.allCases, id: \.self) { alignment in
+                        Button(ioString(alignment.key)) {
+                            session.select(item.first.id); session.align(alignment)
+                        }
+                    }
+                }
+                .accessibilityAdjustableAction { direction in
+                    session.select(item.first.id)
+                    let delta = direction == .increment ? 5.0 : -5.0
+                    session.commit(session.moved(dx: delta, dy: 0, finishing: true))
+                }
+                .position(x: item.frame.midX, y: item.frame.midY)
             }
-            if !session.polygon.isEmpty {
-                Text(String(format: ioString("io.a11y.polygon.unfinished"), Int64(session.polygon.count)))
-                    .accessibilityAction(named: Text(ioString("io.command.closePolygon"))) { session.closePolygon() }
+            if let frame = viewport.polygonFrame(session.polygon) {
+                Button { if session.polygon.count >= 3 { session.closePolygon() } } label: {
+                    Rectangle().fill(.clear).frame(width: frame.width, height: frame.height)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(format: ioString("io.a11y.polygon.unfinished"), Int64(session.polygon.count)))
+                .accessibilityIdentifier("io.polygon.unfinished")
+                .accessibilityActions {
+                    if session.polygon.count >= 3 {
+                        Button(ioString("io.command.closePolygon")) { session.closePolygon() }
+                    }
+                }
+                .position(x: frame.midX, y: frame.midY)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+
+    private func canGroup(with item: OcclusionAccessibilityItem) -> Bool {
+        let ids = session.selection.union(item.ids)
+        return Set(session.document.shapes.filter { ids.contains($0.id) && !$0.isLabel }.map { $0.data.number }).count > 1
     }
 
     private func draw(_ shape: OcclusionShape, in context: inout GraphicsContext) {
@@ -115,7 +164,7 @@ struct MaskCanvas: View {
                            at: .init(x: 0, y: Double(index) * lineHeight), anchor: .topLeading)
             }
         } else {
-            layer.fill(path, with: .color(maskColor(shape.data.fill, fallback: maskDefaultColor)))
+            layer.fill(path, with: .color(maskColor(shape.data.fill, fallback: MaskAppearance.defaultColor)))
             layer.stroke(path, with: .color(.primary), lineWidth: 1 / viewport.zoom)
             let bounds = shape.bounds(in: viewport.reference)
             context.draw(Text(String(shape.data.number)).font(.caption).foregroundStyle(.primary),
@@ -220,6 +269,7 @@ struct MaskCanvas: View {
         }
     }
     private func cancelDrag() {
+        if handleDragActive { handleDragCancelled = true }
         if dragStart != nil { session.selection = selectionAtStart }
         dragStart = nil; drawingTool = nil; session.preview = nil; selectionBox = nil
     }
@@ -237,8 +287,11 @@ struct MaskCanvas: View {
                     .position(viewport.screenPoint(session.handlePoint(handle, in: session.displayed)))
                     .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
                         .onChanged { value in
+                            guard beginHandleDrag() else { return }
                             session.preview = session.resized(handle: handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: false)
                         }.onEnded { value in
+                            defer { endHandleDrag() }
+                            guard !handleDragCancelled, !isNavigating else { return }
                             session.commit(session.resized(handle: handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: true))
                         })
                     .accessibilityLabel(ioString("io.a11y.handle.resize"))
@@ -260,8 +313,15 @@ struct MaskCanvas: View {
                     .position(x: viewport.screenPoint(.init(x: box.midX, y: box.minY)).x,
                               y: viewport.screenPoint(.init(x: box.midX, y: box.minY)).y - 44)
                     .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
-                        .onChanged { value in session.preview = session.rotated(degrees: rotation(value, around: center), finishing: false) }
-                        .onEnded { value in session.commit(session.rotated(degrees: rotation(value, around: center), finishing: true)) })
+                        .onChanged { value in
+                            guard beginHandleDrag() else { return }
+                            session.preview = session.rotated(degrees: rotation(value, around: center), finishing: false)
+                        }
+                        .onEnded { value in
+                            defer { endHandleDrag() }
+                            guard !handleDragCancelled, !isNavigating else { return }
+                            session.commit(session.rotated(degrees: rotation(value, around: center), finishing: true))
+                        })
                     .accessibilityLabel(ioString("io.a11y.handle.rotate"))
                     .accessibilityIdentifier("io.handle.rotate")
                     .accessibilityAdjustableAction { direction in
@@ -270,18 +330,15 @@ struct MaskCanvas: View {
             }
         }
     }
+    private func beginHandleDrag() -> Bool {
+        if !handleDragActive { handleDragActive = true; handleDragCancelled = isNavigating }
+        return !handleDragCancelled && !isNavigating
+    }
+    private func endHandleDrag() {
+        handleDragActive = false; handleDragCancelled = false; session.preview = nil
+    }
     private func rotation(_ value: DragGesture.Value, around center: CGPoint) -> Double {
         (atan2(value.location.y - center.y, value.location.x - center.x)
          - atan2(value.startLocation.y - center.y, value.startLocation.x - center.x)) * 180 / .pi
     }
-}
-
-// These are authored card colours, mandated by the format, not app chrome.
-let maskDefaultColor = Color(.sRGB, red: 1, green: 235.0 / 255, blue: 162.0 / 255, opacity: 1)
-func maskColor(_ value: String?, fallback: Color) -> Color {
-    guard let value else { return fallback }
-    if value == "transparent" { return .clear }
-    guard value.hasPrefix("#"), value.count == 7, let rgb = UInt32(value.dropFirst(), radix: 16) else { return fallback }
-    return Color(.sRGB, red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255,
-                 blue: Double(rgb & 255) / 255, opacity: 1)
 }

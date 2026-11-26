@@ -147,10 +147,10 @@ import Testing
         #expect(model.field == rect1 && writes == 2)
     }
 
-    @Test func numberedMaskReadUsesStrictCoreCodec() throws {
-        #expect(try occlusionHasNumberedMask(rect1))
-        #expect(try !occlusionHasNumberedMask("{{c0::image-occlusion:text:left=.1:top=.1:text=hi}}"))
-        #expect(try !occlusionHasNumberedMask(""))
-        #expect(throws: (any Error).self) { try occlusionHasNumberedMask("unsupported") }
+    @Test func strictCoreCodecReadsNumberedMasksLabelsAndEmptyDocuments() throws {
+        #expect(try OcclusionCodec(field: rect1).shapes.map(\.number) == [1])
+        #expect(try OcclusionCodec(field: "{{c0::image-occlusion:text:left=.1:top=.1:text=hi}}").shapes.map(\.number) == [0])
+        #expect(try OcclusionCodec(field: "").shapes.isEmpty)
+        #expect(throws: (any Error).self) { try OcclusionCodec(field: "unsupported") }
     }
 }

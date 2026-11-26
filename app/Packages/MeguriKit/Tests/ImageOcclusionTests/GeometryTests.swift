@@ -95,4 +95,56 @@ import Testing
             #expect(abs(coordinate - expected) < 0.000001)
         }
     }
+    @Test func fittedCanvasExcludesLetterboxingInBothOrientations() {
+        var landscape = CanvasViewport(reference: .init(width: 800, height: 400), area: .init(width: 1000, height: 800))
+        landscape.fit()
+        #expect(landscape.imageRect == CGRect(x: 0, y: 150, width: 1000, height: 500))
+        #expect(landscape.referencePoint(.init(x: 0, y: 150)) == .zero)
+        #expect(landscape.referencePoint(.init(x: 1000, y: 650)) == .init(x: 800, y: 400))
+        #expect(landscape.referencePoint(.init(x: 500, y: 100)).y < 0)
+        landscape.area = .init(width: 800, height: 1000); landscape.fit()
+        #expect(landscape.reference == .init(width: 800, height: 400))
+        #expect(landscape.imageRect == CGRect(x: 0, y: 300, width: 800, height: 400))
+
+        var portrait = CanvasViewport(reference: .init(width: 400, height: 800), area: .init(width: 1000, height: 800))
+        portrait.fit()
+        #expect(portrait.imageRect == CGRect(x: 300, y: 0, width: 400, height: 800))
+        let point = CGPoint(x: 425, y: 675)
+        portrait.magnify(by: 1.5, at: point); portrait.pan = .init(width: 10, height: -20)
+        let imagePoint = portrait.referencePoint(point)
+        #expect(abs(portrait.screenPoint(imagePoint).x - point.x) < 0.000001)
+        #expect(abs(portrait.screenPoint(imagePoint).y - point.y) < 0.000001)
+        portrait.area = .zero; portrait.fit()
+        #expect(portrait.zoom > 0 && portrait.zoom.isFinite)
+    }
+
+    @Test func accessibilityItemsKeepNumberedGroupsAndSeparateLabelsAndZero() throws {
+        let group = OcclusionShape(.init(number: 3, left: 0.1, top: 0.1, kind: .rect(width: 0.2, height: 0.1)))
+        let member = OcclusionShape(.init(number: 3, left: 0.5, top: 0.4, kind: .ellipse(rx: 0.1, ry: 0.1)))
+        let label = OcclusionShape(.init(number: 3, left: 0.1, top: 0.5, kind: .text(text: "Label", scale: 1, fs: 0.04)))
+        let zero = OcclusionShape(.init(number: 0, left: 0.2, top: 0.3, kind: .rect(width: 0.1, height: 0.1)))
+        let otherZero = OcclusionShape(.init(number: 0, left: 0.3, top: 0.4, kind: .rect(width: 0.1, height: 0.1)))
+        var document = OcclusionDocument(shapes: [group, member, label, zero, otherZero])
+        var viewport = CanvasViewport(reference: .init(width: 800, height: 400), area: .init(width: 1000, height: 800))
+        viewport.fit()
+        let items = document.accessibilityItems(in: viewport)
+        #expect(items.count == 4)
+        #expect(Set(items.map(\.identifier)).count == 4)
+        let first = try #require(items.first)
+        #expect(first.identifier == "io.mask.3")
+        #expect(first.ids == [group.id, member.id])
+        #expect(first.frame == CGRect(x: 100, y: 200, width: 600, height: 250))
+        #expect(items[1].identifier == "io.label.\(label.id.uuidString)")
+        #expect(items[2].identifier == "io.mask.zero.\(zero.id.uuidString)")
+        viewport.magnify(by: 1.2, at: .init(x: 500, y: 400))
+        viewport.pan = .init(width: 30, height: 20)
+        let zoomed = document.accessibilityItems(in: viewport)
+        #expect(zoomed.map(\.identifier) == items.map(\.identifier))
+        #expect(zoomed[0].frame == CGRect(x: 50, y: 180, width: 720, height: 300))
+        // A production drag preview uses the same IDs and current drawn bounds.
+        document.shapes[0].move(dx: 0.1, dy: 0)
+        #expect(document.accessibilityItems(in: viewport).map(\.identifier) == items.map(\.identifier))
+        #expect(document.accessibilityItems(in: viewport)[0].frame.minX == 170)
+    }
+
 }

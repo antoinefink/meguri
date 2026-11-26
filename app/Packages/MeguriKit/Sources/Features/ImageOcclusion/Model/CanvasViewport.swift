@@ -12,6 +12,19 @@ struct CanvasViewport {
         .init(x: (area.width - reference.width * zoom) / 2 + pan.width,
               y: (area.height - reference.height * zoom) / 2 + pan.height)
     }
+    var imageRect: CGRect { screenRect(CGRect(origin: .zero, size: reference)) }
+
+    func polygonFrame(_ points: [CGPoint]) -> CGRect? {
+        guard let first = points.first else { return nil }
+        let marker = CGRect(x: first.x - 5, y: first.y - 5, width: 10, height: 10)
+        let bounds = points.dropFirst().reduce(marker) { box, point in
+            CGRect(x: min(box.minX, point.x), y: min(box.minY, point.y),
+                   width: max(box.maxX, point.x) - min(box.minX, point.x),
+                   height: max(box.maxY, point.y) - min(box.minY, point.y))
+        }
+        return screenRect(bounds)
+    }
+
     func referencePoint(_ point: CGPoint) -> CGPoint {
         .init(x: (point.x - origin.x) / zoom, y: (point.y - origin.y) / zoom)
     }
@@ -22,10 +35,12 @@ struct CanvasViewport {
         .init(origin: screenPoint(rect.origin), size: .init(width: rect.width * zoom, height: rect.height * zoom))
     }
     mutating func fit() {
-        guard reference.width > 0, reference.height > 0 else { return }
+        guard reference.width > 0, reference.height > 0, area.width > 0, area.height > 0,
+              reference.width.isFinite, reference.height.isFinite, area.width.isFinite, area.height.isFinite else { return }
         zoom = min(area.width / reference.width, area.height / reference.height); pan = .zero
     }
     mutating func magnify(by factor: Double, at point: CGPoint) {
+        guard factor.isFinite, factor > 0, zoom > 0 else { return }
         let fixed = referencePoint(point)
         zoom = min(5, max(0.5, zoom * factor))
         pan = .init(width: point.x - fixed.x * zoom - (area.width - reference.width * zoom) / 2,
@@ -134,5 +149,26 @@ extension MaskEditorSession {
         }
         if finishing { bringBack(&next) }
         return next
+    }
+}
+
+struct OcclusionAccessibilityItem {
+    let ids: [UUID]
+    let first: OcclusionShape
+    let identifier: String
+    let frame: CGRect
+}
+
+extension OcclusionDocument {
+    func accessibilityItems(in viewport: CanvasViewport) -> [OcclusionAccessibilityItem] {
+        items.compactMap { ids in
+            guard let id = ids.first, let first = shapes.first(where: { $0.id == id }),
+                  let bounds = bounds(of: Set(ids), in: viewport.reference) else { return nil }
+            let identifier: String
+            if first.isLabel { identifier = "io.label.\(id.uuidString)" }
+            else if first.data.number == 0 { identifier = "io.mask.zero.\(id.uuidString)" }
+            else { identifier = "io.mask.\(first.data.number)" }
+            return .init(ids: ids, first: first, identifier: identifier, frame: viewport.screenRect(bounds))
+        }
     }
 }

@@ -19,7 +19,10 @@ public enum MaskEditorTool: String, CaseIterable, Identifiable {
     }
 }
 
-enum MaskAlignment: String, CaseIterable { case left, center, right, top, middle, bottom }
+enum MaskAlignment: String, CaseIterable {
+    case left, center, right, top, middle, bottom
+    var key: String { "io.command.align" + rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
 
 /// Retain this above layout switches when the host removes the canvas for fields.
 /// The four-argument MaskEditorView owns one for its own mounted lifetime; the
@@ -35,6 +38,7 @@ enum MaskAlignment: String, CaseIterable { case left, center, right, top, middle
     public private(set) var isReadable = false
     public private(set) var referenceSize = CGSize.zero
     var onWrite: ((String) -> Void)?
+    public let palette: MaskPaletteModel?
     private var codec: OcclusionCodec?
     private var initial = OcclusionDocument()
     private var history: [OcclusionDocument] = []
@@ -49,7 +53,8 @@ enum MaskAlignment: String, CaseIterable { case left, center, right, top, middle
     var canUngroup: Bool { document.items.contains { $0.count > 1 && selection.contains($0[0]) } }
     var displayed: OcclusionDocument { preview ?? document }
 
-    public init(field: String, isEditing: Bool) {
+    public init(field: String, isEditing: Bool, palette: MaskPaletteModel? = nil) {
+        self.palette = palette
         self.field = field
         tool = isEditing ? .select : .rectangle
         load(field, isEditing: isEditing)
@@ -84,7 +89,8 @@ enum MaskAlignment: String, CaseIterable { case left, center, right, top, middle
 
     public static func referenceSize(imageSize: CGSize, area: CGSize, displayScale: Double) -> CGSize {
         guard imageSize.width > 0, imageSize.height > 0, area.width > 0, area.height > 0,
-              imageSize.width.isFinite, imageSize.height.isFinite, displayScale > 0 else { return .zero }
+              imageSize.width.isFinite, imageSize.height.isFinite, area.width.isFinite, area.height.isFinite,
+              displayScale.isFinite, displayScale > 0 else { return .zero }
         let fit = min(area.width / imageSize.width, area.height / imageSize.height)
         var width = imageSize.width * fit * displayScale, height = imageSize.height * fit * displayScale
         let reduction = min(1, sqrt(16_777_216 / (width * height)))
@@ -195,7 +201,7 @@ enum MaskAlignment: String, CaseIterable { case left, center, right, top, middle
     func fill(_ id: UUID, color: String) {
         var next = document
         guard let i = next.shapes.firstIndex(where: { $0.id == id }) else { return }
-        let fallback = next.shapes[i].isLabel ? "#000000" : "#ffeba2"
+        let fallback = next.shapes[i].isLabel ? MaskAppearance.labelFill : MaskAppearance.defaultFill
         guard (next.shapes[i].data.fill ?? fallback).lowercased() != color else { return }
         next.shapes[i].data.fill = color == fallback ? nil : color; commit(next)
     }

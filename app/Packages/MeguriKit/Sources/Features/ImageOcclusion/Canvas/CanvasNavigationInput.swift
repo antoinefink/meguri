@@ -29,7 +29,8 @@ struct CanvasNavigationInput: NSViewRepresentable {
             super.viewDidMoveToWindow(); stop()
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify, .keyDown, .keyUp, .leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
-                self?.receive(event) ?? event
+                guard let self else { return event }
+                return self.receive(event)
             }
         }
         func stop() {

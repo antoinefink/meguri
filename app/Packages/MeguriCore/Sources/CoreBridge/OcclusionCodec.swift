@@ -1,7 +1,6 @@
 import Dispatch
 import Foundation
 import Instrumentation
-import Synchronization
 internal import MeguriCoreBindings
 
 /// Image-normalized geometry. Source indexes and unknown properties must survive
@@ -84,19 +83,19 @@ public enum OcclusionNumberAction: Sendable {
 }
 
 /// Synchronous at the edit boundary so a host Save cannot overtake a mask write.
-/// The FFI itself executes on the interactive lane, never on the main actor.
-/// This facade is main-actor-only to prevent a caller waiting on its own lane.
+/// Pure document calls use a dedicated serial executor, never the collection
+/// queue or the main actor. Main-actor admission preserves completed-edit order.
 @MainActor public final class OcclusionCodec {
     private let original: MeguriCoreBindings.ImageOcclusionDocument
     public let shapes: [OcclusionShapeData]
     public let hideAll: Bool
 
     public init(field: String) throws(BridgeError) {
-        original = try occlusionCall("image_occlusion_parse") {
+        original = try occlusionCall(.imageOcclusionParse) {
             try MeguriCoreBindings.imageOcclusionParse(field: field)
         }
         let original = original
-        let reading = try occlusionCall("ImageOcclusionDocument.reading") { try original.reading() }
+        let reading = try occlusionCall(.imageOcclusionReading) { try original.reading() }
         shapes = reading.shapes.map(OcclusionShapeData.init)
         hideAll = reading.hideAll
     }
@@ -104,24 +103,47 @@ public enum OcclusionNumberAction: Sendable {
     public func write(shapes: [OcclusionShapeData], hideAll: Bool,
                       width: Double, height: Double) throws(BridgeError) -> String {
         let original = original
-        return try occlusionCall("image_occlusion_write") {
+        return try occlusionCall(.imageOcclusionWrite) {
             try MeguriCoreBindings.imageOcclusionWrite(original: original, shapes: shapes.map(\.ffi),
                                                        hideAll: hideAll, width: width, height: height)
         }
     }
 
     public func allocate(shapes: [OcclusionShapeData]) throws(BridgeError) -> UInt16 {
-        try occlusionCall("image_occlusion_allocate") {
+        try occlusionCall(.imageOcclusionAllocate) {
             try MeguriCoreBindings.imageOcclusionAllocate(shapes: shapes.map(\.ffi))
         }
     }
 
     public func numbers(shapes: [OcclusionShapeData], action: OcclusionNumberAction) throws(BridgeError) -> [OcclusionShapeData] {
-        try occlusionCall("image_occlusion_numbers") {
+        try occlusionCall(.imageOcclusionNumbers) {
             try MeguriCoreBindings.imageOcclusionNumbers(shapes: shapes.map(\.ffi), action: action.ffi)
                 .map(OcclusionShapeData.init)
         }
     }
+}
+
+/// Isolated from collection operations: parsing a document must not wait for a
+/// review/render/database call. Only this synchronous main-actor facade admits
+/// work, and every call finishes before the host can save the resulting field.
+private actor OcclusionLane: CoreLane {
+    static let lane = Lane.interactive
+    static let shared = OcclusionLane()
+    nonisolated let queue = DispatchSerialQueue(label: "com.antoinefink.meguri.core.occlusion", qos: .userInteractive)
+    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+}
+
+@MainActor private func occlusionCall<T: Sendable>(
+    _ call: BridgeCall, _ body: @Sendable () throws -> T
+) throws(BridgeError) -> T {
+    let lane = OcclusionLane.shared
+    // sync has no semaphore/result storage and propagates the mapped error.
+    // Returning a typed Result retains typed throws across Dispatch's rethrows.
+    return try lane.queue.sync {
+        lane.assumeIsolated { executor in
+            Result<T, BridgeError> { () throws(BridgeError) in try executor.call(call, body) }
+        }
+    }.get()
 }
 
 /// Uses the strict reading, including protection against unsupported input.
@@ -130,30 +152,4 @@ public enum OcclusionNumberAction: Sendable {
         if case .text = $0.kind { return false }
         return $0.number > 0
     }
-}
-
-@MainActor private func occlusionCall<T: Sendable>(
-    _ name: String, _ body: @escaping @Sendable () throws -> T
-) throws(BridgeError) -> T {
-    // Lookup deliberately refuses an unregistered export rather than silently
-    // mislabelling it as another bridge call. The integrator owns the registry.
-    guard let call = BridgeCall.all.first(where: { $0.name == name }) else {
-        throw .internal("Missing bridge interval: \(name)")
-    }
-    let result = OcclusionCallResult<T>()
-    InteractiveLane.shared.queue.async {
-        let value = InteractiveLane.shared.assumeIsolated { lane in
-            Result<T, BridgeError> { () throws(BridgeError) in try lane.call(call, body) }
-        }
-        result.value.withLock { $0 = value }
-        result.finished.signal()
-    }
-    result.finished.wait()
-    guard let value = result.value.withLock({ $0 }) else { throw .internal("Missing occlusion result") }
-    return try value.get()
-}
-
-private final class OcclusionCallResult<T: Sendable>: Sendable {
-    let value = Mutex<Result<T, BridgeError>?>(nil)
-    let finished = DispatchSemaphore(value: 0)
 }
