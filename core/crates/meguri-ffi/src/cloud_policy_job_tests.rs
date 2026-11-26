@@ -265,18 +265,21 @@ fn policy_job_cancelled_after_worker_contends_on_driver_preserves_settings_and_s
 
 #[test]
 fn policy_job_cancelled_during_projection_before_first_effect_preserves_state() {
-    let clock = Arc::new(ProjectionClock {
-        pause: Mutex::new(None),
-    });
-    let (fixture, _) = unbound_fixture_with_clock(Arc::new(Account), Some(clock.clone()));
+    let (fixture, _) = unbound_fixture(Arc::new(Account));
     let policy = fixture.workflow.policy().unwrap();
     policy.clone().input(CloudPolicyEvent::Foreground).unwrap();
-    let before = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let before = driver.state();
     let events = fixture.workflow.host.engine().stream().subscribe();
     let (entered, reached) = mpsc::channel();
     let (release, resume) = mpsc::channel();
     let release = ReleaseDeckAccount(release);
-    *clock.pause.lock().unwrap() = Some((entered, resume));
+    driver.set_projection_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume
+            .recv_timeout(Duration::from_secs(10))
+            .expect("projection release");
+    });
     let started = policy
         .clone()
         .start_input(CloudPolicyEvent::Network { reachable: true })
@@ -286,7 +289,7 @@ fn policy_job_cancelled_during_projection_before_first_effect_preserves_state() 
     drop(release);
     assert_eq!(finished(&events, started.handle.id), JobOutcome::Cancelled);
     assert!(matches!(started.result.result(), Err(CoreError::Cancelled)));
-    assert_eq!(fixture.workflow.host.cloud_policy_driver().unwrap().state(), before);
+    assert_eq!(driver.state(), before);
     fixture.workflow.host.close().unwrap();
 }
 
