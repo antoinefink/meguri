@@ -845,13 +845,18 @@ screens:
       Limits (New Cards per Day, Maximum Reviews per Day; the preset's values, no tabs) and Memory
       (Desired Retention, footer "How likely you are to remember a card when it comes back."); Save
       is the confirmation action (⌘S); leaving with a change asks "Discard changes?". Extended
-      2026-11-25 at the user's request: Advanced beneath Memory starts collapsed and contains
-      Display Order's five native preset pickers (O3, exact K3/K5 labels and order), plus a localized
-      gathering-versus-sorting footer. New Preset… beside Preset opens native name entry and stages
+      2026-11-25 at the user's request: Display Order's five native preset pickers (O3, exact K3/K5
+      labels and order) beneath Memory. New Preset… beside Preset opens native name entry and stages
       core built-in defaults; Save creates all staged presets and assigns the currently selected
-      preset to this deck in one operation, Discard creates nothing.
-      No clone, rename, delete, tabs, restore-default or help controls yet; the rest of this purpose
-      applies as those parts land.
+      preset to this deck in one operation, Discard creates nothing. Changed 2026-11-27 (Antoine in
+      chat, N20.9): no Advanced wrapper and no gathering footer; one grouped box whose first row is
+      the collapsed "Display Order" disclosure (leading chevron, collapsed each time the page opens)
+      and whose further rows are the five pickers, each with a small info.circle help button after
+      its label that opens Meguri's help (the row's name, what it does, one line per choice: a
+      popover on Mac and at regular width, a sheet at compact width). Later Advanced sections each
+      get their own collapsed box. No clone, rename, delete, tabs or restore-default controls yet,
+      and help only on the five Display Order rows; the rest of this purpose applies as those parts
+      land.
       A normal deck's options: its preset, the Essentials, the Advanced sections and the one undoable
       save (U232: shell, presets and save; U233: Essentials and Daily Limits; U234: the other
       Advanced sections; sched/deck-options O2 to O9; R730–R753; native-interface-contract N11.9).
@@ -963,7 +968,8 @@ screens:
       deckOptions.options.preset.menu.add, deckOptions.options.preset.menu.clone,
       deckOptions.options.preset.menu.rename, deckOptions.options.preset.menu.remove,
       deckOptions.options.preset.menu.saveToSubdecks, deckOptions.options.save,
-      deckOptions.options.cancel, deckOptions.options.advanced, deckOptions.options.option.<key>,
+      deckOptions.options.cancel, deckOptions.options.advanced (first version: deckOptions.options.displayOrder,
+      deckOptions.options.order.<key>, deckOptions.options.order.<key>.help), deckOptions.options.option.<key>,
       deckOptions.options.option.<key>.restore, deckOptions.options.option.<key>.help.
       Core (U49): the O2 snapshot, O4's validation of the draft after each edit, O5's step text
       reading and writing, sched/memory-state M5's count for each entered date, the collection's
