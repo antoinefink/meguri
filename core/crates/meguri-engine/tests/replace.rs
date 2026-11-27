@@ -1264,6 +1264,227 @@ fn recover_cloud_twice(
     }
 }
 
+fn retirement_config() -> meguri_engine::OpenConfig {
+    let mut open = config(AccountBinding::LocalOnly, 149);
+    open.retire_icloud_publication = true;
+    open
+}
+
+fn recover_retired_twice(
+    live: &Path,
+    expected: &Publication,
+    reason: Option<PendingDecisionReason>,
+    expected_marker: i64,
+) {
+    for _ in 0..2 {
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let collection = engine.open_raw(live, retirement_config()).unwrap();
+        assert_eq!(&publication(live), expected);
+        assert_reason(live, reason);
+        assert_eq!(marker(&collection), expected_marker);
+        assert!(r6_document(live)["deviceState"]["intent"].is_null());
+        assert_eq!(
+            DeviceState::for_collection(live).settled_publication().unwrap().as_ref(),
+            Some(expected)
+        );
+        engine.close().unwrap();
+    }
+}
+
+#[test]
+fn icloud_retirement_stable_connected_publication_requires_opt_in_and_preserves_identity() {
+    let (dir, live) = common::copy_fixture("schema-18.anki2");
+    settled_old(&live);
+    let mut expected = publication(&live);
+    let sidecar = dir.path().join("meguri-sidecar.json");
+    let original = fs::read(&sidecar).unwrap();
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    let ordinary = config(AccountBinding::LocalOnly, 8);
+    assert!(!ordinary.retire_icloud_publication);
+    assert!(engine.open_raw(&live, ordinary).is_err());
+    assert_eq!(fs::read(&sidecar).unwrap(), original);
+    expected.binding = AccountBinding::LocalOnly;
+    recover_retired_twice(&live, &expected, None, 0);
+    assert!(DeviceState::for_collection(&live).publication_token(&binding()).is_err());
+    assert!(DeviceState::for_collection(&live).publication_token(&AccountBinding::LocalOnly).is_ok());
+}
+
+#[test]
+fn icloud_retirement_uninitialized_collection_uses_local_ownership_without_account_input() {
+    let (_dir, live) = common::copy_fixture("schema-18.anki2");
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    let mut open = retirement_config();
+    open.publication_binding = binding();
+    open.startup_publication_binding = Some(AccountBinding::Unknown);
+    open.startup_identity_read_failed = true;
+    engine.open_raw(&live, open).unwrap();
+    let expected = publication(&live);
+    assert_eq!(expected.binding, AccountBinding::LocalOnly);
+    assert_eq!(expected.decision, PublicationDecision::Clear);
+    engine.close().unwrap();
+    recover_retired_twice(&live, &expected, None, 0);
+}
+
+#[test]
+fn icloud_retirement_regular_replacements_recover_exact_local_decision_and_reason() {
+    for reason in [
+        ReplaceReason::Restore,
+        ReplaceReason::ColpkgImport,
+        ReplaceReason::FullDownload,
+        ReplaceReason::FullUpload,
+    ] {
+        for mode in ["clear", "pending"] {
+            for point in [
+                "replace.after_pause_recorded",
+                "replace.after_rename",
+                "replace.after_durable_activation",
+            ] {
+                let (_dir, live) = common::copy_fixture("schema-18.anki2");
+                settled_old(&live);
+                crash(&live, point, mode, reason);
+                let before = r6_document(&live);
+                let swapped = cloud_swapped(point);
+                let intent = &before["deviceState"]["intent"];
+                assert_recorded_file_proof(&live, intent, swapped);
+                let mut expected: Publication =
+                    serde_json::from_value(intent[if swapped { "candidate" } else { "prior" }].clone()).unwrap();
+                expected.binding = AccountBinding::LocalOnly;
+                let expected_reason = if swapped && reason != ReplaceReason::FullUpload {
+                    Some(match reason {
+                        ReplaceReason::Restore => PendingDecisionReason::Restore,
+                        ReplaceReason::ColpkgImport => PendingDecisionReason::ColpkgImport,
+                        ReplaceReason::FullDownload => PendingDecisionReason::ManualImport,
+                        _ => unreachable!(),
+                    })
+                } else if mode == "pending" {
+                    Some(PendingDecisionReason::Restore)
+                } else {
+                    None
+                };
+                recover_retired_twice(
+                    &live,
+                    &expected,
+                    expected_reason,
+                    if swapped || mode == "pending" { 722 } else { 0 },
+                );
+                if swapped {
+                    let after = r6_document(&live);
+                    assert_eq!(after["deviceState"]["lastReplacement"]["candidate"], intent["candidate"]);
+                    assert_eq!(after["deviceState"]["lastReplacement"]["prior"], intent["prior"]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn icloud_retirement_cloud_adopt_recovers_pre_and_post_rename_without_live_account() {
+    for mode in ["cloud-clear-bound", "cloud-restore-bound", "cloud-colpkg-local"] {
+        for point in [
+            "replace.after_pause_recorded",
+            "replace.after_rename",
+            "replace.after_durable_activation",
+        ] {
+            let (_dir, live) = common::copy_fixture("schema-18.anki2");
+            settled_old(&live);
+            crash(&live, point, mode, ReplaceReason::CloudAdopt);
+            let before = r6_document(&live);
+            let intent = &before["deviceState"]["intent"];
+            let swapped = cloud_swapped(point);
+            assert_recorded_file_proof(&live, intent, swapped);
+            let mut expected: Publication =
+                serde_json::from_value(intent[if swapped { "candidate" } else { "prior" }].clone()).unwrap();
+            expected.binding = AccountBinding::LocalOnly;
+            let prior_kind = mode.split('-').nth(1).unwrap();
+            recover_retired_twice(
+                &live,
+                &expected,
+                if swapped { None } else { prior_reason(prior_kind) },
+                if swapped {
+                    946
+                } else if prior_kind == "clear" {
+                    0
+                } else {
+                    722
+                },
+            );
+            if swapped {
+                let after = r6_document(&live);
+                assert_eq!(
+                    after["deviceState"]["cloudAdoptActivation"]["replacement"]["candidate"],
+                    intent["candidate"]
+                );
+                assert_eq!(after["deviceState"]["lastReplacement"]["candidate"], intent["candidate"]);
+                if point == "replace.after_durable_activation" {
+                    assert_eq!(after["deviceState"]["replacements"], before["deviceState"]["replacements"]);
+                    assert_eq!(
+                        after["deviceState"]["cloudAdoptActivation"],
+                        before["deviceState"]["cloudAdoptActivation"]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn icloud_retirement_settled_cloud_account_fence_clears_without_rewriting_history() {
+    let (_dir, live) = common::copy_fixture("schema-18.anki2");
+    settled_old(&live);
+    crash(&live, "replace.after_rename", "cloud-restore-bound", ReplaceReason::CloudAdopt);
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    // An earlier launch without the removal flag fenced this exact adoption.
+    engine.open_raw(&live, config(AccountBinding::LocalOnly, 80)).unwrap();
+    assert_eq!(publication(&live).decision, PublicationDecision::Pending);
+    engine.close().unwrap();
+    let before = r6_document(&live);
+    let mut expected = publication(&live);
+    expected.binding = AccountBinding::LocalOnly;
+    expected.decision = PublicationDecision::Clear;
+    recover_retired_twice(&live, &expected, None, 946);
+    let after = r6_document(&live);
+    for key in ["replacements", "lastReplacement", "cloudAdoptActivation"] {
+        assert_eq!(after["deviceState"][key], before["deviceState"][key]);
+    }
+}
+
+#[test]
+fn icloud_retirement_unmatched_proof_fails_closed_and_keeps_all_recovery_bytes() {
+    for reason in [ReplaceReason::Restore, ReplaceReason::CloudAdopt] {
+        for point in ["replace.after_pause_recorded", "replace.after_rename"] {
+            for damage in ["native", "bytes", "wal", "metadata"] {
+                let (dir, live) = common::copy_fixture("schema-18.anki2");
+                settled_old(&live);
+                crash(
+                    &live,
+                    point,
+                    if reason == ReplaceReason::CloudAdopt {
+                        "cloud-restore-bound"
+                    } else {
+                        "clear"
+                    },
+                    reason,
+                );
+                match damage {
+                    "native" => {
+                        let bytes = fs::read(&live).unwrap();
+                        fs::rename(&live, live.with_extension("held-native")).unwrap();
+                        fs::write(&live, bytes).unwrap();
+                    }
+                    "bytes" => fs::write(&live, b"unmatched closed collection bytes").unwrap(),
+                    "wal" => fs::write(live.with_file_name("collection.anki2-wal"), b"unsettled WAL").unwrap(),
+                    "metadata" => fs::write(dir.path().join("meguri-sidecar.json"), b"{\"deviceState\":").unwrap(),
+                    _ => unreachable!(),
+                }
+                let before = recovery_files(dir.path());
+                let engine = Engine::new(EngineConfig::default()).unwrap();
+                assert!(engine.open_raw(&live, retirement_config()).is_err());
+                assert_eq!(recovery_files(dir.path()), before, "{reason:?}: {point}, {damage}");
+            }
+        }
+    }
+}
+
 #[test]
 fn cloud_adopt_kill_at_every_r8_boundary_recovers_proven_old_or_exact_candidate() {
     for mode in [
@@ -2192,6 +2413,54 @@ fn assert_raw_copies(root: &Path) {
         b"nonempty old WAL recovery bytes"
     );
 }
+
+#[test]
+fn icloud_retirement_retained_wal_uses_existing_exact_pair_recovery() {
+    for point in [
+        "replace.after_pause_recorded",
+        "replace.wal.after_retire",
+        "replace.after_rename",
+        "replace.after_durable_activation",
+    ] {
+        let (root, live, prior) = raw_recovery_fixture();
+        crash(&live, point, "raw", ReplaceReason::Restore);
+        let before = r6_document(&live);
+        let candidate = cloud_swapped(point);
+        let mut expected: Publication = serde_json::from_value(
+            before["deviceState"]["intent"][if candidate { "candidate" } else { "prior" }].clone(),
+        )
+        .unwrap();
+        expected.binding = AccountBinding::LocalOnly;
+        for _ in 0..2 {
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            let opened = engine.open_raw(&live, retirement_config());
+            if candidate {
+                opened.unwrap();
+                assert_reason(&live, Some(PendingDecisionReason::Restore));
+                engine.close().unwrap();
+            } else {
+                assert!(opened.is_err(), "regular recovery must leave the damaged old main damaged");
+                assert_eq!(expected.identity, prior.identity);
+                assert_eq!(fs::read(&live).unwrap(), b"damaged main retained without SQLite writes");
+                assert_eq!(
+                    fs::read(live.with_file_name("collection.anki2-wal")).unwrap(),
+                    b"nonempty old WAL recovery bytes"
+                );
+            }
+            assert_eq!(publication(&live), expected);
+            assert!(r6_document(&live)["deviceState"]["intent"].is_null());
+            assert_raw_copies(root.path());
+        }
+    }
+    let (root, live, _) = raw_recovery_fixture();
+    crash(&live, "replace.after_pause_recorded", "raw", ReplaceReason::Restore);
+    fs::write(root.path().join("raw-backups/retained-main.anki2-wal"), b"substituted retained WAL").unwrap();
+    let before = recovery_files(root.path());
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    assert!(engine.open_raw(&live, retirement_config()).is_err());
+    assert_eq!(recovery_files(root.path()), before);
+}
+
 fn reopen_raw_twice(root: &Path, live: &Path, prior: &Publication, candidate: bool) {
     for _ in 0..2 {
         let engine = Engine::new(EngineConfig::default()).unwrap();
