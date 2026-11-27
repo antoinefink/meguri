@@ -13,7 +13,7 @@ use meguri_engine::{
 };
 use meguri_storage::media::{
     MediaBaselineOwner, MediaEntry, MediaError, MediaPageDecision, MediaStore, MediaSyncBaseline, MediaSyncState,
-    PendingChange, MediaBoundReset, MediaBoundCheckError, UnsupportedMedia,
+    PendingChange, MediaBoundReset, MediaBoundCheckError, UnsupportedMedia, MediaDownloadIntent,
 };
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -127,7 +127,7 @@ pub fn reconcile(
         baseline: None,
         snapshot: MediaSnapshot::default(),
         progress,
-        window: DownloadWindow::default(),
+        window: DownloadWindow::default(), download_concurrency: 1, download_serial_only: false,
         prebound: None, initial: None, resets: Vec::new(), binding_changed: std::cell::Cell::new(false),
     };
     let keep_draining = CancelToken::new();
@@ -255,7 +255,7 @@ pub fn reconcile_bound(
     job.admit_meguri(admission);
     let cancel = job.cancellation();
     let mut stage = Stage { job, service, generation: expected_generation, cancel,
-        baseline: None, snapshot: MediaSnapshot::default(), progress, window: DownloadWindow::default(),
+        baseline: None, snapshot: MediaSnapshot::default(), progress, window: DownloadWindow::default(), download_concurrency: 1, download_serial_only: false,
         prebound: Some(prebound), initial: None, resets: Vec::new(), binding_changed: std::cell::Cell::new(false) };
     let keep_draining = CancelToken::new();
     let run = runtime::block_on(threads, &keep_draining, async { Ok(stage.run(&owner).await) });
@@ -285,6 +285,8 @@ struct Stage<'a> {
     snapshot: MediaSnapshot,
     progress: &'a mut dyn FnMut(&MediaSnapshot),
     window: DownloadWindow,
+    download_concurrency: u32,
+    download_serial_only: bool,
     prebound: Option<crate::provider::MediaEpochEvidence>,
     initial: Option<MediaSyncBaseline>,
     resets: Vec<MediaBoundReset>,
@@ -379,7 +381,7 @@ impl Stage<'_> {
             .collect();
         self.snapshot.totals.oversized.sort();
         self.snapshot.totals.empty.sort();
-        self.snapshot.totals.awaiting = local(|| self.store().awaiting_names())?.len() as u64;
+        self.snapshot.totals.awaiting = local(|| self.store().awaiting_count())?;
         Ok(())
     }
     fn check_changes(&mut self) -> Result<(), JobError> {
@@ -446,14 +448,22 @@ impl Stage<'_> {
             if attempt != 0 {
                 self.check_changes()?;
             }
-            let begin = self.json(Method::MediaBegin, wire::encode_begin()).await?;
+            self.checkpoint()?;
+            let begin = self.job.request(Method::MediaBegin, Payload::Json(wire::encode_begin())).await
+                .map_err(|e| self.job.error_for(Method::MediaBegin, e))?;
+            let concurrency = begin.media_download_concurrency;
+            let begin = begin.bytes().await.map_err(|e| self.job.error_for(Method::MediaBegin, e))?;
             let server_usn = positive_usn(wire::decode_begin(&begin)?, Method::MediaBegin)?;
+            self.checkpoint()?;
+            // Only this job's fully validated begin can enable the extension.
+            // A capacity downgrade survives even a sanity-reset rerun.
+            if !self.download_serial_only { self.download_concurrency = concurrency; }
             let mut requested = false;
             if server_usn != self.baseline().usn {
                 self.list().await?;
                 requested = true;
             }
-            requested |= !local(|| self.store().download_intents())?.is_empty();
+            requested |= local(|| self.store().download_intent_count())? != 0;
             self.download().await?;
             loop {
                 requested |= self.push().await?;
@@ -605,136 +615,157 @@ impl Stage<'_> {
             cursor = high; // Listing cursor is independent of the durable USN.
             self.snapshot.listed += page.len() as u64;
             self.snapshot.totals.checked += page.len() as u64;
-            self.snapshot.totals.awaiting = local(|| self.store().awaiting_names())?.len() as u64;
+            self.snapshot.totals.awaiting = local(|| self.store().awaiting_count())?;
             self.emit(MediaPhase::Listing);
         }
     }
     async fn download(&mut self) -> Result<(), JobError> {
-        let initial = local(|| self.store().download_intents())?;
-        self.snapshot.download_files = initial.len() as u64;
+        let initial = local(|| self.store().download_intent_count())?;
+        self.snapshot.download_files = initial;
         self.snapshot.download_received = 0;
         self.snapshot.published_files = 0;
-        self.snapshot.files_left = initial.len() as u64;
-        self.snapshot.estimate = self.window.estimate(initial.len() as u64);
-        if initial.is_empty() {
-            return Ok(());
-        }
+        self.snapshot.files_left = initial;
+        self.snapshot.estimate = if self.download_concurrency == 1 { self.window.estimate(initial) } else { None };
+        if initial == 0 { return Ok(()); }
         self.emit(MediaPhase::Downloading);
         let staging = owned_staging(self.store())?;
         loop {
             self.checkpoint()?;
-            let intents: Vec<_> = local(|| self.store().download_intents())?
-                .into_iter()
-                .take(BATCH as usize)
-                .collect();
-            if intents.is_empty() {
-                return Ok(());
-            }
-            let names: Vec<_> = intents.iter().map(|d| d.name.clone()).collect();
+            let parallel = self.download_concurrency > 1;
+            let intents = local(|| self.store().download_intents_limit(BATCH * self.download_concurrency))?;
+            if intents.is_empty() { return Ok(()); }
             let started = meguri_engine::monotonic::now();
             self.snapshot.transfer_started = true;
             self.emit(MediaPhase::Downloading);
-            let response = self
-                .job
-                .request(
-                    Method::DownloadFiles,
-                    Payload::Json(wire::encode_download_files(&names)),
-                )
-                .await
-                .map_err(|e| self.job.error_for(Method::DownloadFiles, e))?;
-            // W17.1/Y8.2 validation finishes for every member in the private
-            // staging directory before any file can become visible to readers.
-            let files = wire::spool_media_reply(
-                response,
-                staging.path().to_path_buf(),
-                names,
-                DOWNLOAD_REPLY_LIMIT,
-                self.job.kind(),
-                Arc::clone(&self.cancel),
-            )
-            .await?;
-            self.snapshot.totals.downloaded_files += files.len() as u64;
-            self.snapshot.download_received += files.len() as u64;
-            self.snapshot.totals.bytes_downloaded += files.iter().map(|f| f.file.size()).sum::<u64>();
-            // Keep every received file and the staging owner through all
-            // rebuilds. A stale receipt requires the complete answer to be
-            // observed/saved again, never a weakened batch commit.
-            let mut order: Vec<_> = (0..files.len()).collect();
-            let mut changed_names = BTreeSet::new();
-            let mut committed = false;
-            'repair: for attempt in 0..REBUILD_LIMIT {
-                let mut records = vec![None; files.len()];
-                for &index in &order {
-                    let file = &files[index];
-                    self.checkpoint()?;
-                    let intent = intents
-                        .iter()
-                        .find(|d| d.name == file.name)
-                        .ok_or_else(|| JobError::bad_response(Method::DownloadFiles, "unrequested media file"))?;
-                    let saved = match runtime::blocking_work(|| {
-                        if self.prebound.is_some() {
-                            self.store().save_downloaded_file_with_boundary(self.baseline(), intent, file.file.path(), &mut self.effect_boundary())
-                        } else { self.store().save_downloaded_file(self.baseline(), intent, file.file.path()) }
-                    }) {
-                        Ok(saved) => saved,
-                        Err(MediaError::StaleDownload) if attempt + 1 < REBUILD_LIMIT => {
-                            self.checkpoint()?;
-                            // A save can publish bytes and then lose its receipt
-                            // to an external edit. Discard this pass's records
-                            // and observe every staged member again.
-                            continue 'repair;
-                        }
-                        Err(error) => return Err(self.boundary_error(error)),
-                    };
-                    if saved.changed {
-                        if let Some(name) = &saved.record.stored_name {
-                            changed_names.insert(name.clone());
-                        }
-                        self.snapshot.published_files += 1;
-                    }
-                    records[index] = Some(saved.record);
-                    self.emit(MediaPhase::Downloading);
-                }
-                let records: Vec<_> = records
-                    .into_iter()
-                    .map(|r| r.expect("complete staged answer"))
-                    .collect();
+            self.checkpoint()?;
+            let replies = if parallel {
+                // This wait never short-circuits or drops a spool/file_work
+                // future. The directory and Sync lease outlive the whole wave.
+                download_wave(self.job, staging.path(), &intents).await
+            } else {
+                let names = intents.iter().map(|d| d.name.clone()).collect();
+                let files = fetch_download(self.job, staging.path().to_path_buf(), names).await;
+                vec![DownloadReply { intents, files }]
+            };
+            // Inspect ALL failures before deciding to back off: a later fatal
+            // reply must never be hidden by an earlier capacity response.
+            let fatal = replies.iter().filter_map(|r| r.files.as_ref().err())
+                .find(|e| !download_capacity(e)).cloned();
+            let mut failed = None;
+            let mut received = 0;
+            for DownloadReply { intents, files: reply } in replies {
+                let files = match reply {
+                    Ok(files) => files,
+                    Err(error) => { failed = Some(error); break; }
+                };
                 self.checkpoint()?;
-                match runtime::blocking_work(|| self.store().commit_media_downloads_with_boundary(self.baseline(), &records, &mut self.effect_boundary())) {
-                    Ok(usn) => {
-                        self.advanced(usn);
-                        let arrived = records
-                            .iter()
-                            .filter_map(|r| r.stored_name.as_ref())
-                            .filter(|name| changed_names.contains(*name))
-                            .cloned()
-                            .collect::<BTreeSet<_>>();
-                        self.service
-                            .media_arrived(arrived.into_iter().collect())
-                            .map_err(engine_error)?;
-                        committed = true;
-                        break;
-                    }
+                received += files.len() as u64;
+                self.save_download_reply(&intents, files)?;
+                if parallel { self.emit(MediaPhase::Downloading); }
+            }
+            if let Some(error) = failed {
+                if let Some(fatal) = fatal { return Err(fatal); }
+                if !parallel || !download_capacity(&error) { return Err(error); }
+                self.download_concurrency = 1;
+                self.download_serial_only = true;
+                self.snapshot.estimate = None;
+                self.checkpoint()?;
+                tokio::select! {
+                    biased;
+                    () = self.cancel.cancelled() => return Err(stopped(&self.cancel)),
+                    () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                }
+                self.checkpoint()?;
+                // Refetch only durable outstanding intents, including partial
+                // ZIP omissions and later replies that were never committed.
+                continue;
+            }
+            if !parallel {
+                self.window.saved_batch(meguri_engine::monotonic::now() - started, received);
+                self.snapshot.estimate = self.window.estimate(self.snapshot.files_left);
+                self.emit(MediaPhase::Downloading);
+            }
+        }
+    }
+    fn save_download_reply(&mut self, intents: &[MediaDownloadIntent], files: Vec<wire::MediaFile>) -> Result<(), JobError> {
+        self.snapshot.totals.downloaded_files += files.len() as u64;
+        self.snapshot.download_received += files.len() as u64;
+        self.snapshot.totals.bytes_downloaded += files.iter().map(|f| f.file.size()).sum::<u64>();
+        // Keep every received file and the staging owner through all
+        // rebuilds. A stale receipt requires the complete answer to be
+        // observed/saved again, never a weakened batch commit.
+        let mut order: Vec<_> = (0..files.len()).collect();
+        let mut changed_names = BTreeSet::new();
+        let mut committed = false;
+        'repair: for attempt in 0..REBUILD_LIMIT {
+            let mut records = vec![None; files.len()];
+            for &index in &order {
+                let file = &files[index];
+                self.checkpoint()?;
+                let intent = intents
+                    .iter()
+                    .find(|d| d.name == file.name)
+                    .ok_or_else(|| JobError::bad_response(Method::DownloadFiles, "unrequested media file"))?;
+                let saved = match runtime::blocking_work(|| {
+                    if self.prebound.is_some() {
+                        self.store().save_downloaded_file_with_boundary(self.baseline(), intent, file.file.path(), &mut self.effect_boundary())
+                    } else { self.store().save_downloaded_file(self.baseline(), intent, file.file.path()) }
+                }) {
+                    Ok(saved) => saved,
                     Err(MediaError::StaleDownload) if attempt + 1 < REBUILD_LIMIT => {
                         self.checkpoint()?;
-                        // An exact server name owns its destination. Save it
-                        // first on repair so a transformed name can choose a
-                        // hash fallback rather than overwrite it each pass.
-                        order.sort_by_key(|&i| records[i].stored_name.as_ref() != Some(&records[i].intent.name));
+                        // A save can publish bytes and then lose its receipt
+                        // to an external edit. Discard this pass's records
+                        // and observe every staged member again.
+                        continue 'repair;
                     }
                     Err(error) => return Err(self.boundary_error(error)),
+                };
+                if saved.changed {
+                    if let Some(name) = &saved.record.stored_name {
+                        changed_names.insert(name.clone());
+                    }
+                    self.snapshot.published_files += 1;
                 }
+                records[index] = Some(saved.record);
+                self.emit(MediaPhase::Downloading);
             }
-            if !committed {
-                return Err(local_failure("download answer kept changing"));
+            let records: Vec<_> = records
+                .into_iter()
+                .map(|r| r.expect("complete staged answer"))
+                .collect();
+            self.checkpoint()?;
+            match runtime::blocking_work(|| self.store().commit_media_downloads_with_boundary(self.baseline(), &records, &mut self.effect_boundary())) {
+                Ok(usn) => {
+                    self.advanced(usn);
+                    let arrived = records
+                        .iter()
+                        .filter_map(|r| r.stored_name.as_ref())
+                        .filter(|name| changed_names.contains(*name))
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    self.service
+                        .media_arrived(arrived.into_iter().collect())
+                        .map_err(engine_error)?;
+                    committed = true;
+                    break;
+                }
+                Err(MediaError::StaleDownload) if attempt + 1 < REBUILD_LIMIT => {
+                    self.checkpoint()?;
+                    // An exact server name owns its destination. Save it
+                    // first on repair so a transformed name can choose a
+                    // hash fallback rather than overwrite it each pass.
+                    order.sort_by_key(|&i| records[i].stored_name.as_ref() != Some(&records[i].intent.name));
+                }
+                Err(error) => return Err(self.boundary_error(error)),
             }
-            self.snapshot.files_left = local(|| self.store().download_intents())?.len() as u64;
-            self.snapshot.totals.awaiting = local(|| self.store().awaiting_names())?.len() as u64;
-            self.window
-                .saved_batch(meguri_engine::monotonic::now() - started, files.len() as u64);
-            self.snapshot.estimate = self.window.estimate(self.snapshot.files_left);
-            self.emit(MediaPhase::Downloading);
         }
+        if !committed {
+            return Err(local_failure("download answer kept changing"));
+        }
+        self.snapshot.files_left = local(|| self.store().download_intent_count())?;
+        self.snapshot.totals.awaiting = local(|| self.store().awaiting_count())?;
+        Ok(())
     }
     fn register(&self, captured: &PendingChange) -> Result<(), JobError> {
         for _ in 0..REBUILD_LIMIT {
@@ -915,6 +946,46 @@ impl Stage<'_> {
             self.emit(MediaPhase::Uploading);
         }
     }
+}
+
+struct DownloadReply {
+    intents: Vec<MediaDownloadIntent>,
+    files: Result<Vec<wire::MediaFile>, JobError>,
+}
+fn download_capacity(error: &JobError) -> bool {
+    matches!(error.kind, ErrorKind::ServerError { code: 429 | 503 })
+}
+async fn fetch_download(job: &mut Job, staging: std::path::PathBuf, names: Vec<String>)
+    -> Result<Vec<wire::MediaFile>, JobError> {
+    let response = job.request(Method::DownloadFiles, Payload::Json(wire::encode_download_files(&names))).await
+        .map_err(|e| job.error_for(Method::DownloadFiles, e))?;
+    wire::spool_media_reply(response, staging, names, DOWNLOAD_REPLY_LIMIT, job.kind(), job.cancellation()).await
+}
+async fn download_wave(job: &Job, staging: &std::path::Path, intents: &[MediaDownloadIntent])
+    -> Vec<DownloadReply> {
+    use std::{future::Future, task::Poll};
+    let mut requests: Vec<_> = intents.chunks(BATCH as usize).map(|batch| {
+        let mut child = job.fork_media_download();
+        let batch = batch.to_vec();
+        let names = batch.iter().map(|d| d.name.clone()).collect();
+        let staging = staging.to_path_buf();
+        Box::pin(async move {
+            DownloadReply { intents: batch, files: fetch_download(&mut child, staging, names).await }
+        })
+    }).collect();
+    let mut replies: Vec<_> = (0..requests.len()).map(|_| None).collect();
+    // Poll every independent request, retaining even completed results until
+    // all workers have joined. No cancellation select surrounds this drain.
+    std::future::poll_fn(|cx| {
+        for (request, reply) in requests.iter_mut().zip(&mut replies) {
+            if reply.is_none() && let Poll::Ready(result) = request.as_mut().poll(cx) {
+                *reply = Some(result);
+            }
+        }
+        if replies.iter().all(Option::is_some) {
+            Poll::Ready(replies.iter_mut().map(|r| r.take().expect("drained download")).collect())
+        } else { Poll::Pending }
+    }).await
 }
 
 fn decide(change: &wire::MediaChange, entry: Option<&MediaEntry>) -> Option<MediaPageDecision> {

@@ -276,6 +276,19 @@ impl Job {
         with_cancel(&cancel, self.send(method, payload)).await
     }
 
+    /// Only independent downloadFiles requests use this fork. Transport and
+    /// session inputs are shared, while redirect/refusal state is private.
+    /// Opaque body progress cannot safely report through a shared ProgressSink.
+    pub(crate) fn fork_media_download(&self) -> Self {
+        Self {
+            transport: Arc::clone(&self.transport), base: self.base.clone(), kind: self.kind,
+            host_key: self.host_key.clone(), session_key: self.session_key.clone(),
+            stall_timeout: self.stall_timeout, cancel: Arc::clone(&self.cancel),
+            progress: None, followed: self.followed, new_endpoint: self.new_endpoint.clone(),
+            finish_sent: None, admission: self.admission.clone(), dispatch_refusal: None,
+        }
+    }
+
     pub(crate) fn on_finish_sent(&mut self, hook: impl FnOnce() + Send + 'static) {
         self.finish_sent = Some(Box::new(hook));
     }
@@ -345,7 +358,10 @@ impl Job {
             let response = self.transport.post(request).await?;
             match response.status {
                 200..=299 => {
-                    let body = ResponseBody::new(response, Arc::clone(&self.cancel), self.progress.clone())?;
+                    let mut body = ResponseBody::new(response, Arc::clone(&self.cancel), self.progress.clone())?;
+                    if method != Method::MediaBegin || self.kind != ServerKind::SelfHosted {
+                        body.media_download_concurrency = 1;
+                    }
                     if self.followed && self.new_endpoint.is_none() {
                         // The repeated `meta` was answered at the target (T7).
                         self.new_endpoint = Some(self.base.clone());
@@ -464,6 +480,7 @@ pub struct ResponseBody {
     /// at once (T6.2, T9).
     body: Option<Box<dyn RawBody>>,
     decoder: Decompressor,
+    pub(crate) media_download_concurrency: u32,
     /// Received bytes the decoder has not consumed yet.
     pending: Bytes,
     ended: bool,
@@ -481,7 +498,9 @@ impl ResponseBody {
     ) -> Result<ResponseBody, SyncError> {
         let declared =
             framing::original_size(&response.header_values(framing::ORIGINAL_SIZE)).map_err(SyncError::Protocol)?;
+        let media_download_concurrency = media_download_concurrency(&response.header_values("meguri-media-download-concurrency"));
         Ok(ResponseBody {
+            media_download_concurrency,
             body: Some(response.body),
             decoder: Decompressor::new(declared).map_err(SyncError::Protocol)?,
             pending: Bytes::new(),
@@ -554,5 +573,28 @@ impl fmt::Debug for ResponseBody {
             .field("declared", &self.decoder.declared())
             .field("produced", &self.decoder.produced())
             .finish_non_exhaustive()
+    }
+}
+
+// Apply the limit while parsing so the accumulator cannot overflow.
+fn media_download_concurrency(values: &[&[u8]]) -> u32 {
+    let [value] = values else { return 1 };
+    if value.is_empty() || !value.iter().all(u8::is_ascii_digit) { return 1; }
+    value.iter().fold(0u32, |n, b| (n * 10 + u32::from(b - b'0')).min(4)).max(1)
+}
+
+#[cfg(test)]
+mod media_hint_tests {
+    use super::media_download_concurrency as hint;
+    #[test]
+    fn only_one_positive_decimal_hint_is_accepted_and_clamped() {
+        for values in [vec![], vec![b"".as_slice()], vec![b"0".as_slice()], vec![b"-1".as_slice()],
+            vec![b"+4".as_slice()], vec![b"4,4".as_slice()], vec![b"4".as_slice(), b"4".as_slice()],
+            vec![b" 4".as_slice()], vec![b"four".as_slice()]] {
+            assert_eq!(hint(&values), 1);
+        }
+        assert_eq!(hint(&[b"2"]), 2);
+        assert_eq!(hint(&[b"4"]), 4);
+        assert_eq!(hint(&[b"99999999999999999999999999999999999"]), 4);
     }
 }

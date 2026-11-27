@@ -1819,3 +1819,246 @@ fn stop_during_upload_drains_before_classifying_and_never_acknowledges() {
         });
     }
 }
+
+// Deterministic transport rendezvous: serialization cannot accidentally pass
+// these tests because all four dispatches must arrive before any answer exists.
+mod concurrent_downloads {
+    use super::*;
+    use bytes::Bytes;
+    use meguri_sync::transport::RawBody;
+    use meguri_testkit::sync_stub::Part;
+
+    #[derive(Clone, Copy)]
+    enum Answers { Full, Partial, Busy(u16), BusyAndBad, SerialBusy(u16), RemainsBusy(u16) }
+    #[derive(Default)]
+    struct Observed {
+        downloads: Vec<Vec<String>>,
+        live: usize,
+        maximum: usize,
+        later_maximum: usize,
+        drained: usize,
+        sessions: Vec<String>,
+    }
+    struct InFlight(Arc<Mutex<Observed>>);
+    impl Drop for InFlight {
+        fn drop(&mut self) {
+            let mut observed = self.0.lock().unwrap();
+            observed.live -= 1;
+            observed.drained += 1;
+        }
+    }
+    struct Body(Option<Bytes>);
+    impl RawBody for Body {
+        fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>, SyncError>> {
+            Box::pin(async move { Ok(self.0.take()) })
+        }
+    }
+    fn response(reply: Reply) -> TransportResponse {
+        let mut bytes = Vec::new();
+        for part in reply.body {
+            match part { Part::Bytes(part) => bytes.extend(part), _ => unreachable!() }
+        }
+        TransportResponse {
+            status: reply.status,
+            headers: reply.headers.into_iter().map(|(k,v)| (k,v.into_bytes())).collect(),
+            body: Box::new(Body(Some(Bytes::from(bytes)))),
+        }
+    }
+    struct Transport {
+        observed: Arc<Mutex<Observed>>,
+        rendezvous: Option<tokio::sync::Barrier>,
+        hints: Vec<String>,
+        answers: Answers,
+    }
+    impl SyncTransport for Transport {
+        fn post(&self, mut request: TransportRequest) -> BoxFuture<'_, Result<TransportResponse, SyncError>> {
+            Box::pin(async move {
+                let mut compressed = Vec::new();
+                while let Some(chunk) = media_files_support::next(&mut request.body).await {
+                    compressed.extend_from_slice(&chunk.unwrap());
+                }
+                let body = zstd::stream::decode_all(compressed.as_slice()).unwrap();
+                let value: Value = serde_json::from_slice(&body).unwrap();
+                let method = request.url.rsplit('/').next().unwrap();
+                let reply = match method {
+                    "begin" => {
+                        let mut reply = begin(100);
+                        for hint in &self.hints { reply = reply.add_header("meguri-media-download-concurrency", hint); }
+                        reply
+                    }
+                    "mediaChanges" => {
+                        let first = value["lastUsn"].as_u64().unwrap() as usize;
+                        changes(&names(first..100), first + 1)
+                    }
+                    "mediaSanity" => envelope(json!("OK")),
+                    "downloadFiles" => {
+                        let names: Vec<String> = serde_json::from_value(value["files"].clone()).unwrap();
+                        let index = {
+                            let mut observed = self.observed.lock().unwrap();
+                            let index = observed.downloads.len();
+                            observed.downloads.push(names.clone());
+                            observed.sessions.push(request.sync_header.clone());
+                            observed.live += 1;
+                            observed.maximum = observed.maximum.max(observed.live);
+                            if index >= 4 { observed.later_maximum = observed.later_maximum.max(observed.live); }
+                            index
+                        };
+                        let _in_flight = InFlight(self.observed.clone());
+                        if index < 4 && let Some(barrier) = &self.rendezvous {
+                            tokio::time::timeout(Duration::from_secs(5), barrier.wait()).await
+                                .expect("four disjoint requests must overlap");
+                        }
+                        // Keep serial/parallel admission observable without a sleep.
+                        tokio::task::yield_now().await;
+                        match self.answers {
+                            Answers::Partial if index < 4 => download(&names[..2]),
+                            Answers::Busy(code) if index == 1 => Reply::status(code),
+                            Answers::RemainsBusy(code) if index >= 1 => Reply::status(code),
+                            Answers::BusyAndBad if index == 0 => Reply::status(503),
+                            Answers::BusyAndBad if index == 2 => Reply::ok(b"invalid ZIP"),
+                            Answers::SerialBusy(code) => Reply::status(code),
+                            _ => download(&names),
+                        }
+                    }
+                    _ => panic!("unexpected method {method}"),
+                };
+                Ok(response(reply))
+            })
+        }
+    }
+    fn run(h: &Harness, hints: &[&str], overlap: bool, answers: Answers,
+        progress: impl FnMut(&MediaSnapshot, &CancelToken) + Send + 'static)
+        -> (Result<MediaSyncResult, Box<MediaFailure>>, Arc<Mutex<Observed>>) {
+        let observed = Arc::new(Mutex::new(Observed::default()));
+        let transport = Transport { observed: observed.clone(),
+            rendezvous: overlap.then(|| tokio::sync::Barrier::new(4)),
+            hints: hints.iter().map(|s| (*s).into()).collect(), answers };
+        let outcome = h.run_using(common::options("http://media.test/"), move |options, random|
+            Job::with_transport(options, Some(meguri_sync::HostKey::new("synthetic")), random, Box::new(transport)).unwrap(), progress);
+        (outcome, observed)
+    }
+    fn exact(h: &Harness) {
+        let store = h.media.store();
+        assert_eq!(store.download_intent_count().unwrap(), 0);
+        assert_eq!(store.awaiting_count().unwrap(), 0);
+        assert_eq!(store.sync_baseline().unwrap().usn, 100);
+        for name in names(0..100) {
+            assert_eq!(fs::read(store.media_dir().join(&name)).unwrap(), b"payload");
+            let entry = store.sync_entry(&name).unwrap().unwrap();
+            assert!(!entry.dirty && !entry.pending_download);
+            assert_eq!(entry.sha1, Some(sha(b"payload")));
+        }
+    }
+    fn first_wave(observed: &Observed) {
+        assert_eq!(observed.maximum, 4);
+        assert_eq!(observed.live, 0);
+        assert_eq!(observed.drained, observed.downloads.len());
+        for i in 0..4 { assert_eq!(observed.downloads[i], names(i*25..(i+1)*25)); }
+        assert!(observed.sessions.iter().all(|s| s == &observed.sessions[0]));
+    }
+
+    #[test]
+    fn advertised_overlap_saves_exact_disjoint_batches() {
+        with_collection(|h| {
+            let store = h.media.store().clone();
+            let (outcome, observed) = run(&h, &["99999999999999999999"], true, Answers::Full, move |s, _| {
+                assert!(s.estimate.is_none());
+                if s.phase == MediaPhase::Downloading && s.files_left < 100 {
+                    // Serial commits must expose the exact prefix cursor.
+                    assert_eq!(store.sync_baseline().unwrap().usn, 100 - s.files_left);
+                }
+            });
+            let result = outcome.unwrap();
+            assert_eq!(result.downloaded_files, 100);
+            assert_eq!(result.bytes_downloaded, 700);
+            first_wave(&observed.lock().unwrap());
+            assert_eq!(observed.lock().unwrap().downloads.len(), 4);
+            exact(&h);
+        });
+    }
+    #[test]
+    fn advertised_overlap_partial_zips_reselect_only_outstanding_intents() {
+        with_collection(|h| {
+            let (outcome, observed) = run(&h, &["4"], true, Answers::Partial, |_, _| {});
+            assert_eq!(outcome.unwrap().downloaded_files, 100);
+            let observed = observed.lock().unwrap();
+            first_wave(&observed);
+            assert_eq!(observed.downloads[4], [names(2..25), names(27..29)].concat());
+            exact(&h);
+        });
+    }
+    #[test]
+    fn advertised_overlap_busy_drains_then_finishes_serially() {
+        for code in [429, 503] {
+            with_collection(|h| {
+                let (outcome, observed) = run(&h, &["4"], true, Answers::Busy(code), |_, _| {});
+                assert_eq!(outcome.unwrap().downloaded_files, 100);
+                let observed = observed.lock().unwrap();
+                first_wave(&observed);
+                assert_eq!(&observed.downloads[4..], &[names(25..50), names(50..75), names(75..100)]);
+                assert_eq!(observed.later_maximum, 1);
+                exact(&h);
+            });
+        }
+    }
+    #[test]
+    fn advertised_overlap_busy_at_serial_capacity_returns_to_caller() {
+        for code in [429, 503] {
+            with_collection(|h| {
+                let (outcome, observed) = run(&h, &["4"], true, Answers::RemainsBusy(code), |_, _| {});
+                assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::ServerError { code });
+                let observed = observed.lock().unwrap();
+                first_wave(&observed);
+                assert_eq!(observed.downloads.len(), 5);
+                assert_eq!(observed.downloads[4], names(25..50));
+                assert_eq!(h.media.store().download_intent_count().unwrap(), 75);
+                assert_eq!(h.media.store().sync_baseline().unwrap().usn, 25);
+            });
+        }
+    }
+    #[test]
+    fn advertised_overlap_busy_never_masks_another_invalid_reply() {
+        with_collection(|h| {
+            let (outcome, observed) = run(&h, &["4"], true, Answers::BusyAndBad, |_, _| {});
+            assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::BadResponse);
+            let observed = observed.lock().unwrap();
+            first_wave(&observed);
+            assert_eq!(observed.downloads.len(), 4);
+            assert_eq!(h.media.store().download_intent_count().unwrap(), 100);
+            assert_eq!(h.media.store().sync_baseline().unwrap().usn, 0);
+        });
+    }
+    #[test]
+    fn advertised_overlap_cancel_after_publish_drains_and_resumes_from_journal() {
+        with_collection(|h| {
+            let (outcome, observed) = run(&h, &["4"], true, Answers::Full, |s, cancel| {
+                if s.published_files == 1 { cancel.cancel(); }
+            });
+            assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::Cancelled);
+            first_wave(&observed.lock().unwrap());
+            assert_eq!(h.media.store().download_intent_count().unwrap(), 100);
+            assert_eq!(h.media.store().sync_baseline().unwrap().usn, 0);
+            let (outcome, _) = run(&h, &[], false, Answers::Full, |_, _| {});
+            assert_eq!(outcome.unwrap().downloaded_files, 100);
+            exact(&h);
+        });
+    }
+    #[test]
+    fn missing_invalid_duplicate_hints_and_serial_busy_keep_compatibility() {
+        for hints in [vec![], vec!["0"], vec!["invalid"], vec!["4", "4"]] {
+            with_collection(|h| {
+                let (outcome, observed) = run(&h, &hints, false, Answers::Full, |_, _| {});
+                assert_eq!(outcome.unwrap().downloaded_files, 100);
+                assert_eq!(observed.lock().unwrap().maximum, 1);
+                exact(&h);
+            });
+        }
+        for code in [429, 503] {
+            with_collection(|h| {
+                let (outcome, observed) = run(&h, &[], false, Answers::SerialBusy(code), |_, _| {});
+                assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::ServerError { code });
+                assert_eq!(observed.lock().unwrap().downloads.len(), 1);
+            });
+        }
+    }
+}

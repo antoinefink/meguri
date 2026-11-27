@@ -140,6 +140,20 @@ Each received file is saved by Y9. When the entry's state changed since its page
 
 After the files of one answer are in the folder, one journal transaction, holding the media lock, records them (Y9), ends their `awaiting` state and advances the local media USN to the resume point. Then the job emits `MediaArrived` with the names whose file appeared or changed (Y12). A crash between the files and the transaction leaves files the journal does not know: the next change check registers them as pending, and the next listing, which lists their changes again, finds the same SHA-1 and marks them clean without transferring anything.
 
+### Y8.6 Meguri Sync concurrent-download extension (owner requested 2026-11-27)
+
+Anki: none for this extension. Applies to both routine Meguri Sync and bootstrap media tasks; Y8.1 remains the serial compatibility behavior for other servers and older Meguri Sync releases.
+
+On a successful authenticated `/msync/begin`, Meguri Sync advertises the HTTP response header `meguri-media-download-concurrency: 4`, outside the unchanged JSON envelope. Only a self-hosted media job may accept the hint from its own successful response after validating its complete begin envelope and nonnegative USN. Missing, duplicate, empty, non-decimal or zero fields mean one; a positive decimal value is clamped to the local hard cap of four. The hint lasts only for that media job. No change to `downloadFiles`, collection requests, uploads or production settings is implied. The server retains its 16 native-request and 16 encoder limits, temporary quotas, integrity checks and authority checks.
+
+Select up to four batches in journal USN/name order. Each batch requests up to 25 exact names and no name appears in two requests in a window. Each request uses the same session, transport, dispatch checks, and cancellation token. Spool and validate each ZIP under the existing limits. Generic progress remains per request and concurrent downloads report through media snapshots. Keep the staging directory and media lease until all requests and file work have drained.
+
+Save each reply and commit its existing receipt boundary serially in scheduled batch order, preserving filename, hash, stamp, trash, progress, event and cursor semantics. Validate a whole ZIP before publishing any member. A partial ZIP commits only its returned files; the next window reselects the remaining journal intents. The cursor never passes unfinished intents. An earlier failed batch prevents saving later replies; earlier committed effects survive.
+
+HTTP 429 or 503 in a parallel wave permanently reduces this job to one download request at a time, including after a sanity rerun. Drain the wave first, retain earlier commits, wait one second with cancellation, then refetch only outstanding journal intents. Check cancellation and admission before and after waiting. At serial capacity the same status follows existing caller error handling. Inspect the whole wave and never hide a non-capacity failure behind this fallback. Keep the serial estimate's last-20-batch window unchanged. Parallel estimates may be absent; if offered, use elapsed wall time and received count for complete windows, never a sum of overlapping request times.
+
+Batch/window selection uses SQL LIMIT and full pending-download/awaiting progress uses SQL COUNT, without materializing every name per batch. Public unbounded APIs retain their behavior. Cursor selection uses the existing USN index and bounded ORDER BY queries, preserving NULL-as-zero, negative-corruption rejection and the applied-cursor lower bound, without a journal schema change.
+
 ## Y9. Saving a downloaded file: names (R1578)
 
 Let N be the real name, B the bytes and H their SHA-1. N is **usable** when it is normalized (`text/media-filenames#F1` leaves it unchanged), not ignored (`media/media-files#M8`), and either a regular file with exactly the spelling N is present or no present file is a case variant of N with a different spelling.
