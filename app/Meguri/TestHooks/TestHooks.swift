@@ -59,6 +59,9 @@ enum TestHooks {
             BrowseScrollDriver.shared.listen()
             ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,
                 nativeCollection: options.nativeReview == nil ? nil : collection)
+            #if os(macOS)
+            SidebarSelectionTiming.shared.listen(navigation: navigation)
+            #endif
         }
     }
 

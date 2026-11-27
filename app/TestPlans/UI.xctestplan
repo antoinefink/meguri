@@ -24,6 +24,7 @@
         "CardSwapTimingGateTests",
         "CardSwapTimingSpikeTests",
         "PerfTestCaseTests",
+        "SidebarSelectionTimingTests",
         "SmokePerfTests",
         "StatsPerfTests",
         "StatsTouchPerfTests"

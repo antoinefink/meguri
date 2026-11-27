@@ -317,12 +317,13 @@ mg_bench_icount() {
 MG_PERF_UI_SUITES="PerfTestCaseTests SmokePerfTests"
 # The harness's own checks: they measure nothing and have no perf result.
 # Every other suite is a performance suite and must yield one.
-MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests CardSwapTimingGateTests"
+# SidebarSelectionTimingTests reports its frame timings as attachments.
+MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests CardSwapTimingGateTests SidebarSelectionTimingTests"
 
 # The suites that open the generated 150k collection: perf-ui makes it in
 # this checkout (tools/mg fixtures 150k) and, for the test VM, puts it at its
 # own path there, where the test finds it (build/fixtures/<profile>-1-150k).
-MG_PERF_UI_150K_SUITES="BrowserSearchPerfTests StatsPerfTests"
+MG_PERF_UI_150K_SUITES="BrowserSearchPerfTests StatsPerfTests SidebarSelectionTimingTests"
 
 # mg__perf_ui_fixtures <suite>...: makes the 150k collection for the suites
 # that need it, into MG_PERF_UI_FIXTURE (empty when none does), before the
