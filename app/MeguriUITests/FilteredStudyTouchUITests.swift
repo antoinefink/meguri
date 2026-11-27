@@ -17,6 +17,40 @@ import XCTest
         try journey(sizeClass: "regular")
     }
 
+    func testIPhoneLargestTextCustomStudyAmountRemainsOperable() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("iPhone largest text") }
+        let app = try launch(sizeClass: "compact", extra: AccessibilityAudit.Variant(largestText: true, dark: false).launchArguments)
+        defer { app.terminate() }
+        let deck = try selectDeck("Preview Source", app: app)
+        try openDeckMenu(deck, app: app)
+        try tap("home.deckMenu.customStudy." + deck, app: app)
+        _ = try visible("home.customStudy.available", app: app)
+        _ = try visible("home.customStudy.amount", app: app)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        capture(app, "filtered-touch-iphone-largest-text-custom-study-before-editing")
+        let fields = app.textFields.matching(identifier: "home.customStudy.amount")
+        XCTAssertEqual(fields.count, 1, "One native editable amount field at largest text")
+        let amount = fields.firstMatch
+        XCTAssertTrue(amount.isEnabled && amount.isHittable)
+        XCTAssertEqual(amount.label, "Change in today’s limit")
+        let windowFrame = app.windows.firstMatch.frame
+        let availableFrame = element(app, "home.customStudy.available").frame
+        XCTAssertGreaterThanOrEqual(amount.frame.minX, windowFrame.minX, "The native amount stays inside the window at largest text")
+        XCTAssertLessThanOrEqual(amount.frame.maxX, windowFrame.maxX, "The native amount stays inside the window at largest text")
+        // Native LabeledContent stacks its read-only count at the leading content inset at AX5.
+        let leadingInset = availableFrame.minX - windowFrame.minX
+        XCTAssertEqual(amount.frame.maxX, windowFrame.maxX - leadingInset, accuracy: 1,
+                       "The editor reaches the trailing content edge at largest text")
+        try replace("home.customStudy.amount", with: "-99999", app: app)
+        capture(app, "filtered-touch-iphone-largest-text-custom-study-signed-boundary")
+        _ = try visible("home.customStudy.amount", app: app)
+        XCTAssertTrue(amount.isEnabled && amount.isHittable)
+        XCTAssertTrue(element(app, "home.customStudy.save").isEnabled)
+        try tap("home.customStudy.save", app: app)
+        XCTAssertTrue(element(app, "home.customStudy.sheet").waitForNonExistence(timeout: 15))
+        XCTAssertTrue(element(app, "home.deck.page." + deck).exists, "Daily adjustment keeps the normal deck")
+    }
+
     private func journey(sizeClass: String) throws {
         let app = try launch(sizeClass: sizeClass)
         defer { app.terminate() }
@@ -30,8 +64,23 @@ import XCTest
         try tap("home.deckMenu.customStudy." + normalID, app: app)
         XCTAssertTrue(element(app, "home.customStudy.available").waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, "home.customStudy.state").exists, "Only relevant inputs are exposed")
+        let amount = app.textFields.matching(identifier: "home.customStudy.amount").firstMatch
+        XCTAssertTrue(amount.waitForExistence(timeout: 10), "The amount remains a native editable text field")
+        XCTAssertEqual(amount.label, "Change in today’s limit")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        capture(app, prefix + "-custom-study-before-editing")
+        let windowFrame = app.windows.firstMatch.frame
+        let availableFrame = element(app, "home.customStudy.available").frame
+        XCTAssertGreaterThan(amount.frame.minX, windowFrame.midX, "The amount occupies the trailing half of the window")
+        XCTAssertEqual(amount.frame.maxX, availableFrame.maxX, accuracy: 1, "The editor aligns with the available-card count")
         try app.performAccessibilityAudit(for: [.trait, .sufficientElementDescription])
         try replace("home.customStudy.amount", with: "invalid", app: app)
+        XCTAssertFalse(element(app, "home.customStudy.save").isEnabled)
+        for signedAmount in ["-99999", "99999"] {
+            try replace("home.customStudy.amount", with: signedAmount, app: app)
+            XCTAssertTrue(element(app, "home.customStudy.save").isEnabled, signedAmount)
+        }
+        try replace("home.customStudy.amount", with: "-100000", app: app)
         XCTAssertFalse(element(app, "home.customStudy.save").isEnabled)
         try replace("home.customStudy.amount", with: "0", app: app)
         capture(app, prefix + "-custom-study-page-entry-and-editable-amount")
@@ -454,7 +503,7 @@ import XCTest
         choice.tap()
     }
 
-    private func launch(sizeClass: String) throws -> XCUIApplication {
+    private func launch(sizeClass: String, extra: [String] = []) throws -> XCUIApplication {
         #if !targetEnvironment(simulator)
         throw XCTSkip("MG stages the generated recipe in the simulator VM")
         #endif
@@ -464,7 +513,7 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/filtered-study-1"),
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            extra: ["-MeguriSizeClass", sizeClass]).arguments
+            extra: ["-MeguriSizeClass", sizeClass] + extra).arguments
         app.launch()
         XCTAssertTrue(element(app, "home.collection.add").waitForExistence(timeout: 25))
         return app

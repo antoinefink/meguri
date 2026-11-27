@@ -835,7 +835,7 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
-    'app/MeguriUITests/NavigationFeedbackUITests.swift': '9a1cd8eadab248eccc1a8c901373ffecf07f201e9f78befddaae13085020ab04',
+    'app/MeguriUITests/NavigationFeedbackUITests.swift': '1b7aa440e531065224b2cc1545b40c959d864c8785f43c8841ab77651250a3b5',
     "app/Packages/MeguriKit/Sources/AppModel/Collection/BackupTrigger.swift":
         "dde4dd4b82894df3eb270cded5a9abdac5ada95a203dea7c30e7a9e3bbb10859",
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":
@@ -846,15 +846,15 @@ PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
         "1008ab6ea30b0e807559cb31dc915677e7db0438e66364e34aed9040cd1a2e18",
     "app/MeguriUITests/FilteredStudyTouchUITests.swift":
-        "aa2ec7c6b55cca107c77a59fbd3b096a445d0d40b217411d2312aed56ee3e64c",
+        "4ab0a09a73e381571f1a37bddbdbfcf9201c1bb682f80d6908d776927d5d3745",
     "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
-        "6ae51d989007b9b6e83a14fdb98faf0b5a36b0db3a6f10bddeaafecad237d7e4",
+        "53d51f1b189acf3e833808c9ddd5157ceef6623a66c8ff6c7753d1709b67e8e8",
     "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
         "847e05fc1456d929196a53a7deb4b401bf06e2441ebb67ba38ff3d4ce7be1fcc",
     "core/crates/meguri-engine/src/decks/custom_study.rs":
         "73e1e2a2e65526dc81129bf299b7731bcad202fb37f5404b55b5a31baeb1b166",
     "app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/FilteredStudyForm.swift":
-        "7365d1732a69f2cc3c08a7394d42727df98171af5278402d058c447c2191dc49",
+        "d0db213c3114ef389a48b32a68ea41581a6fb57d130c203188a3bdb44ba91ca6",
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionImageSourceTests.swift": "cbabc674d9256e6fcc32718e346dff885f858d44a4480d5d2221d5e7e7abebe6",
     "app/Packages/MeguriKit/Tests/AppModelTests/OcclusionNoteFlowTests.swift": "935861e65791369115fb3f0f901a97d0eed69cb673d50b210f24121af8c3179d",
     "app/Packages/MeguriCore/Tests/CoreBridgeTests/ImageSourceRequestTests.swift": "96c21a3630fef1265be0330880d5f0bb7f4a9de93c4e77c3b7b330279ffff8da",

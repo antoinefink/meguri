@@ -480,7 +480,7 @@ struct AppCommands: Commands {
             Button("Restore from Backup…") { context?.present(.backupRestore) }
                 .disabled(context?.collection.backups.canOpenRestore != true || context?.fileActionsAvailable != true)
                 .accessibilityIdentifier("settings.backups.restore")
-            Button("Export Deck…") { context?.exportShownDeck() }
+            Button("Export Deck") { context?.exportShownDeck() }
                 .disabled(context?.canExportShownDeck != true)
             Button("Export Collection…") { context?.present(.collectionExport) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -603,26 +603,26 @@ struct AppCommands: Commands {
             .disabled(context?.canManageFiltered != true)
             .accessibilityIdentifier("home.commands.emptyFilteredDeck")
             Divider()
-            Button("Rename…") {
+            Button("Rename") {
                 guard let context, let deck = context.shownDeck, context.canRenameShownDeck else { return }
                 context.collection.deckActions.present(.rename(deck), host: context.host)
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(context?.canRenameShownDeck != true)
-            Button("New Subdeck…") {
+            Button("New Subdeck") {
                 guard let context, let deck = context.shownDeck, context.canAddSubdeck else { return }
                 context.collection.deckActions.present(.subdeck(deck), host: context.host)
             }
             .disabled(context?.canAddSubdeck != true)
             // N20.9: the shown normal deck's options; disabled during review.
-            Button(context?.shownDeck.flatMap { context?.collection.deck($0)?.filtered } == true ? StudyCommandText.edit : String(localized: "Deck Options…")) {
+            Button(context?.shownDeck.flatMap { context?.collection.deck($0)?.filtered } == true ? StudyCommandText.edit : String(localized: "Deck Options")) {
                 guard let context, let deck = context.shownDeck, context.canOpenDeckOptions else { return }
                 context.collection.openDeckOptions(deckID: deck)
             }
             .keyboardShortcut("o", modifiers: [.command, .option])
             .disabled(context?.canOpenDeckOptions != true)
             Divider()
-            Button("Export Deck…") { context?.exportShownDeck() }
+            Button("Export Deck") { context?.exportShownDeck() }
                 .disabled(context?.canExportShownDeck != true)
             Divider()
             Button("Delete Deck") { context?.deleteShownDeck() }

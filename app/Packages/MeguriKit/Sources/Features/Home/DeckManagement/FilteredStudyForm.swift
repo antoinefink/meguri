@@ -81,8 +81,8 @@ public struct CustomStudyForm: View {
                     } label: { Text("Available cards before daily limits", bundle: .module) }
                     .accessibilityIdentifier("home.customStudy.available")
                 }
-                StudyTextField(model.modeIndex < 2 ? "Change in today’s limit" : model.modeIndex == 5 ? "Card limit" : "Days",
-                               text: $model.amountText, id: "home.customStudy.amount")
+                StudyAmountField(title: model.modeIndex < 2 ? "Change in today’s limit" : model.modeIndex == 5 ? "Card limit" : "Days",
+                                 text: $model.amountText)
                 if model.modeIndex == 2 { Text("Choose 1–30 days.", bundle: .module) }
             } footer: {
                 if model.modeIndex < 2 { Text("Positive changes allow more cards today. Negative changes reduce today’s allowance.", bundle: .module) }
@@ -103,6 +103,42 @@ public struct CustomStudyForm: View {
                 }
             }
         }
+    }
+}
+
+/// Stack at accessibility sizes so the label keeps the full row width and the editor stays trailing.
+private struct StudyAmountField: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let title: LocalizedStringKey
+    @Binding var text: String
+
+    var body: some View {
+        #if os(macOS)
+        StudyTextField(title, text: $text, id: "home.customStudy.amount")
+        #else
+        (dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing))
+            : AnyLayout(HStackLayout())) {
+            Text(title, bundle: .module)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityHidden(true)
+            // The same body font measures the widest signed daily adjustment at any text size.
+            Text(verbatim: "-99999")
+                .hidden()
+                .accessibilityHidden(true)
+                .fixedSize()
+                .overlay(alignment: .trailing) {
+                    TextField("", text: $text)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel(Text(title, bundle: .module))
+                        .accessibilityIdentifier("home.customStudy.amount")
+                }
+                .monospacedDigit()
+        }
+        .font(.body)
+        #endif
     }
 }
 
@@ -268,7 +304,7 @@ struct FilteredDeckActions: View {
     let deck: Int64
     var body: some View {
         Button { collection.filteredStudy.edit(deck) } label: {
-            Label { Text("Edit Filtered Deck…", bundle: .module) } icon: { Image(systemName: "pencil") }
+            Label { Text("Edit Filtered Deck", bundle: .module) } icon: { Image(systemName: "pencil") }
         }
         #if os(macOS)
         .keyboardShortcut("o", modifiers: [.command, .option])
@@ -291,7 +327,7 @@ struct FilteredDeckActions: View {
 /// The app menu shares this feature's translated catalog with both package forms.
 public enum StudyCommandText {
     public static var create: String { String(localized: "Create Filtered Deck", bundle: .module) }
-    public static var edit: String { String(localized: "Edit Filtered Deck…", bundle: .module) }
+    public static var edit: String { String(localized: "Edit Filtered Deck", bundle: .module) }
     public static var custom: String { String(localized: "Custom Study", bundle: .module) }
     public static var rebuild: String { String(localized: "Rebuild", bundle: .module) }
     public static var empty: String { String(localized: "Empty", bundle: .module) }

@@ -289,8 +289,8 @@ import XCTest
             try dismissMenu()
         }
 
-        try assertMenuEnabled("File", "Export Deck…", true)
-        try assertMenuEnabled("Deck", "Rename…", true)
+        try assertMenuEnabled("File", "Export Deck", true)
+        try assertMenuEnabled("Deck", "Rename", true)
         try command("hold.deck")
         try app.bringToFront(bundleIdentifier: bundle)
         try clickDeck(science)
@@ -300,8 +300,8 @@ import XCTest
         assertTitle("Science")
         assertSelected("home.sidebar.deck.\(science)")
         XCTAssertFalse(element("home.deck.page.\(languages)").exists)
-        try assertMenuEnabled("File", "Export Deck…", false)
-        try assertMenuEnabled("Deck", "Rename…", false)
+        try assertMenuEnabled("File", "Export Deck", false)
+        try assertMenuEnabled("Deck", "Rename", false)
         try assertMenuEnabled("View", "Browse", true)
 
         try app.bringToFront(bundleIdentifier: bundle)
@@ -329,11 +329,11 @@ import XCTest
         assertSelected("home.sidebar.deck.\(languages)")
         XCTAssertTrue(element("home.deck.page.\(languages)").waitForExistence(timeout: 5))
         XCTAssertFalse(progress("Loading Deck").exists)
-        try assertMenuEnabled("File", "Export Deck…", true)
-        try assertMenuEnabled("Deck", "Rename…", true)
+        try assertMenuEnabled("File", "Export Deck", true)
+        try assertMenuEnabled("Deck", "Rename", true)
 
         // Invoke the restored mutation entry, proving it targets Languages.
-        let rename = try menuItem("Deck", "Rename…")
+        let rename = try menuItem("Deck", "Rename")
         rename.click()
         let name = element("home.deckName.name")
         XCTAssertTrue(wait(NSPredicate(format: "exists == true AND value == 'Languages'"), name))

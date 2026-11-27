@@ -31,7 +31,7 @@ final class DeckOptionsUITests: XCTestCase {
             format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 10))
 
-        // Deck › Deck Options… (⌥⌘O).
+        // Deck › Deck Options (⌥⌘O).
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("o", modifierFlags: [.command, .option])
         let save = element(app, "deckOptions.options.save")
@@ -105,7 +105,7 @@ final class DeckOptionsUITests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         let deckMenu = app.menuBars.menuBarItems["Deck"]
         deckMenu.click()
-        let options = menuItem(deckMenu, titled: "Deck Options…")
+        let options = menuItem(deckMenu, titled: "Deck Options")
         XCTAssertTrue(options.waitForExistence(timeout: 10) && options.isEnabled)
         options.click()
         let save = element(app, "deckOptions.options.save")
