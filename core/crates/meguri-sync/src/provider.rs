@@ -270,11 +270,25 @@ impl Authority {
     /// Internal historical cloud tests keep using `migrate`/`load` directly.
     pub fn retire_icloud(root: &Path) -> Result<(), StorageError> {
         let path = root.join("provider.json");
-        let current = sidecar::read_document(&path, decode)?.ok_or_else(invalid)?;
+        // This exact document was written by the old preference migration.
+        // Additional members may belong to a malformed provider, not that marker.
+        let legacy_marker = |raw: &Map<String, Value>| raw.len() == 1
+            && raw.get("migrationFailure").and_then(Value::as_str) == Some("invalidLegacySettings");
+        let current = sidecar::read_document(&path, |raw| {
+            let raw = raw.ok_or_else(invalid)?;
+            if legacy_marker(raw) { Ok(None) } else { decode(Some(raw)) }
+        })?;
         let retired = |doc: &ProviderDocument| doc.selection == Selection::ICloud
             || doc.handoff.as_ref().is_some_and(|h| h.old == Selection::ICloud || h.destination == Selection::ICloud);
-        if !retired(&current) { return Ok(()); }
+        if current.as_ref().is_some_and(|doc| !retired(doc)) { return Ok(()); }
         sidecar::update_document(&path, |raw| {
+            if legacy_marker(raw) {
+                let previous = Value::Object(raw.clone());
+                raw.clear();
+                put(raw, &ProviderDocument::migration(LegacySettings::decode(None)?))?;
+                raw.insert("retiredICloud".into(), previous);
+                return Ok(());
+            }
             let mut doc = decode(Some(raw))?.ok_or_else(invalid)?;
             if !retired(&doc) { return Ok(()); }
             // Preserve the complete pre-upgrade record, including unknown
@@ -299,10 +313,29 @@ impl Authority {
                 doc.meguri_structure = None;
                 doc.meguri_settings.automatic = false;
             }
-            // Otherwise keep inactive Meguri config, binding and pending
-            // intentions byte-for-byte through the sidecar's merging writer.
+            // Update only retirement-owned members. Serializing the complete
+            // typed document would insert defaults into untouched Meguri work
+            // (including absent optional bootstrap members).
             doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
-            put(raw, &doc)
+            doc.validate()?;
+            let fields = serde_json::to_value(&doc).map_err(|_| invalid())?;
+            for key in ["revision", "selection", "binding", "handoff", "legacy_binding_pending"] {
+                raw.insert(key.into(), fields[key].clone());
+            }
+            for key in ["enabled", "paused"] {
+                raw.get_mut("settings").and_then(Value::as_object_mut).ok_or_else(invalid)?
+                    .insert(key.into(), fields["settings"][key].clone());
+            }
+            raw.get_mut("icloud_settings").and_then(Value::as_object_mut).ok_or_else(invalid)?
+                .insert("enabled".into(), Value::Bool(false));
+            if removal {
+                for key in ["meguri", "meguri_binding", "meguri_bootstrap", "meguri_structure"] {
+                    raw.insert(key.into(), Value::Null);
+                }
+                raw.get_mut("meguri_settings").and_then(Value::as_object_mut).ok_or_else(invalid)?
+                    .insert("automatic".into(), Value::Bool(false));
+            }
+            Ok(())
         })
     }
     pub fn snapshot(&self) -> Result<ProviderDocument, StorageError> {

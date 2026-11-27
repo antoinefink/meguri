@@ -94,6 +94,18 @@ impl ProcessCore {
         }
         let mut reset = Reset(self, false);
         let (mut host, paths, options) = CoreHost::compose_on(self, config, open_existing || recover_initial)?;
+        if options.retire_icloud_publication {
+            let absence = match paths.collection().symlink_metadata() {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+                    host.engine.reconcile_retired_icloud_absence_raw(&paths.collection(), &options),
+                Err(error) => Err(meguri_storage::StorageError::from(error).into()),
+                Ok(_) => Ok(()), // Existing files use ordinary locked open.
+            };
+            if let Err(error) = absence {
+                host.close()?;
+                return Err(error);
+            }
+        }
         // Active means host-owned lifecycle, including NoCollection/Failed.
         host.set_close_state(CloseState::Active);
         if !open_existing && let Some(runtime) = &host.cloud {
@@ -539,11 +551,17 @@ impl CoreHost {
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
         // A failed migration/load is retained as blocked network admission. It
         // must not prevent local collection open or repair.
-        let _ = meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None);
-        let retirement_failed = config.cloud.is_none()
-            && meguri_sync::provider::Authority::retire_icloud(&config.manual_transfer_directory).is_err();
+        let retire_icloud = config.cloud.is_none();
+        let migration = if retire_icloud {
+            Self::migrate_application_provider_configuration(
+                &config.manual_transfer_directory, meguri_sync::provider::LegacyInput::Absent,
+            )
+        } else {
+            // Frozen internal conformance callers retain actual cloud inputs.
+            meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None)
+        };
         let provider = meguri_sync::provider::Authority::load(&config.manual_transfer_directory);
-        if retirement_failed { provider.close_admission(); }
+        if migration.is_err() { provider.close_admission(); }
         if !meguri_sync::policy::TransferPolicy::new(&config.manual_transfer_directory)
             .active().is_ok_and(|active| active.is_none()) {
             provider.close_admission();
@@ -631,6 +649,7 @@ impl CoreHost {
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();
+        options.retire_icloud_publication = retire_icloud;
         // The platform provider is the sole current-account authority. Read it
         // before ownership/recovery, except for explicit local creation, which
         // requires no account. Runtime/tracking locks never span that read.

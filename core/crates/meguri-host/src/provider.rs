@@ -205,8 +205,12 @@ impl CoreHost {
         Authority::migrate_input(root, legacy)
     }
     /// The Apple application always applies local retirement before attachment.
-    pub fn migrate_application_provider_configuration(root: &std::path::Path, legacy: meguri_sync::provider::LegacyInput) -> Result<(), meguri_storage::StorageError> {
-        Authority::migrate_input(root, legacy)?;
+    pub fn migrate_application_provider_configuration(root: &std::path::Path, _legacy: meguri_sync::provider::LegacyInput) -> Result<(), meguri_storage::StorageError> {
+        // Retired preferences are no longer an input. Missing metadata starts
+        // Off; only retirement may accept the exact old migration-failure marker.
+        // Its strict read below also propagates any unreadable/malformed record
+        // or failed initialization instead of enabling a provider.
+        let _ = Authority::migrate(root, None);
         Authority::retire_icloud(root)
     }
     pub fn provider_authority(&self) -> &Arc<Authority> { &self.provider }

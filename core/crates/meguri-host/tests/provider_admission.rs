@@ -474,6 +474,163 @@ fn ordinary_host_open_and_reopen_do_not_discover_an_account_for_a_new_installati
 }
 
 #[test]
+fn application_upgrade_reopens_archived_connected_publication_through_host_startup() {
+    use meguri_engine::device_state::{AccountBinding, DeviceState, PublicationDecision};
+    use meguri_sync::provider::{LegacySettings, ProviderDocument, Selection};
+    use std::os::unix::fs::MetadataExt;
+    for manual in [false, true] {
+        for decision in [PublicationDecision::Clear, PublicationDecision::Pending] {
+            let root = tempfile::tempdir().unwrap();
+            let account = Arc::new(Account(AtomicUsize::new(0)));
+            let mut config = fixture(root.path(), account.clone());
+            config.cloud = None; // The application supplies no retired runtime.
+            let original = CoreHost::open(config.clone()).unwrap();
+            prepare_provider_review(&original);
+            original.close().unwrap();
+            drop(original);
+            let live = config.collection_directory.join("collection.anki2");
+            let bytes = std::fs::read(&live).unwrap();
+            let native = std::fs::metadata(&live).unwrap();
+            let sidecar = config.collection_directory.join("meguri-sidecar.json");
+            // Synthetic archival publication, with real populated collection
+            // bytes. No live account or completion authority is supplied.
+            meguri_storage::sidecar::update_document(&sidecar, |raw| {
+                raw.get_mut("deviceState").unwrap()["active"]["binding"] = serde_json::json!(AccountBinding::Connected {
+                    account: "synthetic-archived-account".into(), configuration: "synthetic-retired-app".into(),
+                    environment: "development".into(),
+                });
+                raw.get_mut("deviceState").unwrap()["active"]["decision"] = serde_json::json!(decision);
+                raw.get_mut("deviceState").unwrap()["active"]["futurePublication"] = serde_json::json!([1, 2]);
+                Ok(())
+            }).unwrap();
+            let archive: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+            let publication = DeviceState::for_collection(&live).settled_publication().unwrap();
+            let provider = ProviderDocument::migration(LegacySettings { enabled: true, paused: false, automatic: true, media: true });
+            let provider_path = config.manual_transfer_directory.join("provider.json");
+            std::fs::write(&provider_path, serde_json::to_vec(&provider).unwrap()).unwrap();
+            for _ in 0..2 {
+                let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+                let host = if manual { process.open_for_manual_import(config.clone()) }
+                    else { process.open(config.clone()) }.unwrap();
+                assert!(host.collection().is_ok(), "startup must open the archived local collection");
+                assert!(host.derived().wait_idle(std::time::Duration::from_secs(5)));
+                assert!(host.cloud_runtime().is_none());
+                let provider = host.provider_authority().snapshot().unwrap();
+                assert_eq!(provider.selection, Selection::LocalOnly);
+                assert!(!provider.settings.enabled && provider.handoff.is_none());
+                assert!(!provider.permits_meguri_transfer());
+                assert_eq!(DeviceState::for_collection(&live).settled_publication().unwrap(), publication);
+                host.close().unwrap();
+                let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+                assert_eq!(after["deviceState"], archive["deviceState"]);
+                let file = std::fs::metadata(&live).unwrap();
+                assert_eq!((file.dev(), file.ino()), (native.dev(), native.ino()));
+                assert_eq!(std::fs::read(&live).unwrap(), bytes, "all synthetic collection contents survive startup");
+            }
+            assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[test]
+fn application_upgrade_settles_absent_initial_adoption_before_prepared_host_attachment() {
+    use meguri_engine::device_state::DeviceState;
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::MetadataExt;
+    for entry in 0..3 {
+        for malformed in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let account = Arc::new(Account(AtomicUsize::new(0)));
+            let mut config = unopened_fixture(root.path(), account.clone());
+            config.cloud = None;
+            let live = config.collection_directory.join("collection.anki2");
+            let sidecar = config.collection_directory.join("meguri-sidecar.json");
+            let stage = root.path().join("synthetic-staged.anki2");
+            meguri_engine::bootstrap::create(&stage, config.clock.as_ref(), config.random.as_ref()).unwrap();
+            let bytes = std::fs::read(&stage).unwrap();
+            let native = std::fs::metadata(&stage).unwrap();
+            let digest: [u8; 32] = Sha256::digest(&bytes).into();
+            let prior = serde_json::json!({"identity":[1,2],"binding":"LocalOnly","decision":"Clear"});
+            let candidate = serde_json::json!({"identity":[3,4],"binding":{"Connected":{
+                "account":"synthetic-archived-account","configuration":"synthetic-retired-app","environment":"development"}},"decision":"Clear"});
+            let mut raw = serde_json::json!({"futureTop":{"retained":true},"deviceState":{"active":prior,"intent":{
+                "operation":[5,6],"reason":"CloudAdopt","prior":prior,"candidate":candidate,"phase":"Intent",
+                "old_file":null,"old_native":null,"candidate_file":{"length":bytes.len(),"sha256":digest},
+                "candidate_native":{"device":native.dev(),"inode":native.ino()}}}});
+            if malformed { raw["deviceState"]["intent"]["candidate_native"] = serde_json::Value::Null; }
+            let evidence = serde_json::to_vec_pretty(&raw).unwrap();
+            std::fs::write(&sidecar, &evidence).unwrap();
+            let tracking = config.collection_directory.join(meguri_sync::cloud::TRACKING_FILE);
+            std::fs::write(&tracking, b"synthetic retained tracking").unwrap();
+            let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+            let result = match entry {
+                0 => process.open_for_manual_import(config.clone()),
+                1 => process.prepare_empty_collection(config.clone()),
+                _ => process.prepare_cloud_connection(config.clone()),
+            };
+            if malformed {
+                assert!(result.is_err());
+                assert_eq!(std::fs::read(&sidecar).unwrap(), evidence);
+            } else {
+                let host = result.unwrap();
+                assert_eq!(host.engine().state(), meguri_engine::LifecycleState::NoCollection);
+                assert_eq!(host.engine().generation(), meguri_engine::Generation(0));
+                assert_eq!(serde_json::to_value(DeviceState::for_collection(&live).settled_publication().unwrap().unwrap()).unwrap(), prior);
+                let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+                assert!(after["deviceState"]["intent"].is_null());
+                assert_eq!(after["futureTop"], raw["futureTop"]);
+                assert!(host.cloud_runtime().is_none());
+                host.close().unwrap();
+            }
+            assert_eq!(live.symlink_metadata().unwrap_err().kind(), std::io::ErrorKind::NotFound);
+            assert_eq!(std::fs::read(&stage).unwrap(), bytes);
+            let file = std::fs::metadata(&stage).unwrap();
+            assert_eq!((file.dev(), file.ino()), (native.dev(), native.ino()));
+            assert_eq!(std::fs::read(&tracking).unwrap(), b"synthetic retained tracking");
+            assert!(!config.collection_directory.join("collection.media").exists());
+            assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[test]
+fn application_provider_initialization_ignores_retired_preferences_and_only_accepts_exact_marker() {
+    use meguri_sync::provider::{Authority, LegacyInput, LegacySettings, Selection};
+    let root = tempfile::tempdir().unwrap();
+    // These inputs remain part of the historical Rust API, but the application
+    // must neither import them nor need them to upgrade a prior failure marker.
+    for input in [LegacyInput::Invalid, LegacyInput::Settings(LegacySettings {
+        enabled: true, paused: false, automatic: true, media: true,
+    })] {
+        let installation = tempfile::tempdir_in(root.path()).unwrap();
+        CoreHost::migrate_application_provider_configuration(installation.path(), input).unwrap();
+        let provider = Authority::load(installation.path()).snapshot().unwrap();
+        assert_eq!(provider.selection, Selection::LocalOnly);
+        assert!(!provider.settings.enabled && provider.meguri.is_none());
+    }
+    for extra in [false, true] {
+        let account = Arc::new(Account(AtomicUsize::new(0)));
+        let mut config = fixture(&root.path().join(if extra { "malformed" } else { "marker" }), account.clone());
+        config.cloud = None;
+        std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
+        let path = config.manual_transfer_directory.join("provider.json");
+        let mut marker = serde_json::json!({"migrationFailure":"invalidLegacySettings"});
+        if extra { marker["selection"] = serde_json::json!("Meguri"); }
+        let bytes = serde_json::to_vec(&marker).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let migration = CoreHost::migrate_application_provider_configuration(&config.manual_transfer_directory, LegacyInput::Absent);
+        assert_eq!(migration.is_err(), extra);
+        let host = CoreHost::open(config).unwrap();
+        assert!(host.collection().is_ok());
+        assert_eq!(host.provider_authority().snapshot().is_err(), extra);
+        assert_eq!(host.provider_authority().network_blocked(), extra);
+        if extra { assert_eq!(std::fs::read(path).unwrap(), bytes); }
+        assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        host.close().unwrap();
+    }
+}
+
+#[test]
 fn invalid_provider_document_blocks_account_discovery_without_preventing_local_open() {
     for document in ["null", "{}", "{\"version\":999}", "{\"version\":1,\"handoff\":true}"] {
         let root = tempfile::tempdir().unwrap();
