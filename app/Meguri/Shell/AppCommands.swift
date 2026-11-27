@@ -37,8 +37,10 @@ struct NativeCommandContext {
         // Commands must be re-registered when visible feedback replaces a workspace.
         // A sidebar row's display handoff (`sidebarInteractionPending`) is not
         // observed: its frame redraws the sidebar alone, and each command
-        // checks it again when it acts.
+        // checks it again when it acts. Its commit is: commands evaluated while
+        // the press was pending stop at that guard and read nothing of the route.
         _ = collection.navigation.pendingDeckPage
+        _ = collection.navigation.sidebarSelection
         let review = review
         #if os(macOS)
         _ = MacUndoResponder.shared.firstResponder

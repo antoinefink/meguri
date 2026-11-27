@@ -64,14 +64,23 @@ struct MacSidebarSelectionHandoff: NSViewRepresentable {
         link.add(to: .main, forMode: .common)
         backMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let used = MainActor.assumeIsolated { () -> Bool in
-                guard let self, event.window === self.window,
-                      self.navigation.sidebarInteractionPending,
-                      event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                      event.charactersIgnoringModifiers == "[" else { return false }
-                self.navigation.cancelMacSidebarSelection()
-                MacSidebarNativePress.restore()
-                self.stop()
-                return true
+                guard let self, let window = self.window, event.window === window,
+                      self.navigation.sidebarInteractionPending else { return false }
+                let responder = (window.firstResponder as? NSView).map { $0.convert($0.bounds, to: nil) }
+                let column = self.convert(self.bounds, to: nil)
+                switch MacSidebarPendingKeys.route(
+                    modifiers: event.modifierFlags, characters: event.charactersIgnoringModifiers,
+                    responderInSidebar: responder.map { column.contains(CGPoint(x: $0.midX, y: $0.midY)) } ?? false) {
+                case .cancel:
+                    self.navigation.cancelMacSidebarSelection()
+                    MacSidebarNativePress.restore()
+                    self.stop()
+                    return true
+                case .withhold:
+                    return true
+                case .deliver:
+                    return false
+                }
             }
             return used ? nil : event
         }
@@ -108,7 +117,9 @@ struct MacSidebarSelectionHandoff: NSViewRepresentable {
             if navigation.macSidebarSelectionID == intent {
                 navigation.cancelMacSidebarSelection()
             }
-            MacSidebarNativePress.restore()
+            // A newer press superseded this one (its view update has not run yet): its
+            // row stays selected. Only a press that ended puts the list's rows back.
+            if navigation.macSidebarSelectionID == nil { MacSidebarNativePress.restore() }
             stop()
             return
         }
@@ -136,6 +147,22 @@ struct MacSidebarSelectionHandoff: NSViewRepresentable {
         window.displayIfNeeded()
         CATransaction.commit()
         CATransaction.flush()
+    }
+}
+
+/// Keys while a sidebar press waits for its frame. The page being left stays
+/// enabled (disabling it would redraw it in the row's frame), so its key
+/// equivalents (⌘⌫ on a note type's card, ⌘S on Deck Options) are withheld
+/// until the route changes, unless the sidebar has the keys. ⌘[ cancels the
+/// press; keys without ⌘ (Return to study, the arrows) keep their paths.
+enum MacSidebarPendingKeys {
+    enum Route: Equatable { case cancel, withhold, deliver }
+
+    static func route(modifiers: NSEvent.ModifierFlags, characters: String?, responderInSidebar: Bool) -> Route {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command) else { return .deliver }
+        if flags == .command, characters == "[" { return .cancel }
+        return responderInSidebar ? .deliver : .withhold
     }
 }
 
