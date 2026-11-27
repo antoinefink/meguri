@@ -914,3 +914,29 @@ async fn read_waits_for_a_slot_freed_within_the_bound_and_overload_still_refuses
     assert_eq!(service.me(a).await.unwrap_err().code, "storage_unavailable");
     assert!(started.elapsed() >= super::SLOT_WAIT, "overload answers only after the bounded wait");
 }
+
+#[tokio::test]
+async fn live_service_retains_metadata_wal_until_shutdown() {
+    let (_temp, root) = initialized();
+    let path = root.database();
+    let wal = path.with_extension("sqlite-wal");
+    let service = crate::Service::open(root, config()).await.unwrap();
+    service.close_admission().await.unwrap();
+
+    // Completing the last request must not checkpoint on close. A fresh
+    // authority connection still sees the latest committed state.
+    assert!(wal.metadata().unwrap().len() > 0);
+    let reader = inspect(path.clone()).unwrap();
+    reader.busy_timeout(Duration::ZERO).unwrap();
+    assert_eq!(crate::accounts::admission(&reader).unwrap_err().code, "admission_closed");
+    drop(reader);
+    drop(service);
+
+    // The service's final connection still closes and checkpoints normally.
+    assert!(!wal.exists());
+    let reader = inspect(path).unwrap();
+    let open: bool = reader
+        .query_row("SELECT admission_open FROM service_state WHERE singleton=1", [], |row| row.get(0))
+        .unwrap();
+    assert!(!open);
+}

@@ -107,8 +107,7 @@ impl Service {
     /// Startup recovery never allocates identities or retries expired authority.
     pub async fn open(root: DataRoot, config: Config) -> Result<Arc<Self>> {
         let root = Arc::new(root);
-        let metadata = Metadata::new(root);
-        metadata.files(|r| r.check_initialized()).await?;
+        let metadata = Metadata::open(root).await?;
         let service = Arc::new(Self {
             temp: TempBudget::new(config.temp_bytes),
             config,

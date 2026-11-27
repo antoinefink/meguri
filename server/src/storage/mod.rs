@@ -10,7 +10,7 @@ pub(crate) mod collection;
 use crate::{Error, Result};
 pub use root::{AccountStores, DataRoot};
 use rusqlite::{Connection, OpenFlags};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// A storage job waits this long for one of the eight metadata slots. A burst
@@ -29,6 +29,10 @@ pub(crate) fn private_collection_file(path: &std::path::Path) -> Result<()> {
 }
 
 pub struct Metadata {
+    // Live services park a connection with no transaction so request completion
+    // never becomes the last WAL close. Mutex makes Metadata Sync. No code
+    // uses the connection after startup. Drop it before releasing root ownership.
+    _idle: Option<Mutex<Connection>>,
     root: Arc<DataRoot>,
     capacity: Arc<Semaphore>,
 }
@@ -36,9 +40,28 @@ impl Metadata {
     pub(crate) fn owner(&self) -> Arc<DataRoot> { self.root.clone() }
     pub fn new(root: Arc<DataRoot>) -> Self {
         Self {
+            _idle: None,
             root,
             capacity: Arc::new(Semaphore::new(8)),
         }
+    }
+    pub(crate) async fn open(root: Arc<DataRoot>) -> Result<Self> {
+        tokio::task::spawn_blocking(move || {
+            root.validate()?;
+            root.check_initialized()?;
+            let connection = open(root.database(), false)?;
+            // Reading the main database attaches this connection to the WAL.
+            let _: bool = connection.query_row(
+                "SELECT admission_open FROM service_state WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )?;
+            let mut metadata = Self::new(root);
+            metadata._idle = Some(Mutex::new(connection));
+            Ok(metadata)
+        })
+        .await
+        .map_err(|_| Error::new("storage_unavailable"))?
     }
     #[cfg(test)]
     pub(crate) fn test_hold_capacity(&self) -> Vec<tokio::sync::OwnedSemaphorePermit> {
