@@ -34,3 +34,24 @@ settings on Mac, iPhone and iPad.
   [PR #246](https://github.com/antoinefink/meguri/pull/246) records subsequent
   Swift, simulator and hosted verification. The full integration gate is
   tracked in the shared verification register.
+
+## Native journeys and final review
+
+- The iPhone and iPad Account & Sync journeys passed in the test VM on
+  `de756175b`, using only the runtime products specified by the Xcode test
+  plan in the disk-constrained guest. The receipts are
+  `ui-test/20261127T090511Z-99662` and `ui-test/20261127T090726Z-5912`.
+- `swift-test/20261127T085846Z-86826` passed 48 focused sync, collection,
+  suspend and diagnostic tests. It verifies the original connection owner
+  drains before creating the current one, with one credential reload.
+  `swift-test/20261127T090837Z-11072` passed 27 diagnostic and owner tests.
+- `selftest/20261127T090839Z-11762` passed receipt and product inventory checks.
+  `core-test/20261127T091530Z-21319` passed 18 recovery and local integrity
+  cases, including refusal of a substituted activated file and completion
+  from the original inode after WAL writes.
+- Hosted verification found that retired cloud transport and the historical
+  Rust test fixture both open without transport. The native FFI now selects
+  application policy at every retained host boundary. The historical fixture
+  keeps its existing provider choice between offline and connected phases.
+  Independent review checked all five app entry paths and the debug-only
+  local integrity bridge.
