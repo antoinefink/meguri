@@ -61,7 +61,6 @@
 
 ## Test hooks
 
-- `CloudKitAccountSetupTests/testOwnerSetup` is a separate Debug owner entry. Select only through the verified owner producer; keep it out of default CloudAgent selections and skipped by Snapshot. Its private live channel carries no XCTest attachment.
 
 - `HomeDeckListPreview` renders the production tree with DTO data; it proves appearance only. Full `-MeguriFixture` launches replace the destination collection. A `.dev` id does not isolate current development data; use an isolated test container or the VM for those launches.
 
@@ -70,7 +69,7 @@
 - On the Mac, SwiftUI keeps the window frame in the `NSWindow Frame main` default, which `-ApplePersistenceIgnoreState` does not reset. Hook launches therefore always set a size (`default` when `-MeguriWindowSize` is absent); a launch with no hook option keeps the previous run's frame.
 - `ApplePersistenceIgnoreState` only ignores previous state; fresh Mac fixture windows use public `disableSnapshotRestoration()` to prevent automatic Resume image allocation during measurements.
 - A running Mac hook build also resizes its window on the distributed notification `<bundle id>.testhooks.resizeWindow` (object: a `-MeguriWindowSize` value) and answers `<bundle id>.testhooks.windowResized` (`WindowHookView`; the agent driver's `resize` step). Post both with `deliverImmediately`: the receiver is usually not the active app. Sandboxed senders cannot attach a `userInfo`.
-- The Sync section's routes (`settings/sync/*`, `TestHooks/SyncRoutes.swift`) draw the production views over `SyncCoordinator.renderFixture`: never attached, no collection, account or server. `SyncCoordinator.stageDeviceSettingsForTests` is the only way a media-off input reaches the core; it exists for the suites that stage a ResumeMedia command, and `SyncStringCatalogTests` fails when a source names a key that `sync/status-strings` T19.8 withdrew.
+- The Sync section's routes (`settings/sync/*`, `TestHooks/SyncRoutes.swift`) draw the production views over `SyncCoordinator.renderFixture`. These render fixtures have no attached collection, account or server.
 - Each UI area registers its routes (`area/screen[/state]`) in `RouteRegistry.standard`, from a `TestHooks/<Area>Routes.swift`, with literal paths: `tools/mg xcode-check` reads them from the source, launches the Mac app hidden on each and fails on a computed path. A `.screen` route shows its view on its own, without the shell; `registerShell` routes open the shell in a state with sample features (`ShellRoutes.swift`), and their probe `testhooks.shell.state`, a strip below the shell that covers none of it, prints the navigation.
 - A launch with any hook option starts from a fresh UI state and saves none (`UIStateStore(defaults: nil)`); a launch with none restores the device's.
 - `-MeguriSizeClass` forces the layout on iOS; the Darwin notification `<bundle id>.testhooks.toggleSizeClass` flips it at run time (also `presentAdd`, and `closeWindow` on the Mac, distributed). The override goes on the windows: one on the scene does not reach SwiftUI's size class on an iPhone. At regular width an iPhone's sidebar overlays the detail column and hides it from accessibility queries.
@@ -80,9 +79,9 @@
 ## Signing and entitlements
 
 - `MEGURI_SIGNING` in `Config/Signing.xcconfig`: `adhoc` until the `xcode-account` user step, then `team`.
-- CloudKit destinations live in `Config/Cloud.xcconfig` and select isolated development for Debug/Profile and the explicit Mac Release.dev personal preview; normal Release/AppStore use production. Personal preview passes the development cloud setting as well as the bundle suffix; a suffix alone never grants production authority. Readiness defaults NO; ad-hoc always NO. Preserve the preprocessed Boolean Info element; generated custom Info keys are strings. Widgets have no cloud/push grants. Setup and schema proof are user steps, separate from packaging checks (`xcode-check --cloud-signing-matrix`).
+- The app and widget builds must pass the sync packaging validator in `tools/tests/sync_build_configuration.py`. Keep Meguri Sync on the existing network, App Group and device-only credential paths.
 - Mac UI-test runners stay ad hoc via `Config/MeguriUITests.xcconfig`, even with `MEGURI_SIGNING=team`: they have no runner profile. Keep these overrides Mac-only and scoped to the UI-test target.
-- Mac entitlements are `Meguri-macOS[-Dev][-AdHoc].entitlements`: `-Dev` (hook builds) adds read-only access to the checkout, `-AdHoc` drops the App Group, Keychain and CloudKit/push grants. Only team app variants have the private Keychain group `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`; ad-hoc and widget variants do not. Keep sandbox/network/file keys identical in all four. R2041/KTD22 also requires configuration-isolated CloudKit container/services/environment and push grants on signed apps. One exception: the owner-requested real copy (`build-app`/`run --real-copy`) signs development push over production CloudKit, from installed profiles pinned by UUID (standing decision 2026-11-21).
+- The four Mac app entitlement files combine the `-Dev` hook-build read grant with the `-AdHoc` signing variant. Only team app variants use the App Group and private Keychain group `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`. Keep shared sandbox, network and file grants aligned.
 
 ## Tests
 
