@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 #if os(macOS)
+import AppKit
 
 /// Deck Options' keys on the Mac (N20.9, `sched/deck-options` O15.3): ⌥⌘O
 /// opens the page on the shown deck, ⌘↩ saves as ⌘S does, and Save returns
@@ -187,6 +188,43 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(helpTitle.waitForNonExistence(timeout: 10), "Esc closes the help")
         XCTAssertTrue(save.exists, "Esc in the help leaves the page open")
         XCTAssertFalse(save.isEnabled, "Reading the help never changes the draft")
+
+        // A short help keeps its own height: every line shows, with no empty space below the last.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.buttons["deckOptions.options.orderHelp.newMix"].click()
+        let mixLines = [0, 1, 2].map { popover.staticTexts["deckOptions.options.orderHelpChoice.newMix-\($0)"] }
+        XCTAssertTrue(mixLines[2].waitForExistence(timeout: 10), "The New/review order help opens")
+        XCTAssertTrue(mixLines.allSatisfy(\.isHittable), "A short help needs no scrolling")
+        XCTAssertLessThan(popover.frame.maxY - mixLines[2].frame.maxY, mixLines[2].frame.height * 2,
+                          "A short help ends after its last line")
+        capture(popover, "deck-options-help-popover-short")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(mixLines[2].waitForNonExistence(timeout: 10))
+
+        // The longest help, Review sort order, stays on the screen and scrolls to its last choice.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.buttons["deckOptions.options.orderHelp.reviewOrder"].click()
+        let reviewTitle = popover.staticTexts["deckOptions.options.orderHelpTitle.reviewOrder"]
+        XCTAssertTrue(reviewTitle.waitForExistence(timeout: 10), "The Review sort order help opens")
+        let screen = try XCTUnwrap(NSScreen.main)
+        XCTAssertTrue(popover.frame.minY >= screen.frame.height - screen.visibleFrame.maxY - 1
+                      && popover.frame.maxY <= screen.frame.height - screen.visibleFrame.minY + 1,
+                      "The help fits the screen's visible area (popover \(popover.frame), screen \(screen.visibleFrame))")
+        XCTAssertTrue(reviewTitle.isHittable, "The help opens at its top")
+        capture(popover, "deck-options-help-popover-review")
+        // Value 10, Latest added first, is the menu's last choice.
+        let lastLine = popover.staticTexts["deckOptions.options.orderHelpChoice.reviewOrder-10"]
+        XCTAssertTrue(lastLine.exists)
+        if !lastLine.isHittable {
+            popover.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -popover.frame.height * 4)
+        }
+        XCTAssertTrue(lastLine.isHittable && popover.frame.contains(lastLine.frame), "The last choice can be reached")
+        capture(popover, "deck-options-help-popover-review-end")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(reviewTitle.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(save.exists && !save.isEnabled, "Reading the help never changes the draft")
         XCTAssertTrue(bringIntoView(disclosure, in: scroll, app: app))
         disclosure.click()
         XCTAssertTrue(waitForValue(disclosure, "Collapsed"))

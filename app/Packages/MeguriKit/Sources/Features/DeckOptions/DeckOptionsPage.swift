@@ -315,6 +315,10 @@ private struct DisplayOrderRow: View {
     let choices: [Int32]
     @Binding var selection: Int32
     @State private var helpShown = false
+    #if os(macOS)
+    /// The help button's frame in its window, for the popover's height cap.
+    @State private var helpAnchor: CGRect = .zero
+    #endif
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -351,6 +355,9 @@ private struct DisplayOrderRow: View {
         .foregroundStyle(.secondary)
         .help(Text(verbatim: helpLabel))
         .accessibilityIdentifier("deckOptions.options.orderHelp.\(row.rawValue)")
+        #if os(macOS)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { helpAnchor = $0 }
+        #endif
         .popover(isPresented: $helpShown) {
             // A popover on the Mac and at regular width; a sheet at compact
             // width, as the sync status panel adapts (N23.1).
@@ -364,13 +371,57 @@ private struct DisplayOrderRow: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             #else
-            DisplayOrderHelp(row: row, choices: choices)
-                .padding()
-                .frame(width: ContentWidth.primaryAction)
+            DisplayOrderHelpPopover(row: row, choices: choices,
+                                    maxHeight: DisplayOrderHelpPopover.heightCap(anchor: helpAnchor))
             #endif
         }
     }
 }
+
+#if os(macOS)
+/// The Mac popover's content. A popover takes its content's ideal size, so the
+/// help keeps its own height (no scroll bar, no empty space) up to `maxHeight`,
+/// and scrolls above it: Review sort order's 13 choices can be taller than the
+/// screen leaves beside the button.
+private struct DisplayOrderHelpPopover: View {
+    let row: DeckOptionsDisplayOrder
+    let choices: [Int32]
+    let maxHeight: CGFloat
+
+    var body: some View {
+        // The unscrolled copy, hidden, gives the size: its own height, at most
+        // maxHeight. The scroll view shows the help within that size.
+        DisplayOrderHelp(row: row, choices: choices)
+            .padding()
+            .hidden()
+            .accessibilityHidden(true)
+            .frame(maxHeight: maxHeight, alignment: .top)
+            .overlay(alignment: .top) {
+                ScrollView { DisplayOrderHelp(row: row, choices: choices).padding() }
+                    .scrollBounceBehavior(.basedOnSize)
+            }
+            .frame(width: ContentWidth.primaryAction)
+    }
+
+    /// The taller of the spaces the screen leaves above and below the help
+    /// button, where the system can open the popover, less the popover's arrow
+    /// and its inset from the screen's edge. Half the screen, which one side
+    /// always leaves, when the button's window is unknown; no cap off screen.
+    static func heightCap(anchor: CGRect) -> CGFloat {
+        let margin = Spacing.xLarge
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let screen = window.screen ?? NSScreen.main,
+              let content = window.contentView else {
+            return NSScreen.main.map { $0.visibleFrame.height / 2 - margin } ?? .infinity
+        }
+        // SwiftUI's global space on the Mac starts at the top of the window's content view.
+        let height = content.frame.height
+        let top = window.convertPoint(toScreen: CGPoint(x: anchor.minX, y: height - anchor.minY)).y
+        let bottom = window.convertPoint(toScreen: CGPoint(x: anchor.minX, y: height - anchor.maxY)).y
+        let visible = screen.visibleFrame
+        return max(visible.maxY - top, bottom - visible.minY) - margin
+    }
+}
+#endif
 
 /// The help for one Display Order row: its name, what it does, then one line
 /// per choice the core offers, in the menu's order, each name in bold.
