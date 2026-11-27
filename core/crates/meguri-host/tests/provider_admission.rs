@@ -571,6 +571,21 @@ fn application_upgrade_settles_absent_initial_adoption_before_prepared_host_atta
             if malformed {
                 assert!(result.is_err());
                 assert_eq!(std::fs::read(&sidecar).unwrap(), evidence);
+                // Repair only the synthetic missing proof, then retry on the
+                // same process. Failed preparation must release its providers
+                // and reservation without releasing the retry's ownership.
+                raw["deviceState"]["intent"]["candidate_native"] = serde_json::json!({
+                    "device":native.dev(),"inode":native.ino()});
+                std::fs::write(&sidecar, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+                let retry = match entry {
+                    0 => process.open_for_manual_import(config.clone()),
+                    1 => process.prepare_empty_collection(config.clone()),
+                    _ => process.prepare_cloud_connection(config.clone()),
+                }.unwrap();
+                assert_eq!(retry.engine().state(), meguri_engine::LifecycleState::NoCollection);
+                assert!(process.prepare_empty_collection(config.clone()).is_err());
+                assert!(process.open_for_manual_import(config.clone()).is_err());
+                retry.close().unwrap();
             } else {
                 let host = result.unwrap();
                 assert_eq!(host.engine().state(), meguri_engine::LifecycleState::NoCollection);
@@ -590,6 +605,32 @@ fn application_upgrade_settles_absent_initial_adoption_before_prepared_host_atta
             assert!(!config.collection_directory.join("collection.media").exists());
             assert_eq!(account.0.load(Ordering::SeqCst), 0);
         }
+    }
+}
+
+#[test]
+fn application_absence_preparation_releases_reservation_after_unavailable_lock() {
+    for entry in 0..3 {
+        let root = tempfile::tempdir().unwrap();
+        let account = Arc::new(Account(AtomicUsize::new(0)));
+        let mut config = unopened_fixture(root.path(), account.clone());
+        config.cloud = None;
+        let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+        let ownership = meguri_storage::lockfile::CollectionLock::acquire(&config.collection_directory).unwrap();
+        let prepare = || match entry {
+            0 => process.open_for_manual_import(config.clone()),
+            1 => process.prepare_empty_collection(config.clone()),
+            _ => process.prepare_cloud_connection(config.clone()),
+        };
+        assert!(prepare().is_err());
+        drop(ownership);
+        let retry = prepare().unwrap();
+        assert_eq!(retry.engine().state(), meguri_engine::LifecycleState::NoCollection);
+        assert!(prepare().is_err(), "the retry owns the process reservation");
+        retry.close().unwrap();
+        prepare().unwrap().close().unwrap();
+        assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        assert!(!config.collection_directory.join("collection.anki2").exists());
     }
 }
 

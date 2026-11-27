@@ -94,6 +94,10 @@ impl ProcessCore {
         }
         let mut reset = Reset(self, false);
         let (mut host, paths, options) = CoreHost::compose_on(self, config, open_existing || recover_initial)?;
+        // Composition transfers the reservation to CoreHost, including its
+        // failure cleanup. Once close releases it, Reset must not clear a
+        // reservation already acquired by another caller.
+        reset.1 = true;
         if options.retire_icloud_publication {
             let absence = match paths.collection().symlink_metadata() {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
@@ -126,7 +130,6 @@ impl ProcessCore {
         if open_existing && paths.collection().symlink_metadata().is_ok() {
             let _ = host.engine.open_raw(&paths.collection(), options);
         }
-        reset.1 = true;
         Ok(host)
     }
     pub fn engine(&self) -> &Engine {

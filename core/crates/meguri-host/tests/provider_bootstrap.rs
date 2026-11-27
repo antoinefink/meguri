@@ -129,6 +129,93 @@ fn meguri_initial_server_download_can_start_without_a_local_collection() {
 }
 
 #[test]
+fn meguri_initial_download_after_retired_absent_adoption_preserves_nearby_evidence() {
+    use meguri_engine::{EventKind, Generation, LifecycleState};
+    use meguri_storage::{ReadRows, ReaderRole};
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::Arc;
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = config(&root.path().join("local"), Arc::new(meguri_model::clock::FixedClock::new(
+        NOW, meguri_model::clock::UtcOffset::UTC)));
+    assert!(config.cloud.is_none());
+    let live = config.collection_directory.join("collection.anki2");
+    let sidecar = config.collection_directory.join("meguri-sidecar.json");
+    let stage = root.path().join("interrupted-adoption.anki2");
+    meguri_engine::bootstrap::create(&stage, config.clock.as_ref(), config.random.as_ref()).unwrap();
+    let bytes = std::fs::read(&stage).unwrap();
+    let native = std::fs::metadata(&stage).unwrap();
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    let prior = serde_json::json!({"identity":[1,2],"binding":"LocalOnly","decision":"Clear"});
+    let candidate = serde_json::json!({"identity":[3,4],"binding":{"Connected":{
+        "account":"synthetic-archived-account","configuration":"synthetic-retired-app","environment":"development"}},"decision":"Clear"});
+    let raw = serde_json::json!({"futureTop":{"retained":true},"deviceState":{"active":prior,"intent":{
+        "operation":[5,6],"reason":"CloudAdopt","prior":prior,"candidate":candidate,"phase":"Intent",
+        "old_file":null,"old_native":null,"candidate_file":{"length":bytes.len(),"sha256":digest},
+        "candidate_native":{"device":native.dev(),"inode":native.ino()}}}});
+    std::fs::write(&sidecar, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    let tracking = config.collection_directory.join(meguri_sync::cloud::TRACKING_FILE);
+    let tracking_bytes = b"synthetic retained tracking";
+    std::fs::write(&tracking, tracking_bytes).unwrap();
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = Arc::new(process.open_for_manual_import(config.clone()).unwrap());
+    assert_eq!(host.engine().state(), LifecycleState::NoCollection);
+    assert_eq!(host.engine().generation(), Generation(0));
+    assert_eq!(serde_json::to_value(DeviceState::for_collection(&live).settled_publication().unwrap().unwrap()).unwrap(), prior);
+    let settled_sidecar = std::fs::read(&sidecar).unwrap();
+    let settled: serde_json::Value = serde_json::from_slice(&settled_sidecar).unwrap();
+    assert!(settled["deviceState"]["intent"].is_null());
+
+    // Welcome's explicit Start Empty still refuses retained ownership. Run on
+    // the original job pool as production does, then use the normal download.
+    let events = host.engine().stream().subscribe();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let original = host.clone();
+    let job = host.engine().jobs().start("create empty collection", Generation(0), None, move |ctx| {
+        tx.send(original.create_empty(ctx)).unwrap();
+        Ok(())
+    });
+    assert!(matches!(rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap(), Err(EngineError::Busy { .. })));
+    let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
+    loop {
+        let event = events.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now())).unwrap();
+        if matches!(event.kind, EventKind::JobFinished { id, .. } if id == job.id) { break; }
+    }
+    assert_eq!(host.engine().state(), LifecycleState::NoCollection);
+    assert!(!live.exists() && !config.collection_directory.join("collection.media").exists());
+    assert_eq!(std::fs::read(&sidecar).unwrap(), settled_sidecar);
+    assert_eq!(std::fs::read(&tracking).unwrap(), tracking_bytes);
+
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = collection_script(data, false);
+    let preview = prepare(&host, &connection, &script, D::UseServerCollection);
+    let op = confirm(&host, &connection, &script, preview);
+    assert!(op.collection_complete && op.safety_backups.is_empty());
+    let done = finish_empty_media(&host, &connection, &op);
+    assert!(host.complete_meguri_bootstrap(&connection, USER, &done.id).unwrap().is_complete());
+    assert!(matches!(host.meguri_readiness().unwrap(), R::Ready));
+    assert_eq!(script.count(Method::Download), 1);
+    assert_eq!(script.count(Method::Upload), 0);
+    host.close().unwrap();
+    let reopened = process.open(config.clone()).unwrap();
+    assert!(matches!(reopened.meguri_readiness().unwrap(), R::Ready));
+    {
+        let collection = reopened.collection().unwrap();
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        assert!(reader.config_value("bootstrap-server").unwrap().is_some());
+    }
+    reopened.close().unwrap();
+    assert_eq!(std::fs::read(&stage).unwrap(), bytes);
+    let after = std::fs::metadata(&stage).unwrap();
+    assert_eq!((after.dev(), after.ino()), (native.dev(), native.ino()));
+    assert_eq!(std::fs::read(&tracking).unwrap(), tracking_bytes);
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    assert_eq!(after["futureTop"], raw["futureTop"]);
+}
+
+#[test]
 fn meguri_server_download_completes_collection_but_stays_unbound_until_media_accounted() {
     let _lane = LANE.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
@@ -578,9 +665,13 @@ fn meguri_binding_clear_keeps_the_auto_invariant() {
         assert!(before.settings.automatic && before.meguri_settings.automatic);
         let icloud = serde_json::to_vec(&before.icloud_settings).unwrap();
         let host = if case == "recovery" {
-            host.begin_provider_handoff(Selection::ICloud).unwrap();
+            // Restart retires an iCloud destination automatically. Leave an
+            // interrupted Off handoff to exercise explicit durable recovery.
+            host.begin_provider_handoff(Selection::LocalOnly).unwrap();
+            let intent = host.provider_authority().snapshot().unwrap().handoff.unwrap();
             host.close().unwrap();
             let reopened = CoreHost::open(config.clone()).unwrap();
+            assert_eq!(reopened.provider_authority().snapshot().unwrap().handoff, Some(intent));
             reopened.recover_provider_handoff_to_local_only().unwrap();
             reopened
         } else {
