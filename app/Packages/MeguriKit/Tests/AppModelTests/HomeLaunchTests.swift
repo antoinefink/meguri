@@ -262,6 +262,44 @@ extension ReviewCollectionStartupTests {
         #expect(await second.close())
     }
 
+    @Test(.timeLimit(.minutes(3))) func homeLaunchKeepsEmptyDecksWhenAPageReadsBeforeTheTreeRetry() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        let first = fixture.owner()
+        await first.start()
+        let deck = try #require(first.decks.first(where: { !$0.filtered }))
+        // Use another fixture deck when present, otherwise a synthetic page ID.
+        let freshID = HomeLaunchTests.flattened(first.decks).first(where: { !$0.filtered && $0.id != deck.id })?.id ?? -1
+        #expect(await first.openDeckPage(deckID: deck.id).value)
+        first.loadFixtureDeckEmptiness = { _ in true }
+        await first.refreshDeckPage(try #require(first.deckPageRefreshRequest))
+        #expect(first.homeDeckEmpty(deck.id))
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+
+        let second = fixture.owner()
+        try #require(second.keptHome?.snapshot.emptyDecks == [deck.id])
+        let loadDeckTree = second.loadDeckTree
+        // Startup retries a failed initial read: keep every attempt failing until restored.
+        second.loadDeckTree = { throw CocoaError(.fileReadUnknown) }
+        await second.start()
+        try #require(second.state == .ready)
+        try #require(second.homePhase == .readFailed)
+        second.navigation.openDeckPage(DeckID(freshID))
+        second.loadFixtureDeckEmptiness = { _ in true }
+        await second.refreshDeckPage(try #require(second.deckPageRefreshRequest))
+        #expect(second.emptyDeckPageID == freshID)
+        #expect(second.homeDeckEmpty(freshID))
+
+        second.loadDeckTree = loadDeckTree
+        await second.loadCounts()
+        #expect(second.homePhase == .decks)
+        #expect(second.deck(deck.id) != nil)
+        #expect(second.homeDeckEmpty(deck.id))
+        #expect(second.homeDeckEmpty(freshID))
+        #expect(await second.close())
+    }
+
     @Test(.timeLimit(.minutes(3))) func homeLaunchASnapshotOfAnotherCollectionNeverShows() async throws {
         let fixture = try HomeLaunchTests.Fixture()
         defer { fixture.remove() }

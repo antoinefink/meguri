@@ -92,7 +92,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     }
     private func recordDeckPageEmptiness(_ id: Int64, empty: Bool, generation read: UInt64) {
         guard read == generation else { return }
-        var ids = readEmptyDecks?.generation == read ? readEmptyDecks?.ids ?? [] : []
+        var ids = readEmptyDecks?.generation == read ? readEmptyDecks?.ids ?? [] : Set(keptHome?.snapshot.emptyDecks ?? [])
         if empty { ids.insert(id) } else { ids.remove(id) }
         readEmptyDecks = (generation: read, ids: ids)
         saveHomeSnapshot()
