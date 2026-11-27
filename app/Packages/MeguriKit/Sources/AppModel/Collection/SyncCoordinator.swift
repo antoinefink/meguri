@@ -2609,6 +2609,12 @@ public final class SyncCoordinator {
     @discardableResult func releaseEntryActivation() throws -> Bool {
         guard entryActivationHeld else { return false }
         guard drained, closeTask == nil else { throw BridgeError.busy(runningOperation: "sync drain") }
+        // Retire only after entry drain has finished using the old provider and owner.
+        provider = nil
+        meguriConnectionOwner = nil
+        meguriLoadedConnection = nil
+        providerHandoff = nil
+        providerHandoffDestination = nil
         entryActivationHeld = false
         closing = false; drained = false; replacing = false
         if platformPrepared { ownerState = .prepared }
