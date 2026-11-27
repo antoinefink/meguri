@@ -48,6 +48,12 @@ extension TestHooks {
         private var monitor: Any?
         private var postedLate: TimeInterval = 0
         private var detailRect = CGRect.zero
+        private var sampler: MainThreadSampler?
+        /// Each step's sidebar list and row, when that row was first selected in
+        /// it after a run-loop pass (after Core Animation's commit), and when it
+        /// was first seen unselected again after that.
+        private var watched: [(table: NSTableView, row: Int, down: TimeInterval, selected: TimeInterval?, lost: TimeInterval?)] = []
+        private var commitObserver: CFRunLoopObserver?
 
         static func name(_ suffix: String) -> String { "\(Bundle.main.bundleIdentifier ?? "").testhooks.\(suffix)" }
 
@@ -55,6 +61,7 @@ extension TestHooks {
             self.navigation = navigation
             guard !listening else { return }
             listening = true
+            sampler = MainThreadSampler()
             installObservers()
             DistributedNotificationCenter.default().addObserver(
                 self, selector: #selector(received(_:)), name: Notification.Name(Self.name("sidebarTimingRun")), object: nil,
@@ -97,24 +104,35 @@ extension TestHooks {
             var rowRect = CGRect.zero
             var down: TimeInterval = 0
             var up: TimeInterval = 0
+            weak var table: NSTableView?
+            var row = -1
         }
 
         private func run(_ script: String) async -> String {
             var settle = 2.5
             var steps: [Step] = []
+            // Finite, non-negative and bounded: a run that never ends answers nothing.
+            func valid(_ value: Double?, max: Double) -> Double? {
+                guard let value, value.isFinite, value >= 0, value <= max else { return nil }
+                return value
+            }
             for part in script.split(separator: "|") {
                 if part.hasPrefix("settle=") {
-                    settle = (Double(part.dropFirst(7)) ?? 2500) / 1000
+                    guard let value = valid(Double(part.dropFirst(7)), max: 10_000) else {
+                        return Self.json(["error": "bad settle '\(part)'"])
+                    }
+                    settle = value / 1000
                     continue
                 }
                 let fields = part.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-                guard fields.count == 5, let x = Double(fields[0]), let y = Double(fields[1]),
-                      let hold = Double(fields[2]), let gap = Double(fields[3]) else {
+                guard fields.count == 5, let x = Double(fields[0]), let y = Double(fields[1]), x.isFinite, y.isFinite,
+                      let hold = valid(Double(fields[2]), max: 2_000), let gap = valid(Double(fields[3]), max: 2_000) else {
                     return Self.json(["error": "bad step '\(part)'"])
                 }
                 steps.append(Step(screenPoint: CGPoint(x: x, y: y), hold: hold / 1000, gap: gap / 1000, label: fields[4]))
             }
             guard !steps.isEmpty else { return Self.json(["error": "no steps"]) }
+            guard steps.count <= 10 else { return Self.json(["error": "more than 10 steps"]) }
             guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && !($0 is NSPanel) }),
                   let content = window.contentView else { return Self.json(["error": "no main window"]) }
             let screenHeight = NSScreen.screens.first?.frame.maxY ?? 0
@@ -128,6 +146,8 @@ extension TestHooks {
                 }
                 let row = table.row(at: table.convert(point, from: nil))
                 guard row >= 0 else { return Self.json(["error": "step \(steps[index].label): no row at \(point)"]) }
+                steps[index].table = table
+                steps[index].row = row
                 steps[index].rowRect = Self.topLeft(table.convert(table.rect(ofRow: row), to: nil), in: window).insetBy(dx: 4, dy: 3)
                 if detail == .zero {
                     // Everything right of the sidebar's list: the detail column and its toolbar.
@@ -154,9 +174,15 @@ extension TestHooks {
             detailRect = detail
             // A frame shown before the first press is the baseline.
             try? await Task.sleep(for: .milliseconds(200))
-            guard store.arm(rows: steps.map(\.rowRect), detail: detail) else {
-                return Self.json(["error": "no captured frame to compare with"])
+            switch store.arm(rows: steps.map(\.rowRect), detail: detail) {
+            case .armed: break
+            case .noFrame: return Self.json(["error": "no captured frame to compare with"])
+            case .outside: return Self.json(["error": "a row or the detail column is outside the captured frame"])
             }
+            // Every exit from here disarms: a failed run must not keep recording.
+            var frames: [FrameStore.Record] = []
+            var disarmed = false
+            defer { if !disarmed { _ = store.disarm() } }
             let start = CACurrentMediaTime()
             Self.signposter.emitEvent("run", "\(steps.map(\.label).joined(separator: ">"))")
             // Each event carries the time it is posted at, as a person's press does.
@@ -175,15 +201,29 @@ extension TestHooks {
                 }
                 time += step.hold + step.gap
             }
+            watched = steps.compactMap { step in step.table.map { (table: $0, row: step.row, down: step.down, selected: TimeInterval?.none, lost: TimeInterval?.none) } }
+            sampler?.start()
             let late = await Self.post(ScheduledEvents(
                 events: events, times: times, application: unsafeBitCast(NSApplication.shared, to: (any EventPosting).self)))
             // Times count from each event's timestamp: a late post only adds to them.
             guard late < 0.02 else { return Self.json(["error": "events posted up to \(late * 1000) ms late"]) }
             postedLate = late
             try? await Task.sleep(for: .seconds(settle))
-            let frames = store.disarm()
+            sampler?.stop()
+            frames = store.disarm()
+            disarmed = true
+            if capture?.stopped == true {
+                // The stream failed during the run: its frames prove nothing, and the
+                // next run starts a stream of its own.
+                capture = nil
+                store.reset()
+                watched = []
+                return Self.json(["error": "the window capture stopped during the run"])
+            }
             let end = CACurrentMediaTime()
-            return report(steps: steps, frames: frames, start: start, end: end)
+            let result = report(steps: steps, frames: frames, start: start, end: end)
+            watched = []
+            return result
         }
 
         /// Events made on the main thread, posted at their timestamps from
@@ -198,28 +238,45 @@ extension TestHooks {
         /// doing; returns how late the latest one was posted.
         nonisolated fileprivate static func post(_ scheduled: ScheduledEvents) async -> TimeInterval {
             await withCheckedContinuation { continuation in
-                Thread.detachNewThread {
+                let thread = Thread {
                     var late: TimeInterval = 0
                     for (event, time) in zip(scheduled.events, scheduled.times) {
                         let wait = time - CACurrentMediaTime()
                         if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-                        late = max(late, CACurrentMediaTime() - time)
                         scheduled.application.postEvent(event, atStart: false)
+                        // Once queued: the event is as late as its enqueue.
+                        late = max(late, CACurrentMediaTime() - time)
                     }
                     continuation.resume(returning: late)
                 }
+                // As the window server's input: ahead of the app's own work.
+                thread.qualityOfService = .userInteractive
+                thread.start()
             }
         }
 
-        private func report(steps: [Step], frames: [FrameStore.Record], start: CFTimeInterval, end: CFTimeInterval) -> String {
+        private func report(steps: [Step], frames all: [FrameStore.Record], start: CFTimeInterval, end: CFTimeInterval) -> String {
             func ms(_ value: Double) -> Double { (value * 10_000).rounded() / 10 }
+            // Only frames with a display time time anything: a callback's arrival
+            // does not say when its frame was shown.
+            let frames = all.filter(\.displayed)
             let commits = changes.filter { $0.kind == "selection" }
+            let shownRoutes = changes.filter { $0.kind == "displayed" }
+            /// When the app received each step's mouse-down (its timestamp until then).
+            let received = steps.map { step in
+                deliveries.first { $0.type == "down" && abs($0.stamp - step.down) < 0.0005 }?.time ?? step.down
+            }
             var rows: [[String: Any]] = []
             for (index, step) in steps.enumerated() {
                 let shown = frames.first { $0.time >= step.down && $0.rows[index] >= FrameStore.rowThreshold }
-                let commit = commits.first { $0.time >= step.down }
                 let nextDown = index + 1 < steps.count ? steps[index + 1].down : end
-                // The outgoing page before the route changes: any visible change is a flash.
+                let nextReceived = index + 1 < steps.count ? received[index + 1] : .infinity
+                // The route this press asked for: the row the sidebar showed once the app
+                // had its mouse-down, before the next press arrived.
+                let intended = shownRoutes.first { $0.time >= received[index] && $0.time < nextReceived }?.value
+                // Its own commit, never a later press's; none when a later press superseded it.
+                let commit = intended.flatMap { route in commits.first { $0.time >= step.down && $0.value == route } }
+                // The outgoing page before the route changes: any frame that changes it is a flash.
                 let before = frames.filter { $0.time >= step.down && $0.time < (commit?.time ?? nextDown) }
                 let content = commit.flatMap { commit in frames.first { $0.time > commit.time && $0.detail >= FrameStore.contentThreshold } }
                 var entry: [String: Any] = [
@@ -227,14 +284,30 @@ extension TestHooks {
                     "holdMs": ms(step.up - step.down),
                     "rowMs": shown.map { ms($0.time - step.down) } ?? NSNull(),
                     "rowMax": (frames.map { $0.rows[index] }.max() ?? 0),
-                    "detailBeforeCommitMax": before.map(\.detail).max() ?? 0,
-                    "detailBeforeCommitFrames": before.filter { $0.detail >= FrameStore.flashThreshold }.count,
+                    "detailBeforeCommitMax": before.map(\.delta).max() ?? 0,
+                    "detailBeforeCommitFrames": before.filter { $0.delta >= FrameStore.flashThreshold }.count,
                     "commitMs": commit.map { ms($0.time - step.down) } ?? NSNull(),
                     "commit": commit?.value ?? NSNull(),
+                    "route": intended ?? NSNull(),
+                    "superseded": intended != nil && commit == nil,
                     "contentMs": content.map { ms($0.time - step.down) } ?? NSNull(),
                     "detailMax": frames.filter { $0.time >= step.down && $0.time < nextDown }.map(\.detail).max() ?? 0,
                     "rowRect": "\(step.rowRect)",
+                    "missingSamples": all.filter { $0.time >= step.down && $0.time < nextDown && ($0.detail < 0 || $0.rows[index] < 0) }.count,
                 ]
+                if let watch = watched.first(where: { $0.down == step.down }) {
+                    if let selected = watch.selected { entry["rowStateMs"] = ms(selected - step.down) }
+                    if let lost = watch.lost { entry["rowLostMs"] = ms(lost - step.down) }
+                }
+                // Where the main thread spent a busy press-to-next-press stretch.
+                if busy.contains(where: { $0.start + $0.duration >= step.down && $0.start < nextDown && $0.duration >= 0.1 }),
+                   let sampler {
+                    entry["profile"] = sampler.profile(from: step.down, to: nextDown)
+                }
+                // The press's own work, before its route changes.
+                if let commit, commit.time - step.down >= 0.06, let sampler {
+                    entry["pressProfile"] = sampler.profile(from: step.down, to: commit.time)
+                }
                 if let delivered = deliveries.first(where: { $0.type == "down" && abs($0.stamp - step.down) < 0.0005 }) {
                     entry["downDeliveredMs"] = ms(delivered.time - step.down)
                 }
@@ -252,10 +325,10 @@ extension TestHooks {
             return Self.json([
                 "steps": rows,
                 "changes": changes.filter { $0.time >= first - 0.05 }.prefix(60).map { ["ms": ms($0.time - first), "kind": $0.kind, "value": $0.value] },
-                "frames": frames.count,
+                "frames": all.count,
                 "postLateMs": ms(postedLate),
                 "detailRect": "\(detailRect)",
-                "displayedFrames": frames.filter(\.displayed).count,
+                "displayedFrames": frames.count,
             ])
         }
 
@@ -283,6 +356,27 @@ extension TestHooks {
                 }
                 CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
                 self.observer = observer
+            }
+            if commitObserver == nil {
+                // After Core Animation's own before-waiting commit (order 2000000).
+                let observer = CFRunLoopObserverCreateWithHandler(
+                    kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, true, Int.max
+                ) { [weak self] _, _ in
+                    MainActor.assumeIsolated {
+                        guard let self, !self.watched.isEmpty else { return }
+                        let now = CACurrentMediaTime()
+                        for index in self.watched.indices where self.watched[index].lost == nil && self.watched[index].down <= now {
+                            let selected = self.watched[index].table.selectedRowIndexes.contains(self.watched[index].row)
+                            if self.watched[index].selected == nil {
+                                if selected { self.watched[index].selected = now }
+                            } else if !selected {
+                                self.watched[index].lost = now
+                            }
+                        }
+                    }
+                }
+                CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+                commitObserver = observer
             }
             if monitor == nil {
                 monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
@@ -323,6 +417,10 @@ extension TestHooks {
         }
 
         private func startCapture(_ window: NSWindow) async throws {
+            if capture?.stopped == true {
+                capture = nil
+                store.reset()
+            }
             if capture != nil { return }
             let capture = TimingCapture(store: store)
             try await capture.start(windowID: CGWindowID(window.windowNumber), scale: window.backingScaleFactor)
@@ -368,13 +466,19 @@ extension TestHooks {
         struct Record: Sendable {
             let time: TimeInterval
             let displayed: Bool
-            /// The fraction of each step's row that differs from the baseline.
+            /// The fraction of each step's row that differs from the baseline
+            /// (`missing` when the frame does not cover it).
             let rows: [Double]
             /// The fraction of the detail column that differs from the baseline.
             let detail: Double
             /// The fraction of the detail column that differs from the previous frame.
             let delta: Double
         }
+
+        /// A comparison the frame could not make: below every threshold.
+        static let missing = -1.0
+
+        enum Arming { case armed, noFrame, outside }
 
         static let rowThreshold = 0.25
         static let contentThreshold = 0.01
@@ -398,18 +502,30 @@ extension TestHooks {
             var scaleFactor: CGFloat = 1
         }
 
-        func arm(rows: [CGRect], detail: CGRect) -> Bool {
+        func arm(rows: [CGRect], detail: CGRect) -> Arming {
             lock.lock()
             defer { lock.unlock() }
-            guard let latest else { return false }
+            guard let latest else { return .noFrame }
+            let baseRows = rows.map { Self.sample(latest, latestGeometry, $0, stride: 3) }
+            let baseDetail = Self.sample(latest, latestGeometry, detail, stride: 8)
+            guard !baseDetail.isEmpty, !baseRows.contains(where: \.isEmpty) else { return .outside }
             rowRects = rows
             detailRect = detail
-            baselineRows = rows.map { Self.sample(latest, latestGeometry, $0, stride: 3) }
-            baselineDetail = Self.sample(latest, latestGeometry, detail, stride: 8)
+            baselineRows = baseRows
+            baselineDetail = baseDetail
             previousDetail = baselineDetail
             records.removeAll()
             armed = true
-            return true
+            return .armed
+        }
+
+        /// Forgets the last frame: a failed stream's last frame is no baseline.
+        func reset() {
+            lock.lock()
+            defer { lock.unlock() }
+            latest = nil
+            armed = false
+            records.removeAll()
         }
 
         func disarm() -> [Record] {
@@ -431,11 +547,11 @@ extension TestHooks {
             let detail = Self.sample(pixels, geometry, detailRect, stride: 8)
             records.append(Record(time: time, displayed: displayed, rows: rows,
                                   detail: Self.difference(detail, baselineDetail), delta: Self.difference(detail, previousDetail)))
-            previousDetail = detail
+            if !detail.isEmpty { previousDetail = detail }
         }
 
         private static func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
-            guard a.count == b.count, !a.isEmpty else { return 1 }
+            guard a.count == b.count, !a.isEmpty else { return missing }
             var changed = 0
             var index = 0
             while index + 2 < a.count {
@@ -532,7 +648,20 @@ extension TestHooks {
             store.received(pixels, geometry: geometry, time: time, displayed: displayed)
         }
 
-        func stream(_ stream: SCStream, didStopWithError error: any Error) {}
+        private let stopLock = NSLock()
+        private var stoppedWithError = false
+        /// Whether the stream stopped with an error: it delivers no more frames.
+        var stopped: Bool {
+            stopLock.lock()
+            defer { stopLock.unlock() }
+            return stoppedWithError
+        }
+
+        func stream(_ stream: SCStream, didStopWithError error: any Error) {
+            stopLock.lock()
+            stoppedWithError = true
+            stopLock.unlock()
+        }
     }
 }
 #endif

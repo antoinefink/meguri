@@ -25,6 +25,8 @@ final class SidebarSelectionTimingTests: PerfTestCase {
         bundle = build.expectedBundleIdentifier
         let fixture = try BrowserSearchPerfTests.fixture150k(build.repositoryRoot)
         app = launch(MeguriLaunch(fixture: fixture, windowSize: "large", extra: ["-MeguriStatsRollout", "on"]))
+        // Every run reports, whichever assertion fails first.
+        continueAfterFailure = true
         // The 150k collection keeps the main thread busy for a while after launch.
         waitUntilResponsive()
         let any = app.descendants(matching: .any)
@@ -82,10 +84,16 @@ final class SidebarSelectionTimingTests: PerfTestCase {
     /// apart, each within half a second, and at least `settle` seconds passed.
     private func waitUntilResponsive(settle: TimeInterval = 30, timeout: TimeInterval = 900) {
         let start = Date()
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(timeout)
+        func left() -> TimeInterval {
+            let remaining = clock.now.duration(to: deadline).components
+            return max(0, Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18)
+        }
         var quick = 0
         var slowest: TimeInterval = 0
         let spans = ResultText()
-        while quick < 10 || Date().timeIntervalSince(start) < settle, Date().timeIntervalSince(start) < timeout {
+        while quick < 10 || Date().timeIntervalSince(start) < settle, left() > 0 {
             let sent = Date()
             let pong = XCTNSNotificationExpectation(name: Notification.Name("\(bundle).testhooks.sidebarTimingPong"), object: nil,
                                                     notificationCenter: DistributedNotificationCenter.default())
@@ -95,11 +103,11 @@ final class SidebarSelectionTimingTests: PerfTestCase {
             }
             DistributedNotificationCenter.default().postNotificationName(
                 Notification.Name("\(bundle).testhooks.sidebarTimingPing"), object: nil, userInfo: nil, deliverImmediately: true)
-            let answered = XCTWaiter().wait(for: [pong], timeout: 300) == .completed
+            let answered = XCTWaiter().wait(for: [pong], timeout: min(300, max(0.1, left()))) == .completed
             let took = Date().timeIntervalSince(sent)
             slowest = max(slowest, took)
             quick = answered && took < 0.5 ? quick + 1 : 0
-            pause(1)
+            pause(min(1, left()))
         }
         let line = "launch: responsive after \(Int(Date().timeIntervalSince(start))) s (slowest ping \(Int(slowest * 1000)) ms;"
             + " main-thread spans of 0.5 s or more [s after launch, duration]: \(spans.value))"
@@ -124,6 +132,32 @@ final class SidebarSelectionTimingTests: PerfTestCase {
     private func click(_ identifier: String, _ label: String, hold: Int = 60, expect: String) {
         let result = run(["\(point(identifier)),\(hold),0,\(label)"], label: label)
         check(result, expect: expect)
+        guard let step = (result["steps"] as? [[String: Any]])?.first else {
+            XCTFail("\(label): the run reported no step")
+            return
+        }
+        XCTAssertNotNil(step["rowMs"] as? Double, "\(label): no captured frame showed the row selected")
+        XCTAssertEqual(step["commit"] as? String, expect, "\(label): the press's own route was not shown")
+        XCTAssertEqual(step["missingSamples"] as? Int, 0, "\(label): frames did not cover the row or the detail column")
+        // The row is selected in the list, after Core Animation's commit, within two
+        // display frames of its mouse-down: the press neither waits for its release
+        // nor redraws anything but the sidebar. (Pixels in the test VM's capture
+        // trail this by its compositing delay; `rowMs` reports them.)
+        let selected = step["rowStateMs"] as? Double
+        XCTAssertNotNil(selected, "\(label): the row was never selected")
+        if let selected {
+            XCTAssertLessThanOrEqual(selected, 50, "\(label): the row was selected \(selected) ms after its mouse-down")
+            if hold >= 200 {
+                XCTAssertLessThan(selected, step["holdMs"] as? Double ?? 0, "\(label): the row waited for the mouse-up")
+            }
+        }
+        // The row stays selected until its route is shown (the list may be replaced then).
+        if let lost = step["rowLostMs"] as? Double {
+            XCTAssertGreaterThanOrEqual(lost, step["commitMs"] as? Double ?? .infinity, "\(label): the row lost its selection before its route changed")
+        }
+        // Nothing of the outgoing page changes before the route does: no dimming,
+        // no relayout of its columns.
+        XCTAssertEqual(step["detailBeforeCommitFrames"] as? Int, 0, "\(label): the outgoing page changed before the new one")
     }
 
     /// Presses each row 40 ms after the previous release, whatever the app is doing.
@@ -135,6 +169,8 @@ final class SidebarSelectionTimingTests: PerfTestCase {
 
     private func check(_ result: [String: Any], expect: String) {
         XCTAssertNil(result["error"], "the timing run failed: \(result["error"] ?? "")")
+        // Timings need frames with a display time; a run without them measured nothing.
+        XCTAssertGreaterThan(result["displayedFrames"] as? Int ?? 0, 0, "the run captured no displayed frame")
         let commits = (result["changes"] as? [[String: Any]] ?? []).filter { $0["kind"] as? String == "selection" }
         XCTAssertEqual(commits.last?["value"] as? String, expect, "the run ended on another route")
     }
@@ -157,13 +193,18 @@ final class SidebarSelectionTimingTests: PerfTestCase {
         add(attachment)
         let object = (try? JSONSerialization.jsonObject(with: Data(text.value.utf8))) as? [String: Any] ?? ["error": "unreadable: \(text.value)"]
         for step in object["steps"] as? [[String: Any]] ?? [] {
-            let line = ["label", "holdMs", "rowMs", "rowMax", "commitMs", "contentMs", "lastChangeMs", "detailBeforeCommitMax",
+            let line = ["label", "holdMs", "rowStateMs", "rowLostMs", "rowMs", "rowMax", "commitMs", "contentMs", "lastChangeMs", "detailBeforeCommitMax",
                         "detailBeforeCommitFrames", "downDeliveredMs", "upDeliveredMs", "busy"]
                 .map { "\($0)=\(step[$0].map { "\($0)" } ?? "-")" }.joined(separator: " ")
             report.append(line)
         }
         print("meguri.sidebarTiming \(label): \(text.value)")
         return object
+    }
+    #else
+    /// The probe is the Mac's: elsewhere the suite must not pass by running nothing.
+    func testSidebarSelectionTimings() throws {
+        XCTFail("SidebarSelectionTimingTests measures the Mac sidebar; run it with --platform mac")
     }
     #endif
 }
