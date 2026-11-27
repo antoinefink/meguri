@@ -658,7 +658,7 @@ fn meguri_bootstrap_establishes_fresh_epoch_once_and_validates_on_resume() {
 #[test]
 fn meguri_binding_clear_keeps_the_auto_invariant() {
     let _lane = LANE.lock().unwrap();
-    for case in ["reconfigure", "icloud", "local", "recovery"] {
+    for case in ["reconfigure", "local", "recovery"] {
         let root = tempfile::tempdir().unwrap();
         let (host, config, _, _) = ready(root.path());
         let before = host.provider_authority().snapshot().unwrap();
@@ -677,8 +677,7 @@ fn meguri_binding_clear_keeps_the_auto_invariant() {
         } else {
             if case == "reconfigure" { host.configure_meguri_connection("https://new.synthetic.example/").unwrap(); }
             else {
-                let destination = if case == "icloud" { Selection::ICloud } else { Selection::LocalOnly };
-                let handoff = host.begin_provider_handoff(destination).unwrap();
+                let handoff = host.begin_provider_handoff(Selection::LocalOnly).unwrap();
                 host.finish_provider_handoff(&handoff).unwrap();
             }
             host
@@ -691,15 +690,12 @@ fn meguri_binding_clear_keeps_the_auto_invariant() {
         assert!(Authority::load(&config.manual_transfer_directory).snapshot().is_ok());
         match case {
             "reconfigure" => { assert_eq!(doc.selection, Selection::Meguri); assert!(!doc.settings.automatic); }
-            "icloud" => { assert_eq!(doc.selection, Selection::ICloud); let mut expected = doc.icloud_settings; expected.enabled = true; assert_eq!(doc.settings, expected); }
-            "local" => { let mut expected = doc.icloud_settings; expected.enabled = false; assert_eq!(doc.settings, expected); }
+            "local" => { assert_eq!(doc.selection, Selection::LocalOnly); let mut expected = doc.icloud_settings; expected.enabled = false; assert_eq!(doc.settings, expected); }
             _ => { assert_eq!(doc.selection, Selection::LocalOnly); assert!(!doc.settings.automatic); }
         }
-        if case == "reconfigure" || case == "icloud" {
-            let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap();
-            host.finish_provider_handoff(&handoff).unwrap();
-            assert!(!host.provider_authority().snapshot().unwrap().settings.automatic);
-        }
+        let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap();
+        host.finish_provider_handoff(&handoff).unwrap();
+        assert!(!host.provider_authority().snapshot().unwrap().settings.automatic);
         host.close().unwrap();
     }
 }

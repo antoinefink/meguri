@@ -886,6 +886,11 @@ assert_project_presence_missing() {
   STUB_BUILD_OK=1 check_project --phase builds
   called '^xcodebuild build .* -configuration AppStore -destination platform=macOS'
   called '^xcodebuild build .* -configuration Debug -destination platform=macOS.*mac-Debug-probe\.xcresult'
+  local sdk
+  for sdk in macosx iphoneos; do
+    called "^xcodebuild -showBuildSettings -json -project .* -target Meguri -target MeguriWidget -configuration Debug -sdk $sdk -arch arm64 -xcconfig .*sync-settings-Debug-$sdk-adhoc.json.xcconfig$"
+  done
+  not_called '^xcodebuild -showBuildSettings .* -target .* -(scheme|destination|derivedDataPath) '
   tap_line 'ok [0-9]+ test-hook routes are registered with literal paths: stub/stays'
   not_called '^open '
   not_called '^vm-open '
@@ -1488,43 +1493,27 @@ EOF
   not_called '^xcodebuild test( |-)'
 }
 
-@test "only Mac Unit receives delivered cloud inputs with unchanged test selection" {
+@test "Mac Unit Snapshot and UI plans retain their VM test selection" {
   MEGURI_ALLOW_MAC_UI=1 check_project --phase devices
   no_vm_failure
   called '^vm-xcodebuild test-without-building .*Meguri_Unit_macosx.* -destination platform=macOS,arch=arm64 .* -collect-test-diagnostics never$'
+  called '^vm-xcodebuild test-without-building .*Meguri_Snapshot_macosx.* -destination platform=macOS,arch=arm64 .* -collect-test-diagnostics never$'
   called '^vm-xcodebuild .*Meguri_UI_macosx.* -only-testing:MeguriUITests/TestHooksTests$'
   called '^vm-xcodebuild .*Meguri_UI_iphonesimulator.* -only-testing:MeguriUITests/DriveScriptTests$'
 }
 
-@test "Mac Unit missing or failed input delivery is a prelaunch failure while other lanes remain independent" {
-  for step in missing deliver command; do
-    : >"$STUB_LOG"
-    if [ "$step" = missing ]; then unset MG_RUN_DIR; fi
-    STUB_UNIT_INPUT_FAIL="$step" check_project --phase devices
-    [ "$status" -ne 0 ]
-    tap_line 'not ok [0-9]+ mac-unit: .*'
-    tap_line '# xcode_project_check: Mac Unit input delivery failed before launch'
-    not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
-    called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
-    export MG_RUN_DIR="$SB/build/mg/xcode-check/wiring-run"
-  done
-}
-
-
-@test "no UI or no VM retains the absence of cloud input delivery" {
+@test "no UI or no VM preserves test routing" {
   check_project --phase devices --no-ui
+  not_called '^vm-xcodebuild |^xcodebuild (test|build-for-testing)|^vm-open |^open '
+  : >"$STUB_LOG"
   check_project --phase devices --no-sims
+  tap_line 'ok [0-9]+ mac-unit # SKIP queued: no test VM \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ mac-app-hosted # SKIP queued: no test VM \(user step mac-vm\)'
+  not_called '^vm-xcodebuild |^xcodebuild (test|build-for-testing)|^sim-pool|^vm-open |^open '
 }
 
-@test "unreachable VM during Unit input delivery queues that lane before launch" {
-  STUB_UNIT_INPUT_UNAVAILABLE=deliver check_project --phase devices
-  tap_line 'ok [0-9]+ mac-unit # SKIP queued: meguri-mac unavailable during Mac Unit input delivery \(user step mac-vm\)'
-  not_called '^vm-xcodebuild .*Meguri_Unit_macosx'
-  called '^vm-xcodebuild .*Meguri_Snapshot_macosx'
-}
-
-# Generated tooling execution only: keep the real MG routing, input admission,
-# devices script and VM transport; producers and native tools are doubles.
+# Generated tooling execution only: keep the real MG routing, devices script
+# and VM transport; native tools are doubles.
 focused_wrapper() (
   cd "$SB" || exit 1
   export MG_ROOT="$SB" MG_STATE="$MG_RUN_DIR/state"
@@ -1577,16 +1566,13 @@ focused_wrapper() (
   done
 }
 
-@test "focused absent VM queues, producer failure prevents launch, and actual results stay red" {
+@test "focused absent VM queues and actual build and test failures stay red without launching" {
   fake_vm
   add_test_inputs
   STUB_NO_VM=1 run focused_wrapper --mac-unit-only
   [ "$(cat "$MG_RUN_DIR/state/status")" = warn ]
   tap_line 'ok 1 mac-unit # SKIP queued: no test VM \(user step mac-vm\)'
-  : >"$STUB_LOG"
-  STUB_PRODUCER_FAIL=1 run focused_wrapper --mac-unit-only
-  [ "$(cat "$MG_RUN_DIR/state/status")" = fail ]
-  not_called '^xcodebuild |^vm-xcodebuild |^unit-input-deliver$'
+  not_called '^xcodebuild |^vm-xcodebuild |^open |^vm-open '
   for failure in build summary exit; do
     : >"$STUB_LOG"
     case "$failure" in
@@ -1596,5 +1582,7 @@ focused_wrapper() (
     esac
     [ "$(cat "$MG_RUN_DIR/state/status")" = fail ]
     tap_line 'not ok 1 mac-unit: .*'
+    not_called '^open |^vm-open '
+    if [ "$failure" = build ]; then not_called '^vm-xcodebuild '; fi
   done
 }

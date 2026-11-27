@@ -54,7 +54,10 @@ EOF
   facts
   stub xcodebuild 'echo "xcodebuild $*" >>"$STUB_LOG"
 action="$1"; shift
-if [ "$action" = -showBuildSettings ]; then cat "$FX/settings.json"; exit 0; fi
+if [ "$action" = -showBuildSettings ]; then
+  case " $* " in *" -scheme "*|*" -destination "*|*" -derivedDataPath "*) exit 97 ;; esac
+  cat "$FX/settings.json"; exit 0
+fi
 config=""; result=""; dd=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -205,8 +208,7 @@ with open(sys.argv[1], "wb") as stream:
 PY
 }
 
-# installed_profile <push environment>: the profile Xcode would install for
-# the app (a development profile grants push "development").
+# installed_profile <push environment>: profiles may authorize unused push grants.
 installed_profile() {
   profile "$FX/profiles/daily.provisionprofile" DNQ34W43XX "$(jq -n --arg push "$1" '{
     "com.apple.application-identifier":"DNQ34W43XX.com.antoinefink.meguri", "com.apple.developer.team-identifier":"DNQ34W43XX",
@@ -246,7 +248,7 @@ PY_PROFILE
   called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_MAC_PROFILE_STYLE=Manual MEGURI_MAC_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
   called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_MAC_PROFILE_STYLE=Manual MEGURI_MAC_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
   not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|open '
-  [ "$(grep -n '^xcodebuild -showBuildSettings' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild build ' "$STUB_LOG" | cut -d: -f1)" ]
+  [ "$(grep -n '^xcodebuild -showBuildSettings' "$STUB_LOG" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^xcodebuild build ' "$STUB_LOG" | cut -d: -f1)" ]
   called "^identity $(built)$"
   called "^ditto -c -k --keepParent $(built) $SB/build/app/real-copy/Meguri.zip$"
   called "^pluginkit -r $(built)/Contents/PlugIns/MeguriWidget.appex$"
@@ -322,9 +324,17 @@ PY_PROFILE
 @test "the real copy removes an earlier run's leftover build before anything else" {
   mkdir -p "$(built)/Contents/PlugIns/MeguriWidget.appex"
   installed_profile production
+  python3 - "$FX/profiles/daily.provisionprofile" <<'PY_PROFILE'
+import plistlib, sys
+from pathlib import Path
+path = Path(sys.argv[1]); data = plistlib.loads(path.read_bytes())
+del data['Entitlements']['com.apple.security.application-groups']
+path.write_bytes(plistlib.dumps(data))
+PY_PROFILE
   real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-profile ]
+  [[ "$(field '.failures[0].message')" == *"app-group"* ]]
   called "^lsregister -u $(built)$"
   [ ! -e "$(built)" ]
   not_called '^xcodebuild'

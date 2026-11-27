@@ -102,8 +102,10 @@ cat "$6"'
   stub xcodebuild 'echo "xcodebuild $*" >>"$STUB_LOG"
 action="$1"; shift
 if [ "$action" = -showBuildSettings ]; then
+  # Model Xcode's target-mode CLI admission; scheme-only flags are invalid.
+  case " $* " in *" -scheme "*|*" -destination "*|*" -derivedDataPath "*) exit 97 ;; esac
   case "$*" in
-    *-derivedDataPath\ build/app/StandaloneDerivedData*)
+    *-configuration\ Debug\ -sdk\ macosx\ -arch\ arm64*)
       jq --arg signing "${FX_RESOLVED_SIGNING:-${MEGURI_APP_SIGNING:-adhoc}}" \
         "map(.buildSettings.MEGURI_SIGNING = \$signing)" "$FX_STANDALONE_SETTINGS"
       exit "${FX_SETTINGS_RC:-0}" ;;
@@ -247,8 +249,10 @@ EOF
 
 
 @test "app builds keep adhoc defaults without provisioning arguments" {
-  local platform mode
+  local platform mode sdk
   for platform in mac ios-sim; do
+    sdk=iphonesimulator
+    [ "$platform" != mac ] || sdk=macosx
     for mode in default adhoc; do
       unset MEGURI_APP_SIGNING
       [ "$mode" != adhoc ] || export MEGURI_APP_SIGNING=adhoc
@@ -257,6 +261,7 @@ EOF
       [ "$status" -eq 0 ]
       [ "$(field .status)" = pass ]
       called '^xcodebuild build-for-testing .* -testPlan UI -configuration Debug '
+      called "^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget -configuration Debug -sdk $sdk -arch arm64$"
       not_called 'MEGURI_SIGNING=|allowProvisioning'
     done
   done
@@ -508,7 +513,7 @@ PY
     [ "$(field .status)" = pass ]
     called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev$'
     called '^xcframework .* --configuration Release$'
-    [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | cut -d: -f1)" ]
+    [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | head -n 1 | cut -d: -f1)" ]
     called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev$'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
     [ "$(field .details.build.personal_preview)" = true ]
@@ -586,7 +591,9 @@ PY
     called '^lint$'
     called '^xcframework .* --configuration Debug$'
     called '^xcodebuild build -jobs [0-9]+ -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData '
-    called '^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData'
+    called '^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget -configuration Debug -sdk macosx -arch arm64( |$)'
+    not_called '^xcodebuild -showBuildSettings .* -(scheme|destination|derivedDataPath) '
+    not_called 'build/app/(DerivedData|PersonalPreviewDerivedData|RealCopyDerivedData)'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease)|xcrun (simctl|devicectl)'
     if [ "$mode" = team ]; then
       called '^xcodebuild build .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
@@ -650,30 +657,34 @@ EOF
 @test "standalone app rejects actual root read extra paths write exceptions invalid shapes and missing signed facts" {
   standalone_facts
   cp "$FX_APP_ENT" "$BATS_TEST_TMPDIR/normal.json"
-  local mutation
-  for mutation in \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] += ["/"]' \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = "/"' \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-write"] = ["/"]' \
-    '.["com.apple.security.app-sandbox"] = false'; do
+  local case_name mutation expected_failure
+  for case_name in root-read extra-path invalid-shape write-exception no-sandbox; do
+    expected_failure=standalone-product
+    case "$case_name" in
+      root-read) mutation='.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' ;;
+      extra-path) mutation='.["com.apple.security.temporary-exception.files.absolute-path.read-only"] += ["/"]' ;;
+      invalid-shape) mutation='.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = "/"' ;;
+      write-exception) mutation='.["com.apple.security.temporary-exception.files.absolute-path.read-write"] = ["/"]' ;;
+      no-sandbox) mutation='.["com.apple.security.app-sandbox"] = false' ;;
+    esac
     jq "$mutation" "$BATS_TEST_TMPDIR/normal.json" >"$FX_APP_ENT"
     mg build-app --platform mac --standalone
     [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '.failures[0].id')" = "$expected_failure" ]
     [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
   done
   cp "$BATS_TEST_TMPDIR/normal.json" "$FX_APP_ENT"
   local fault
   for fault in signature entitlements arch stamp; do
+    expected_failure=standalone-product
     case "$fault" in
       signature) FX_SIGNATURE_RC=1 mg build-app --platform mac --standalone ;;
-      entitlements) FX_ENTITLEMENTS_RC=1 mg build-app --platform mac --standalone ;;
+      entitlements) expected_failure=sync-packaging; FX_ENTITLEMENTS_RC=1 mg build-app --platform mac --standalone ;;
       arch) FX_ARCH='arm64 x86_64' mg build-app --platform mac --standalone ;;
       stamp) rm "$SB/app/Packages/MeguriCore/Binaries/.stamp"; mg build-app --platform mac --standalone ;;
     esac
     [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = standalone-product ]
+    [ "$(field '.failures[0].id')" = "$expected_failure" ]
     [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
   done
 }
@@ -697,6 +708,7 @@ EOF
   mg ui-test --physical-device "$PHONE" --suite MediaTests/testAudio
   [ "$status" -eq 0 ]
   called "^xcodebuild build-for-testing .* -destination platform=iOS,id=$PHONE .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$"
+  called '^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget -configuration Debug -sdk iphoneos -arch arm64 MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration$'
   [ "$(grep '^xcodebuild build-for-testing ' "$STUB_LOG" | grep -o 'MEGURI_SIGNING=team' | wc -l | tr -d ' ')" -eq 1 ]
 }
 
@@ -987,7 +999,9 @@ EOF
   called '^xcframework .* --configuration Debug$'
   called '^xcodebuild build-for-testing .* -destination generic/platform=iOS Simulator '
   called "^vm-test .* UI iphonesimulator id=$SIM Debug -only-testing:MeguriUITests/MediaTests/testAudio$"
-  not_called '^(host-lease|plutil)|^xcrun xcdevice|^xcodebuild test-without-building|allowProvisioningUpdates|--slices|MEGURI_SIGNING=team'
+  called "^plutil -extract CFBundleIdentifier raw -o - $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/Info.plist$"
+  ! grep '^plutil ' "$STUB_LOG" | grep -Ev "^plutil (-extract CFBundleIdentifier raw -o -|-convert json -o -) $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/(PlugIns/MeguriWidget.appex/)?Info.plist$"
+  not_called '^host-lease|^xcrun (xcdevice|devicectl)|^xcodebuild test-without-building|allowProvisioningUpdates|--slices|MEGURI_SIGNING=team|iCloud|CloudKit|mobileprovision|provisionprofile'
 }
 
 @test "explicit simulator UI suites reject zero tests, all skips, failures and unknown outcomes despite exit zero" {

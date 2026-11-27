@@ -293,7 +293,7 @@ sync_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-preview
     preview_args=(--personal-preview)
   fi
   xcodebuild -showBuildSettings -json -project "$PROJECT" -target Meguri -target MeguriWidget -configuration "$config" -sdk "$sdk" \
-    -derivedDataPath "$DD" -xcconfig "$output.xcconfig" >"$output" || return 1
+    -arch arm64 -xcconfig "$output.xcconfig" >"$output" || return 1
   python3 "$REPO/tools/tests/sync_build_configuration.py" --settings "$output" \
     --configuration "$config" --platform "$platform" --signing "$signing" ${preview_args[0]+"${preview_args[@]}"}
 }

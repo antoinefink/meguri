@@ -253,13 +253,17 @@ mg_app_build_action() {
   [ "$personal" != true ] || sync_args+=(--personal-preview)
   [ "$real" != true ] || sync_args+=(--real-copy)
   built_app="$(mg_app_products "$platform" "$config")/Meguri.app"
-  # Resolve both targets with the same destination and overrides as the build.
+  # Target-mode queries require SDK/architecture, not scheme-only destination
+  # or DerivedData flags. Keep the build's overrides for both targets.
   # Previews keep their existing named receipt and failure for unavailable settings.
   if [ "$action/$personal/$real" = build/false/false ]; then
     sync_settings="$MG_RUN_DIR/standalone-settings.json"
   fi
+  sdk=iphonesimulator
+  [ "$platform" != mac ] || sdk=macosx
+  [ "$platform" != ios-device ] || sdk=iphoneos
   if ! xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget -configuration "$config" \
-      -destination "$dest" -derivedDataPath "$MG_APP_DD" ${settings[0]+"${settings[@]}"} >"$sync_settings"; then
+      -sdk "$sdk" -arch arm64 ${settings[0]+"${settings[@]}"} >"$sync_settings"; then
     local settings_failure=sync-packaging
     [ "$action/$personal/$real" != build/false/false ] || settings_failure=standalone-product
     mg_failure "$settings_failure" "App and widget build settings could not be resolved"
