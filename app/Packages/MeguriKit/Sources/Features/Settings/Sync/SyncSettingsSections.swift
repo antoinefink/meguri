@@ -118,7 +118,6 @@ struct SyncServiceRows: View {
     @Environment(\.dismiss) private var dismiss
     @State private var destination: String?
     @State private var switchSource: SyncProviderSelection?
-    @State private var refusedForOp = false
     private var changing: Bool {
         get { collection.syncPresentation.serviceChanging }
         nonmutating set { collection.syncPresentation.serviceChanging = newValue }
@@ -134,8 +133,6 @@ struct SyncServiceRows: View {
         case .localOnly, nil: "localOnly"
         }
     }
-    /// V27.5: refused while an op could restore the binding before, or could not be read.
-    private var opBlocksChange: Bool { sync.serviceChangeRefusedForOperation }
     var body: some View {
         control
         // MP6.5: the control stays enabled while the provider is blocked.
@@ -176,10 +173,7 @@ struct SyncServiceRows: View {
             Text(SyncText.value("sync.service.changeFailed")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceChangeFailed")
         }
-        if refusedForOp, opBlocksChange {
-            Text(SyncText.value("sync.service.opFirst")).foregroundStyle(.secondary)
-                .accessibilityIdentifier("settings.sync.serviceRefused")
-        } else if !changing, !sync.serviceChangeAvailable, selected != "localOnly" {
+        if !changing, !sync.serviceChangeAvailable, selected != "localOnly" {
             Text(SyncText.value(sync.serviceChangeBusyKey)).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceBusy")
         }
@@ -191,8 +185,6 @@ struct SyncServiceRows: View {
     private func choose(_ value: String) {
         guard !accountSignOut || selected == "meguri" else { return }
         guard !collection.meguriSignInPreparing, !sync.meguriBusy, value != selected else { return }
-        refusedForOp = false
-        if opBlocksChange { refusedForOp = true; return }
         // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so leaving it asks nothing.
         if selected != "localOnly", !sync.meguriSetupNotFinished {
             // T21.1: the question opens only while the change can run; the reason shows under the control.

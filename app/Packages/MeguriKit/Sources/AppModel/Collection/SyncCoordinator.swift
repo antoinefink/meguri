@@ -2410,7 +2410,6 @@ public final class SyncCoordinator {
             }
         }
     }
-    public var serviceChangeRefusedForOperation: Bool { false }
     func foregroundAfterLocalResume() async {
         guard !closing, !replacing else { return }
         await backend?.resumeAfterCoreResume()

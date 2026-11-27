@@ -2634,17 +2634,6 @@
         }
       }
     },
-    "sync.service.opFirst": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finish or cancel the collection replacement before you change the service."
-          }
-        }
-      }
-    },
     "sync.switch.title.off": {
       "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
       "localizations": {

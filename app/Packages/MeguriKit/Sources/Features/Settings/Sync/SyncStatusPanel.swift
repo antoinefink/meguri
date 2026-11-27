@@ -196,8 +196,7 @@ struct SyncStatusActionButton: View {
             return sync.providerState?.selection != .meguri || (sync.meguriCanChoose && !sync.meguriBusy)
         case .serviceRecovery, .meguriConnectionRetry: return true
         case .copyDebugInfo:
-            // The damaged-collection screen (V19) is not built: Copy Debug Info
-            // is the one action that can run for that row.
+            // Copy Debug Info requires configured diagnostics callbacks.
             return collection.configuration.fieldDiagnostics != nil
         case .meguriCancel: return sync.meguriBusy
         case .meguriTryAgain: return sync.meguriCanSettle || sync.meguriRoutine == .acceptanceUnknown || sync.meguriCanChoose
@@ -208,8 +207,6 @@ struct SyncStatusActionButton: View {
         case .meguriRetryMedia: return sync.meguriCanRetryMedia || (sync.meguriRoutine == .mediaBlocked && !sync.meguriBusy)
         // MP7 step 5: shown while the upload waits, disabled while something else runs.
         case .meguriUploadStructure: return sync.meguriStructureUploadPending
-        // These have no entry outside their own lists.
-        case .abandon, .checkDatabase: return false
         }
     }
 
