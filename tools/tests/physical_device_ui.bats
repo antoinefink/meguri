@@ -102,7 +102,7 @@ cat "$6"'
   stub xcodebuild 'echo "xcodebuild $*" >>"$STUB_LOG"
 action="$1"; shift
 if [ "$action" = -showBuildSettings ]; then
-  # Model Xcode's target-mode CLI admission; scheme-only flags are invalid.
+  # Target-mode Xcode commands reject scheme-only flags.
   case " $* " in *" -scheme "*|*" -destination "*|*" -derivedDataPath "*) exit 97 ;; esac
   case "$*" in
     *-configuration\ Debug\ -sdk\ macosx\ -arch\ arm64*)
@@ -999,7 +999,8 @@ EOF
   called '^xcframework .* --configuration Debug$'
   called '^xcodebuild build-for-testing .* -destination generic/platform=iOS Simulator '
   called "^vm-test .* UI iphonesimulator id=$SIM Debug -only-testing:MeguriUITests/MediaTests/testAudio$"
-  called "^plutil -extract CFBundleIdentifier raw -o - $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/Info.plist$"
+  called "^plutil -convert json -o - $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/Info.plist$"
+  called "^plutil -convert json -o - $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/PlugIns/MeguriWidget.appex/Info.plist$"
   ! grep '^plutil ' "$STUB_LOG" | grep -Ev "^plutil (-extract CFBundleIdentifier raw -o -|-convert json -o -) $SB/build/app/DerivedData/Build/Products/Debug-iphonesimulator/Meguri.app/(PlugIns/MeguriWidget.appex/)?Info.plist$"
   not_called '^host-lease|^xcrun (xcdevice|devicectl)|^xcodebuild test-without-building|allowProvisioningUpdates|--slices|MEGURI_SIGNING=team|iCloud|CloudKit|mobileprovision|provisionprofile'
 }

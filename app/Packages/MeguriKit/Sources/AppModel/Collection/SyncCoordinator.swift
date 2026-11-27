@@ -398,14 +398,6 @@ public final class SyncCoordinator {
     public var mainStatus: SyncMainStatus {
         providerState?.selection == .meguri || providerNeedsAttention ? SyncKinds.meguri(meguriKindFacts) : SyncKinds.off
     }
-    var studyPreparationInput: StudyPreparationSyncInput {
-        .init(needsUser: needsUser || providerNeedsAttention, enabled: settings.enabled,
-            automatic: settings.automatic && storedAutomatic, paused: updateHold, selection: providerState?.selection,
-            meguriPhase: meguriAuthenticating ? .authenticating : meguriPhase, meguriReady: meguriReady,
-            meguriSettled: !meguriBusy && meguriAction == nil && !meguriAuthenticating,
-            meguriRoutine: meguriRoutine, meguriLastExchange: meguriLastExchange)
-    }
-    public var studyPreparationFacts: StudyPreparationSyncFacts { .mapping(studyPreparationInput) }
     public var meguriKindFacts: MeguriKindFacts {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
@@ -2671,9 +2663,11 @@ public final class SyncCoordinator {
     }
 
     func networkChanged(reachable: Bool) {
-        let wasReachable = self.reachable == true
+        guard !closing else { return }
+        let recovered = self.reachable == false && reachable
         self.reachable = reachable
-        if reachable && !wasReachable {
+        if recovered {
+            meguriReachabilityRecoveryRevision &+= 1
             requestMeguriWake(automatic: true)
             resumeMeguriMediaIfNeeded(.network)
         }
