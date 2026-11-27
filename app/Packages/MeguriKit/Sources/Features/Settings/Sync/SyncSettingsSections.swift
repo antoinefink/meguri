@@ -27,7 +27,7 @@ struct SyncSettingsSections: View {
             SyncServiceRows(collection: collection, host: host)
         } header: { heading }
         Section {
-            MeguriAccountRows(collection: collection, draft: draft, footnoteInRows: false)
+            MeguriAccountRows(collection: collection, draft: draft, host: host, footnoteInRows: false)
             // The first sign-in's progress: the status row is not shown in this form.
             if sync.mainStatus.titleKey == "sync.meguri.status.signingIn.title" {
                 ProgressView(SyncText.value("sync.meguri.status.signingIn.title"))
@@ -47,16 +47,16 @@ struct SyncSettingsSections: View {
     }
     @ViewBuilder private var troubleshooting: some View {
         Section {
-            NavigationLink {
-                SyncTroubleshootingPage(collection: collection, host: host)
-            } label: { Text(SyncText.value("sync.settings.troubleshooting")) }
+            SyncSettingsLink(.troubleshooting, collection: collection, host: host) {
+                Text(SyncText.value("sync.settings.troubleshooting"))
+            }
                 .accessibilityIdentifier("settings.sync.troubleshooting")
         }
     }
     @ViewBuilder private var sections: some View {
         Section {
             SyncServiceRows(collection: collection, host: host)
-            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft) }
+            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft, host: host) }
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
@@ -217,6 +217,7 @@ struct SyncServiceRows: View {
 struct MeguriAccountRows: View {
     let collection: ReviewCollection
     let draft: MeguriSignInDraft
+    var host: AppNavigation.SheetHost = .main
     /// The setup footnote is a row here, or the group's footer (N15.7).
     var footnoteInRows = true
     private enum Field: Hashable { case address, username, password }
@@ -289,18 +290,7 @@ struct MeguriAccountRows: View {
                 }
             } else {
                 // N15.2 row 2: the username is the row's value; the page has both facts.
-                NavigationLink {
-                    Form {
-                        LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
-                            .accessibilityIdentifier("settings.sync.meguri.account.address")
-                        LabeledContent(SyncText.value("sync.meguri.username"), value: sync.meguriUsername ?? "")
-                            .accessibilityIdentifier("settings.sync.meguri.account.username")
-                        SyncServiceRows(collection: collection, host: .main, accountSignOut: true)
-                    }
-                    .formStyle(.grouped)
-                    .navigationTitle(SyncText.value("sync.settings.account"))
-                    .accessibilityIdentifier("settings.sync.meguri.account.content")
-                } label: {
+                SyncSettingsLink(.account, collection: collection, host: host) {
                     LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriUsername ?? "")
                 }
                 .accessibilityIdentifier("settings.sync.meguri.account")
@@ -618,9 +608,7 @@ struct SyncMainStatusRows: View {
         // An issues row only for an issue beside the state itself (resume fix):
         // Meguri Sync's media-blocked row needs the files it lists.
         if SyncStatusCopy.showsIssues(sync) {
-            NavigationLink {
-                MeguriAffectedFilesPage(collection: collection)
-            } label: {
+            SyncSettingsLink(.meguriAffectedFiles, collection: collection, host: host) {
                 if let key = status.issuesRowKey, let count = MeguriAffectedCount.value(sync) {
                     Text(SyncText.format(key, Int64(clamping: count)))
                 } else {
@@ -680,14 +668,9 @@ struct SyncTroubleshootingPage: View {
             }
             if let callbacks = collection.configuration.fieldDiagnostics {
                 Section {
-                    NavigationLink {
-                        Form {
-                            SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
-                                safeExport: { try await callbacks.readableExport(sync: sync.debugFacts) }, writeClipboard: callbacks.writeClipboard)
-                        }
-                        .formStyle(.grouped)
-                        .navigationTitle(SyncText.value("sync.trouble.log"))
-                    } label: { Text(SyncText.value("sync.trouble.log")) }
+                    SyncSettingsLink(.syncLog, collection: collection, host: host) {
+                        Text(SyncText.value("sync.trouble.log"))
+                    }
                         .accessibilityIdentifier("sync.trouble.log")
                     SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: "sync.trouble.copyDebugInfo")
                 }

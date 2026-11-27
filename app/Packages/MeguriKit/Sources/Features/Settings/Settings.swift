@@ -252,12 +252,17 @@ public struct MacSettingsView: View {
     private let collection: ReviewCollection
     private let present: (SheetRoute) -> Void
     @AppStorage("settings.selectedSection") private var selectedSection = "accountSync"
+    @State private var detailPath: [SyncSettingsDestination] = []
     public init(collection: ReviewCollection, present: @escaping (SheetRoute) -> Void) {
         self.collection = collection; self.present = present
     }
     public var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(selection: Binding<String?>(get: { selectedSection }, set: { if let value = $0, value != selectedSection { selectedSection = value } })) {
+            List(selection: Binding<String?>(get: { selectedSection }, set: {
+                guard let value = $0, value != selectedSection else { return }
+                if value != section { detailPath.removeAll() }
+                selectedSection = value
+            })) {
                 ForEach(SettingsPage.visible.filter(matchesSearch), id: \.self) { page in
                     SettingsPageLabel(page: page)
                         .tag(page.rawValue)
@@ -271,17 +276,34 @@ public struct MacSettingsView: View {
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 260)
         } detail: {
-            if section == "accountSync" {
-                NavigationStack {
-                    // The pane's title bar names it; the touch page keeps its section headers.
-                    AccountSyncView(collection: collection, host: .settings, showsHeading: false)
-                }
-            } else if section == "backups" {
-                BackupsView(collection: collection, host: .settings).detailColumnChrome()
-            } else if section == "integrations" {
-                SentenceMiningPane(model: collection.sentenceMining).detailColumnChrome()
-            } else {
-              Form {
+            NavigationStack(path: $detailPath) {
+                Group { detailContent }
+                    .navigationDestination(for: SyncSettingsDestination.self) { destination in
+                        destination.view(collection: collection, host: .settings)
+                    }
+            }
+        }
+        .onAppear {
+            if selectedSection == "connection" { selectedSection = "ankiServer" }
+            if !SettingsPage.visible.contains(where: { $0.rawValue == selectedSection }) { selectedSection = "accountSync" }
+            consumeAccountRequest()
+        }
+        .onChange(of: section) { _, _ in detailPath.removeAll() }
+        .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeAccountRequest() }
+        .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings.root.content")
+    }
+    @ViewBuilder private var detailContent: some View {
+        if section == "accountSync" {
+            // The pane's title bar names it; the touch page keeps its section headers.
+            AccountSyncView(collection: collection, host: .settings, showsHeading: false)
+        } else if section == "backups" {
+            BackupsView(collection: collection, host: .settings).detailColumnChrome()
+        } else if section == "integrations" {
+            SentenceMiningPane(model: collection.sentenceMining).detailColumnChrome()
+        } else {
+            Form {
                 if section == "collection" {
                     SettingsCollectionFilesSection(collection: collection, present: present, showsHeading: false)
                     if SettingsPage.showsAnkiServer { serverActions }
@@ -304,17 +326,7 @@ public struct MacSettingsView: View {
             .formStyle(.grouped)
             .navigationTitle(Text(section == "collection" ? "Collection" : "Anki Server", bundle: .module))
             .detailColumnChrome()
-            }
         }
-        .onAppear {
-            if selectedSection == "connection" { selectedSection = "ankiServer" }
-            if !SettingsPage.visible.contains(where: { $0.rawValue == selectedSection }) { selectedSection = "accountSync" }
-            consumeAccountRequest()
-        }
-        .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeAccountRequest() }
-        .manualTransferPresentation(model: collection.manualTransfers, isActive: collection.navigation.sheet != .manualTransfer)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.root.content")
     }
     /// A saved section that is now hidden shows Account & Sync, from the first render.
     private var section: String {
@@ -322,6 +334,7 @@ public struct MacSettingsView: View {
     }
     private func consumeAccountRequest() {
         guard collection.syncPresentation.settingsRequest != nil else { return }
+        detailPath.removeAll()
         selectedSection = "accountSync"
         collection.syncPresentation.settingsSearch = ""
         collection.syncPresentation.settingsRequest = nil

@@ -3,9 +3,7 @@ import CoreBridge
 import Foundation
 import Instrumentation
 import Observation
-#if DEBUG
 import OSLog
-#endif
 
 /// One production collection, held above shell layouts.
 @Observable
@@ -226,7 +224,11 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     /// Shared by the main scene, Settings, imports and every shell layout.
     public private(set) var sync: SyncCoordinator
     private var backgroundLease: UInt64 = 0
-    private var backgroundDeadlineMilliseconds: Int64?
+    private static let defaultBackgroundSuspendTimeoutMilliseconds: UInt32 = 1_500
+    /// Only the final suspend is replaceable; flush and foreground resume always use Core.
+    @ObservationIgnored var finalBackgroundSuspend: @MainActor (UInt32) async throws(BridgeError) -> SuspendOutcome = {
+        try await CoreCollectionService().suspend(timeoutMilliseconds: $0)
+    }
     private var backgroundLeaseExpired = false
     private let collection: CoreCollectionService
     private let providerDirectory: URL
@@ -2798,7 +2800,17 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         }
     }
     public func setForeground(_ active: Bool) {
+        setForeground(active, deadlineMilliseconds: nil)
+    }
+    private func setForeground(_ active: Bool, deadlineMilliseconds: Int64?,
+                               currentBudgetMilliseconds: (@MainActor () -> Double?)? = nil) {
         guard active != foreground else { return }
+        let remainingAtEntry = deadlineMilliseconds.map { Double($0) - Date().timeIntervalSince1970 * 1_000 }
+        let began = ContinuousClock.now
+        if !active {
+            backgroundLease &+= 1
+            backgroundLeaseExpired = false
+        }
         foreground = active
         backupTrigger.setTimerEnabled(active)
         // MP6.10: back in the foreground, the background path stops waiting for a
@@ -2836,7 +2848,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 // even though there is no local writer to flush or suspend.
                 if sync.syncOwnerAttached {
                     if active { await sync.foregroundAfterLocalResume() }
-                    else { _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) }
+                    else { _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired || lease != backgroundLease ? nil : deadlineMilliseconds) }
                 }
                 resuming = false
                 return
@@ -2877,7 +2889,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                     }
                     try await collection.flushForBackground()
                     didFlushLocally?()
-                    guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
+                    guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired || lease != backgroundLease ? nil : deadlineMilliseconds) else {
                         throw BridgeError.unavailable(reason: "Sync could not suspend")
                     }
                     if !foreground, !closing, lease == backgroundLease, !backgroundLeaseExpired {
@@ -2887,6 +2899,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                     // cancelled automatic operation until its terminal result.
                     await backupTrigger.drain()
                     backupTrigger.pauseTimer()
+                    guard !foreground, !closing, !closed, lease == backgroundLease, !backgroundLeaseExpired else { return }
                     #if os(macOS)
                     if miningOwner?.enabled == true {
                         // P1.1/H14: browser mining outlives the main window.
@@ -2896,15 +2909,40 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                         return
                     }
                     #endif
-                    try await suspendCollectionForBackground()
+                    let timeout: UInt32
+                    // Keep the sync event's absolute deadline, but charge local
+                    // drains against monotonic time so wall-clock changes cannot
+                    // extend or exhaust the original UIKit estimate.
+                    let remaining = remainingAtEntry.map { $0 - (ContinuousClock.now - began) / .milliseconds(1) }
+                        ?? currentBudgetMilliseconds?()
+                    if let remaining {
+                        guard remaining >= 1 else { return }
+                        // SQLite busy_timeout accepts signed 32-bit milliseconds;
+                        // keep that bound even though the bridge takes UInt32.
+                        timeout = UInt32(min(remaining, Double(Int32.max)))
+                    } else {
+                        // S1's WAL flush does not release locks. An unknown OS
+                        // estimate still needs the original bounded local suspend.
+                        timeout = Self.defaultBackgroundSuspendTimeoutMilliseconds
+                    }
+                    try await suspendCollectionForBackground(timeoutMilliseconds: timeout)
                 }
             } catch { self.error = String(describing: error) }
         }
     }
-    private func suspendCollectionForBackground() async throws {
-        switch try await collection.suspend(timeoutMilliseconds: 1_500) {
-        case .suspended: deferredSuspend = nil
-        case .deferred(let id): deferredSuspend = id
+    private func suspendCollectionForBackground(
+        timeoutMilliseconds: UInt32 = ReviewCollection.defaultBackgroundSuspendTimeoutMilliseconds
+    ) async throws {
+        do {
+            switch try await finalBackgroundSuspend(timeoutMilliseconds) {
+            case .suspended: deferredSuspend = nil
+            case .deferred(let id): deferredSuspend = id
+            }
+        } catch BridgeError.suspendDeadline(let phase) {
+            // S1/S4: incomplete teardown is recovered by the real foreground resume.
+            // Do not overwrite (or clear) an unrelated error shown by Home.
+            Logger(subsystem: "Meguri", category: "BackgroundSuspend")
+                .notice("Background suspend deadline: \(phase, privacy: .private)")
         }
     }
     public func waitForLifecycle() async { await lifecycleTask?.value }
@@ -2919,14 +2957,11 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     func waitForCollectionActivation() async { await collectionActivationCompletion?.value }
     /// The UIKit assertion owner supplies the OS's remaining time, never a
     /// guessed duration. Tokens keep a late expiry out of a later foreground.
-    public func beginBackgroundTask(deadlineMilliseconds: Int64?) -> UInt64? {
+    public func beginBackgroundTask(deadlineMilliseconds: Int64?,
+                                    currentBudgetMilliseconds: (@MainActor () -> Double?)? = nil) -> UInt64? {
         guard foreground else { return nil }
-        backgroundLease &+= 1
-        backgroundDeadlineMilliseconds = deadlineMilliseconds
-        backgroundLeaseExpired = false
-        let token = backgroundLease
-        setForeground(false)
-        return token
+        setForeground(false, deadlineMilliseconds: deadlineMilliseconds, currentBudgetMilliseconds: currentBudgetMilliseconds)
+        return backgroundLease
     }
     public func backgroundTaskExpired(_ token: UInt64) {
         guard token == backgroundLease, !foreground else { return }

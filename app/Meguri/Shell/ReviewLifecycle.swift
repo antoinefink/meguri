@@ -57,7 +57,7 @@ enum ReviewBackgroundLease {
         guard let collection, collection.foreground else { return }
         let lease = Lease(collection: collection)
         lease.identifier = UIApplication.shared.beginBackgroundTask(withName: "Review and sync flush") {
-            Task { @MainActor in lease.expire() }
+            lease.expire()
         }
         let remaining = UIApplication.shared.backgroundTimeRemaining
         let deadline: Int64?
@@ -65,7 +65,12 @@ enum ReviewBackgroundLease {
            remaining < Double(Int64.max / 1_000) - Date().timeIntervalSince1970 {
             deadline = Int64((Date().timeIntervalSince1970 + remaining) * 1_000)
         } else { deadline = nil }
-        lease.token = collection.beginBackgroundTask(deadlineMilliseconds: deadline)
+        lease.token = collection.beginBackgroundTask(deadlineMilliseconds: deadline, currentBudgetMilliseconds: {
+            let remaining = UIApplication.shared.backgroundTimeRemaining
+            guard lease.identifier != .invalid, remaining.isFinite, remaining >= 0,
+                  remaining < Double(Int64.max / 1_000) else { return nil }
+            return remaining * 1_000
+        })
         Task {
             await collection.waitForLifecycle()
             lease.finish()
