@@ -587,13 +587,17 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     /// W3: the number from every field's session value after a flush; W4: the page wraps the selection.
     public func cloze(sameNumber: Bool) {
-        guard canCloze, let expected = activeLoad else { return }
+        guard canCloze, let expected = activeLoad, let ord = draft.focusedField else { return }
         Task {
             do {
                 try await flush(hold: false)
+                // F13: the wrap names the field Cloze was chosen in. Focus can move
+                // during the flush (Next Field on the keyboard bar); the page refuses then.
+                guard draft.focusedField == ord else { return }
                 let highest = Self.highestCloze(draft.values)
                 let number = sameNumber ? max(highest, 1) : highest + 1
-                _ = try await call(["type": "wrap", "loadId": expected, "prefix": "{{c\(number)::", "suffix": "}}"], load: expected)
+                _ = try await call(["type": "wrap", "loadId": expected, "ord": ord, "prefix": "{{c\(number)::", "suffix": "}}"],
+                                   load: expected)
             } catch {}
         }
     }

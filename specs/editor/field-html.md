@@ -180,7 +180,7 @@ A patch with neither fields nor tags is not sent.
 - Each entry has the field name as its label, the input, and a mode button (H6). Accessibility identifiers: `editor.field.<ord>`, `editor.field.<ord>.label`, `editor.field.<ord>.htmlToggle`.
 - Changed 2026-11-19 (Antoine; `docs/design/native-interface-contract.md` N17.1): an entry has its label and its input, and no mode button. The editor has **one HTML mode control**, outside the field list:
   - It acts on the field that has focus; when no field has focus, on the field of this editor that last had it. Until a field has had focus it is disabled.
-  - Touch: it is in the keyboard accessory bar, at its leading end, so it shows whenever a field is being edited. Mac: it is in the editor's bottom bar, at its leading end.
+  - Touch: it is in the keyboard accessory bar, at its trailing end after Previous and Next Field (N17.1, 2026-11-27), so it shows whenever a field is being edited. Mac: it is in the editor's bottom bar, at its leading end.
   - It is shown selected while the field it acts on is in HTML mode, and its accessibility value says so. Its label is "HTML Editor" (`editor/formatting` F19's name for the command).
   - It carries the identifier `editor.field.<ord>.htmlToggle` of the field it acts on, so one element holds that identifier at a time. While no field has had focus the Add screen's control is `editor.add.htmlToggle`.
   - Activating it is H6's switch: a pending commit first, the caret into the text area or back, no input recorded. It never moves focus to another field.

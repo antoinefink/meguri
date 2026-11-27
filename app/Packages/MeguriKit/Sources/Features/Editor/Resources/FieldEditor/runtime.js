@@ -826,9 +826,12 @@
             return {applied: format(current, message.command)};
         }
         case "wrap": {
-            keys(message, ["type", "loadId", "prefix", "suffix"]);
-            if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
-            if (held || !current || current.mode !== "rich") return {applied: false};
+            keys(message, ["type", "loadId", "ord", "prefix", "suffix"]);
+            if (!Number.isInteger(message.ord) || typeof message.prefix !== "string" || typeof message.suffix !== "string") {
+                throw new Error("Invalid wrap");
+            }
+            // F13: only the field the host named, and only while it still has the focus.
+            if (held || !current || current.ord !== message.ord || current.mode !== "rich") return {applied: false};
             cancelPicture(current);
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
