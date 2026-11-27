@@ -563,7 +563,11 @@ impl CoreHost {
             // Frozen internal conformance callers retain actual cloud inputs.
             meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None)
         };
-        let provider = meguri_sync::provider::Authority::load(&config.manual_transfer_directory);
+        let provider = if retire_icloud {
+            meguri_sync::provider::Authority::load_application(&config.manual_transfer_directory)
+        } else {
+            meguri_sync::provider::Authority::load(&config.manual_transfer_directory)
+        };
         if migration.is_err() { provider.close_admission(); }
         if !meguri_sync::policy::TransferPolicy::new(&config.manual_transfer_directory)
             .active().is_ok_and(|active| active.is_none()) {
@@ -1027,6 +1031,85 @@ mod resource_liveness_tests {
             Arc::new(SeededRandom::new(37)),
             Arc::new(meguri_storage::space::StatvfsSpace),
         )
+    }
+
+    #[test]
+    fn failed_application_retirement_stays_closed_across_compose_and_refresh_until_retry() {
+        use meguri_model::faultpoint::{self, Fault};
+        use meguri_sync::provider::{Authority, LegacyInput, LegacySettings, ProviderDocument, Selection};
+        for (selection, destination, remove) in [
+            (Selection::ICloud, None, false),
+            (Selection::ICloud, Some(Selection::Meguri), false),
+            (Selection::ICloud, Some(Selection::Meguri), true),
+            (Selection::Meguri, Some(Selection::ICloud), false),
+            (Selection::Meguri, Some(Selection::ICloud), true),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut config = config_for_prepared(root.path());
+            config.manual_transfer_directory = root.path().join("installation");
+            assert!(config.cloud.is_none());
+            std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
+            let path = config.manual_transfer_directory.join("provider.json");
+            let mut raw = serde_json::to_value(ProviderDocument::migration(LegacySettings {
+                enabled: true, paused: false, automatic: false, media: true,
+            })).unwrap();
+            raw["selection"] = serde_json::json!(selection);
+            raw["meguri"] = serde_json::json!({"reference":"synthetic-retained", "revision":1,
+                "endpoint":"https://sync.example.test/"});
+            raw["future"] = serde_json::json!({"retained":true});
+            if let Some(destination) = destination {
+                raw["handoff"] = serde_json::json!({"old":selection,"destination":destination,"binding":null,
+                    "publication":null,"generation":1,"revision":1,"remove_credentials":remove});
+            }
+            let bytes = serde_json::to_vec_pretty(&raw).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            let historical = Authority::load(&config.manual_transfer_directory).snapshot().unwrap();
+            let process = ProcessCore::new(config.engine.clone()).unwrap();
+            // Inject only composition's provider write, then open the local
+            // collection normally so collection-sidecar writes can succeed.
+            faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+            let composed = CoreHost::compose_on(&process, config.clone(), true);
+            faultpoint::disarm("storage.sidecar.before_save");
+            let (host, paths, options) = composed.unwrap();
+            let authority = host.provider_authority().clone();
+            assert!(authority.network_blocked());
+            let failure = authority.snapshot().unwrap_err();
+            host.engine.open_raw(&paths.collection(), options).unwrap();
+            host.set_close_state(CloseState::Active);
+            let generation = host.collection().unwrap().generation();
+            for _ in 0..3 {
+                host.refresh_provider_admission();
+                assert!(authority.network_blocked());
+                assert_eq!(authority.snapshot().unwrap_err(), failure);
+                assert!(!authority.permits_icloud_account_read());
+                assert!(authority.begin_discovery().is_err());
+                assert!(host.cloud_runtime().is_none());
+                assert!(host.collection().unwrap().reader(meguri_storage::ReaderRole::Query).is_ok());
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            }
+            meguri_engine::decks::add(&host.collection().unwrap(), "Local study during retirement".into()).unwrap();
+            // Scope rejection must not let an ordinary metadata write expose
+            // the unchanged retired record either.
+            assert!(authority.save_settings(historical.settings).is_err());
+            host.refresh_provider_admission();
+            assert!(authority.network_blocked() && authority.snapshot().is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            CoreHost::migrate_application_provider_configuration(&config.manual_transfer_directory, LegacyInput::Absent).unwrap();
+            host.refresh_provider_admission();
+            assert!(Arc::ptr_eq(&authority, host.provider_authority()));
+            assert!(!authority.network_blocked());
+            let document = authority.snapshot().unwrap();
+            assert_eq!(document.selection, Selection::LocalOnly);
+            assert!(document.handoff.is_none() && document.binding.is_none());
+            assert!(!document.settings.enabled && !document.permits_meguri_transfer());
+            assert_eq!(document.meguri.is_none(), remove);
+            assert!(!authority.permits_icloud_account_read());
+            assert_eq!(host.collection().unwrap().generation(), generation);
+            let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(after["retiredICloud"], raw);
+            assert_eq!(after["future"], raw["future"]);
+            host.close().unwrap();
+        }
     }
 
     fn sample_locked(host: &CoreHost, collection: &Collection, expected: ResourceMode) {

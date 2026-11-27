@@ -474,6 +474,29 @@ fn ordinary_host_open_and_reopen_do_not_discover_an_account_for_a_new_installati
 }
 
 #[test]
+fn historical_cloud_inputs_retain_admission_across_host_open_and_refresh() {
+    use meguri_sync::provider::{LegacyInput, LegacySettings, Selection};
+    let root = tempfile::tempdir().unwrap();
+    let account = Arc::new(Account(AtomicUsize::new(0)));
+    let config = fixture(root.path(), account.clone());
+    CoreHost::migrate_provider_configuration(&config.manual_transfer_directory, LegacyInput::Settings(
+        LegacySettings { enabled: true, paused: false, automatic: true, media: true },
+    )).unwrap();
+    let host = CoreHost::open(config.clone()).unwrap();
+    assert!(host.cloud_runtime().is_some());
+    let before = std::fs::read(config.manual_transfer_directory.join("provider.json")).unwrap();
+    for _ in 0..3 {
+        host.refresh_provider_admission();
+        assert!(!host.provider_authority().network_blocked());
+        assert_eq!(host.provider_authority().snapshot().unwrap().selection, Selection::ICloud);
+        assert!(host.provider_authority().permits_icloud_account_read());
+        assert_eq!(std::fs::read(config.manual_transfer_directory.join("provider.json")).unwrap(), before);
+    }
+    assert!(account.0.load(Ordering::SeqCst) > 0);
+    host.close().unwrap();
+}
+
+#[test]
 fn application_upgrade_reopens_archived_connected_publication_through_host_startup() {
     use meguri_engine::device_state::{AccountBinding, DeviceState, PublicationDecision};
     use meguri_sync::provider::{LegacySettings, ProviderDocument, Selection};

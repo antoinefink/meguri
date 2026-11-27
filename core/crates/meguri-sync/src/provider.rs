@@ -78,6 +78,10 @@ pub struct ProviderDocument {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeguriConnection { pub reference: String, pub revision: u64, pub endpoint: String }
 impl ProviderDocument {
+    fn requires_icloud_retirement(&self) -> bool {
+        self.selection == Selection::ICloud
+            || self.handoff.as_ref().is_some_and(|h| h.old == Selection::ICloud || h.destination == Selection::ICloud)
+    }
     pub fn migration(settings: LegacySettings) -> Self {
         Self { version: 1, revision: 1, selection: if settings.enabled { Selection::ICloud } else { Selection::LocalOnly },
             settings, binding: None, handoff: None, legacy_binding_pending: settings.enabled, meguri: None,
@@ -151,6 +155,7 @@ fn put(doc: &mut Map<String, Value>, value: &ProviderDocument) -> Result<(), Sto
 /// sidecar operations never hold Runtime/tracking ownership.
 pub struct Authority {
     path: PathBuf, state: Mutex<AuthorityState>,
+    scope: AuthorityScope,
     open: AtomicBool,
     writers: AtomicBool,
     discovery: Mutex<(u64, usize)>,
@@ -163,6 +168,19 @@ pub struct Authority {
     #[cfg(feature = "test-hooks")]
     cancellation_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     restart_intent: Option<HandoffIntent>,
+}
+#[derive(Clone, Copy)]
+enum AuthorityScope { Historical, Application }
+impl AuthorityScope {
+    fn check(self, doc: &ProviderDocument) -> Result<(), StorageError> {
+        if matches!(self, Self::Application) && doc.requires_icloud_retirement() { return Err(invalid()); }
+        Ok(())
+    }
+    fn decode(self, raw: Option<&Map<String, Value>>) -> Result<Option<ProviderDocument>, StorageError> {
+        let doc = decode(raw)?;
+        if let Some(doc) = &doc { self.check(doc)?; }
+        Ok(doc)
+    }
 }
 struct AuthorityState {
     document: Result<ProviderDocument, StorageError>,
@@ -228,10 +246,20 @@ impl Authority {
         }
     }
     pub fn load(root: &Path) -> Arc<Self> {
+        Self::load_scoped(root, AuthorityScope::Historical)
+    }
+    /// Application owners cannot expose an iCloud record whose retirement
+    /// failed. Reload keeps the same scope until a successful local migration.
+    pub fn load_application(root: &Path) -> Arc<Self> {
+        let authority = Self::load_scoped(root, AuthorityScope::Application);
+        if authority.snapshot().is_err() { authority.close_admission(); }
+        authority
+    }
+    fn load_scoped(root: &Path, scope: AuthorityScope) -> Arc<Self> {
         let path = root.join("provider.json");
-        let state = sidecar::read_document(&path, decode).and_then(|document| document.ok_or_else(invalid));
+        let state = sidecar::read_document(&path, |raw| scope.decode(raw)).and_then(|document| document.ok_or_else(invalid));
         let restart_intent = state.as_ref().ok().and_then(|doc| doc.handoff.clone());
-        Arc::new(Self { path, state: Mutex::new(AuthorityState { document: state,
+        Arc::new(Self { path, scope, state: Mutex::new(AuthorityState { document: state,
                 closures: AdmissionClosures { ordinary: Arc::new(()), handoff_revision: None } }),
             open: AtomicBool::new(true), writers: AtomicBool::new(false), discovery: Mutex::new((0, 0)),
             original_completion: AtomicBool::new(false), completion: Mutex::new(None),
@@ -278,9 +306,7 @@ impl Authority {
             let raw = raw.ok_or_else(invalid)?;
             if legacy_marker(raw) { Ok(None) } else { decode(Some(raw)) }
         })?;
-        let retired = |doc: &ProviderDocument| doc.selection == Selection::ICloud
-            || doc.handoff.as_ref().is_some_and(|h| h.old == Selection::ICloud || h.destination == Selection::ICloud);
-        if current.as_ref().is_some_and(|doc| !retired(doc)) { return Ok(()); }
+        if current.as_ref().is_some_and(|doc| !doc.requires_icloud_retirement()) { return Ok(()); }
         sidecar::update_document(&path, |raw| {
             if legacy_marker(raw) {
                 let previous = Value::Object(raw.clone());
@@ -290,7 +316,7 @@ impl Authority {
                 return Ok(());
             }
             let mut doc = decode(Some(raw))?.ok_or_else(invalid)?;
-            if !retired(&doc) { return Ok(()); }
+            if !doc.requires_icloud_retirement() { return Ok(()); }
             // Preserve the complete pre-upgrade record, including unknown
             // members and any interrupted handoff, as historical evidence.
             let previous = Value::Object(raw.clone());
@@ -353,7 +379,7 @@ impl Authority {
         let failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
         self.close_admission();
         if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
-        let value = sidecar::read_document(&self.path, decode).and_then(|doc| doc.ok_or_else(invalid));
+        let value = sidecar::read_document(&self.path, |raw| self.scope.decode(raw)).and_then(|doc| doc.ok_or_else(invalid));
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.document = value.clone();
         value?;
@@ -725,9 +751,10 @@ impl Authority {
         let mut entered = false;
         let result = sidecar::update_document(&self.path, |raw| {
             entered = true;
-            let mut doc = decode(Some(raw))?.ok_or_else(invalid)?;
+            let mut doc = self.scope.decode(Some(raw))?.ok_or_else(invalid)?;
             let before = raw.clone();
             change(raw, &mut doc)?;
+            self.scope.check(&doc)?;
             put(raw, &doc)?;
             pending = Some(PendingPublication { before, desired: raw.clone(), document: doc.clone(), facts, retryable, cancel: None });
             Ok(doc)

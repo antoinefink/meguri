@@ -330,7 +330,11 @@ fn application_upgrade_leaves_steady_meguri_binding_and_pending_structure_byte_e
     std::fs::write(&path, &bytes).unwrap();
     Authority::retire_icloud(root.path()).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
-    let document = Authority::load(root.path()).snapshot().unwrap();
+    let authority = Authority::load_application(root.path());
+    authority.reload().unwrap();
+    assert!(!authority.network_blocked());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let document = authority.snapshot().unwrap();
     assert_eq!(document.selection, Selection::Meguri);
     assert!(document.meguri_binding.is_some() && document.meguri_structure.is_some());
     assert!(document.settings.automatic);
@@ -375,11 +379,14 @@ fn application_upgrade_preserves_active_meguri_credential_removal_to_off_byte_ex
     std::fs::write(&path, &bytes).unwrap();
     Authority::retire_icloud(root.path()).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
-    let document = Authority::load(root.path()).snapshot().unwrap();
+    let authority = Authority::load_application(root.path());
+    authority.reload().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let document = authority.snapshot().unwrap();
     assert_eq!(document.selection, Selection::Meguri);
     assert!(document.handoff.unwrap().removal_pending());
     assert_eq!(document.meguri.unwrap().reference, "synthetic-connection");
-    assert!(!Authority::load(root.path()).snapshot().unwrap().permits_meguri_transfer());
+    assert!(!authority.snapshot().unwrap().permits_meguri_transfer());
 }
 
 #[test]
