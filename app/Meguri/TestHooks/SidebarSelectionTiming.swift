@@ -52,7 +52,9 @@ extension TestHooks {
         /// Each step's sidebar list and row, when that row was first selected in
         /// it after a run-loop pass (after Core Animation's commit), and when it
         /// was first seen unselected again after that.
-        private var watched: [(table: NSTableView, row: Int, down: TimeInterval, selected: TimeInterval?, lost: TimeInterval?)] = []
+        /// A row already selected when the run starts counts only once it was seen unselected.
+        private var watched: [(table: NSTableView, row: Int, down: TimeInterval, selected: TimeInterval?, lost: TimeInterval?,
+                               preselected: Bool, armed: Bool)] = []
         private var commitObserver: CFRunLoopObserver?
 
         static func name(_ suffix: String) -> String { "\(Bundle.main.bundleIdentifier ?? "").testhooks.\(suffix)" }
@@ -201,7 +203,9 @@ extension TestHooks {
                 }
                 time += step.hold + step.gap
             }
-            watched = steps.compactMap { step in step.table.map { (table: $0, row: step.row, down: step.down, selected: TimeInterval?.none, lost: TimeInterval?.none) } }
+            watched = steps.compactMap { step in step.table.map { (table: $0, row: step.row, down: step.down, selected: TimeInterval?.none, lost: TimeInterval?.none,
+                                                  preselected: $0.selectedRowIndexes.contains(step.row),
+                                                  armed: !$0.selectedRowIndexes.contains(step.row)) } }
             sampler?.start()
             // Every exit stops it: it suspends the main thread while it runs.
             defer { sampler?.stop() }
@@ -312,6 +316,7 @@ extension TestHooks {
                 if let watch = watched.first(where: { $0.down == step.down }) {
                     if let selected = watch.selected { entry["rowStateMs"] = ms(selected - step.down) }
                     if let lost = watch.lost { entry["rowLostMs"] = ms(lost - step.down) }
+                    entry["rowPreselected"] = watch.preselected
                 }
                 // Where the main thread spent a busy press-to-next-press stretch.
                 if busy.contains(where: { $0.start + $0.duration >= step.down && $0.start < nextDown && $0.duration >= 0.1 }),
@@ -381,7 +386,9 @@ extension TestHooks {
                         let now = CACurrentMediaTime()
                         for index in self.watched.indices where self.watched[index].lost == nil && self.watched[index].down <= now {
                             let selected = self.watched[index].table.selectedRowIndexes.contains(self.watched[index].row)
-                            if self.watched[index].selected == nil {
+                            if !self.watched[index].armed {
+                                if !selected { self.watched[index].armed = true }
+                            } else if self.watched[index].selected == nil {
                                 if selected { self.watched[index].selected = now }
                             } else if !selected {
                                 self.watched[index].lost = now

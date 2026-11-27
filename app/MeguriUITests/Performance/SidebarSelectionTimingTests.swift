@@ -141,6 +141,7 @@ final class SidebarSelectionTimingTests: PerfTestCase {
         }
         XCTAssertNotNil(step["rowMs"] as? Double, "\(label): no captured frame showed the row selected")
         XCTAssertEqual(step["commit"] as? String, expect, "\(label): the press's own route was not shown")
+        XCTAssertEqual(step["rowPreselected"] as? Bool, false, "\(label): the row was selected before its press")
         XCTAssertEqual(step["missingSamples"] as? Int, 0, "\(label): frames did not cover the row or the detail column")
         // The row is selected in the list, after Core Animation's commit, within two
         // display frames of its mouse-down: the press neither waits for its release
