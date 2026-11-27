@@ -60,18 +60,86 @@ import Testing
             #expect(labels == expected)
         }
         let expected = [
-            "deckOptions.section.displayOrder": "Display Order", "deckOptions.disclosure.advanced": "Advanced",
+            "deckOptions.section.displayOrder": "Display Order",
             "deckOptions.option.newGatherPriority": "New card gather order", "deckOptions.option.newSortOrder": "New card sort order",
             "deckOptions.option.newMix": "New/review order", "deckOptions.option.interdayLearningMix": "Interday learning/review order",
             "deckOptions.option.reviewOrder": "Review sort order", "deckOptions.preset.new": "New Preset…",
             "deckOptions.preset.newTitle": "New Preset", "deckOptions.preset.name": "Name", "deckOptions.preset.create": "Create",
             "deckOptions.preset.createFailed": "The preset could not be prepared. Cancel to return to your options.",
             "deckOptions.preset.validationFailed": "The preset was prepared, but its options could not be checked. Save to try again.",
-            "deckOptions.displayOrder.footer": "Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear.",
         ]
         for (key, text) in expected {
             #expect(DeckOptionsStrings.bundle.localizedString(forKey: key, value: "missing", table: nil) == text)
         }
+        // N20.9 (changed 2026-11-27): the Advanced wrapper and the gathering footer are gone.
+        for key in ["deckOptions.disclosure.advanced", "deckOptions.displayOrder.footer"] {
+            #expect(DeckOptionsStrings.bundle.localizedString(forKey: key, value: "missing", table: nil) == "missing", "\(key)")
+        }
+    }
+
+    /// N20.9 (changed 2026-11-27): each row's help names the row, says what it
+    /// does, and explains every choice of K5's list, in the menu's order.
+    @Test func displayOrderHelpCoversEveryChoiceOfEveryRow() {
+        let bundle = DeckOptionsStrings.bundle
+        func text(_ key: String) -> String { bundle.localizedString(forKey: key, value: "missing", table: nil) }
+        let intros: [DeckOptionsDisplayOrder: String] = [
+            .newGatherPriority: "Sets which new cards go into the daily limit. Cards added earlier usually have a lower position.",
+            .newSortOrder: "Sets the order in which the gathered new cards appear.",
+            .newMix: "Sets where new cards appear among the reviews. Interday learning cards count as reviews here.",
+            .interdayLearningMix: "An interday learning card is a learning or relearning card whose current step ends on a later day. "
+                + "This option sets where these cards appear among the reviews.",
+            .reviewOrder: "Sets the order of the reviews. Interday learning cards use the same order.",
+        ]
+        let lines: [(DeckOptionsDisplayOrder, [Int32: String])] = [
+            (.newGatherPriority, [
+                0: "Takes one deck at a time, in deck list order. In each deck, the lowest position comes first.",
+                5: "Takes one deck at a time, in deck list order. In each deck, the notes are in random order.",
+                1: "Takes the lowest position first, from the deck and all its subdecks together.",
+                2: "Takes the highest position first, from the deck and all its subdecks together.",
+                3: "Takes notes in random order from the deck and all its subdecks. The cards of one note stay together.",
+                4: "Takes cards in random order from the deck and all its subdecks."]),
+            (.newSortOrder, [
+                0: "Shows the cards of the first card type, then of the second, and so on. Cards of one type keep the gather order.",
+                1: "Shows the cards in the gather order.",
+                2: "Shows the cards of the first card type, then of the second, and so on. Cards of one type are in random order.",
+                3: "Shows the notes in random order. The cards of one note stay together, in card type order.",
+                4: "Shows the gathered cards in random order."]),
+            (.newMix, [
+                0: "Spreads the new cards evenly between the reviews.",
+                1: "Shows all reviews first, then the new cards.",
+                2: "Shows all new cards first, then the reviews."]),
+            (.interdayLearningMix, [
+                0: "Spreads these cards evenly between the reviews.",
+                1: "Shows all reviews first, then these cards.",
+                2: "Shows these cards first, then the reviews."]),
+            (.reviewOrder, [
+                0: "Shows the earliest due date first. Cards due on the same day are in random order.",
+                1: "Shows the earliest due date first. Cards due on the same day are in deck list order.",
+                2: "Shows one deck at a time, in deck list order. In each deck, the earliest due date comes first.",
+                3: "Shows the cards with the shortest interval first.",
+                4: "Shows the cards with the longest interval first.",
+                6: "Shows the cards with the lowest difficulty first.",
+                5: "Shows the cards with the highest difficulty first.",
+                7: "Shows first the cards that you are least likely to remember now.",
+                11: "Shows first the cards that you are most likely to remember now.",
+                12: "Shows first the cards that are most overdue relative to their interval.",
+                8: "Shows the cards in random order.",
+                9: "Shows the cards of the oldest notes first.",
+                10: "Shows the cards of the newest notes first."]),
+        ]
+        #expect(lines.map { $0.0 } == DeckOptionsDisplayOrder.allCases)
+        for (row, explanations) in lines {
+            #expect(text(DeckOptionsStrings.helpIntroKey(row)) == intros[row], "\(row)")
+            for (value, explanation) in explanations {
+                let key = DeckOptionsStrings.helpChoiceKey(row, value: value)
+                #expect(key.map(text) == explanation, "\(row) \(value)")
+            }
+        }
+        // A value the core might add without a label has no help line.
+        #expect(DeckOptionsStrings.helpChoiceKey(.reviewOrder, value: 99) == nil)
+        #expect(text("deckOptions.help.choice %@ %@") == "%1$@: %2$@")
+        #expect(DeckOptionsStrings.helpLabel(.newGatherPriority, locale: english) == "Help: New card gather order")
+        #expect(DeckOptionsStrings.helpLabel(.interdayLearningMix, locale: english) == "Help: Interday learning/review order")
     }
 
     @Test func issueTextsNameTheRangeInTheRowsUnit() {

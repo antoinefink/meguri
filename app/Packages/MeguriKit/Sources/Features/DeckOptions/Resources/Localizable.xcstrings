@@ -41,16 +41,6 @@
         }
       }
     },
-    "deckOptions.disclosure.advanced": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Advanced"
-          }
-        }
-      }
-    },
     "deckOptions.disclosure.collapsed": {
       "localizations": {
         "en": {
@@ -67,16 +57,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Expanded"
-          }
-        }
-      }
-    },
-    "deckOptions.displayOrder.footer": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear."
           }
         }
       }
@@ -147,6 +127,376 @@
           "stringUnit": {
             "state": "translated",
             "value": "Random notes"
+          }
+        }
+      }
+    },
+    "deckOptions.help.choice %@ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "deckOptions.help.interdayLearningMix": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An interday learning card is a learning or relearning card whose current step ends on a later day. This option sets where these cards appear among the reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.help.interdayLearningMix.afterReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows all reviews first, then these cards."
+          }
+        }
+      }
+    },
+    "deckOptions.help.interdayLearningMix.beforeReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows these cards first, then the reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.help.interdayLearningMix.mixWithReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spreads these cards evenly between the reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.help.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Help: %@"
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sets which new cards go into the daily limit. Cards added earlier usually have a lower position."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.ascendingPosition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes the lowest position first, from the deck and all its subdecks together."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes one deck at a time, in deck list order. In each deck, the lowest position comes first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.deckThenRandomNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes one deck at a time, in deck list order. In each deck, the notes are in random order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.descendingPosition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes the highest position first, from the deck and all its subdecks together."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.randomCards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes cards in random order from the deck and all its subdecks."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newGatherPriority.randomNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Takes notes in random order from the deck and all its subdecks. The cards of one note stay together."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newMix": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sets where new cards appear among the reviews. Interday learning cards count as reviews here."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newMix.afterReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows all reviews first, then the new cards."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newMix.beforeReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows all new cards first, then the reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newMix.mixWithReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spreads the new cards evenly between the reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sets the order in which the gathered new cards appear."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder.cardTypeThenGathered": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards of the first card type, then of the second, and so on. Cards of one type keep the gather order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder.cardTypeThenRandom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards of the first card type, then of the second, and so on. Cards of one type are in random order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder.gathered": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards in the gather order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder.random": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the gathered cards in random order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.newSortOrder.randomNoteThenCardType": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the notes in random order. The cards of one note stay together, in card type order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sets the order of the reviews. Interday learning cards use the same order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.added": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards of the oldest notes first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.ascendingIntervals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards with the shortest interval first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.ascendingRetrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows first the cards that you are least likely to remember now."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.deckThenDue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows one deck at a time, in deck list order. In each deck, the earliest due date comes first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.descendingIntervals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards with the longest interval first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.descendingRetrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows first the cards that you are most likely to remember now."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.difficultFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards with the highest difficulty first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.dueThenDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the earliest due date first. Cards due on the same day are in deck list order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.dueThenRandom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the earliest due date first. Cards due on the same day are in random order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.easyFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards with the lowest difficulty first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.latestAddedFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards of the newest notes first."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.random": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the cards in random order."
+          }
+        }
+      }
+    },
+    "deckOptions.help.reviewOrder.relativeOverdueness": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows first the cards that are most overdue relative to their interval."
           }
         }
       }
@@ -381,16 +731,6 @@
         }
       }
     },
-    "deckOptions.preset.validationFailed": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The preset was prepared, but its options could not be checked. Save to try again."
-          }
-        }
-      }
-    },
     "deckOptions.preset.name": {
       "localizations": {
         "en": {
@@ -459,6 +799,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "deckOptions.preset.validationFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The preset was prepared, but its options could not be checked. Save to try again."
           }
         }
       }

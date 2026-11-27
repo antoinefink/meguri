@@ -163,7 +163,7 @@ public final class DeckOptionsPageModel {
     public private(set) var confirmingDiscard = false
     public var saveFailure: SaveFailure?
     /// Kept with the draft across layout changes; reset whenever a new page opens.
-    public var advancedExpanded = false
+    public var displayOrderExpanded = false
     /// The shell's route owns modal admission, including interactive dismissal.
     public var namingPreset: Bool {
         owner?.navigation.sheet == .newDeckOptionsPreset && owner?.navigation.sheetHost == .main
@@ -215,7 +215,7 @@ public final class DeckOptionsPageModel {
         let current = revision
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false; saveFailure = nil; outcome = nil
-        advancedExpanded = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
+        displayOrderExpanded = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
         presetValidationFailed = false
         leftWhileSaving = false; saveCancelled = false; changedWhileLoading = false
         self.deckID = deckID; deckName = owner.fullDeckName(deckID) ?? ""
