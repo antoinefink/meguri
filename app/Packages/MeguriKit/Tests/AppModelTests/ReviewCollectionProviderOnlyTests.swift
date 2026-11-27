@@ -290,7 +290,7 @@ extension ReviewCollectionStartupTests {
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let backend = SyncOwnerFake()
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { backend }, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
         do {
