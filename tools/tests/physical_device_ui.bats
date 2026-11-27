@@ -54,12 +54,6 @@ mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
 # shows the other identity until that folder is removed.
 mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; [ "${FX_PERSONAL_IDENTITY_RC:-0}" -eq 0 ] && [ ! -e "${1%/Build/Products/*}/stale-icon" ]; }
 mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; }
-# Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
-# the real preparation helper with generated descriptors/command doubles.
-mg_app_cloud_agent_build() {
-  echo product-prepare >>"$STUB_LOG"
-  xcodebuild "$@"
-}
 mg_host_lease() { echo "host-lease $*" >>"$STUB_LOG"; [ "$*" = --no-session ]; }
 mg_sim_begin() { echo sim-begin >>"$STUB_LOG"; MG_SIM_RUNNER=vm; }
 mg_sim_check_given() { echo "sim-check $*" >>"$STUB_LOG"; }
@@ -113,7 +107,10 @@ if [ "$action" = -showBuildSettings ]; then
       jq --arg signing "${FX_RESOLVED_SIGNING:-${MEGURI_APP_SIGNING:-adhoc}}" \
         "map(.buildSettings.MEGURI_SIGNING = \$signing)" "$FX_STANDALONE_SETTINGS"
       exit "${FX_SETTINGS_RC:-0}" ;;
-    *) cat "$FX_PERSONAL_SETTINGS"; exit 0 ;;
+    *)
+      fixture="$FX_STANDALONE_SETTINGS"
+      case "$*" in *Release*) fixture="$FX_PERSONAL_SETTINGS" ;; esac
+      cat "$fixture"; exit 0 ;;
   esac
 fi
 dest=""; config=""; scheme=""; plan=""; result=""; dd=""
@@ -139,8 +136,11 @@ fi
 mkdir -p "$result"
 if [ "$action" = build ]; then
   p="$dd/Build/Products/$config/Meguri.app"
-  # The real-copy device build lands where the route checks it.
-  [ "$dd" != build/app/RealCopyDeviceDerivedData ] || p="$dd/Build/Products/$config-iphoneos/Meguri.app"
+  prefix=Contents/
+  executable_prefix=Contents/MacOS/
+  case "$dest" in
+    platform=iOS,id=*) p="$dd/Build/Products/$config-iphoneos/Meguri.app"; prefix=""; executable_prefix="" ;;
+  esac
   w="$p/Contents/PlugIns/MeguriWidget.appex"
   mkdir -p "$p/Contents/MacOS" "$w/Contents/MacOS"
   echo "synthetic app" >"$p/Contents/MacOS/Meguri"
@@ -155,6 +155,15 @@ if [ "$action" = build ]; then
     cp "$FX_APP_PROFILE" "$p/Contents/embedded.provisionprofile"
     [ "${FX_WIDGET_NO_PROFILE:-0}" = 1 ] || cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
   fi
+  if [ -z "$prefix" ]; then
+    # iOS bundles have no Contents directory, including their extensions.
+    mkdir -p "$p/PlugIns/MeguriWidget.appex"
+    cp "$p/Contents/MacOS/Meguri" "$p/Meguri"
+    cp "$w/Contents/MacOS/MeguriWidget" "$p/PlugIns/MeguriWidget.appex/MeguriWidget"
+    cp "$p/Contents/Info.plist" "$p/Info.plist"
+    cp "$w/Contents/Info.plist" "$p/PlugIns/MeguriWidget.appex/Info.plist"
+    rm -rf "$p/Contents"
+  fi
   [ "${FX_SOURCE_CHANGE:-0}" = 0 ] || echo "synthetic mutation" >>app/TestPlans/Performance.xctestplan
   [ -z "${FX_BUILD_OUTPUT:-}" ] || printf "%s\n" "$FX_BUILD_OUTPUT"
   exit "${FX_BUILD_RC:-0}"
@@ -163,8 +172,16 @@ if [ "$action" = build-for-testing ]; then
   sdk=iphonesimulator
   case "$dest" in platform=iOS,id=*) sdk=iphoneos ;; esac
   p="$dd/Build/Products"
-  mkdir -p "$p/$config-$sdk/Meguri.app"
-  echo "${FX_BUNDLE:-com.antoinefink.meguri.dev}" >"$p/$config-$sdk/Meguri.app/Info.plist"
+  product="$p/$config-$sdk/Meguri.app"; info_prefix=""; binary_prefix=""
+  if [ "$dest" = platform=macOS,arch=arm64 ]; then
+    product="$p/$config/Meguri.app"; info_prefix=Contents/; binary_prefix=Contents/MacOS/
+  fi
+  widget="$product/${info_prefix}PlugIns/MeguriWidget.appex"
+  mkdir -p "$product/$binary_prefix" "$widget/$binary_prefix"
+  echo "synthetic app" >"$product/${binary_prefix}Meguri"
+  echo "synthetic widget" >"$widget/${binary_prefix}MeguriWidget"
+  printf "{\"CFBundleIdentifier\":\"%s\",\"CFBundleExecutable\":\"Meguri\"}\n" "${FX_BUNDLE:-com.antoinefink.meguri.dev}" >"$product/${info_prefix}Info.plist"
+  echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.dev.widget\",\"CFBundleExecutable\":\"MeguriWidget\"}" >"$widget/${info_prefix}Info.plist"
   [ "${FX_POLICY:-}" != wrong-sdk ] || sdk=iphonesimulator
   python3 -c "import plistlib,sys
 target = {\"IsUITestBundle\": True, \"TestBundlePath\": \"__TESTROOT__/\" + sys.argv[2] + \"/MeguriUITests.xctest\"}
@@ -174,6 +191,9 @@ with open(sys.argv[1], \"wb\") as f: plistlib.dump({\"TestConfigurations\":[{\"T
   exit "${FX_BUILD_RC:-0}"
 fi
 exit "${FX_XCODE_RC:-0}"'
+  standalone_facts
+  stub otool 'echo "otool $*" >>"$STUB_LOG"; [ "$1" = -L ] && [ -f "$2" ] || exit 97; echo /System/Library/Frameworks/Foundation.framework/Foundation'
+  stub segedit 'echo "segedit $*" >>"$STUB_LOG"; [ -f "$1" ] || exit 97; python3 -c "import plistlib,sys; plistlib.dump({}, open(sys.argv[1], \"wb\"))" "$5"'
   export PATH="$BIN:$PATH"
 }
 
@@ -214,31 +234,16 @@ EOF
 
 
 
-@test "build-app team CloudAgent simulator certificate selection stays scoped" {
-  trace_app_build
-  local mode platform plan config expected selection
-  for mode in team adhoc; do
-    export MEGURI_APP_SIGNING="$mode"
-    for selection in 'ios-sim CloudAgent Debug yes' 'mac CloudAgent Debug no' 'ios-sim UI Debug no' 'ios-sim UI Profile no'; do
-      read -r platform plan config expected <<<"$selection"
-      : >"$STUB_LOG"
-      # Fail the generated compiler double before freezing: inspect the real
-      # native argv without fabricating signed products or an acceptance pass.
-      FX_BUILD_RC=1 mg build-app --platform "$platform" --config "$config" --test-plan "$plan"
-      [ "$status" -eq 1 ]
-      [ "$(field '.failures[0].id')" = build ]
-      if [ "$mode/$expected" = team/yes ]; then
-        called '^xcodebuild build-for-testing .* -testPlan CloudAgent .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration CODE_SIGN_IDENTITY=Apple Development$'
-        [ "$(grep '^xcodebuild build-for-testing ' "$STUB_LOG" | grep -o 'CODE_SIGN_IDENTITY=' | wc -l | tr -d ' ')" -eq 1 ]
-      else
-        not_called 'CODE_SIGN_IDENTITY='
-      fi
-      not_called 'test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
+@test "retired CloudAgent test plan is rejected before any build or signing" {
+  for platform in mac ios-sim; do
+    for mode in team adhoc; do
+      MEGURI_APP_SIGNING="$mode" mg build-app --platform "$platform" --test-plan CloudAgent
+      [ "$status" -eq 2 ]
+      [ "$(field '.failures[0].id')" = usage ]
+      [ ! -s "$STUB_LOG" ]
     done
   done
 }
-
-
 
 
 @test "app builds keep adhoc defaults without provisioning arguments" {
@@ -377,8 +382,9 @@ standalone_facts() {
   export FX_STANDALONE_SETTINGS="$BATS_TEST_TMPDIR/standalone-settings.json"
   export FX_CLOUD_INFO="$BATS_TEST_TMPDIR/cloud-info.json"
   echo '{}' >"$FX_CLOUD_INFO"
-  jq -n '[{target:"Meguri", buildSettings: {
-    CONFIGURATION:"Debug", MEGURI_BUNDLE_ID_SUFFIX:".dev", PRODUCT_BUNDLE_IDENTIFIER:"com.antoinefink.meguri.dev"}}]' >"$FX_STANDALONE_SETTINGS"
+  jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target:$target, buildSettings: {
+    CONFIGURATION:"Debug", MEGURI_BUNDLE_ID_SUFFIX:".dev",
+    PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri.dev" + (if $target == "MeguriWidget" then ".widget" else "" end))}})' >"$FX_STANDALONE_SETTINGS"
   jq -n --arg fixture "$SB/" '{
     "com.apple.security.app-sandbox":true, "com.apple.security.get-task-allow":true,
     "com.apple.security.network.client":true, "com.apple.security.network.server":true,
@@ -409,8 +415,11 @@ case "$1" in
   *) exit 97 ;;
 esac'
   stub plutil 'echo "plutil $*" >>"$STUB_LOG"
-[ "$1 $2 $3 $4" = "-convert json -o -" ] || exit 97
-case "$5" in -) cat ;; *) cat "$5" ;; esac'
+case "$1" in
+  -extract) [ "$2 $3 $4 $5" = "CFBundleIdentifier raw -o -" ] || exit 97; jq -r .CFBundleIdentifier "$6" ;;
+  -convert) [ "$2 $3 $4" = "json -o -" ] || exit 97; case "$5" in -) cat ;; *) cat "$5" ;; esac ;;
+  *) exit 97 ;;
+esac'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo "${FX_ARCH:-arm64}"'
 }
 
@@ -507,7 +516,7 @@ PY
     [ "$(field .details.build.standalone)" = false ]
     [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
     [ "$(field .details.personal_preview_product.test_hooks)" = false ]
-    [ "$(field .details.personal_preview_product.cloud_environment)" = development ]
+    [ "$(field .details.personal_preview_product.sync_configuration_verified)" = true ]
     [ "$(field .details.personal_preview_product.card_inspection_build)" = personalRelease ]
     [ "$(field .details.personal_preview_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
     [ "$(field .details.personal_preview_product.provisioning_sha256.app)" = "$(shasum -a 256 "$FX_APP_PROFILE" | cut -c1-64)" ]
@@ -524,27 +533,8 @@ PY
   mg build-app --platform ios-sim
   [ "$status" -eq 0 ]
   called '^xcodebuild build-for-testing .* -testPlan UI -configuration Debug .* -derivedDataPath build/app/DerivedData '
-  not_called 'MEGURI_BUNDLE_ID_SUFFIX=|^codesign |^security |^system_profiler '
+  not_called 'MEGURI_BUNDLE_ID_SUFFIX=|^codesign --verify|^codesign .*--(sign|remove-signature|extract-certificates)|^security |^system_profiler '
 }
-
-
-# Mutate only the generated profile; signed product claims stay independent.
-personal_profile_cloud_grant() {
-  python3 - "$FX_APP_PROFILE" "$1" "$2" <<'PY'
-import json, plistlib, sys
-with open(sys.argv[1], "rb") as stream:
-    profile = plistlib.load(stream)
-if sys.argv[3] == "missing":
-    profile["Entitlements"].pop(sys.argv[2], None)
-else:
-    profile["Entitlements"][sys.argv[2]] = json.loads(sys.argv[3])
-with open(sys.argv[1], "wb") as stream:
-    plistlib.dump(profile, stream)
-PY
-}
-
-
-
 
 
 @test "personal preview accepts native Mac widget without profile only with exact dev signed identity and authorized app signer" {
@@ -614,7 +604,7 @@ PY
     [ "$(field .details.build.standalone)" = true ]
     [ "$(field '.details.standalone_product.architecture | .app + "/" + .widget')" = arm64/arm64 ]
     [ "$(field .details.standalone_product.signature_verified)" = true ]
-    [ "$(field .details.standalone_product.cloud_configuration_verified)" = true ]
+    [ "$(field .details.standalone_product.sync_configuration_verified)" = true ]
     [ "$(field .details.standalone_product.executable_sha256)" = "$(shasum -a 256 "$candidate/Contents/MacOS/Meguri" | cut -c1-64)" ]
     [ "$(field '.details.standalone_product.normal_entitlements.app["com.apple.security.temporary-exception.files.absolute-path.read-only"][0]')" = "$SB/" ]
     [[ "$(field .details.input)" =~ ^[0-9a-f]{64}$ ]]
@@ -624,7 +614,7 @@ PY
     mg build-app --platform mac
     [ "$status" -eq 0 ]
     called '^xcodebuild build-for-testing .* -testPlan UI .* -derivedDataPath build/app/DerivedData '
-    not_called '^codesign '
+    not_called '^codesign --verify|^codesign .*--(sign|remove-signature|extract-certificates)'
     [ "$(field .details.build.action)" = build-for-testing ]
     [ "$(field .details.build.standalone)" = false ]
     [ "$(field '.details.standalone_product // "absent"')" = absent ]
@@ -689,12 +679,12 @@ EOF
 }
 
 
-@test "standalone cloud proof uses effective signing and fails closed on unavailable settings" {
+@test "standalone packaging uses effective signing and fails closed on unavailable settings" {
   standalone_facts
   standalone_team_grants
   FX_RESOLVED_SIGNING=team mg build-app --platform mac --standalone
   [ "$status" -eq 0 ]
-  [ "$(field .details.standalone_product.cloud_configuration_verified)" = true ]
+  [ "$(field .details.standalone_product.sync_configuration_verified)" = true ]
   not_called 'MEGURI_SIGNING=|allowProvisioning'
   FX_SETTINGS_RC=1 mg build-app --platform mac --standalone
   [ "$status" -eq 1 ]
@@ -3418,12 +3408,11 @@ PY
   not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild)'
 }
 
-@test "physical personal preview profile binds iOS development signer push group and selected device with optional debugger grant" {
+@test "physical personal preview profile binds iOS development signer group and selected device with optional debugger grant" {
   personal_facts
   jq 'del(.["com.apple.application-identifier"], .["com.apple.developer.aps-environment"])
     | .["application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"
-    | .["com.apple.security.application-groups"] = ["group.com.antoinefink.meguri.dev"]
-    | .["aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/ios-entitlements.json"
+    | .["com.apple.security.application-groups"] = ["group.com.antoinefink.meguri.dev"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/ios-entitlements.json"
   mv "$BATS_TEST_TMPDIR/ios-entitlements.json" "$FX_APP_ENT"
   python3 - "$FX_APP_ENT" "$FX_APP_PROFILE" "$PHONE" <<'PY'
 import json, plistlib, sys
@@ -3537,7 +3526,7 @@ PY
   not_called '^(xcframework|xcodebuild)|devicectl'
 }
 
-@test "the phone real copy builds Release with development push from the pinned device profiles and never registers or launches" {
+@test "the phone real copy builds Release from the pinned device profiles and never registers or launches" {
   real_copy_device_facts
   real_copy_device_profiles
   FX_BUILD_RC=1 mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
@@ -3744,4 +3733,22 @@ FAKE
   [ -f "$outside/PersonalPreviewDerivedData/marker" ]
   [ ! -e "$outside/PersonalPreviewDerivedData/meguri-build-identity.json" ]
   not_called '^xcodebuild build '
+}
+
+@test "personal preview rejects wrong supported settings for either target before compiling" {
+  personal_facts
+  cp "$FX_PERSONAL_SETTINGS" "$BATS_TEST_TMPDIR/good-preview.json"
+  local index mutation
+  for index in 0 1; do
+    for mutation in '.CONFIGURATION="Debug"' '.PRODUCT_BUNDLE_IDENTIFIER="com.antoinefink.meguri"' \
+        '.MEGURI_BUNDLE_ID_SUFFIX=""' '.ENABLE_TESTABILITY="YES"' '.ENABLE_DEBUG_DYLIB="YES"' \
+        '.CODE_SIGN_ENTITLEMENTS="wrong.entitlements"' '.SWIFT_ACTIVE_COMPILATION_CONDITIONS="MEGURI_TEST_HOOKS"'; do
+      jq ".[${index}].buildSettings |= ($mutation)" "$BATS_TEST_TMPDIR/good-preview.json" >"$FX_PERSONAL_SETTINGS"
+      : >"$STUB_LOG"
+      mg build-app --platform mac --personal-preview
+      [ "$status" -eq 1 ]
+      [ "$(field '.failures[0].id')" = personal-preview-settings ]
+      not_called '^xcodebuild build |^(open|sim-|vm-)|xcrun (simctl|devicectl)'
+    done
+  done
 }

@@ -98,6 +98,7 @@ esac'
   stub plutil 'echo "plutil $*" >>"$STUB_LOG"
 [ "$1 $2 $3 $4" = "-convert json -o -" ] || exit 97
 case "$5" in -) cat ;; *) cat "$5" ;; esac'
+  stub otool 'echo "otool $*" >>"$STUB_LOG"; [ "$1" = -L ] && [ -f "$2" ] || exit 97; echo /System/Library/Frameworks/Foundation.framework/Foundation'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo arm64'
   stub security 'echo "security $*" >>"$STUB_LOG"; [ "$1 $2 $3" = "cms -D -i" ] || exit 97; cat "$4"'
   stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"
@@ -165,7 +166,7 @@ built() { echo "$SB/build/app/RealCopyDerivedData/Build/Products/Release/Meguri.
 
 # Synthetic daily-driver facts: resolved settings, signed claims, Info, the
 # embedded profile (team TESTTEAM01) and an installed profile as Xcode would
-# keep it (team DNQ34W43XX, the real container) for the preflight.
+# keep it (team DNQ34W43XX) for the preflight.
 facts() {
   jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target: $target, buildSettings: ({
     CONFIGURATION:"Release", MEGURI_SIGNING:"team", MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon",
@@ -214,12 +215,19 @@ installed_profile() {
 
 
 @test "the real copy stops before building when no installed profile authorizes it, naming what is missing" {
-  # A profile without the development push grant (here production only) cannot sign it.
+  # A profile without the app Keychain grant cannot authorize the real copy.
   installed_profile production
+  python3 - "$FX/profiles/daily.provisionprofile" <<'PY_PROFILE'
+import plistlib, sys
+from pathlib import Path
+path = Path(sys.argv[1]); data = plistlib.loads(path.read_bytes())
+del data['Entitlements']['keychain-access-groups']
+path.write_bytes(plistlib.dumps(data))
+PY_PROFILE
   real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-profile ]
-  [[ "$(field '.failures[0].message')" == *"push-development"* ]]
+  [[ "$(field '.failures[0].message')" == *"keychain"* ]]
   [[ "$(field '.failures[0].message')" == *"never requests provisioning updates"* ]]
   [ "$(field '.details.daily_driver_profiles.mac.state')" = incomplete ]
   not_called '^(lint|xcframework|xcodebuild|ditto)'
@@ -250,8 +258,7 @@ installed_profile() {
   [ "$(field .details.real_copy.built_app_forgotten)" = true ]
   [ "$(field .details.real_copy.zip)" = build/app/real-copy/Meguri.zip ]
   [ "$(field .details.real_copy_product.bundle_id)" = com.antoinefink.meguri ]
-  [ "$(field .details.real_copy_product.cloud_environment)" = production ]
-  [ "$(field .details.real_copy_product.push_environment)" = development ]
+  [ "$(field .details.real_copy_product.sync_configuration_verified)" = true ]
   [ "$(field .details.build.real_copy)" = true ]
   [ "$(field '.details.real_copy_cleanup_checks | length')" = 4 ]
   [[ "$(field '.details.real_copy_cleanup_checks[2].command')" == "pluginkit -mAvvv -i com.antoinefink.meguri.widget" ]]
@@ -355,8 +362,8 @@ installed_profile() {
   [ "$(jq -r '.mac.missing | join(",")' <<<"$output")" = this-device ]
   installed_profile production
   run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require mac
-  [ "$status" -eq 1 ]
-  [ "$(jq -r '.mac.missing | join(",")' <<<"$output")" = push-development ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .mac.state <<<"$output")" = authorized ]
   [ "$(jq -r .ios.state <<<"$output")" = missing ]
   not_called '^security (add|delete|import|find|unlock|set)'
 }
@@ -543,4 +550,44 @@ installed_profile() {
   [ "$status" -eq 1 ]
   [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
   [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 1 ]
+}
+
+@test "real-copy owner acknowledgement and explicit team signing remain mandatory before work" {
+  local args mode
+  for args in '--real-copy' '--owner-requested' '--real-copy --owner-requested --standalone' \
+      '--real-copy --owner-requested --personal-preview'; do
+    mg build-app --platform mac $args
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ ! -s "$STUB_LOG" ]
+  done
+  for mode in adhoc invalid; do
+    MEGURI_APP_SIGNING="$mode" real_copy
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ ! -s "$STUB_LOG" ]
+  done
+}
+
+@test "unused profile iCloud and push authorization is allowed while actual signed grants stay absent" {
+  python3 - "$FX/embedded.plist" "$FX/profiles/daily.provisionprofile" <<'PY'
+import plistlib, sys
+from pathlib import Path
+for name in sys.argv[1:]:
+    path = Path(name)
+    data = plistlib.loads(path.read_bytes())
+    data['Entitlements'].update({
+        'com.apple.developer.icloud-container-identifiers': ['iCloud.synthetic.unused'],
+        'com.apple.developer.icloud-services': ['CloudKit'],
+        'com.apple.developer.icloud-container-environment': ['Development', 'Production'],
+        'com.apple.developer.aps-environment': 'development'})
+    path.write_bytes(plistlib.dumps(data))
+PY
+  real_copy
+  [ "$status" -eq 0 ]
+  [ "$(field .details.real_copy_product.signature_verified)" = true ]
+  [ "$(field .details.real_copy_product.sync_configuration_verified)" = true ]
+  called '^codesign -d --entitlements - --xml .*Meguri.app$'
+  called '^codesign -d --entitlements - --xml .*MeguriWidget.appex$'
+  not_called 'allowProvisioning|^codesign .*--(sign|remove-signature)'
 }

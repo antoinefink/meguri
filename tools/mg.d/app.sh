@@ -13,7 +13,7 @@
 # daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
-  "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI] [--standalone|--personal-preview|--real-copy --owner-requested] (lint-ui first, core XCFramework; default build-for-testing with UI plan; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; --real-copy --owner-requested: only on Antoine's request, the daily-driver Mac Release (development push) with team signing and installed profiles only (never provisioning updates) in RealCopyDerivedData, verified, packed as build/app/real-copy/Meguri.zip, then the built app unregistered and deleted, and with --install put in /Applications while Meguri is not running; nothing launches)"
+  "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI] [--standalone|--personal-preview|--real-copy --owner-requested] (lint-ui first, core XCFramework; default build-for-testing with UI plan; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; --real-copy --owner-requested: only on Antoine's request, the daily-driver Mac Release with team signing and installed profiles only (never provisioning updates) in RealCopyDerivedData, verified, packed as build/app/real-copy/Meguri.zip, then the built app unregistered and deleted, and with --install put in /Applications while Meguri is not running; nothing launches)"
 mg_job run host mg_run \
   "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug, or --personal-preview for manual team Release without test hooks, or --real-copy --owner-requested (only on Antoine's request) to install, never launch, the daily-driver Release from installed profiles; physical launches have no overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
@@ -153,9 +153,7 @@ mg_app_build_action() {
   if [ "$signing/$real" = team/true ]; then
     # Installed profiles only: never register identifiers, capabilities or
     # devices on Antoine's account (one-time step daily-driver-account).
-    # Development push, so an ordinary development profile authorizes it;
-    # Manual
-    # signing with the profiles the preflight selected: automatic signing
+    # Manual signing with the profiles the preflight selected: automatic signing
     # would need Xcode-managed profiles and provisioning updates.
     settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team )
     if [ "$platform" = mac ]; then
@@ -249,33 +247,31 @@ mg_app_build_action() {
     mg_status fail
     return 1
   fi
-  local product_prefix="" built_app
-  [ "$platform" != mac ] || product_prefix="Contents/MacOS/"
+  local built_app sync_platform=ios sync_args=() sync_settings="$MG_RUN_DIR/sync-settings.json"
+  [ "$platform" != mac ] || sync_platform=mac
+  [ "$platform" != ios-sim ] || sync_args+=(--simulator)
+  [ "$personal" != true ] || sync_args+=(--personal-preview)
+  [ "$real" != true ] || sync_args+=(--real-copy)
   built_app="$(mg_app_products "$platform" "$config")/Meguri.app"
-  if ! python3 -B - "$MG_TOOLS/tests" "$built_app" "$product_prefix" <<'PY_NO_CLOUD'
-from pathlib import Path
-import sys
-sys.path.insert(0, sys.argv[1])
-from sync_build_configuration import check_binary
-app, prefix = Path(sys.argv[2]), sys.argv[3]
-check_binary(app / (prefix + "Meguri"))
-widget = app / ("Contents/PlugIns" if prefix else "PlugIns") / "MeguriWidget.appex"
-check_binary(widget / (prefix + "MeguriWidget"))
-PY_NO_CLOUD
-  then
-    mg_failure sync-packaging "App and widget must not link CloudKit"
+  # Resolve both targets with the same destination and overrides as the build.
+  # Previews keep their existing named receipt and failure for unavailable settings.
+  if [ "$action/$personal/$real" = build/false/false ]; then
+    sync_settings="$MG_RUN_DIR/standalone-settings.json"
+  fi
+  if ! xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget -configuration "$config" \
+      -destination "$dest" -derivedDataPath "$MG_APP_DD" ${settings[0]+"${settings[@]}"} >"$sync_settings"; then
+    local settings_failure=sync-packaging
+    [ "$action/$personal/$real" != build/false/false ] || settings_failure=standalone-product
+    mg_failure "$settings_failure" "App and widget build settings could not be resolved"
     mg_status fail
     return 1
   fi
-  if [ "$action/$personal/$real" = build/false/false ]; then
-    # Resolve the preview with its build's destination, products and overrides.
-    if ! xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme "$scheme" -configuration "$config" \
-        -destination "$dest" -derivedDataPath "$MG_APP_DD" ${settings[0]+"${settings[@]}"} >"$MG_RUN_DIR/standalone-settings.json"; then
-      mg_failure standalone-product "normal Debug preview settings could not be resolved; see log.txt"
-      mg_status fail
-      return 1
-    fi
-
+  if ! python3 -B "$MG_TOOLS/tests/sync_build_configuration.py" --settings "$sync_settings" \
+      --configuration "$config" --platform "$sync_platform" --signing "$signing" \
+      --app "$built_app" ${sync_args[0]+"${sync_args[@]}"}; then
+    mg_failure sync-packaging "App and widget settings, Info, signed grants and all executables must exclude retired iCloud and app XCTest injection"
+    mg_status fail
+    return 1
   fi
   if [ "$config" = Profile ] && [ "$plan" = Performance ]; then
     sdk=iphonesimulator
@@ -600,7 +596,7 @@ PY_SYNC
   mg_detail personal_preview_product "$(jq -nc --arg hash "$app_hash" --arg widget_hash "$widget_hash" \
     --arg app_profile "$app_profile_hash" --arg widget_profile "$widget_profile_hash" --arg widget_provision "$widget_provision" \
     --arg core_hash "$hash" --arg slices "$slices" '
-    {signature_verified: true, provisioning_verified: true, architecture: {app: "arm64", widget: "arm64"},
+    {signature_verified: true, provisioning_verified: true, sync_configuration_verified: true, architecture: {app: "arm64", widget: "arm64"},
      executable_sha256: $hash, widget_executable_sha256: $widget_hash,
      provisioning: {app: "verified", widget: $widget_provision}, widget_signer_matches_app: true,
      provisioning_sha256: {app: $app_profile, widget: (if $widget_profile == "" then null else $widget_profile end)},
@@ -741,7 +737,7 @@ PY_SYNC
   mg_app_real_copy_identity "$app" || return 1
   mg_detail real_copy_product "$(jq -nc --arg hash "$(shasum -a 256 "$app/Contents/MacOS/Meguri" | cut -c1-64)" \
     --arg widget_provision "$widget_provision" --arg core_hash "$hash" --arg slices "$slices" '
-    {signature_verified: true, provisioning_verified: true, architecture: {app: "arm64", widget: "arm64"},
+    {signature_verified: true, provisioning_verified: true, sync_configuration_verified: true, architecture: {app: "arm64", widget: "arm64"},
      executable_sha256: $hash, provisioning: {app: "verified", widget: $widget_provision}, widget_signer_matches_app: true,
      bundle_id: "com.antoinefink.meguri", widget_bundle_id: "com.antoinefink.meguri.widget",
      card_inspection_build: "personalRelease", test_hooks: false,
@@ -824,7 +820,7 @@ PY_SYNC
   printf '%s\n' "$slices" | tr ',' '\n' | grep -qx device || return 1
   mg_app_real_copy_identity "$app" || return 1
   mg_detail real_copy_product "$(jq -nc --arg core_hash "$hash" --arg slices "$slices" '
-    {signature_verified: true, provisioning_verified: true, platform: "ios", architecture: {app: "arm64", widget: "arm64"},
+    {signature_verified: true, provisioning_verified: true, sync_configuration_verified: true, platform: "ios", architecture: {app: "arm64", widget: "arm64"},
      provisioning: {app: "verified", widget: "verified"}, widget_signer_matches_app: true,
      bundle_id: "com.antoinefink.meguri", widget_bundle_id: "com.antoinefink.meguri.widget",
      card_inspection_build: "personalRelease",

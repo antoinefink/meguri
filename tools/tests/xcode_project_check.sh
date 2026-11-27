@@ -283,10 +283,8 @@ expect_info() { # expect_info <app> <key> <JSON value, null when absent>: the Ma
   [ "$actual" = "$3" ] || { echo "$2 is $actual, expected $3" && return 1; }
 }
 
-# Validate settings before inspecting products. Development/test cloud is isolated;
-# personal preview requests development explicitly as well as a dev bundle ID.
-# Other builds retain the destinations assigned to their configurations.
-cloud_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-preview]
+# Validate both resolved targets before inspecting their signed products.
+sync_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-preview]
   local config="$1" sdk="$2" signing="$3" suffix="$4" output="$5" platform=ios preview_args=()
   [ "$sdk" != macosx ] || platform=mac
   # A run-owned override keeps this independent of the normal settings cache.
@@ -294,7 +292,7 @@ cloud_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-previe
   if [ "${6:-}" = personal-preview ]; then
     preview_args=(--personal-preview)
   fi
-  xcodebuild -showBuildSettings -json -project "$PROJECT" -scheme Meguri -configuration "$config" -sdk "$sdk" \
+  xcodebuild -showBuildSettings -json -project "$PROJECT" -target Meguri -target MeguriWidget -configuration "$config" -sdk "$sdk" \
     -derivedDataPath "$DD" -xcconfig "$output.xcconfig" >"$output" || return 1
   python3 "$REPO/tools/tests/sync_build_configuration.py" --settings "$output" \
     --configuration "$config" --platform "$platform" --signing "$signing" ${preview_args[0]+"${preview_args[@]}"}
@@ -302,11 +300,11 @@ cloud_settings() { # <config> <sdk> <signing> <suffix> <output> [personal-previe
 
 # Entitlements come from the signature on real products, or the simulator's
 # embedded section. Do not substitute expanded source plists for these artifacts.
-cloud_artifacts() { # <config> <sdk> <signing> <app> <suffix>
+sync_artifacts() { # <config> <sdk> <signing> <app> <suffix>
   local config="$1" sdk="$2" signing="$3" app="$4" suffix="$5" platform=ios info widget
-  local proof="$WORK/cloud-$1-$2-$3"
+  local proof="$WORK/sync-$1-$2-$3"
   mkdir -p "$proof" || return 1
-  cloud_settings "$config" "$sdk" "$signing" "$suffix" "$proof/settings.json" || return 1
+  sync_settings "$config" "$sdk" "$signing" "$suffix" "$proof/settings.json" || return 1
   case "$sdk" in
     macosx)
       platform=mac info="$app/Contents/Info.plist" widget="$app/Contents/PlugIns/MeguriWidget.appex"
@@ -324,11 +322,13 @@ cloud_artifacts() { # <config> <sdk> <signing> <app> <suffix>
     *) return 1 ;;
   esac
   cp "$info" "$proof/Info.plist" || return 1
+  cp "$widget/$([ "$platform" != mac ] || printf 'Contents/')Info.plist" "$proof/widget-Info.plist" || return 1
+  # The shared checker inspects both Info plists and each main/debug executable.
+  local product_args=()
+  [ "$sdk" != iphonesimulator ] || product_args=(--simulator)
   python3 "$REPO/tools/tests/sync_build_configuration.py" --settings "$proof/settings.json" \
     --configuration "$config" --platform "$platform" --signing "$signing" \
-    --info "$proof/Info.plist" --entitlements "$proof/app.plist" --widget-entitlements "$proof/widget.plist" \
-    --binary "$app/$([ "$platform" != mac ] || printf 'Contents/MacOS/')Meguri" \
-    --binary "$widget/$([ "$platform" != mac ] || printf 'Contents/MacOS/')MeguriWidget"
+    --app "$app" ${product_args[0]+"${product_args[@]}"}
 }
 
 # R523/R2040: inspectability uses this native build policy, never DEBUG alone.
@@ -426,14 +426,14 @@ if builds_phase; then
       for signing in adhoc team; do
         case "$config" in Debug | Profile) suffix=.dev ;; *) suffix="" ;; esac
         check "$config $sdk $signing: no iCloud settings" \
-          cloud_settings "$config" "$sdk" "$signing" "$suffix" "$WORK/cloud-settings-$config-$sdk-$signing.json"
+          sync_settings "$config" "$sdk" "$signing" "$suffix" "$WORK/sync-settings-$config-$sdk-$signing.json"
         check "$config $sdk $signing: $(identity_of "$suffix") identity's app name and icon" \
-          identity_settings "$WORK/cloud-settings-$config-$sdk-$signing.json" "$suffix"
+          identity_settings "$WORK/sync-settings-$config-$sdk-$signing.json" "$suffix"
         if [ "$config/$sdk/$signing" = Release/macosx/team ]; then
           check "personal preview Release.dev: no iCloud settings" \
-            cloud_settings Release macosx team .dev "$WORK/cloud-settings-personal-preview.json" personal-preview
+            sync_settings Release macosx team .dev "$WORK/sync-settings-personal-preview.json" personal-preview
           check "personal preview Release.dev: dev identity's app name and icon" \
-            identity_settings "$WORK/cloud-settings-personal-preview.json" .dev
+            identity_settings "$WORK/sync-settings-personal-preview.json" .dev
           check "personal preview Release.dev: dev identity's widget name" \
             identity_widget_settings Release macosx .dev "$WORK/widget-settings-personal-preview.json"
         fi
@@ -540,8 +540,8 @@ if builds_phase; then
     esac
     build "mac-$config" "$config" "platform=macOS,arch=arm64" || { forget_mac_app "$config"; continue; }
     app="$DD/Build/Products/$config/Meguri.app"
-    case "$config" in Debug | Profile) cloud_suffix=.dev ;; *) cloud_suffix="" ;; esac
-    check "mac-$config has no iCloud Info, entitlements or linkage" cloud_artifacts "$config" macosx adhoc "$app" "$cloud_suffix"
+    case "$config" in Debug | Profile) sync_suffix=.dev ;; *) sync_suffix="" ;; esac
+    check "mac-$config has no iCloud Info, entitlements or linkage" sync_artifacts "$config" macosx adhoc "$app" "$sync_suffix"
     check "mac-$config links the $config core (features '$features')" stamp_is "$config" "$features" mac
     case "$config" in
       Debug)
@@ -572,7 +572,7 @@ if builds_phase; then
       *) check "mac-$config is a regular app (LSUIElement false)" expect_info "$app" LSUIElement false ;;
     esac
     check "mac-$config built card inspection policy" expect_info "$app" MeguriCardInspectionBuild "\"$(card_inspection_build "$config")\""
-    check "mac-$config built $(identity_of "$cloud_suffix") identity's name and icon" identity_product "$app" "$cloud_suffix"
+    check "mac-$config built $(identity_of "$sync_suffix") identity's name and icon" identity_product "$app" "$sync_suffix"
     # shellcheck disable=SC2046
     markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
     case "$config" in
@@ -605,7 +605,7 @@ if builds_phase; then
   for config in $CONFIGS; do
     case "$config" in Debug|Profile) sync_suffix=.dev ;; *) sync_suffix="" ;; esac
     if build "ios-$config-packaging" "$config" "generic/platform=iOS Simulator"; then
-      check "iOS $config has no iCloud Info, entitlements or linkage" cloud_artifacts \
+      check "iOS $config has no iCloud Info, entitlements or linkage" sync_artifacts \
         "$config" iphonesimulator adhoc "$DD/Build/Products/$config-iphonesimulator/Meguri.app" "$sync_suffix"
     fi
   done
@@ -1098,7 +1098,7 @@ if devices_phase; then
     skip "lease the iPhone and iPad simulators" "queued: no test VM (user step mac-vm)"
   fi
   if { [ -n "$IPHONE" ] || [ "$SIMS" = false ]; } && build "iphone-Debug" Debug "$(sim_dest "$IPHONE")"; then
-    check "iphone-Debug has no iCloud Info, entitlements or linkage" cloud_artifacts Debug iphonesimulator adhoc \
+    check "iphone-Debug has no iCloud Info, entitlements or linkage" sync_artifacts Debug iphonesimulator adhoc \
       "$DD/Build/Products/Debug-iphonesimulator/Meguri.app" .dev
     check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
     check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \

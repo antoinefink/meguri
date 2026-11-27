@@ -222,7 +222,7 @@ exit 0
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open lsappinfo; do
+  for c in xcrun xcodebuild codesign otool lipo segedit pluginkit plutil xmllint open lsappinfo; do
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"

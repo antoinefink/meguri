@@ -1395,7 +1395,7 @@ class ReviewsFirstCoverageTests(Sandbox):
     clauses and states the cumulative rule; a global condition from M1R claims
     the clause M1 repeats."""
 
-    SYNC = ("The first real sync with AnkiWeb, after passing results (U246 sync area, U248) and a backup; "
+    SYNC = ("The first real sync with Meguri Sync, after passing results (U246 sync area, U248) and a backup; "
             "it starts the M1R trial")
 
     def bound(self):
@@ -1413,8 +1413,8 @@ class ReviewsFirstCoverageTests(Sandbox):
                  "validator": {"type": "device-run", "device": d}, "plan": ["U256 device run on iPhone, iPad and Mac (AE81)"]}
                 for d in ("iphone", "ipad", "mac")] + [
                 {"id": "first-sync", "description": "first sync", "evidence": "docs/first-sync.json",
-                 "validator": {"type": "first-sync", "results": ["u246-sync-area", "u248-soak"]},
-                 "plan": [{"text": self.SYNC, "items": ["u246-sync-area", "u248-soak"]}]}]}
+                 "validator": {"type": "first-sync", "results": ["u246-sync-area", "meguri-provider-real-server"]},
+                 "plan": [{"text": self.SYNC, "items": ["u246-sync-area", "meguri-provider-real-server"]}]}]}
         per["M1"] = {
             "units": ["U47"],
             "plan": {"gate": "Cumulative over M1R: the full gate. U246: areas storage, optimizer and sync, plus the "
@@ -1450,10 +1450,10 @@ class ReviewsFirstCoverageTests(Sandbox):
                 {"validator": {"type": "trial", "days": 7}, "plan": [self.SYNC]}), "which asks for a first-sync step"),
             ("a result the first sync relied on dropped",
              lambda m: step(m, "first-sync")["validator"].update({"results": ["u246-sync-area"]}),
-             "binds u248-soak, which its results lacks"),
+             "binds meguri-provider-real-server, which its results lacks"),
             ("the first sync removed",
              lambda m: milestone(m, "M1R").update({"user_steps": milestone(m, "M1R")["user_steps"][:3]}),
-             "The first real sync with AnkiWeb"),
+             "The first real sync with Meguri Sync"),
             ("the Mac device run removed", lambda m: milestone(m, "M1R").update(
                 {"user_steps": [s for s in milestone(m, "M1R")["user_steps"] if s["id"] != "device-run-mac"]}),
              "no device-run user step on mac"),
@@ -1493,11 +1493,10 @@ class FirstSyncChecks:
         self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
         self.assertEqual([a["id"] for a in ev["awaiting"]], ["user-step:first-sync"])
 
-    def test_valid_historical_references_are_retained_without_accepting_missing_lane_proof(self):
+    def test_valid_historical_references_and_native_phase_proof_pass(self):
         self.commit("Record the first sync", {self.EVIDENCE: self.data})
         rc, ev = self.evaluate(self.man(), "M1R")
-        self.assertEqual((rc, ev["outcome"]), (1, "fail"), ev)
-        self.assertIn("signed-validator-unavailable", self.failure(ev, "user-step:first-sync"))
+        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev)
         self.assertEqual(ev["gate_commit"], self.gate)
         details = ev["user_steps"][0]["details"]
         self.assertEqual(details["build_commit"], self.build)
@@ -1506,11 +1505,11 @@ class FirstSyncChecks:
             self.assertEqual(result["commit"], self.build)
             self.assertEqual(result["run_id"], self.receipts[rid]["run_id"])
             self.assertTrue(result["receipt_validated"])
-            self.assertFalse(result["evidence_validated"])
+            self.assertTrue(result["evidence_validated"])
 
     def test_invalid_evidence_fails_and_names_the_step(self):
         cases = [
-            ({"results__u248-soak__commit": self.gate}, "copied-display-commit-disagrees"),
+            ({"results__meguri-provider-real-server__commit": self.gate}, "copied-display-commit-disagrees"),
             ({"results__u246-sync-area__finished_at": "2026-11-15T09:00:00Z"},
              "copied-display-finished_at-disagrees"),
             ({"results__u250-sync-classes__outcome": "fail"}, "copied-display-outcome-disagrees"),
@@ -1555,23 +1554,27 @@ class FirstSyncChecks:
 
 
 class FirstSyncFixture:
-    """Receipt references are authority; all signed claims here are synthetic
-    negative evidence, never a substitute for the missing signed validator."""
+    """Exact receipts and native bootstrap artifacts, all synthetic."""
 
     EVIDENCE = FirstSyncChecks.EVIDENCE
-    CLOUD_CLASSES = tuple("cloud-" + name for name in (
-        "send", "fetch", "apply", "media", "rekey", "claim", "tracking", "start",
-        "adopt", "publish", "own", "abandon"))
-    # The normative suite/run/job/scope mapping in cloudkit-acceptance Q13.
     RECEIPTS = (
         ("u246-sync-area", "u246-conformance", "conformance-aggregate", "areas", ("sync",), None, ()),
-        ("cloudkit-fake", "cloud-fake", "cloud-fake", "scenarios", ("cloudkit-fake",), "cloud-fake", ()),
-        ("cloudkit-faults", "cloud-faults", "cloud-faults", "scenarios", ("cloudkit-faults",), "cloud-faults", ()),
-        ("cloudkit-soak-fake", "cloud-soak-fake", "soak", "scenarios", ("cloudkit-soak-fake",),
-         "cloud-soak-fake", ("--lane", "cloud-fake")),
-        ("u248-soak", "cloudkit-signed", "cloudkit-signed", "scenarios", ("cloudkit-signed",), "cloud-signed", ()),
-        ("u250-sync-classes", "u250-fault", "fault", "classes", ("review", "sync", "backup") + CLOUD_CLASSES, None, ()),
+        ("sync-server-test", "sync-server-test", "sync-server-test", None, (), None, ()),
+        ("sync-server-package-test", "sync-server-package-test", "sync-server-package-test", None, (), None, ()),
+        ("meguri-provider-real-server", "meguri-provider-real-server", "meguri-provider-real-server", None, (), None, ()),
+        ("u250-sync-classes", "u250-fault", "fault", "classes", ("review", "sync", "backup"), None, ()),
     )
+    PHASES = {
+        "upload": ["fresh-upload-client", "explicit-collection-and-media", "retained-safety-artifacts",
+                   "all-media-accounted", "ready-automatic", "exact-fixture", "closed"],
+        "download": ["initial-no-collection", "explicit-collection-and-media", "initial-no-backup",
+                     "all-media-accounted", "ready-automatic", "exact-fixture", "closed"],
+        "reopen": ["cold-ready", "persisted-binding-epoch", "exact-fixture", "closed"],
+    }
+
+    def phase(self, phase):
+        return {"format": 1, "phase": phase, "status": "pass", "checks": self.PHASES[phase],
+                "counts": {"notes": 2, "cards": 2, "media": 2, "revlogs": 0, "reps": 0}}
 
     def setUp(self):
         super().setUp()
@@ -1584,14 +1587,14 @@ class FirstSyncFixture:
                       require=[{"id": "no-notes", "detail": "notes", "only_keys": []}])
         self.config["runs"][1]["args"] = ["--base", "{base}", "--rev", "{tip}"]
         self.build = self.commit("Synthetic first-sync build", {
-            ".gitignore": "build/\n/outside-signed.json\n/signed-evidence.json\n", "app/A.swift": "// synthetic build\n",
+            ".gitignore": "build/\n/outside-signed.json\n/signed-evidence.json\n/upload.json\n", "app/A.swift": "// synthetic build\n",
             "tools/gate/tiers.yaml": self.source_tiers(), "docs/process/milestones.yaml": self.man()})
         self.paths, self.receipts = {}, {}
         self.data = first_sync(self.build, started="2026-11-20T11:00:00Z")
         self.data["backup"] = {"file": "synthetic.colpkg", "taken_at": "2026-11-20T10:30:00Z"}
         self.data["results"] = {}
         for rid, run, job, detail, items, lane, _ in self.RECEIPTS:
-            details = {detail: {item: "pass" for item in items}}
+            details = {detail: {item: "pass" for item in items}} if detail else {}
             if lane:
                 details["lane"] = lane
             definition = next(r for r in self.config["runs"] if r["id"] == run)
@@ -1599,11 +1602,12 @@ class FirstSyncFixture:
             path = self.result(job, args=args, sha=self.build, details=details)
             receipt = self.read_receipt(path)
             self.paths[rid], self.receipts[rid] = path, receipt
-            if rid == "u248-soak":
-                artifact = os.path.join(os.path.dirname(path), "signed-evidence.json")
-                # Only a loader witness: no signed schema or success proof.
-                self.write_receipt(artifact, {"lane": "cloud-signed"})
-                receipt["artifacts"] = [{"kind": "report", "path": artifact}]
+            if rid == "meguri-provider-real-server":
+                receipt["artifacts"] = []
+                for phase in self.PHASES:
+                    artifact = os.path.join(os.path.dirname(path), phase + ".json")
+                    self.write_receipt(artifact, self.phase(phase))
+                    receipt["artifacts"].append({"kind": "provider-phase", "path": artifact})
                 self.write_receipt(path, receipt)
             self.data["results"][rid] = {
                 "job": job, "run_id": receipt["run_id"], "commit": self.build,
@@ -1643,7 +1647,7 @@ class FirstSyncFixture:
     def man(self):
         step = {"id": "first-sync", "description": "synthetic receipt check", "evidence": self.EVIDENCE,
                 "validator": {"type": "first-sync", "results": [r[0] for r in self.RECEIPTS]}}
-        suites = [{"id": rid, "run": run, "scope": {"detail": detail, "items": list(items)},
+        suites = [{"id": rid, "run": run, **({"scope": {"detail": detail, "items": list(items)}} if detail else {}),
                    "require": [{"id": "no-skips", "summary": "skipped", "max": 0}]}
                   for rid, run, _, detail, items, _, _ in self.RECEIPTS]
         return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]},
@@ -1668,99 +1672,49 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
         step = milestone(self.man(), "M1R")["user_steps"][0]
         return mod, ctx, step
 
-    def test_each_non_signed_reference_validates_identity_before_missing_lane_dependency(self):
+    def test_each_reference_and_native_phase_is_validated_without_latest_lookup(self):
         mod, ctx, step = self._internal_validator()
-        for reference_only, object_pass in ((False, False), (True, True)):
-            with self.subTest(reference_only=reference_only, object_pass=object_pass):
-                data = copy.deepcopy(self.data)
-                if reference_only:
-                    for ref in data["results"].values():
-                        for key in ("commit", "finished_at", "outcome"):
-                            del ref[key]
-                for rid, _, _, detail, items, _, _ in self.RECEIPTS:
-                    receipt = copy.deepcopy(self.receipts[rid])
-                    if object_pass:
-                        receipt["details"][detail] = {item: {"status": "pass"} for item in items}
-                    self.write_receipt(self.paths[rid], receipt)
-                try:
-                    with mock.patch.object(mod, "evidence_json", return_value=(data, None)), \
-                            mock.patch.object(mod, "_first_sync_envelope", wraps=mod._first_sync_envelope) as envelopes, \
-                            mock.patch.object(mod, "_first_sync_artifacts", wraps=mod._first_sync_artifacts) as artifacts:
-                        outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
-                    self.assertEqual(outcome, "fail")
-                    self.assertIn("signed-validator-unavailable", message)
-                    self.assertEqual(envelopes.call_count, 6)
-                    self.assertEqual([c.args[1] for c in artifacts.call_args_list], [r[0] for r in self.RECEIPTS])
-                    for rid, _, job, _, _, _, _ in self.RECEIPTS:
-                        if rid == "u248-soak":
-                            continue
-                        verified = details["results"][rid]
-                        self.assertEqual((verified["job"], verified["run_id"], verified["commit"], verified["receipt"]),
-                                         (job, self.receipts[rid]["run_id"], self.build, self.paths[rid]))
-                        self.assertTrue(verified["receipt_validated"])
-                        self.assertFalse(verified["evidence_validated"])
-                        # Do not relabel a loader invocation as artifact proof.
-                        self.assertIn(rid + ": lane-evidence-validator-unavailable", message)
-                finally:
-                    for rid, receipt in self.receipts.items():
-                        self.write_receipt(self.paths[rid], receipt)
+        for reference_only in (False, True):
+            data = copy.deepcopy(self.data)
+            if reference_only:
+                for ref in data["results"].values():
+                    for key in ("commit", "finished_at", "outcome"):
+                        del ref[key]
+            with mock.patch.object(mod, "evidence_json", return_value=(data, None)), \
+                    mock.patch.object(mod.Results, "latest", side_effect=AssertionError("no latest lookup")), \
+                    mock.patch.object(mod, "_first_sync_envelope", wraps=mod._first_sync_envelope) as envelopes:
+                outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
+            self.assertEqual(outcome, "pass", message)
+            self.assertEqual(envelopes.call_count, len(self.RECEIPTS))
+            for rid, _, job, _, _, _, _ in self.RECEIPTS:
+                verified = details["results"][rid]
+                self.assertEqual((verified["job"], verified["run_id"], verified["commit"], verified["receipt"]),
+                                 (job, self.receipts[rid]["run_id"], self.build, self.paths[rid]))
+                self.assertTrue(verified["receipt_validated"])
+                self.assertTrue(verified["evidence_validated"])
 
-    def test_only_required_known_artifacts_are_loaded_before_reporting_unavailable_validators(self):
+    def test_only_required_native_phase_artifacts_are_loaded_and_hashed(self):
         mod, ctx, step = self._internal_validator()
-        declared, optional = {}, []
+        optional = []
         for rid, receipt in self.receipts.items():
             changed = copy.deepcopy(receipt)
-            if rid == "u248-soak":
-                declared[rid] = receipt["artifacts"][0]["path"]
-            for kind, name in (("log", "log.txt"), ("report", "synthetic-evidence.json")):
-                path = os.path.join(os.path.dirname(self.paths[rid]), name)
-                with open(path, "w", encoding="utf-8") as stream:
-                    stream.write("ordinary optional text, not JSON")
-                changed["artifacts"].append({"kind": kind, "path": path})
-                optional.append(path)
+            path = os.path.join(os.path.dirname(self.paths[rid]), "optional.json")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("ordinary optional text, not JSON")
+            changed["artifacts"].append({"kind": "report", "path": path})
+            optional.append(path)
             self.write_receipt(self.paths[rid], changed)
-        try:
-            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)), \
-                    mock.patch.object(mod, "_first_sync_json", wraps=mod._first_sync_json) as loader:
-                outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
-            self.assertEqual(outcome, "fail")
-            self.assertIn("signed-validator-unavailable", message)
-            for rid, path in declared.items():
-                self.assertEqual(len([c for c in loader.call_args_list if c.args[1] == path]), 1)
-                self.assertEqual(details["results"][rid]["artifacts_checked"], [path])
-                self.assertFalse(details["results"][rid]["evidence_validated"])
-                with open(path, "rb") as stream:
-                    digest = hashlib.sha256(stream.read()).hexdigest()
-                self.assertEqual(details["results"][rid]["artifact_sha256"], {path: digest})
-            self.assertFalse(any(c.args[1] in optional for c in loader.call_args_list))
-            for rid in set(self.receipts) - set(declared):
-                self.assertEqual(details["results"][rid]["artifacts_checked"], [])
-                self.assertFalse(details["results"][rid]["evidence_validated"])
-                self.assertIn(rid + ": lane-evidence-validator-unavailable", message)
-            # An unrelated declaration stays optional, even in the signed
-            # receipt. Malformed required evidence retains its exact error.
-            signed = copy.deepcopy(self.receipts["u248-soak"])
-            extra = os.path.join(os.path.dirname(self.paths["u248-soak"]), "extra-evidence.json")
-            with open(extra, "w", encoding="utf-8") as stream:
-                stream.write("not-json")
-            signed["artifacts"].append({"kind": "report", "path": extra})
-            self.write_receipt(self.paths["u248-soak"], signed)
-            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)):
-                outcome, message, _ = mod.v_first_sync(ctx, step, step["validator"])
-            self.assertEqual(outcome, "fail")
-            self.assertIn("signed-validator-unavailable", message)
-            self.assertNotIn("artifact-malformed-json", message)
-            with open(declared["u248-soak"], "w", encoding="utf-8") as stream:
-                stream.write("not-json")
-            with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)):
-                outcome, message, _ = mod.v_first_sync(ctx, step, step["validator"])
-            self.assertEqual(outcome, "fail")
-            self.assertIn("u248-soak: artifact-malformed-json", message)
-            self.assertNotIn("signed-validator-unavailable", message)
-        finally:
-            self.write_receipt(declared["u248-soak"], {"lane": "cloud-signed"})
-            for rid, receipt in self.receipts.items():
-                self.write_receipt(self.paths[rid], receipt)
+        with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)), \
+                mock.patch.object(mod, "_first_sync_json", wraps=mod._first_sync_json) as loader:
+            outcome, message, details = mod.v_first_sync(ctx, step, step["validator"])
+        self.assertEqual(outcome, "pass", message)
+        self.assertFalse(any(c.args[1] in optional for c in loader.call_args_list))
+        for artifact in self.receipts["meguri-provider-real-server"]["artifacts"]:
+            path = artifact["path"]
+            self.assertEqual(len([c for c in loader.call_args_list if c.args[1] == path]), 1)
+            with open(path, "rb") as stream:
+                digest = hashlib.sha256(stream.read()).hexdigest()
+            self.assertEqual(details["results"]["meguri-provider-real-server"]["artifact_sha256"][path], digest)
 
     def reject(self, data, rid, reason):
         self.commit("Synthetic first-sync reference evidence", {self.EVIDENCE: data})
@@ -1780,14 +1734,14 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
         data = copy.deepcopy(self.data)
         for result in data["results"].values():
             del result["run_id"]
-        self.reject(data, "cloudkit-fake", r"run.?id|reference|receipt")
+        self.reject(data, "sync-server-test", r"run.?id|reference|receipt")
 
     def test_selected_bad_receipt_never_falls_back_to_newer_pass(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         original = self.receipts[rid]
-        newer = self.result("cloud-fake", sha=self.build, details=original["details"])
-        os.symlink(os.path.dirname(newer), os.path.join(self.results, "cloud-fake", "latest"))
-        default_receipt = os.path.join(self.root, "build", "mg", "cloud-fake", original["run_id"], "result.json")
+        newer = self.result("sync-server-test", sha=self.build, details=original["details"])
+        os.symlink(os.path.dirname(newer), os.path.join(self.results, "sync-server-test", "latest"))
+        default_receipt = os.path.join(self.root, "build", "mg", "sync-server-test", original["run_id"], "result.json")
         os.makedirs(os.path.dirname(default_receipt))
         self.write_receipt(default_receipt, original)
         bad = copy.deepcopy(original)
@@ -1799,8 +1753,8 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
             self.write_receipt(self.paths[rid], original)
 
     def test_wrong_job_and_unsafe_run_ids_fail(self):
-        rid = "cloudkit-fake"
-        cases = [("job", "soak"), ("job", "../cloud-fake"),
+        rid = "sync-server-test"
+        cases = [("job", "soak"), ("job", "../sync-server-test"),
                  ("job", os.path.dirname(self.paths[rid])), ("run_id", "latest"),
                  ("run_id", "20261120T100000Z-x"), ("run_id", "../outside"),
                  ("run_id", "20261120T100001Z-101/../../outside"),
@@ -1812,7 +1766,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                 self.reject(data, rid, r"job|run.?id|reference|path")
 
     def test_missing_and_symlink_receipts_fail_without_content_disclosure(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         path = self.paths[rid]
         # The symlink target is synthetic and stays within temporary build
         # output. No test points the evaluator at arbitrary workstation data.
@@ -1841,7 +1795,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                     os.rename(saved, os.path.dirname(path))
 
     def test_actual_envelope_controls_source_and_pass_facts(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         cases = [
             ("schema_version", 2, r"schema"), ("schema_version", None, r"schema"),
             ("job", "soak", r"job"), ("run_id", "20261120T100059Z-999", r"run.?id"),
@@ -1851,7 +1805,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
             ("dry_run", True, r"dry"), ("exit_code", 1, r"exit"),
             ("status", "fail", r"status|pass|fail"),
             ("summary", {"total": 3, "passed": 2, "failed": 1, "skipped": 0}, r"failed|summary"),
-            ("failures", [{"id": "synthetic-failure", "message": "synthetic", "repro": "tools/mg cloud-fake"}],
+            ("failures", [{"id": "synthetic-failure", "message": "synthetic", "repro": "tools/mg sync-server-test"}],
              r"failure"),
             ("duration_ms", -1, r"duration|schema"), ("args", [1], r"args|argument|schema"),
             ("placement", "unknown", r"placement|schema"), ("service", [], r"service|schema"),
@@ -1873,9 +1827,9 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                     self.write_receipt(self.paths[rid], self.receipts[rid])
 
     def test_queued_awaiting_and_unavailable_receipts_are_not_passes(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         for details in ({"queued": True}, {"outcome": "awaiting_user"},
-                        {"lane": {"kind": "cloud-fake", "status": "unavailable", "reason": "synthetic"}}):
+                        {"lane": {"kind": "sync-server-test", "status": "unavailable", "reason": "synthetic"}}):
             with self.subTest(details=details):
                 bad = copy.deepcopy(self.receipts[rid])
                 bad["status"] = "warn"
@@ -1888,7 +1842,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
 
     def test_arguments_lane_and_each_required_scope_cell_control_result(self):
         for rid, _, _, detail, items, lane, _ in self.RECEIPTS:
-            cases = [("arguments", None), ("missing-table", None)]
+            cases = [("arguments", None)] + ([("missing-table", None)] if detail else [])
             cases += [("scope", item) for item in items]
             if lane:
                 cases.append(("lane", None))
@@ -1914,7 +1868,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                         self.write_receipt(self.paths[rid], self.receipts[rid])
 
     def test_copied_display_facts_must_agree_with_receipt(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         for field, value in (("commit", self.gate), ("finished_at", "2026-11-20T10:02:00Z"), ("outcome", "fail")):
             with self.subTest(field=field):
                 data = copy.deepcopy(self.data)
@@ -1922,7 +1876,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                 self.reject(data, rid, r"disagree|match|copied|display|receipt")
 
     def test_mapped_run_and_suite_pass_rules_are_required(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         for kind in ("run-rule", "suite-rule"):
             with self.subTest(kind=kind):
                 bad = copy.deepcopy(self.receipts[rid])
@@ -1939,7 +1893,7 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
                     self.write_receipt(self.paths[rid], self.receipts[rid])
 
     def test_receipt_times_are_valid_ordered_and_strictly_before_sync(self):
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         cases = [("started_at", "yesterday"), ("finished_at", "2026-11-20T10:01:99Z"),
                  ("started_at", "2026-11-20T10:02:00Z"),
                  ("finished_at", self.data["sync_started_at"]), ("finished_at", "2026-11-20T11:01:00Z")]
@@ -1964,10 +1918,10 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
             self.write_receipt(self.paths[rid], self.receipts[rid])
 
     def test_changed_run_definition_uses_historical_build_arguments(self):
-        # The source at the build has no cloud-fake arguments. The trial's
+        # The source at the build has no sync-server-test arguments. The trial's
         # source and normalized config acquire an argument. Neither may
         # reinterpret the old receipt under the new definition.
-        run = next(r for r in self.config["runs"] if r["id"] == "cloud-fake")
+        run = next(r for r in self.config["runs"] if r["id"] == "sync-server-test")
         run["args"] = ["--rev", "{tip}"]
         self.gate = self.commit("Synthetic tier change during trial", {
             "tools/gate/tiers.yaml": self.source_tiers()})
@@ -1979,103 +1933,88 @@ class FirstSyncReceiptTests(FirstSyncFixture, Sandbox):
             current.update(started_at="2026-11-20T11:40:00Z", finished_at="2026-11-20T11:41:00Z")
             self.write_receipt(path, current)
         self.result("core-test")
-        # No positive signed witness exists. A valid historical reference
-        # must reach evidence validation, without an argument rejection.
-        ev = self.reject(self.data, "u248-soak", r"signed.*(schema|validator|validation|evidence)")
-        message = self.failure(ev, "user-step:first-sync").lower()
-        self.assertNotRegex(message, r"cloudkit-fake[^;\n]*(argument|args|definition)")
-        verified = ev["user_steps"][0]["details"]["results"]["cloudkit-fake"]
+        self.commit("Record first sync after a tier change", {self.EVIDENCE: self.data})
+        rc, ev = self.evaluate(self.man(), "M1R")
+        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev)
+        verified = ev["user_steps"][0]["details"]["results"]["sync-server-test"]
         self.assertTrue(verified["receipt_validated"])
         self.assertEqual((verified["commit"], verified["run_id"]),
-                         (self.build, self.receipts["cloudkit-fake"]["run_id"]))
+                         (self.build, self.receipts["sync-server-test"]["run_id"]))
 
     def test_real_yaml_historical_arguments_are_compiled_by_load_and_bound_to_build(self):
         # Actual YAML flow arguments, including a quoted comma, defeat both
         # JSON-only decoding and the old comma-split decoder. No test parser.
         source = '''version: 1
 runs:
-  - id: cloud-fake
-    job: cloud-fake
+  - id: sync-server-test
+    job: sync-server-test
     args: [--base, "{base}", --rev, "{tip}", --label, "ordinary, argument"]
 '''
         self.build = self.commit("Synthetic historical YAML definition", {"tools/gate/tiers.yaml": source})
         self.data["build"]["commit"] = self.build
-        rid = "cloudkit-fake"
+        rid = "sync-server-test"
         receipt = copy.deepcopy(self.receipts[rid])
         receipt["commit"]["sha"] = self.build
         receipt["args"] = ["--base", self.build, "--rev", self.build, "--label", "ordinary, argument"]
         self.write_receipt(self.paths[rid], receipt)
         self.data["results"][rid]["commit"] = self.build
-        run = next(r for r in self.config["runs"] if r["id"] == "cloud-fake")
+        run = next(r for r in self.config["runs"] if r["id"] == "sync-server-test")
         run["args"] = ["--current-only"]
         self.gate = self.commit("Synthetic current definition differs", {"tools/gate/tiers.yaml": self.source_tiers()})
         mod, ctx, _ = self._internal_validator()
-        ctx["results"].selected["cloud-fake"] = ("unused-current-cache", {"args": ["--current-only"]})
+        ctx["results"].selected["sync-server-test"] = ("unused-current-cache", {"args": ["--current-only"]})
         with mock.patch.object(mod.Results, "latest", side_effect=AssertionError("latest must not be consulted")), \
                 mock.patch.object(mod, "_first_sync_run", wraps=mod._first_sync_run) as definitions:
             selected, metadata = mod._first_sync_reference(
                 ctx, rid, self.data["results"][rid], self.build, mod.as_time(self.data["sync_started_at"]))
-        definitions.assert_called_once_with(ctx, self.build, "cloud-fake")
+        definitions.assert_called_once_with(ctx, self.build, "sync-server-test")
         self.assertEqual(selected["args"], receipt["args"])
         self.assertTrue(metadata["receipt_validated"])
         self.assertFalse(metadata["evidence_validated"])
         entry = ctx["model"]["_first_sync_definitions"]["builds"][self.build]
         self.assertEqual(entry["sha256"], hashlib.sha256(source.encode()).hexdigest())
-        self.assertEqual(entry["runs"]["cloud-fake"]["args"],
+        self.assertEqual(entry["runs"]["sync-server-test"]["args"],
                          ["--base", "{base}", "--rev", "{tip}", "--label", "ordinary, argument"])
         entry["sha256"] = "0" * 64
         with self.assertRaisesRegex(mod.Invalid, "^historical-definition-mismatch$"):
-            mod._first_sync_run(ctx, self.build, "cloud-fake")
+            mod._first_sync_run(ctx, self.build, "sync-server-test")
         del ctx["model"]["_first_sync_definitions"]
         with self.assertRaisesRegex(mod.Invalid, "^historical-definition-unavailable$"):
-            mod._first_sync_run(ctx, self.build, "cloud-fake")
+            mod._first_sync_run(ctx, self.build, "sync-server-test")
 
-    def test_reference_only_entries_require_signed_schema_and_validator(self):
-        data = copy.deepcopy(self.data)
-        for result in data["results"].values():
-            for key in ("commit", "finished_at", "outcome"):
-                del result[key]
-        # Pass-shaped cells (including object cells) cannot implement Q7.4.
-        for rid, receipt in self.receipts.items():
-            changed = copy.deepcopy(receipt)
-            for _, _, _, detail, items, _, _ in self.RECEIPTS:
-                if detail in changed["details"]:
-                    for item in items:
-                        if item in changed["details"][detail]:
-                            changed["details"][detail][item] = {"status": "pass"}
-            self.write_receipt(self.paths[rid], changed)
-        try:
-            self.reject(data, "u248-soak", r"signed.*(schema|validator|validation|evidence)")
-        finally:
-            for rid, receipt in self.receipts.items():
-                self.write_receipt(self.paths[rid], receipt)
+    def test_scope_object_passes_do_not_replace_required_native_phase_proof(self):
+        rid = "meguri-provider-real-server"
+        bad = copy.deepcopy(self.receipts[rid])
+        bad["artifacts"] = []
+        self.write_receipt(self.paths[rid], bad)
+        self.reject(self.data, rid, "phase-artifact-declaration")
 
-    def test_required_signed_artifacts_and_substitutions_fail_closed(self):
-        rid = "u248-soak"
+    def test_required_native_artifacts_and_substitutions_fail_closed(self):
+        rid = "meguri-provider-real-server"
         path = self.paths[rid]
-        artifact = os.path.join(os.path.dirname(path), "signed-evidence.json")
+        artifact = os.path.join(os.path.dirname(path), "upload.json")
         outside = os.path.join(self.root, "build", "outside-signed.json")
         marker = "SYNTHETIC_ACCOUNT_VALUE_MUST_NOT_APPEAR"
         # Deliberately invalid declarations; these are not signed evidence.
-        fake = {"outcome": "pass", "lane": "cloud-fake", "account": marker}
+        fake = {"outcome": "pass", "lane": "sync-server-test", "account": marker}
         self.write_receipt(outside, fake)
         mod, ctx, step = self._internal_validator()
         diagnostics = {"missing": "artifact-missing-unreadable-or-symlink",
-                       "undeclared": "signed-artifact-declaration", "escaping": "artifact-path-escape",
+                       "undeclared": "phase-artifact-declaration", "escaping": "artifact-path-escape",
                        "symlink": "artifact-missing-unreadable-or-symlink", "malformed": "artifact-malformed-json",
-                       "copied-pass": "signed-artifact-substitution", "fake": "signed-artifact-substitution",
-                       "per-leg": "receipt-arguments-mismatch", "wrong-role": "signed-artifact-declaration",
-                       "duplicate": "signed-artifact-declaration", "hardlink": "artifact-not-regular"}
+                       "copied-pass": "phase-artifact-substitution", "fake": "phase-artifact-substitution",
+                       "per-leg": "receipt-arguments-mismatch", "wrong-role": "phase-artifact-declaration",
+                       "duplicate": "phase-artifact-declaration", "hardlink": "artifact-not-regular"}
         os.unlink(artifact)
         for kind, diagnostic in diagnostics.items():
             with self.subTest(kind=kind):
                 bad = copy.deepcopy(self.receipts[rid])
-                bad["artifacts"] = [{"kind": "report", "path": artifact}]
+                bad["artifacts"][0] = {"kind": "provider-phase", "path": artifact}
                 try:
                     if kind == "escaping":
                         # Outside this checkout's build output, but still
                         # inside the disposable Git repository.
-                        escaped = os.path.join(self.root, "signed-evidence.json")
+                        escaped = os.path.join(self.root, "upload.json")
                         self.write_receipt(escaped, fake)
                         bad["artifacts"][0]["path"] = escaped
                     elif kind == "symlink":
@@ -2099,7 +2038,6 @@ runs:
                     ev = self.reject(self.data, rid, diagnostic)
                     self.assertNotIn(marker, json.dumps(ev))
                     message = self.failure(ev, "user-step:first-sync")
-                    self.assertNotIn("signed-validator-unavailable", message)
                     with mock.patch.object(mod, "evidence_json", return_value=(self.data, None)), \
                             mock.patch.object(mod, "_first_sync_json", wraps=mod._first_sync_json) as loader, \
                             mock.patch.object(mod, "_first_sync_artifacts", wraps=mod._first_sync_artifacts) as delegate:
@@ -2115,11 +2053,11 @@ runs:
                 finally:
                     if os.path.lexists(artifact):
                         os.unlink(artifact)
-                    escaped = os.path.join(self.root, "signed-evidence.json")
+                    escaped = os.path.join(self.root, "upload.json")
                     if os.path.exists(escaped):
                         os.unlink(escaped)
                     self.write_receipt(path, self.receipts[rid])
-        self.write_receipt(artifact, {"lane": "cloud-signed"})
+        self.write_receipt(artifact, self.phase("upload"))
 
 
 class MilestoneRunsTests(Sandbox):
@@ -2152,7 +2090,7 @@ class MilestoneRunsTests(Sandbox):
         man = manifest(
             M0={"suites": [{"id": "unit", "run": "unit"}, {"id": "harvest", "run": "harvest"}]},
             M1R={"suites": [{"id": "review-loop", "run": "review-loop"},
-                            {"id": "soak", "run": "u248-soak", "pending": "U248"}],
+                            {"id": "soak", "run": "u248-convergence", "pending": "U248"}],
                  "user_steps": [{"id": "device-run-mac", "description": "run",
                                  "evidence": "docs/process/milestone-records/device-runs/M1R/mac.json",
                                  "validator": {"type": "device-run", "device": "mac"}}],
