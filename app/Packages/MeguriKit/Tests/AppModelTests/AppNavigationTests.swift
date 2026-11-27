@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import Testing
 
@@ -76,6 +77,38 @@ import AppModel
         #expect(studies == 1)
         #expect(navigation.homeDeckPage == japanese)
         #expect(navigation.displayedSidebarSelection == .deck(japanese))
+    }
+
+    /// The row's frame redraws the sidebar alone: a press changes what its rows
+    /// read, and nothing the detail, the commands or the stacks read, even
+    /// when a second press supersedes the first.
+    @Test func aSidebarPressInvalidatesOnlyTheRowsFeedback() throws {
+        let navigation = AppNavigation()
+        navigation.openDeckPage(spanishMining)
+        let fired = ObservationFired()
+        func observeDetail() {
+            withObservationTracking {
+                _ = navigation.pendingDeckPage
+                _ = navigation.sidebarSelection
+                _ = navigation.section
+                _ = navigation.detailPath
+                _ = navigation.homeDeckPage
+                _ = navigation.sidebarInteractionPending
+                _ = navigation.destinationActionsAvailable
+            } onChange: { fired.detail = true }
+        }
+        observeDetail()
+        withObservationTracking { _ = navigation.displayedSidebarSelection } onChange: { fired.rows = true }
+        navigation.selectFromSidebar(.section(.stats))
+        navigation.selectFromSidebar(.section(.browse))
+        #expect(fired.rows)
+        #expect(!fired.detail)
+        #expect(navigation.sidebarInteractionPending && !navigation.destinationActionsAvailable)
+        // The commit is the detail's change.
+        navigation.commitMacSidebarSelection(try #require(navigation.macSidebarSelectionID))
+        #expect(fired.detail)
+        #expect(navigation.section == .browse)
+        #expect(!navigation.sidebarInteractionPending)
     }
     #endif
 
@@ -454,4 +487,10 @@ import AppModel
             columns = navigation.columnVisibility
         }
     }
+}
+
+/// What `withObservationTracking`'s change handlers saw: they are Sendable closures.
+private nonisolated final class ObservationFired: @unchecked Sendable {
+    var detail = false
+    var rows = false
 }
