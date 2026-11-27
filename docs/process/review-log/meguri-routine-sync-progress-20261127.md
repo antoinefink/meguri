@@ -15,13 +15,20 @@ The new test routes appear in the exact inventories, and Swift tests use the
 regenerated progress record fields. A schema change after server acknowledgment
 does not record a completed local apply.
 
-The independent reviewer, session `s-20261127T080615Z-10a4c97b`, read the full
-contents of both specs and classified these exact SHA-256 digests as PUBLIC.
+A subsequent review found that core can retain an acceptance-unknown recovery
+state after the app observes a valid Finish reply. The log now uses the observed
+reply and local apply evidence. It preserves a native media refusal when the
+media result also has an error. The three provider tests with new wall-clock
+bounds run alone in Nextest. See `cleanroom/20261127T082710Z-32904`.
+
+Session `s-20261127T080615Z-10a4c97b` reviewed the complete provider spec.
+The independent standards reviewer, `sync_standards`, reviewed the complete
+revised status strings spec. Both exact SHA-256 digests are PUBLIC.
 
 | File | Reviewed SHA-256 |
 | --- | --- |
 | `specs/sync/meguri-provider.md` | `37cb64867dc11f051331a1befea521c0cf121e036969faeb93330e57297101c5` |
-| `specs/sync/status-strings.md` | `d6f43622fbef904b5f7afd067485cf2d3852f503505f7a6b4db35b05d5f1e2eb` |
+| `specs/sync/status-strings.md` | `a4c126c83ae9095f20d5a2453c9a2c2488c1e3f8286107348dedd7b7e956c282` |
 
 The same reviewer classified the implementation, first fixer, and review
 session records as public operational metadata.
@@ -32,9 +39,13 @@ session records as public operational metadata.
 | `s-20261127T080516Z-0e7ac008` | `15dfedbc6230f12a88ea092597b217b5ae5c445518b2d0e1a6adcd1735b52445` |
 | `s-20261127T080615Z-10a4c97b` | `7da0542057b93220f3b547cf89dbed7bc203763cd883a9380a358c23a813f16a` |
 
-The independent standards reviewer confirmed the last fixer session record
-`s-20261127T081450Z-648c50a9` is public operational metadata. The reviewed
-SHA-256 is `7a1c5420fe24159739625dbd424f03f8b5fd2438194232664dbe199ecb7aaeb8`.
+The independent standards reviewer confirmed both later fixer session records
+contain public operational metadata.
+
+| Session record | Reviewed SHA-256 |
+| --- | --- |
+| `s-20261127T081450Z-648c50a9` | `7a1c5420fe24159739625dbd424f03f8b5fd2438194232664dbe199ecb7aaeb8` |
+| `s-20261127T082339Z-96caebdd` | `c64b51b8a68175c5e239973433d0fd5f42713485e4e964e47255c4f8b86873d9` |
 
 ## Verification
 

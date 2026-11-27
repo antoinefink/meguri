@@ -1141,9 +1141,9 @@ PUBLIC_ARTIFACTS = {
     # Complete bounded-content PUBLIC review: Codex r10_native_failure_diagnosis, 2026-11-17.
     'app/Packages/MeguriCore/Sources/CoreBridge/Sync/ProviderBootstrapService.swift':
         'edba139cde56f1dc7c10598a9de920c034b31d800320ed3e0068480e8fe6fb99',
-    # Complete final-content PUBLIC review: Codex meguri-sync-progress-review, 2026-11-27.
+    # Complete final-content PUBLIC review: Codex sync_standards, 2026-11-27.
     'specs/sync/status-strings.md':
-        'd6f43622fbef904b5f7afd067485cf2d3852f503505f7a6b4db35b05d5f1e2eb',
+        'a4c126c83ae9095f20d5a2453c9a2c2488c1e3f8286107348dedd7b7e956c282',
     # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
         '56e8aee5d42aec1c619bdf279c17454872a227f2a607bc0e8e554b7a379096f0',

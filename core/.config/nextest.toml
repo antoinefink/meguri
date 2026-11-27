@@ -219,6 +219,19 @@ threads-required = "num-test-threads"
 filter = 'package(meguri-host) and binary(host_it) and (test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'
 threads-required = "num-test-threads"
 
+# Routine Finish/apply rendezvous retain their ten-second bounds on an idle runner.
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and binary(host_it) and test(=provider_normal::routine_finish_response_precedes_apply_and_invalid_or_lost_responses_never_invent_it)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and binary(host_it) and test(=provider_normal::routine_schema_change_keeps_acknowledgment_without_apply_completion)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and binary(host_it) and test(=provider_normal::meguri_round_relays_answered_card_revlog_and_media_to_second_bound_device)'
+threads-required = "num-test-threads"
+
 # Reference drains retain a one-second lane bound; provider interleaving uses
 # actual file observations with the existing ten-second operation budget.
 [[profile.default.overrides]]

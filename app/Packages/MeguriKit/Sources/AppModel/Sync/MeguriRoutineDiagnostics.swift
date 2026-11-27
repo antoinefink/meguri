@@ -39,17 +39,24 @@ import Foundation
         case .refused: reason = .refused
         case .pending: reason = .unavailable
         case .collection(let value):
-            if value.acceptanceUnknown { reason = .acceptanceUnknown }
+            // Core keeps acceptance conservative for recovery even after a validated
+            // Finish response. Diagnostics retain this attempt's observed evidence.
+            if value.acceptanceUnknown && !seen.contains(.serverAcknowledged) && !seen.contains(.applyCompleted) {
+                reason = .acceptanceUnknown
+            }
             else if value.refusal != nil { reason = .refused }
             else if value.state == .fullSyncRequired { reason = .fullSyncRequired }
+            else if seen.contains(.serverAcknowledged) && !seen.contains(.applyCompleted) {
+                reason = value.failure.map(Self.reason) == .cancelled ? .cancelled : .localFailure
+            }
             else if let failure = value.failure { reason = Self.reason(failure) }
-            else if value.recovery != nil { reason = .localFailure }
+            else if value.recovery != nil || value.acceptanceUnknown { reason = .localFailure }
             else if let media = report.media {
                 switch media.outcome {
                 case .refused: reason = .refused
                 case .media(let value):
-                    if let failure = value.failure ?? value.accountingFailure { reason = Self.reason(failure) }
-                    else if value.refusal != nil { reason = .refused }
+                    if value.refusal != nil { reason = .refused }
+                    else if let failure = value.failure ?? value.accountingFailure { reason = Self.reason(failure) }
                     else if value.recovery != nil { reason = .localFailure }
                     else { reason = .mediaIncomplete }
                 default: reason = .unavailable
