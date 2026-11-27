@@ -203,7 +203,34 @@ mg_failure() { printf 'failure %s\n' "$1"; }
 mg_message() { :; }
 mg_status() { printf 'status %s\n' "$1"; }
 xcrun() { printf '{"errorCount":0,"warningCount":0}'; }
+# The fake build emits only an xctestrun, not signed app/widget packages.
+# Stub that independent validator only; all performance Python stays real.
+python3() {
+  if [ "${1:-}" = -B ] && [ "${2:-}" = "$MG_TOOLS/tests/sync_build_configuration.py" ]; then
+    shift 2
+    local sync_platform=ios extra=() arg
+    [ "$FAKE_PLATFORM" != mac ] || sync_platform=mac
+    [ "$FAKE_PLATFORM" != ios-sim ] || extra=(--simulator)
+    local expected=(--settings "$MG_RUN_DIR/sync-settings.json"
+      --configuration "$FAKE_CONFIG" --platform "$sync_platform" --signing adhoc
+      --app "$(mg_app_products "$FAKE_PLATFORM" "$FAKE_CONFIG")/Meguri.app" ${extra[0]+"${extra[@]}"})
+    [ "$#" -eq "${#expected[@]}" ] || return 97
+    for arg in "${expected[@]}"; do
+      [ "$1" = "$arg" ] || return 97
+      shift
+    done
+    [ -f "$MG_RUN_DIR/sync-settings.json" ] || return 97
+    echo SYNTHETIC_PACKAGE_ACCEPTED
+    return 0
+  fi
+  command python3 "$@"
+}
 xcodebuild() {
+  # A separate settings query must not overwrite the actual build arguments.
+  if [ "${1:-}" = -showBuildSettings ]; then
+    printf '[]\n'
+    return 0
+  fi
   printf '%s\n' "$*" >"$MG_ROOT/build-args"
   [ "$FAKE_BUILD_RC" = 0 ] || return "$FAKE_BUILD_RC"
   [ "$FAKE_AVAILABLE" = yes ] || return 0
@@ -216,8 +243,9 @@ mg_app_build "$@" || exit $?
 echo CONSUMER_ALLOWED
 '''
             env = dict(os.environ, MG_ROOT=str(root), MG_TOOLS=str(TOOLS),
-                       FAKE_PLATFORM=platform, FAKE_BUILD_RC=str(build_rc),
+                       FAKE_PLATFORM=platform, FAKE_CONFIG=config, FAKE_BUILD_RC=str(build_rc),
                        FAKE_AVAILABLE="yes" if available else "no",
+                       MEGURI_APP_SIGNING="adhoc",
                        MG_APP_TEST_SCHEME="WrongAmbientScheme")
             result = subprocess.run(["bash", "-u", "-c", script, "fake", platform, config, plan,
                                      "Meguri-Profile", "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES"],
@@ -225,6 +253,10 @@ echo CONSUMER_ALLOWED
             args = (root / "build-args").read_text()
             self.assertIn("-configuration " + config, args)
             self.assertIn("CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES", args)
+            if build_rc == 0:
+                self.assertIn("SYNTHETIC_PACKAGE_ACCEPTED", result.stdout)
+            else:
+                self.assertNotIn("SYNTHETIC_PACKAGE_ACCEPTED", result.stdout)
             return result
 
     def test_profile_guard(self):
@@ -240,11 +272,12 @@ echo CONSUMER_ALLOWED
                 self.assertNotIn("CONSUMER_ALLOWED", result.stdout)
 
     def test_ordinary_builds_unaffected(self):
-        for config, plan in (("Debug", "UI"), ("Debug", "Performance"), ("Profile", "UI")):
-            result = self.run_build(config=config, plan=plan, available=False)
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertNotIn("performance_test_policy", result.stdout)
-            self.assertIn("CONSUMER_ALLOWED", result.stdout)
+        for platform in ("mac", "ios-sim"):
+            for config, plan in (("Debug", "UI"), ("Debug", "Performance"), ("Profile", "UI")):
+                result = self.run_build(platform=platform, config=config, plan=plan, available=False)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertNotIn("performance_test_policy", result.stdout)
+                self.assertIn("CONSUMER_ALLOWED", result.stdout)
 
     def test_failed_build_stops_before_guard(self):
         result = self.run_build(build_rc=7)
