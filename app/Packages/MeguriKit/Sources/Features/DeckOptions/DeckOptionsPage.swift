@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import DesignSystem
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -129,34 +130,30 @@ public struct DeckOptionsPage: View {
                 Text(verbatim: DeckOptionsStrings.memoryFooter(ownRetention: model.ownRetention, locale: locale))
                     .accessibilityIdentifier("deckOptions.options.memoryFooter")
             }
+            // N20.9 (changed 2026-11-27): one box per collapsible section, named
+            // for its content; the disclosure row is the box's first row and
+            // the five pickers open as further rows of the same box.
             Section {
                 // Two native Mac UI runs found DisclosureGroup inert in this grouped
                 // Form, at both its center and chevron. A native Button gives the
                 // whole row one action, with its identifier confined to that leaf.
-                Button { model.advancedExpanded.toggle() } label: {
+                Button { model.displayOrderExpanded.toggle() } label: {
                     HStack {
-                        Image(systemName: model.advancedExpanded ? "chevron.down" : "chevron.right")
+                        Image(systemName: model.displayOrderExpanded ? "chevron.down" : "chevron.right")
                             .accessibilityHidden(true)
-                        Text("deckOptions.disclosure.advanced", bundle: .module)
+                        Text("deckOptions.section.displayOrder", bundle: .module)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityValue(Text(model.advancedExpanded
+                .accessibilityValue(Text(model.displayOrderExpanded
                     ? "deckOptions.disclosure.expanded" : "deckOptions.disclosure.collapsed", bundle: .module))
-                .accessibilityIdentifier("deckOptions.options.advanced")
-            }
-            if model.advancedExpanded {
-                Section {
+                .accessibilityIdentifier("deckOptions.options.displayOrder")
+                if model.displayOrderExpanded {
                     ForEach(DeckOptionsDisplayOrder.allCases, id: \.self) { row in
                         displayOrderPicker(row)
                     }
-                } header: {
-                    Text("deckOptions.section.displayOrder", bundle: .module)
-                } footer: {
-                    Text("deckOptions.displayOrder.footer", bundle: .module)
-                        .accessibilityIdentifier("deckOptions.options.displayOrderFooter")
                 }
             }
         }
@@ -188,17 +185,9 @@ public struct DeckOptionsPage: View {
 
     @ViewBuilder private func displayOrderPicker(_ row: DeckOptionsDisplayOrder) -> some View {
         if let value = model.selected?.displayOrder[row] {
-            Picker(selection: Binding(get: { model.selected?.displayOrder[row] ?? value },
-                                      set: { model.setDisplayOrder(row, $0) })) {
-                ForEach(model.choices(row), id: \.self) { choice in
-                    Text(DeckOptionsStrings.choiceKey(row, value: choice), bundle: .module).tag(choice)
-                }
-            } label: {
-                Text(DeckOptionsStrings.optionKey(row), bundle: .module)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .pickerStyle(.menu)
-            .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue)")
+            DisplayOrderRow(row: row, choices: model.choices(row),
+                            selection: Binding(get: { model.selected?.displayOrder[row] ?? value },
+                                               set: { model.setDisplayOrder(row, $0) }))
         }
     }
 
@@ -318,6 +307,152 @@ public struct DeckOptionsPage: View {
     }
 }
 
+/// One Display Order row (N20.9, changed 2026-11-27): the label with a small
+/// help button right after it, then the menu picker trailing in the row. The
+/// help button is its own control in the label, so the picker keeps its hit area.
+private struct DisplayOrderRow: View {
+    let row: DeckOptionsDisplayOrder
+    let choices: [Int32]
+    @Binding var selection: Int32
+    @State private var helpShown = false
+    #if os(macOS)
+    /// The help button's frame in its window, for the popover's height cap.
+    @State private var helpAnchor: CGRect = .zero
+    #endif
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        LabeledContent {
+            Picker(selection: $selection) {
+                ForEach(choices, id: \.self) { choice in
+                    Text(DeckOptionsStrings.choiceKey(row, value: choice), bundle: .module).tag(choice)
+                }
+            } label: {
+                Text(DeckOptionsStrings.optionKey(row), bundle: .module)
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            // N11.9: Help is also a custom action on the control.
+            .accessibilityAction(named: Text(verbatim: helpLabel)) { helpShown = true }
+            .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue)")
+        } label: {
+            HStack {
+                Text(DeckOptionsStrings.optionKey(row), bundle: .module)
+                    .fixedSize(horizontal: false, vertical: true)
+                helpButton
+            }
+        }
+    }
+
+    private var helpLabel: String { DeckOptionsStrings.helpLabel(row, locale: locale) }
+
+    private var helpButton: some View {
+        Button { helpShown = true } label: {
+            Label { Text(verbatim: helpLabel) } icon: { Image(systemName: "info.circle") }
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help(Text(verbatim: helpLabel))
+        .accessibilityIdentifier("deckOptions.options.orderHelp.\(row.rawValue)")
+        #if os(macOS)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { helpAnchor = $0 }
+        #endif
+        .popover(isPresented: $helpShown) {
+            // A popover on the Mac and at regular width; a sheet at compact
+            // width, as the sync status panel adapts (N23.1).
+            #if os(iOS)
+            ViewThatFits(in: .vertical) {
+                DisplayOrderHelp(row: row, choices: choices).padding()
+                ScrollView { DisplayOrderHelp(row: row, choices: choices).padding() }
+            }
+            .frame(idealWidth: ContentWidth.primaryAction, maxHeight: .infinity, alignment: .top)
+            .presentationCompactAdaptation(.sheet)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            #else
+            DisplayOrderHelpPopover(row: row, choices: choices,
+                                    maxHeight: DisplayOrderHelpPopover.heightCap(anchor: helpAnchor))
+            #endif
+        }
+    }
+}
+
+#if os(macOS)
+/// The Mac popover's content. A popover takes its content's ideal size, so the
+/// help keeps its own height (no scroll bar, no empty space) up to `maxHeight`,
+/// and scrolls above it: Review sort order's 13 choices can be taller than the
+/// screen leaves beside the button.
+private struct DisplayOrderHelpPopover: View {
+    let row: DeckOptionsDisplayOrder
+    let choices: [Int32]
+    let maxHeight: CGFloat
+
+    var body: some View {
+        // The unscrolled copy, hidden, gives the size: its own height, at most
+        // maxHeight. The scroll view shows the help within that size.
+        DisplayOrderHelp(row: row, choices: choices)
+            .padding()
+            .hidden()
+            .accessibilityHidden(true)
+            .frame(maxHeight: maxHeight, alignment: .top)
+            .overlay(alignment: .top) {
+                ScrollView { DisplayOrderHelp(row: row, choices: choices).padding() }
+                    .scrollBounceBehavior(.basedOnSize)
+            }
+            .frame(width: ContentWidth.primaryAction)
+    }
+
+    /// The taller of the spaces the screen leaves above and below the help
+    /// button, where the system can open the popover, less the popover's arrow
+    /// and its inset from the screen's edge. Half the screen, which one side
+    /// always leaves, when the button's window is unknown; no cap off screen.
+    static func heightCap(anchor: CGRect) -> CGFloat {
+        let margin = Spacing.xLarge
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let screen = window.screen ?? NSScreen.main,
+              let content = window.contentView else {
+            return NSScreen.main.map { $0.visibleFrame.height / 2 - margin } ?? .infinity
+        }
+        // SwiftUI's global space on the Mac starts at the top of the window's content view.
+        let height = content.frame.height
+        let top = window.convertPoint(toScreen: CGPoint(x: anchor.minX, y: height - anchor.minY)).y
+        let bottom = window.convertPoint(toScreen: CGPoint(x: anchor.minX, y: height - anchor.maxY)).y
+        let visible = screen.visibleFrame
+        return max(visible.maxY - top, bottom - visible.minY) - margin
+    }
+}
+#endif
+
+/// The help for one Display Order row: its name, what it does, then one line
+/// per choice the core offers, in the menu's order, each name in bold.
+private struct DisplayOrderHelp: View {
+    let row: DeckOptionsDisplayOrder
+    let choices: [Int32]
+
+    var body: some View {
+        // A space between the lines, so a long list (Review sort order has 13) scans
+        // choice by choice; the mock the owner approved spaced them the same way.
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+            Text(DeckOptionsStrings.optionKey(row), bundle: .module)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("deckOptions.options.orderHelpTitle.\(row.rawValue)")
+            Text(LocalizedStringKey(DeckOptionsStrings.helpIntroKey(row)), bundle: .module)
+            ForEach(choices, id: \.self) { choice in
+                if let explanation = DeckOptionsStrings.helpChoiceKey(row, value: choice) {
+                    let name = Text(DeckOptionsStrings.choiceKey(row, value: choice), bundle: .module).bold()
+                    let text = Text(LocalizedStringKey(explanation), bundle: .module)
+                    // "Name: explanation" (`deckOptions.help.choice %@ %@`).
+                    Text("deckOptions.help.choice \(name) \(text)", bundle: .module)
+                        .accessibilityIdentifier("deckOptions.options.orderHelpChoice.\(row.rawValue)-\(choice)")
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// The page's formatted strings (K6, K10 and Meguri's issue texts).
 public enum DeckOptionsStrings {
     /// The DeckOptions String Catalog's bundle.
@@ -344,6 +479,33 @@ public enum DeckOptionsStrings {
     }
 
     static func choiceCatalogKey(_ row: DeckOptionsDisplayOrder, value: Int32) -> String {
+        choiceName(row, value: value).map { "deckOptions." + $0 } ?? "deckOptions.displayOrder.unavailable"
+    }
+
+    /// The help popover's sentence on what a row does (N20.9, changed 2026-11-27).
+    static func helpIntroKey(_ row: DeckOptionsDisplayOrder) -> String {
+        "deckOptions.help." + row.rawValue
+    }
+
+    /// The help popover's explanation of one choice, per row: the two mix rows
+    /// share their choice labels but not their explanations. Nil for a value
+    /// with no label, which the popover leaves out.
+    static func helpChoiceKey(_ row: DeckOptionsDisplayOrder, value: Int32) -> String? {
+        guard let name = choiceName(row, value: value), let choice = name.split(separator: ".").last else { return nil }
+        return "deckOptions.help.\(row.rawValue).\(choice)"
+    }
+
+    /// The help button's accessibility label and Mac tooltip, naming its row.
+    static func helpLabel(_ row: DeckOptionsDisplayOrder, locale: Locale) -> String {
+        let name = String(localized: String.LocalizationValue(optionCatalogKey(row)), bundle: .module, locale: locale)
+        return String(localized: "deckOptions.help.label", defaultValue: "Help: \(name)", bundle: .module, locale: locale)
+    }
+
+    static func optionCatalogKey(_ row: DeckOptionsDisplayOrder) -> String {
+        "deckOptions.option." + row.rawValue
+    }
+
+    private static func choiceName(_ row: DeckOptionsDisplayOrder, value: Int32) -> String? {
         let keys: [Int32: String]
         switch row {
         case .newGatherPriority:
@@ -361,7 +523,7 @@ public enum DeckOptionsStrings {
                     11: "reviewSort.descendingRetrievability", 12: "reviewSort.relativeOverdueness",
                     8: "reviewSort.random", 9: "reviewSort.added", 10: "reviewSort.latestAddedFirst"]
         }
-        return keys[value].map { "deckOptions." + $0 } ?? "deckOptions.displayOrder.unavailable"
+        return keys[value]
     }
 
     /// K6: "Default (used by 6 decks)", the count grouped in the locale's format.

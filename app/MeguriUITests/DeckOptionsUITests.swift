@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 #if os(macOS)
+import AppKit
 
 /// Deck Options' keys on the Mac (N20.9, `sched/deck-options` O15.3): ⌥⌘O
 /// opens the page on the shown deck, ⌘↩ saves as ⌘S does, and Save returns
@@ -110,15 +111,29 @@ final class DeckOptionsUITests: XCTestCase {
         let save = element(app, "deckOptions.options.save")
         XCTAssertTrue(save.waitForExistence(timeout: 20))
         let gather = app.popUpButtons["deckOptions.options.order.newGatherPriority"]
-        XCTAssertFalse(gather.exists, "Advanced is collapsed whenever the page opens")
+        XCTAssertFalse(gather.exists, "Display Order is collapsed whenever the page opens")
         try app.bringToFront(bundleIdentifier: bundle)
-        let advanced = app.buttons["deckOptions.options.advanced"]
-        XCTAssertTrue(advanced.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitForValue(advanced, "Collapsed"))
-        XCTAssertTrue(advanced.isHittable)
-        advanced.click()
-        XCTAssertTrue(waitForValue(advanced, "Expanded"))
+        let disclosure = app.buttons["deckOptions.options.displayOrder"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        XCTAssertEqual(disclosure.label, "Display Order", "The disclosure is named for its content")
+        XCTAssertTrue(waitForValue(disclosure, "Collapsed"))
+        XCTAssertTrue(disclosure.isHittable)
+        XCTAssertFalse(app.buttons["deckOptions.options.advanced"].exists, "No Advanced wrapper remains")
+        capture(app, "deck-options-display-order-collapsed")
+        // One row's pitch inside one box, measured before anything scrolls.
+        let newPerDay = element(app, "deckOptions.options.option.newPerDay")
+        let reviewsPerDay = element(app, "deckOptions.options.option.reviewsPerDay")
+        XCTAssertTrue(newPerDay.exists && reviewsPerDay.exists)
+        let rowPitch = reviewsPerDay.frame.midY - newPerDay.frame.midY
+        disclosure.click()
+        XCTAssertTrue(waitForValue(disclosure, "Expanded"))
         XCTAssertTrue(gather.waitForExistence(timeout: 10))
+        // N20.9 (2026-11-27): the first picker is the next row of the disclosure's
+        // own box, not the first row of a second section under its own header.
+        let disclosurePitch = gather.frame.midY - disclosure.frame.midY
+        XCTAssertTrue(rowPitch > 0 && disclosurePitch > 0 && disclosurePitch <= rowPitch * 1.5,
+                      "The pickers open in the disclosure's box (pitch \(disclosurePitch), row pitch \(rowPitch))")
+        XCTAssertFalse(app.staticTexts["deckOptions.options.displayOrderFooter"].exists, "The gathering footer is gone")
         let orderRows = ["newGatherPriority", "newSortOrder", "newMix", "interdayLearningMix", "reviewOrder"]
         let review = app.popUpButtons["deckOptions.options.order.reviewOrder"]
         let scroll = app.scrollViews.containing(.popUpButton, identifier: "deckOptions.options.order.reviewOrder").firstMatch
@@ -134,21 +149,89 @@ final class DeckOptionsUITests: XCTestCase {
             XCTAssertTrue(picker.isHittable && app.windows.firstMatch.frame.contains(picker.frame),
                           "The native panel screenshot shows the picker for \(row)")
         }
-        for label in ["New card gather order", "New card sort order", "New/review order",
-                      "Interday learning/review order", "Review sort order"] {
+        let rowLabels = ["New card gather order", "New card sort order", "New/review order",
+                         "Interday learning/review order", "Review sort order"]
+        for (row, label) in zip(orderRows, rowLabels) {
             let text = app.staticTexts[label].firstMatch
             XCTAssertTrue(text.exists && app.windows.firstMatch.frame.contains(text.frame),
                           "The native panel screenshot shows the row label \(label)")
+            // The info button follows the label and keeps clear of the picker.
+            let help = app.buttons["deckOptions.options.orderHelp.\(row)"]
+            let picker = app.popUpButtons["deckOptions.options.order." + row]
+            XCTAssertTrue(help.exists && help.isHittable, "\(row) has its help button")
+            XCTAssertEqual(help.label, "Help: \(label)", "The help button names its row")
+            XCTAssertGreaterThanOrEqual(help.frame.minX, text.frame.maxX - 1, "\(row)'s help button follows its label")
+            XCTAssertFalse(help.frame.intersects(picker.frame), "\(row)'s help button takes none of the picker's area")
+            XCTAssertTrue(help.frame.midY > picker.frame.minY && help.frame.midY < picker.frame.maxY,
+                          "\(row)'s help button sits in the picker's row")
         }
         XCTAssertFalse(save.isEnabled, "Expanding the disclosure never changes the draft")
-        XCTAssertTrue(bringIntoView(advanced, in: scroll, app: app))
-        advanced.click()
-        XCTAssertTrue(waitForValue(advanced, "Collapsed"))
+
+        // The help popover: the row's name, what it does, then each choice in the menu's order.
+        let gatherHelp = app.buttons["deckOptions.options.orderHelp.newGatherPriority"]
+        try app.bringToFront(bundleIdentifier: bundle)
+        gatherHelp.click()
+        let popover = app.popovers.firstMatch
+        let helpTitle = popover.staticTexts["deckOptions.options.orderHelpTitle.newGatherPriority"]
+        XCTAssertTrue(helpTitle.waitForExistence(timeout: 10), "The help opens in a popover on the Mac")
+        XCTAssertEqual(text(of: helpTitle), "New card gather order")
+        let helpLines = [0, 5, 1, 2, 3, 4].map { popover.staticTexts["deckOptions.options.orderHelpChoice.newGatherPriority-\($0)"] }
+        XCTAssertTrue(helpLines.allSatisfy(\.exists), "One line per choice the menu offers")
+        XCTAssertEqual(text(of: helpLines[1]),
+                       "Deck, then random notes: Takes one deck at a time, in deck list order. In each deck, the notes are in random order.")
+        XCTAssertEqual(helpLines.map(\.frame.minY), helpLines.map(\.frame.minY).sorted(), "The lines follow the menu's order")
+        capture(app, "deck-options-help-popover-anchor")
+        // The popover is its own window on the Mac: the main window's screenshot omits it.
+        capture(popover, "deck-options-help-popover")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(helpTitle.waitForNonExistence(timeout: 10), "Esc closes the help")
+        XCTAssertTrue(save.exists, "Esc in the help leaves the page open")
+        XCTAssertFalse(save.isEnabled, "Reading the help never changes the draft")
+
+        // A short help keeps its own height: every line shows, with no empty space below the last.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.buttons["deckOptions.options.orderHelp.newMix"].click()
+        let mixLines = [0, 1, 2].map { popover.staticTexts["deckOptions.options.orderHelpChoice.newMix-\($0)"] }
+        XCTAssertTrue(mixLines[2].waitForExistence(timeout: 10), "The New/review order help opens")
+        XCTAssertTrue(mixLines.allSatisfy(\.isHittable), "A short help needs no scrolling")
+        XCTAssertLessThan(popover.frame.maxY - mixLines[2].frame.maxY, mixLines[2].frame.height * 2,
+                          "A short help ends after its last line")
+        capture(popover, "deck-options-help-popover-short")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(mixLines[2].waitForNonExistence(timeout: 10))
+
+        // The longest help, Review sort order, stays on the screen and scrolls to its last choice.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.buttons["deckOptions.options.orderHelp.reviewOrder"].click()
+        let reviewTitle = popover.staticTexts["deckOptions.options.orderHelpTitle.reviewOrder"]
+        XCTAssertTrue(reviewTitle.waitForExistence(timeout: 10), "The Review sort order help opens")
+        let visible = try XCTUnwrap(Self.visibleFrame(around: popover.frame), "no display holds the help")
+        XCTAssertTrue(visible.insetBy(dx: -1, dy: -1).contains(popover.frame),
+                      "The help fits its display's visible area (popover \(popover.frame), visible \(visible))")
+        XCTAssertTrue(reviewTitle.isHittable, "The help opens at its top")
+        capture(popover, "deck-options-help-popover-review")
+        // Value 10, Latest added first, is the menu's last choice.
+        let lastLine = popover.staticTexts["deckOptions.options.orderHelpChoice.reviewOrder-10"]
+        XCTAssertTrue(lastLine.exists)
+        if !lastLine.isHittable {
+            popover.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -popover.frame.height * 4)
+        }
+        XCTAssertTrue(lastLine.isHittable && popover.frame.contains(lastLine.frame), "The last choice can be reached")
+        capture(popover, "deck-options-help-popover-review-end")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(reviewTitle.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(save.exists && !save.isEnabled, "Reading the help never changes the draft")
+        XCTAssertTrue(bringIntoView(disclosure, in: scroll, app: app))
+        disclosure.click()
+        XCTAssertTrue(waitForValue(disclosure, "Collapsed"))
         for row in orderRows {
             XCTAssertFalse(app.popUpButtons["deckOptions.options.order." + row].exists)
         }
         XCTAssertFalse(save.isEnabled, "Collapsing the disclosure never changes the draft")
-        advanced.click()
+        disclosure.click()
         XCTAssertTrue(gather.waitForExistence(timeout: 10))
         XCTAssertTrue(bringIntoView(gather, in: scroll, app: app))
         // This is the native menu's spec order, including the nonsequential value 5.
@@ -324,7 +407,10 @@ final class DeckOptionsUITests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        capture(app.windows.firstMatch, name)
+    }
+    private func capture(_ element: XCUIElement, _ name: String) {
+        let attachment = XCTAttachment(screenshot: element.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -389,6 +475,23 @@ final class DeckOptionsUITests: XCTestCase {
             scroll.scroll(byDeltaX: 0, deltaY: move)
         }
         return false
+    }
+    /// The visible frame of the display that holds most of `frame`, both in
+    /// XCUITest's screen points (top-left origin on the primary display), as
+    /// `AgentDriverTests.visibleFrame(around:)` converts it.
+    private static func visibleFrame(around frame: CGRect) -> CGRect? {
+        guard let height = NSScreen.screens.first?.frame.height else { return nil }
+        func flipped(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        func area(_ rect: CGRect) -> CGFloat { rect.isNull ? 0 : rect.width * rect.height }
+        return NSScreen.screens
+            .max { area(flipped($0.frame).intersection(frame)) < area(flipped($1.frame).intersection(frame)) }
+            .map { flipped($0.visibleFrame) }
+    }
+    /// A Mac static text carries its string as its value; the label is often empty.
+    private func text(of element: XCUIElement) -> String {
+        (element.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? element.label
     }
     private func waitForValue(_ target: XCUIElement, _ value: String) -> Bool {
         XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value == %@", value),

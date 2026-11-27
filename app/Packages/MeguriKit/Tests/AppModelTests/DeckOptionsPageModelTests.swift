@@ -367,10 +367,10 @@ import Testing
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions
         model.open(deckID: 1); await model.waitForCompletion()
-        #expect(!model.advancedExpanded)
+        #expect(!model.displayOrderExpanded)
         #expect(model.selected?.displayOrder[.reviewOrder] == 11)
         #expect(model.choices(.newGatherPriority) == [0, 5, 1, 2, 3, 4])
-        model.advancedExpanded = true
+        model.displayOrderExpanded = true
         model.setDisplayOrder(.reviewOrder, 12)
         model.setDisplayOrder(.newGatherPriority, 5)
         model.selectPreset(2)
@@ -385,7 +385,7 @@ import Testing
             "select 2", "order newSortOrder 2 4", "select 1", "save"])
         #expect(model.outcome == .saved)
         model.open(deckID: 1); await model.waitForCompletion()
-        #expect(!model.advancedExpanded)
+        #expect(!model.displayOrderExpanded)
     }
 
     @Test(arguments: [false, true])
