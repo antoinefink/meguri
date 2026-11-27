@@ -28,7 +28,7 @@ import Testing
         let directory = location()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
-        let round = MeguriRoutineDiagnostics(record: store.enqueue)
+        let round = MeguriRoutineDiagnostics(record: { store.enqueue($0) })
         #expect(round.observe([.collectionStarted, .serverAcknowledged, .applyStarted]) == .applying)
         // A conflated/replayed update retains intermediate evidence, once only.
         #expect(round.observe([.collectionStarted, .serverAcknowledged, .applyStarted, .applyCompleted, .mediaCheckStarted]) == .checkingMedia)
@@ -45,7 +45,7 @@ import Testing
         {"component":"cloud","operation":"exchange","stage":"statusObserved","outcome":"observed"}
         """.utf8))
         #expect(old.roundID == nil && old.roundMilestone == nil && old.roundReason == nil)
-        let cancelled = MeguriRoutineDiagnostics(record: store.enqueue)
+        let cancelled = MeguriRoutineDiagnostics(record: { store.enqueue($0) })
         cancelled.finish(error: CancellationError())
         let last = await store.timeline().events.last?.observation
         #expect(last?.roundReason == .cancelled && last?.outcome == .cancelled)
