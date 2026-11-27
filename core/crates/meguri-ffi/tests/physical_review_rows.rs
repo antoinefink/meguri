@@ -2,10 +2,10 @@
 //! read from the stored rows, not inferred from tracking or a synthetic receipt.
 use meguri_engine::{OpSource, OpSpec};
 use meguri_ffi::{
-    CoreError, CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
+    CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
     collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
     physical_review_rows::PhysicalReviewCell,
-    test_hooks::{collection_for_testing, test_physical_review_rows},
+    test_hooks::{collection_for_testing, test_physical_review_rows, test_smoke_integrity},
 };
 use meguri_model::{
     card::{CardQueue, CardType},
@@ -58,30 +58,6 @@ fn assert_cells(actual: &[PhysicalReviewCell], stored: &[Cell]) {
             _ => panic!("observer changed a storage class"),
         }
     }
-}
-struct SmokeIntegrityObservation {
-    generation: u64,
-    seq: u64,
-    integrity_ok: bool,
-    schema_ok: bool,
-    reference_failures: u64,
-}
-fn test_smoke_integrity() -> Result<SmokeIntegrityObservation, CoreError> {
-    let collection = collection_for_testing()?;
-    let lease = collection.reader(ReaderRole::Query)?;
-    let snapshot = lease.snapshot()?;
-    let r = snapshot.smoke_integrity()?;
-    Ok(SmokeIntegrityObservation {
-        generation: snapshot.generation().0,
-        seq: snapshot.seq().0,
-        integrity_ok: r.integrity_ok,
-        schema_ok: r.schema_ok,
-        reference_failures: r.missing_card_notes
-            + r.missing_card_decks
-            + r.missing_note_types
-            + r.missing_field_types
-            + r.wrong_field_counts,
-    })
 }
 #[test]
 fn physical_observer_matches_actual_card_history_and_one_snapshot_without_mutation() {

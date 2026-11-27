@@ -1,7 +1,8 @@
 //! Test-only exports (KTD18, R1967), compiled only with the `test-hooks`
 //! feature: Debug and Profile builds, never Release or AppStore. CoreBridge
-//! never names them; the MeguriCore Swift tests call them through the
-//! generated bindings. Like every export they exist on every slice.
+//! names them only in DEBUG inspection helpers; the MeguriCore Swift tests
+//! also call them through generated bindings. Like every export they exist
+//! on every slice of a test-hooks configuration.
 
 use std::sync::Arc;
 use std::thread;
@@ -320,6 +321,36 @@ pub fn test_maintenance_notes_page_offset() -> Result<u64, CoreError> {
         )
         .wait()?;
     Ok(offset)
+}
+
+/// Fixed integrity facts from one owned Query snapshot; no caller-selected query.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SmokeIntegrityObservation {
+    pub generation: u64,
+    pub seq: u64,
+    pub integrity_ok: bool,
+    pub schema_ok: bool,
+    pub reference_failures: u64,
+}
+
+#[uniffi::export]
+pub fn test_smoke_integrity() -> Result<SmokeIntegrityObservation, CoreError> {
+    callback::enter("test_smoke_integrity");
+    let collection = collection_for_testing()?;
+    let lease = collection.reader(meguri_storage::ReaderRole::Query)?;
+    let snapshot = lease.snapshot()?;
+    let r = snapshot.smoke_integrity()?;
+    Ok(SmokeIntegrityObservation {
+        generation: snapshot.generation().0,
+        seq: snapshot.seq().0,
+        integrity_ok: r.integrity_ok,
+        schema_ok: r.schema_ok,
+        reference_failures: r.missing_card_notes
+            + r.missing_card_decks
+            + r.missing_note_types
+            + r.missing_field_types
+            + r.wrong_field_counts,
+    })
 }
 
 /// Observe the actual answered card and history entry through one Query snapshot.

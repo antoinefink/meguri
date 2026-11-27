@@ -541,6 +541,13 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
 
 
+    #if DEBUG
+    public static let smokeIntegrity = BridgeCall("test_smoke_integrity")
+    private static let testHookCalls: [BridgeCall] = [smokeIntegrity]
+    #else
+    private static let testHookCalls: [BridgeCall] = []
+    #endif
+
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         migrateProvider, providerOwner, providerSnapshot, providerRefresh, providerSaveSettings,
@@ -592,5 +599,5 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startFindDuplicates, findDuplicatesJobResult,
         findReplacePreviewsNew, findReplacePreviewsStart, findReplacePreviewJobResult, startFindReplace, bulkActionJobResult,
         startBulkCardActionOnSelection, startBulkNoteActionOnSelection,
-    ]
+    ] + testHookCalls
 }

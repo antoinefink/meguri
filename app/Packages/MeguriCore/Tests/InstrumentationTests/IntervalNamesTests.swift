@@ -58,6 +58,11 @@ import Testing
     }
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
+        #if DEBUG
+        let testHookExports = ["test_smoke_integrity"]
+        #else
+        let testHookExports: [String] = []
+        #endif
         let mediaExports = [
             "ManualTransferSession.start_media_preview",
             "ManualTransferSession.start_media",
@@ -123,7 +128,7 @@ import Testing
             "start_find_duplicates", "FindDuplicatesJob.result",
             "FindReplacePreviews.new", "FindReplacePreviews.start", "FindReplacePreviewJob.result", "start_find_replace", "BulkActionJob.result",
             "start_bulk_card_action_on_selection", "start_bulk_note_action_on_selection",
-        ])
+        ] + testHookExports)
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)
             #expect(!call.interval.fieldReported, "bridge calls never go to MetricKit")
