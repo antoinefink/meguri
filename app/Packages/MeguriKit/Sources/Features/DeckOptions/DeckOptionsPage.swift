@@ -350,7 +350,7 @@ private struct DisplayOrderRow: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(Text(verbatim: helpLabel))
-        .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue).help")
+        .accessibilityIdentifier("deckOptions.options.orderHelp.\(row.rawValue)")
         .popover(isPresented: $helpShown) {
             // A popover on the Mac and at regular width; a sheet at compact
             // width, as the sync status panel adapts (N23.1).
@@ -385,7 +385,7 @@ private struct DisplayOrderHelp: View {
             Text(DeckOptionsStrings.optionKey(row), bundle: .module)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue).helpTitle")
+                .accessibilityIdentifier("deckOptions.options.orderHelpTitle.\(row.rawValue)")
             Text(LocalizedStringKey(DeckOptionsStrings.helpIntroKey(row)), bundle: .module)
             ForEach(choices, id: \.self) { choice in
                 if let explanation = DeckOptionsStrings.helpChoiceKey(row, value: choice) {
@@ -393,7 +393,7 @@ private struct DisplayOrderHelp: View {
                     let text = Text(LocalizedStringKey(explanation), bundle: .module)
                     // "Name: explanation" (`deckOptions.help.choice %@ %@`).
                     Text("deckOptions.help.choice \(name) \(text)", bundle: .module)
-                        .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue).help.\(choice)")
+                        .accessibilityIdentifier("deckOptions.options.orderHelpChoice.\(row.rawValue)-\(choice)")
                 }
             }
         }

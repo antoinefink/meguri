@@ -969,7 +969,7 @@ screens:
       deckOptions.options.preset.menu.rename, deckOptions.options.preset.menu.remove,
       deckOptions.options.preset.menu.saveToSubdecks, deckOptions.options.save,
       deckOptions.options.cancel, deckOptions.options.advanced (first version: deckOptions.options.displayOrder,
-      deckOptions.options.order.<key>, deckOptions.options.order.<key>.help), deckOptions.options.option.<key>,
+      deckOptions.options.order.<key>, deckOptions.options.orderHelp.<key>), deckOptions.options.option.<key>,
       deckOptions.options.option.<key>.restore, deckOptions.options.option.<key>.help.
       Core (U49): the O2 snapshot, O4's validation of the draft after each edit, O5's step text
       reading and writing, sched/memory-state M5's count for each entered date, the collection's

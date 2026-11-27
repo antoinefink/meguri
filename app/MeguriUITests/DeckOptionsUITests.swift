@@ -155,7 +155,7 @@ final class DeckOptionsUITests: XCTestCase {
             XCTAssertTrue(text.exists && app.windows.firstMatch.frame.contains(text.frame),
                           "The native panel screenshot shows the row label \(label)")
             // The info button follows the label and keeps clear of the picker.
-            let help = app.buttons["deckOptions.options.order.\(row).help"]
+            let help = app.buttons["deckOptions.options.orderHelp.\(row)"]
             let picker = app.popUpButtons["deckOptions.options.order." + row]
             XCTAssertTrue(help.exists && help.isHittable, "\(row) has its help button")
             XCTAssertEqual(help.label, "Help: \(label)", "The help button names its row")
@@ -167,14 +167,14 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "Expanding the disclosure never changes the draft")
 
         // The help popover: the row's name, what it does, then each choice in the menu's order.
-        let gatherHelp = app.buttons["deckOptions.options.order.newGatherPriority.help"]
+        let gatherHelp = app.buttons["deckOptions.options.orderHelp.newGatherPriority"]
         try app.bringToFront(bundleIdentifier: bundle)
         gatherHelp.click()
         let popover = app.popovers.firstMatch
-        let helpTitle = popover.staticTexts["deckOptions.options.order.newGatherPriority.helpTitle"]
+        let helpTitle = popover.staticTexts["deckOptions.options.orderHelpTitle.newGatherPriority"]
         XCTAssertTrue(helpTitle.waitForExistence(timeout: 10), "The help opens in a popover on the Mac")
         XCTAssertEqual(text(of: helpTitle), "New card gather order")
-        let helpLines = [0, 5, 1, 2, 3, 4].map { popover.staticTexts["deckOptions.options.order.newGatherPriority.help.\($0)"] }
+        let helpLines = [0, 5, 1, 2, 3, 4].map { popover.staticTexts["deckOptions.options.orderHelpChoice.newGatherPriority-\($0)"] }
         XCTAssertTrue(helpLines.allSatisfy(\.exists), "One line per choice the menu offers")
         XCTAssertEqual(text(of: helpLines[1]),
                        "Deck, then random notes: Takes one deck at a time, in deck list order. In each deck, the notes are in random order.")
