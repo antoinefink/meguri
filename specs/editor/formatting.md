@@ -201,6 +201,7 @@ The toolbar is a native control row: a row above the fields on macOS, the keyboa
   - Each insertion is part of the same input as the keystroke.
 - The palette swatches (`editor/config-keys` K9) show in the colour panel on macOS, as a colour list the panel offers, and as a swatch row beside the system picker on iOS and iPadOS, whose own favourites an app cannot set. Choosing Add to Palette in that place adds the current colour; a swatch's context menu removes it.
 - On iPhone the row may group controls into menus to fit; every command stays one tap or one menu away.
+- Built so far on iOS and iPadOS (2026-11-27, screen contract N17.1): Bold, Italic, Underline and the cloze group, then the field and HTML controls. The other groups are not yet on the touch bar.
 - Every function-key action is also a toolbar control and a menu command (R864): F3, F5 (U194), F7, F8, and F9 (U195).
 
 ## F13. Bridge messages
