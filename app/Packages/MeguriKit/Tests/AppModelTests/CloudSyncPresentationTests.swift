@@ -190,7 +190,7 @@ import Testing
             (.fullSyncRequired, "sync.status.needsAttention.title", "sync.needsYou.meguri.chooseCollection", .account("sync.decision.action")),
             (.mediaBlocked, "sync.meguri.status.mediaBlocked.title", "sync.meguri.media.blocked", .account("sync.meguri.media.showAffected")),
             (.authentication, "sync.status.needsAttention.title", "sync.needsYou.meguri.signIn", .disabled("sync.meguri.now.unavailable.signIn.sync")),
-            (.exchanging, "sync.status.syncing.title", nil, .disabled(nil)),
+            (.exchanging, "sync.meguri.round.preparing.title", nil, .disabled(nil)),
             (.network, "sync.meguri.status.failed.title", "sync.meguri.round.network", .round),
             (.server, "sync.meguri.status.failed.title", "sync.meguri.round.server", .round),
             (.cancelled, "sync.status.pending.title", "sync.status.pending.detail", .round),
