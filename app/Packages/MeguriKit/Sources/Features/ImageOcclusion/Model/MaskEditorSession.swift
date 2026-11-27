@@ -32,12 +32,18 @@ enum MaskAlignment: String, CaseIterable {
     var preview: OcclusionDocument?
     var selection: Set<UUID> = []
     var polygon: [CGPoint] = []
-    public var tool: MaskEditorTool { didSet { polygon = [] } }
+    public var tool: MaskEditorTool {
+        didSet {
+            guard tool != oldValue else { return }
+            polygon = []; inputRevision += 1
+        }
+    }
     public private(set) var field: String
     public private(set) var errorKey: String?
     public private(set) var isReadable = false
     public private(set) var readingError: String?
     public private(set) var imageRevision = 0
+    private(set) var inputRevision = 0
     public private(set) var removedNumbers: Set<UInt16> = []
     public var retainedCardNotice: UInt16?
     private var showedRetainedCardNotice = false
@@ -79,6 +85,7 @@ enum MaskAlignment: String, CaseIterable {
     /// source and clear the local history. Our own binding echo is ignored.
     public func receive(_ value: String, isEditing: Bool) {
         guard value != field else { return }
+        inputRevision += 1
         load(value, isEditing: isEditing)
     }
 
@@ -109,6 +116,7 @@ enum MaskAlignment: String, CaseIterable {
         referenceSize = .zero; preview = nil; polygon = []; selection = []
         history = [document]; historyIndex = 0
         imageRevision += 1
+        inputRevision += 1
     }
 
     public static func referenceSize(imageSize: CGSize, area: CGSize, displayScale: Double) -> CGSize {
@@ -200,13 +208,20 @@ enum MaskAlignment: String, CaseIterable {
         commit(rotated(degrees: increment ? 5 : -5, finishing: true))
     }
 
-    func addBox(from start: CGPoint, to end: CGPoint, ellipse: Bool = false) {
+    // Preview allocation uses the same codec rule without publishing an error
+    // before release. Failure still follows addBox's ordinary error path.
+    func boxPreviewNumber() -> UInt16? {
+        guard let codec else { return nil }
+        return try? codec.allocate(shapes: document.shapes.map(\.data))
+    }
+
+    func addBox(from start: CGPoint, to end: CGPoint, ellipse: Bool = false, previewNumber: UInt16? = nil) {
         guard inside(start), let codec else { return }
         let box = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                          width: abs(end.x - start.x), height: abs(end.y - start.y))
         guard box.width >= 5, box.height >= 5 else { return }
         do {
-            let number = try codec.allocate(shapes: document.shapes.map(\.data))
+            let number = try previewNumber ?? codec.allocate(shapes: document.shapes.map(\.data))
             let width = box.width / referenceSize.width, height = box.height / referenceSize.height
             add(.init(number: number, left: box.minX / referenceSize.width, top: box.minY / referenceSize.height,
                       kind: ellipse ? .ellipse(rx: width / 2, ry: height / 2) : .rect(width: width, height: height)))

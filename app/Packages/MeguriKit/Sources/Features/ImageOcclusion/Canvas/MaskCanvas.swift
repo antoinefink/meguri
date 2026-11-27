@@ -17,6 +17,9 @@ struct MaskCanvas: View {
     @Environment(\.isEnabled) private var isEnabled
     @State private var interaction = MaskCanvasInteraction()
     @State private var pointer: CGPoint?
+    #if os(macOS)
+    @State private var contextPoint: CGPoint?
+    #endif
     @GestureState private var pointerGestureActive = false
     @GestureState private var handleGestureActive = false
 
@@ -38,23 +41,17 @@ struct MaskCanvas: View {
             accessibleItems
             #endif
             handles
+                #if os(macOS)
+                .allowsHitTesting(false)
+                #endif
                 .accessibilityHidden(usesNativeAccessibility)
             #if os(macOS)
-            NativeCanvasAccessibility(items: nativeAccessibilityItems, enabled: isEnabled,
+            NativeCanvasAccessibility(items: nativeAccessibilityItems, enabled: isEnabled && session.isReadable,
                                       selectionDescription: formStyle ? selectionDescription(session.selection) : nil)
             // Do not apply accessibilityHidden or allowsHitTesting here: AppKit
             // returns nil from mouse hitTest while retaining its AX children.
             #endif
-            CanvasNavigationInput(
-                navigate: { factor, delta, anchor in
-                    interaction.navigationStarted(session: session)
-                    if factor != 1 { viewport.magnify(by: factor, at: anchor) }
-                    viewport.pan.width += delta.width; viewport.pan.height += delta.height
-                },
-                ended: { interaction.navigationEnded() },
-                panStarted: { interaction.navigationStarted(session: session) },
-                acceptsKeyboard: acceptsKeyboardNavigation
-            )
+            navigationInput
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
@@ -62,20 +59,21 @@ struct MaskCanvas: View {
         #if os(macOS)
         .background { if formStyle { Color(nsColor: .underPageBackgroundColor) } }
         .contextMenu { if formStyle { canvasContextMenu } }
-        .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { value in
-            guard formStyle, isEnabled,
-                  let shape = shape(at: viewport.referencePoint(value.location)), shape.isLabel else { return }
-            focusCanvas(); session.select(shape.id); editLabel(shape.id)
-        }, including: formStyle ? .all : .none)
+        .onChange(of: session.polygon.isEmpty) { _, empty in
+            if empty { pointer = nil }
+        }
         #endif
         .contentShape(Rectangle())
+        #if !os(macOS)
         .onContinuousHover { phase in
             switch phase {
             case let .active(location): pointer = viewport.referencePoint(location)
             case .ended: pointer = nil
             }
         }
+        #endif
         .coordinateSpace(name: "io.canvas")
+        #if !os(macOS)
         .gesture(DragGesture(minimumDistance: 0)
             .updating($pointerGestureActive) { _, active, _ in active = true }
             .onChanged(dragChanged).onEnded(dragEnded))
@@ -85,6 +83,7 @@ struct MaskCanvas: View {
         .onChange(of: handleGestureActive) { _, active in
             if !active { interaction.handleGestureEnded(session: session) }
         }
+        #endif
         .clipped()
         #if !os(macOS)
         .accessibilityElement(children: .contain)
@@ -92,6 +91,92 @@ struct MaskCanvas: View {
         .accessibilityIdentifier("io.canvas")
         #endif
     }
+
+    private var navigationInput: some View {
+        let input = CanvasNavigationInput(
+            navigate: { factor, delta, anchor in
+                #if !os(macOS)
+                interaction.navigationStarted(session: session)
+                #endif
+                if factor != 1 { viewport.magnify(by: factor, at: anchor) }
+                viewport.pan.width += delta.width; viewport.pan.height += delta.height
+            },
+            ended: { interaction.navigationEnded() },
+            panStarted: { interaction.navigationStarted(session: session) },
+            acceptsKeyboard: acceptsKeyboardNavigation
+        )
+        #if os(macOS)
+        var native = input
+        native.enabled = isEnabled && session.isReadable
+        native.pressBegan = { point, extending, count in
+            focusCanvas()
+            if session.tool == .polygon { pointer = viewport.referencePoint(point) }
+            interaction.nativeBegan(at: point, viewport: viewport, extending: extending,
+                                    clickCount: formStyle ? count : 1, session: session)
+        }
+        native.pressChanged = { point in
+            interaction.nativeChanged(at: point, viewport: viewport, session: session)
+            if !session.polygon.isEmpty { pointer = viewport.referencePoint(point) }
+        }
+        native.pressEnded = { point in
+            if let label = interaction.nativeEnded(at: point, viewport: viewport, fill: fill, session: session) { editLabel(label) }
+            if session.tool == .polygon { pointer = session.polygon.isEmpty ? nil : viewport.referencePoint(point) }
+        }
+        native.pressCancelled = { interaction.nativeCancelled(session: session) }
+        native.cursor = canvasCursor
+        native.pointerMoved = { point in
+            // Cursor-only motion never publishes SwiftUI state. Only an open
+            // polygon needs a live pointer; menus capture their own press point.
+            if !session.polygon.isEmpty { pointer = point.map(viewport.referencePoint) }
+        }
+        native.contextPoint = { contextPoint = viewport.referencePoint($0) }
+        return native
+        #else
+        return input
+        #endif
+    }
+
+    #if os(macOS)
+    private func canvasCursor(at point: CGPoint) -> NSCursor {
+        let cue: MaskCanvasInteraction.PointerCue
+        if let active = interaction.nativeCue { cue = active }
+        else if let handle = session.canvasHandle(at: point, in: viewport) {
+            switch handle.target {
+            case let .resize(handle): cue = .resize(handle)
+            case .rotate: cue = .rotate
+            }
+        } else {
+            let reference = viewport.referencePoint(point)
+            switch session.tool {
+            case .polygon: cue = session.inside(reference) ? .crosshair : .arrow
+            case .fill: cue = session.shape(at: reference) != nil ? .fill : .arrow
+            default:
+                if session.shape(at: reference) != nil { cue = .openHand }
+                else if !session.inside(reference) { cue = .arrow }
+                else { cue = session.tool == .text ? .text : .crosshair }
+            }
+        }
+        switch cue {
+        case .arrow: return .arrow
+        case .openHand: return .openHand
+        case .closedHand: return .closedHand
+        case .crosshair, .rotate: return .crosshair
+        case .text: return .iBeam
+        case .fill: return .pointingHand
+        case let .resize(handle):
+            switch session.resizeCursorHandle(handle) {
+            case .topLeft: return .frameResize(position: .topLeft, directions: [.inward, .outward])
+            case .top: return .frameResize(position: .top, directions: [.inward, .outward])
+            case .topRight: return .frameResize(position: .topRight, directions: [.inward, .outward])
+            case .right: return .frameResize(position: .right, directions: [.inward, .outward])
+            case .bottomRight: return .frameResize(position: .bottomRight, directions: [.inward, .outward])
+            case .bottom: return .frameResize(position: .bottom, directions: [.inward, .outward])
+            case .bottomLeft: return .frameResize(position: .bottomLeft, directions: [.inward, .outward])
+            case .left: return .frameResize(position: .left, directions: [.inward, .outward])
+            }
+        }
+    }
+    #endif
 
     private var usesNativeAccessibility: Bool {
         #if os(macOS)
@@ -213,33 +298,26 @@ struct MaskCanvas: View {
                 frame: frame, press: close,
                 actions: session.polygon.count >= 3 ? [(ioString("io.command.closePolygon"), close)] : []))
         }
-        if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
-            for handle in ResizeHandle.allCases.filter({ !session.uniformResize || $0.isCorner }) {
-                let center = viewport.screenPoint(session.handlePoint(handle, in: session.displayed))
+        for geometry in session.canvasHandles(in: viewport) {
+            switch geometry.target {
+            case let .resize(handle):
                 result.append(.init(identifier: "io.handle.resize.\(handle.rawValue)",
-                    label: ioString("io.a11y.handle.resize"),
-                    frame: CGRect(x: center.x - 22, y: center.y - 22, width: 44, height: 44),
+                    label: ioString("io.a11y.handle.resize"), frame: geometry.frame,
                     adjust: { increment in
                         let delta = increment ? 5.0 : -5.0
                         session.commit(session.resized(handle: handle, delta: .init(width: delta, height: delta), finishing: true))
                     }))
-            }
-            if session.canRotate {
-                let center = viewport.screenPoint(.init(x: box.midX, y: box.minY))
+            case .rotate:
                 result.append(.init(identifier: "io.handle.rotate", label: ioString("io.a11y.handle.rotate"),
-                    frame: CGRect(x: center.x - 22, y: center.y - 66, width: 44, height: 44),
-                    adjust: { session.rotateStep(increment: $0) }))
+                    frame: geometry.frame, adjust: { session.rotateStep(increment: $0) }))
             }
         }
         return result
     }
 
-    private func shape(at point: CGPoint) -> OcclusionShape? {
-        session.document.shapes.reversed().first { $0.path(in: session.referenceSize).contains(point) }
-    }
     private var contextSelection: Set<UUID> {
-        if let pointer, let shape = shape(at: pointer), !session.selection.contains(shape.id) {
-            return Set(session.document.items.first { $0.contains(shape.id) } ?? [shape.id])
+        if let contextPoint, let shape = session.shape(at: contextPoint), !session.selection.contains(shape.id) {
+            return Set(session.document.item(containing: shape.id))
         }
         return session.selection
     }
@@ -310,35 +388,42 @@ struct MaskCanvas: View {
     }
 
     @ViewBuilder private var handles: some View {
-        if let box = session.displayed.bounds(of: session.selection, in: viewport.reference) {
-            ForEach(ResizeHandle.allCases.filter { !session.uniformResize || $0.isCorner }) { handle in
-                Image(systemName: "square.fill")
-                    .foregroundStyle(.tint)
-                    .padding()
-                    .contentShape(Rectangle())
-                    .position(viewport.screenPoint(session.handlePoint(handle, in: session.displayed)))
-                    .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
-                        .updating($handleGestureActive) { _, active, _ in active = true }
-                        .onChanged { value in
-                            guard handleGestureActive else { return }
-                            interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: false, session: session)
-                        }.onEnded { value in
-                            interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: true, session: session)
-                        })
-                    .accessibilityLabel(ioString("io.a11y.handle.resize"))
-                    .accessibilityIdentifier("io.handle.resize.\(handle.rawValue)")
-                    .accessibilityAdjustableAction { direction in
-                        let d = direction == .increment ? 5.0 : -5.0
-                        session.commit(session.resized(handle: handle, delta: .init(width: d, height: d), finishing: true))
-                    }
+        let geometry = session.canvasHandles(in: viewport)
+        if !geometry.isEmpty {
+            ForEach(geometry) { geometry in
+                if case let .resize(handle) = geometry.target {
+                    Image(systemName: "square.fill")
+                        .foregroundStyle(.tint)
+                        .padding()
+                        .contentShape(Rectangle())
+                        .position(geometry.center)
+                        #if !os(macOS)
+                        .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
+                            .updating($handleGestureActive) { _, active, _ in active = true }
+                            .onChanged { value in
+                                guard handleGestureActive else { return }
+                                interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: false, session: session)
+                            }.onEnded { value in
+                                interaction.resize(handle, delta: .init(width: value.translation.width / viewport.zoom, height: value.translation.height / viewport.zoom), finishing: true, session: session)
+                            })
+                        #endif
+                        .accessibilityLabel(ioString("io.a11y.handle.resize"))
+                        .accessibilityIdentifier("io.handle.resize.\(handle.rawValue)")
+                        .accessibilityAdjustableAction { direction in
+                            let d = direction == .increment ? 5.0 : -5.0
+                            session.commit(session.resized(handle: handle, delta: .init(width: d, height: d), finishing: true))
+                        }
+                }
             }
-            if session.canRotate {
-                let origin = session.rotationPivot ?? box.origin
+            if let geometry = geometry.first(where: { $0.target == .rotate }) {
+                #if !os(macOS)
+                let origin = session.rotationPivot ?? .zero
                 let center = viewport.screenPoint(origin)
+                #endif
                 Image(systemName: "arrow.trianglehead.clockwise.rotate.90")
                     .foregroundStyle(.tint).padding().contentShape(Rectangle())
-                    .position(x: viewport.screenPoint(.init(x: box.midX, y: box.minY)).x,
-                              y: viewport.screenPoint(.init(x: box.midX, y: box.minY)).y - 44)
+                    .position(geometry.center)
+                    #if !os(macOS)
                     .gesture(DragGesture(coordinateSpace: .named("io.canvas"))
                         .updating($handleGestureActive) { _, active, _ in active = true }
                         .onChanged { value in
@@ -348,6 +433,7 @@ struct MaskCanvas: View {
                         .onEnded { value in
                             interaction.rotate(degrees: rotation(value, around: center), finishing: true, session: session)
                         })
+                    #endif
                     .accessibilityLabel(ioString("io.a11y.handle.rotate"))
                     .accessibilityIdentifier("io.handle.rotate")
                     .accessibilityAdjustableAction { direction in
