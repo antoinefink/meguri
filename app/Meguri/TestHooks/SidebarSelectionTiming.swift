@@ -284,7 +284,14 @@ extension TestHooks {
                 // commit plus that delay, measured as the row's frame against its state.
                 let selectedAt = watched.first { $0.down == step.down }?.selected
                 let lag = shown.flatMap { shown in selectedAt.map { max(0, shown.time - $0) } } ?? 0
-                let before = frames.filter { $0.time >= step.down && $0.time < (commit.map { $0.time + lag } ?? nextDown) }
+                // That frame lies on the capture's grid, so the delay can be overstated: the
+                // window also ends at the first frame after the row's own that shows the
+                // destination, which is never the outgoing page.
+                let destination = commit.flatMap { commit in
+                    frames.first { $0.time > max(commit.time, shown?.time ?? step.down) && $0.detail >= FrameStore.contentThreshold }
+                }
+                let end = min(commit.map { $0.time + lag } ?? nextDown, destination?.time ?? .infinity)
+                let before = frames.filter { $0.time >= step.down && $0.time < end }
                 let content = commit.flatMap { commit in frames.first { $0.time > commit.time && $0.detail >= FrameStore.contentThreshold } }
                 var entry: [String: Any] = [
                     "label": step.label,
