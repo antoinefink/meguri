@@ -640,6 +640,95 @@ fn absent_exact_spelling_reuses_same_content_alias_without_rewriting_it() {
 }
 
 #[test]
+fn unchanged_candidates_are_not_rehashed_after_private_staging() {
+    for legacy in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        store.ensure_static_media("clip.png", b"prior").unwrap();
+        let intent = plan(&store, "clip.png", b"remote", 3);
+        let source = payload(dir.path(), b"remote");
+        let _hash = Armed("media.download.existing_hash");
+        let _stage = Armed::hook("media.download.after_stage", || {
+            // The first observation already hashed the replacement. Any
+            // second observation of unchanged candidates fails this save.
+            faultpoint::arm("media.download.existing_hash", Fault::IoError(std::io::ErrorKind::Other));
+        });
+        let baseline = store.sync_baseline().unwrap();
+        let saved = if legacy {
+            store.save_downloaded_file(&baseline, &intent, source.path())
+        } else {
+            store.save_downloaded_file_with_boundary(&baseline, &intent, source.path(), &mut || Ok(()))
+        }.unwrap();
+        assert!(saved.changed);
+        assert_eq!(fs::read(store.media_dir().join("clip.png")).unwrap(), b"remote");
+        assert_eq!(store.trash_entries().unwrap()[0].sha1, hash(b"prior"));
+    }
+}
+
+#[test]
+fn a_new_case_candidate_after_staging_is_reobserved_and_reused() {
+    for legacy in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        let intent = plan(&store, "clip:1.png", b"remote", 3);
+        let source = payload(dir.path(), b"remote");
+        let appeared = store.media_dir().join("CLIP1.PNG");
+        let _stage = Armed::hook("media.download.after_stage", move || {
+            fs::write(appeared, b"remote").unwrap();
+        });
+        let baseline = store.sync_baseline().unwrap();
+        let saved = if legacy {
+            store.save_downloaded_file(&baseline, &intent, source.path())
+        } else {
+            store.save_downloaded_file_with_boundary(&baseline, &intent, source.path(), &mut || Ok(()))
+        }.unwrap();
+        assert!(!saved.changed);
+        assert_eq!(saved.record.stored_name.as_deref(), Some("CLIP1.PNG"));
+        assert_eq!(fs::read(store.media_dir().join("CLIP1.PNG")).unwrap(), b"remote");
+        let names = fs::read_dir(store.media_dir()).unwrap()
+            .map(|entry| entry.unwrap().file_name()).collect::<Vec<_>>();
+        assert_eq!(names, [std::ffi::OsString::from("CLIP1.PNG")]);
+        assert!(store.trash_entries().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn a_stale_pre_stage_observation_keeps_all_three_fresh_attempts() {
+    for legacy in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        store.ensure_static_media("clip.png", b"prior").unwrap();
+        let intent = plan(&store, "clip.png", b"remote", 3);
+        let source = payload(dir.path(), b"remote");
+        let target = store.media_dir().join("clip.png");
+        let _hash = Armed("media.download.existing_hash");
+        let _stage = Armed::hook("media.download.after_stage", move || {
+            // Reject the cached observation, then invalidate each of the first
+            // two fresh observations during its descriptor-based hash read.
+            fs::write(&target, b"stage").unwrap();
+            *HOOK.lock().unwrap() = Some(Box::new(move || {
+                fs::write(&target, b"first").unwrap();
+                *HOOK.lock().unwrap() = Some(Box::new(move || {
+                    fs::write(target, b"final").unwrap();
+                }));
+            }));
+            faultpoint::arm("media.download.existing_hash", Fault::Callback(run_hook));
+        });
+        let baseline = store.sync_baseline().unwrap();
+        let saved = if legacy {
+            store.save_downloaded_file(&baseline, &intent, source.path())
+        } else {
+            store.save_downloaded_file_with_boundary(&baseline, &intent, source.path(), &mut || Ok(()))
+        }.unwrap();
+        assert!(saved.changed);
+        assert_eq!(fs::read(store.media_dir().join("clip.png")).unwrap(), b"remote");
+        let trash = store.trash_entries().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].sha1, hash(b"final"));
+    }
+}
+
+#[test]
 fn journal_guard_is_available_during_existing_file_hashes_before_and_after_staging() {
     use std::sync::atomic::{AtomicBool, Ordering};
     for after_stage in [false, true] {
@@ -661,7 +750,11 @@ fn journal_guard_is_available_during_existing_file_hashes_before_and_after_stagi
         };
         let _hash = Armed("media.download.existing_hash");
         let _stage = if after_stage {
+            let target = store.media_dir().join("clip.png");
             Armed::hook("media.download.after_stage", move || {
+                // Invalidate the pre-stage observation so a fresh hash is
+                // required. Unchanged candidates now reuse that observation.
+                fs::write(target, b"later").unwrap();
                 *HOOK.lock().unwrap() = Some(Box::new(probe));
                 faultpoint::arm("media.download.existing_hash", Fault::Callback(run_hook));
             })
@@ -675,7 +768,7 @@ fn journal_guard_is_available_during_existing_file_hashes_before_and_after_stagi
             .unwrap();
         assert!(reached.load(Ordering::SeqCst));
         assert!(saved.changed);
-        assert_eq!(store.trash_entries().unwrap()[0].sha1, hash(b"prior"));
+        assert_eq!(store.trash_entries().unwrap()[0].sha1, hash(if after_stage { b"later" } else { b"prior" }));
     }
 }
 

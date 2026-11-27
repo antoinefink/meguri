@@ -80,7 +80,7 @@ pub struct MediaFailure {
     pub snapshot: MediaSnapshot,
 }
 
-/// Last twenty saved batches, available to deterministic Rust progress tests.
+/// Timing samples for the last twenty completed download intervals.
 #[derive(Default, Debug)]
 pub struct DownloadWindow(VecDeque<(Duration, u64)>);
 impl DownloadWindow {
@@ -457,7 +457,13 @@ impl Stage<'_> {
             self.checkpoint()?;
             // Only this job's fully validated begin can enable the extension.
             // A capacity downgrade survives even a sanity-reset rerun.
-            if !self.download_serial_only { self.download_concurrency = concurrency; }
+            if !self.download_serial_only {
+                if self.download_concurrency != concurrency {
+                    self.window = DownloadWindow::default();
+                    self.snapshot.estimate = None;
+                }
+                self.download_concurrency = concurrency;
+            }
             let mut requested = false;
             if server_usn != self.baseline().usn {
                 self.list().await?;
@@ -625,7 +631,7 @@ impl Stage<'_> {
         self.snapshot.download_received = 0;
         self.snapshot.published_files = 0;
         self.snapshot.files_left = initial;
-        self.snapshot.estimate = if self.download_concurrency == 1 { self.window.estimate(initial) } else { None };
+        self.snapshot.estimate = self.window.estimate(initial);
         if initial == 0 { return Ok(()); }
         self.emit(MediaPhase::Downloading);
         let staging = owned_staging(self.store())?;
@@ -658,7 +664,6 @@ impl Stage<'_> {
                     Ok(files) => files,
                     Err(error) => { failed = Some(error); break; }
                 };
-                self.checkpoint()?;
                 received += files.len() as u64;
                 self.save_download_reply(&intents, files)?;
                 if parallel { self.emit(MediaPhase::Downloading); }
@@ -668,6 +673,7 @@ impl Stage<'_> {
                 if !parallel || !download_capacity(&error) { return Err(error); }
                 self.download_concurrency = 1;
                 self.download_serial_only = true;
+                self.window = DownloadWindow::default();
                 self.snapshot.estimate = None;
                 self.checkpoint()?;
                 tokio::select! {
@@ -680,11 +686,11 @@ impl Stage<'_> {
                 // ZIP omissions and later replies that were never committed.
                 continue;
             }
-            if !parallel {
-                self.window.saved_batch(meguri_engine::monotonic::now() - started, received);
-                self.snapshot.estimate = self.window.estimate(self.snapshot.files_left);
-                self.emit(MediaPhase::Downloading);
-            }
+            // One wall-clock sample covers the complete saved wave, including
+            // publication. Overlapping request durations must never be summed.
+            self.window.saved_batch(meguri_engine::monotonic::now() - started, received);
+            self.snapshot.estimate = self.window.estimate(self.snapshot.files_left);
+            self.emit(MediaPhase::Downloading);
         }
     }
     fn save_download_reply(&mut self, intents: &[MediaDownloadIntent], files: Vec<wire::MediaFile>) -> Result<(), JobError> {

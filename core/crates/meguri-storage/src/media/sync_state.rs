@@ -457,6 +457,7 @@ impl MediaStore {
             return self.saved_download_locked(&db, download, None, &source.hash, false);
         }
         self.check_changes_with_boundary(before_effect)?;
+        let mut reusable_observation = None;
         for attempt in 0..3 {
             let result = (|| {
                 let observed = self.observe_download(&download.name, &source.hash)?;
@@ -464,6 +465,7 @@ impl MediaStore {
                 require_download(&db, expected, download)?;
                 let plan = self.download_installation_locked(&db, &download.name, &source.hash, false, &observed)?;
                 if plan.write {
+                    reusable_observation = Some(observed);
                     Ok(None)
                 } else {
                     self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false)
@@ -488,14 +490,30 @@ impl MediaStore {
         self.check_changes_with_boundary(before_effect)?;
         for attempt in 0..3 {
             let result = (|| {
-                let observed = self.observe_download(&download.name, &source.hash)?;
+                let reused = reusable_observation.is_some();
+                let mut observed = match reusable_observation.take() {
+                    Some(observed) => observed,
+                    None => self.observe_download(&download.name, &source.hash)?,
+                };
                 let mut db = self.db_with_boundary(before_effect)?;
                 require_download(&db, expected, download)?;
                 // Y8.4/Y6 against CURRENT facts and the actual received hash:
                 // equal content is kept; different local content loses to the
                 // server, with its bytes preserved by the common installer.
-                let plan =
-                    self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed)?;
+                let plan = match self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed) {
+                    Err(MediaError::NameTaken) if reused => {
+                        // A stale pre-stage snapshot spends no fresh-plan
+                        // attempt. Re-evaluate names and hashes outside locks.
+                        drop(db);
+                        if legacy { self.register_full(|_, _| true)?; }
+                        else { self.check_changes_with_boundary(before_effect)?; }
+                        observed = self.observe_download(&download.name, &source.hash)?;
+                        db = self.db_with_boundary(before_effect)?;
+                        require_download(&db, expected, download)?;
+                        self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed)?
+                    }
+                    other => other?,
+                };
                 if !plan.write {
                     return self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false);
                 }

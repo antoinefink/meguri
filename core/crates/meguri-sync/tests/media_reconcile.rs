@@ -1829,7 +1829,7 @@ mod concurrent_downloads {
     use meguri_testkit::sync_stub::Part;
 
     #[derive(Clone, Copy)]
-    enum Answers { Full, Partial, Busy(u16), BusyAndBad, SerialBusy(u16), RemainsBusy(u16) }
+    enum Answers { Full, Partial, LateBusy(u16), Busy(u16), BusyAndBad, SerialBusy(u16), RemainsBusy(u16) }
     #[derive(Default)]
     struct Observed {
         downloads: Vec<Vec<String>>,
@@ -1912,6 +1912,8 @@ mod concurrent_downloads {
                         tokio::task::yield_now().await;
                         match self.answers {
                             Answers::Partial if index < 4 => download(&names[..2]),
+                            Answers::LateBusy(_) if index < 12 => download(&names[..2]),
+                            Answers::LateBusy(code) if index == 13 => Reply::status(code),
                             Answers::Busy(code) if index == 1 => Reply::status(code),
                             Answers::RemainsBusy(code) if index >= 1 => Reply::status(code),
                             Answers::BusyAndBad if index == 0 => Reply::status(503),
@@ -1984,6 +1986,32 @@ mod concurrent_downloads {
             let observed = observed.lock().unwrap();
             first_wave(&observed);
             assert_eq!(observed.downloads[4], [names(2..25), names(27..29)].concat());
+            exact(&h);
+        });
+    }
+    #[test]
+    fn estimates_use_three_saved_windows_and_reset_at_backoff() {
+        with_collection(|h| {
+            let snapshots = Arc::new(Mutex::new(Vec::new()));
+            let seen = snapshots.clone();
+            let (outcome, observed) = run(&h, &["4"], true, Answers::LateBusy(503), move |s, _| {
+                if s.phase == MediaPhase::Downloading { seen.lock().unwrap().push(s.clone()); }
+            });
+            assert_eq!(outcome.unwrap().downloaded_files, 100);
+            let snapshots = snapshots.lock().unwrap();
+            // Four saved replies in a wave contribute only one sample. The
+            // The sample first becomes available after 24 received files.
+            assert!(snapshots.iter().filter(|s| s.download_received < 24).all(|s| s.estimate.is_none()));
+            assert!(snapshots.iter().any(|s| s.download_received == 24 && s.files_left == 76 && s.estimate.is_some()));
+            // The fourth wave saves 25 files before its capacity failure.
+            // Discard its timing and all faster samples at the serial switch.
+            let reset = snapshots.iter().position(|s| s.download_received == 49 && s.estimate.is_none()).unwrap();
+            assert!(snapshots[reset..].iter().filter(|s| s.download_received < 100).all(|s| s.estimate.is_none()));
+            assert!(snapshots[reset..].iter().any(|s| s.download_received == 100 && s.files_left == 0 && s.estimate.is_some()));
+            let observed = observed.lock().unwrap();
+            assert_eq!(observed.downloads.len(), 19);
+            assert_eq!(observed.live, 0);
+            assert_eq!(observed.drained, 19);
             exact(&h);
         });
     }
