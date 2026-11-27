@@ -169,9 +169,12 @@ fn journal_name(name: &str) -> bool {
     safe_component(name) && meguri_text::normalize::nfc(name) == name
 }
 fn downloads(db: &Connection) -> Result<Vec<MediaDownloadIntent>> {
+    limited_downloads(db, -1)
+}
+fn limited_downloads(db: &Connection, limit: i64) -> Result<Vec<MediaDownloadIntent>> {
     Ok(db
-        .prepare("SELECT name,sha1,usn FROM media_downloads ORDER BY usn,name")?
-        .query_map([], |r| {
+        .prepare("SELECT name,sha1,usn FROM media_downloads ORDER BY usn,name LIMIT ?1")?
+        .query_map([limit], |r| {
             Ok(MediaDownloadIntent {
                 name: r.get(0)?,
                 sha1: r.get(1)?,
@@ -236,7 +239,18 @@ fn advance_cursor(db: &Connection, high: u64) -> Result<u64> {
     let old = number(db, "last_usn")?;
     let listed = number(db, "listed_usn")?.max(high);
     put_meta(db, "listed_usn", &listed.to_string())?;
-    let first: Option<i64> = db.query_row("SELECT MIN(COALESCE(usn,0)) FROM media_downloads", [], |r| r.get(0))?;
+    let first: Option<Option<i64>> = db.query_row(
+        "SELECT usn FROM media_downloads ORDER BY usn LIMIT 1", [], |r| r.get(0),
+    ).optional()?;
+    let first = match first {
+        // NULL sorts first, but the old MIN(COALESCE(usn,0)) still reported
+        // negative corruption even in the presence of a migrated NULL intent.
+        Some(None) => Some(db.query_row(
+            "SELECT usn FROM media_downloads WHERE usn<0 ORDER BY usn LIMIT 1", [], |r| r.get::<_, i64>(0),
+        ).optional()?.unwrap_or(0)),
+        Some(Some(usn)) => Some(usn),
+        None => None,
+    };
     let bound = first
         .map(|v| u64::try_from(v).map(|v| v.saturating_sub(1)))
         .transpose()
@@ -443,6 +457,7 @@ impl MediaStore {
             return self.saved_download_locked(&db, download, None, &source.hash, false);
         }
         self.check_changes_with_boundary(before_effect)?;
+        let mut reusable_observation = None;
         for attempt in 0..3 {
             let result = (|| {
                 let observed = self.observe_download(&download.name, &source.hash)?;
@@ -450,6 +465,7 @@ impl MediaStore {
                 require_download(&db, expected, download)?;
                 let plan = self.download_installation_locked(&db, &download.name, &source.hash, false, &observed)?;
                 if plan.write {
+                    reusable_observation = Some(observed);
                     Ok(None)
                 } else {
                     self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false)
@@ -474,14 +490,30 @@ impl MediaStore {
         self.check_changes_with_boundary(before_effect)?;
         for attempt in 0..3 {
             let result = (|| {
-                let observed = self.observe_download(&download.name, &source.hash)?;
+                let reused = reusable_observation.is_some();
+                let mut observed = match reusable_observation.take() {
+                    Some(observed) => observed,
+                    None => self.observe_download(&download.name, &source.hash)?,
+                };
                 let mut db = self.db_with_boundary(before_effect)?;
                 require_download(&db, expected, download)?;
                 // Y8.4/Y6 against CURRENT facts and the actual received hash:
                 // equal content is kept; different local content loses to the
                 // server, with its bytes preserved by the common installer.
-                let plan =
-                    self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed)?;
+                let plan = match self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed) {
+                    Err(MediaError::NameTaken) if reused => {
+                        // A stale pre-stage snapshot spends no fresh-plan
+                        // attempt. Re-evaluate names and hashes outside locks.
+                        drop(db);
+                        if legacy { self.register_full(|_, _| true)?; }
+                        else { self.check_changes_with_boundary(before_effect)?; }
+                        observed = self.observe_download(&download.name, &source.hash)?;
+                        db = self.db_with_boundary(before_effect)?;
+                        require_download(&db, expected, download)?;
+                        self.download_installation_locked(&db, &download.name, &source.hash, attempt == 2, &observed)?
+                    }
+                    other => other?,
+                };
                 if !plan.write {
                     return self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false);
                 }
@@ -579,6 +611,16 @@ impl MediaStore {
     }
     pub fn download_intents(&self) -> Result<Vec<MediaDownloadIntent>> {
         downloads(&*self.db()?)
+    }
+    /// Bounded protocol selection in the same order as download_intents.
+    pub fn download_intents_limit(&self, limit: u32) -> Result<Vec<MediaDownloadIntent>> {
+        limited_downloads(&*self.db()?, i64::from(limit))
+    }
+    pub fn download_intent_count(&self) -> Result<u64> {
+        Ok(self.db()?.query_row("SELECT COUNT(*) FROM media_downloads", [], |r| journal_db::unsigned(r, 0))?)
+    }
+    pub fn awaiting_count(&self) -> Result<u64> {
+        Ok(self.db()?.query_row("SELECT COUNT(*) FROM media WHERE sync_state=3", [], |r| journal_db::unsigned(r, 0))?)
     }
     /// Includes case variants, through the awaiting-only index. Filesystem
     /// lookup remains separate: an externally appeared file can already render.

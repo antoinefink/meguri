@@ -418,3 +418,81 @@ async fn deletion_retires_native_round_without_waiting_for_opened_media_snapshot
     }
     let _ = h.stop().await;
 }
+
+fn exact_download_zip(bytes:Vec<u8>,name:&str,expected:&[u8]) {
+    use std::io::Read;
+    let mut archive=zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(archive.len(),2);
+    let mut meta=String::new();archive.by_name("_meta").unwrap().read_to_string(&mut meta).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&meta).unwrap(),json!({"0":name}));
+    let mut content=Vec::new();archive.by_name("0").unwrap().read_to_end(&mut content).unwrap();
+    assert_eq!(content,expected);
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn advertised_media_overlap_on_one_account_allows_collection_meta() {
+    let h=Harness::new().await;h.setup().await;let key=login(&h,"root.admin").await;
+    let fixtures:Vec<_>=(0..4).map(|i|(format!("overlap-{i}.bin"),format!("exact synthetic media {i}").into_bytes())).collect();
+    for (i,(name,bytes)) in fixtures.iter().enumerate() {
+        assert_eq!(media(&h,&key,"uploadChanges",&zip(name,bytes)).await,json!([1,i+1]));
+    }
+    let begin=within(request(&h.client,&h.base,"msync","begin",&key,br#"{"v":"synthetic"}"#).send()).await.unwrap();
+    assert_eq!(begin.headers().get_all("meguri-media-download-concurrency").iter().count(),1);
+    assert_eq!(begin.headers()["meguri-media-download-concurrency"],"4");
+    assert_eq!(serde_json::from_slice::<Value>(&decoded(begin).await).unwrap(),json!({"data":{"usn":4,"sk":""},"err":""}));
+    let refused=request(&h.client,&h.base,"msync","begin","invalid-host-key",br#"{"v":"synthetic"}"#).send().await.unwrap();
+    assert_eq!(refused.status(),403);assert!(!refused.headers().contains_key("meguri-media-download-concurrency"));drop(refused);
+    let mut pauses=Vec::new();let mut downloads=Vec::new();
+    for (name,_) in &fixtures {
+        // The hook is single-use. Rearming after each arrival proves all four
+        // disjoint same-account requests reach the pin boundary concurrently.
+        let pause=h.service.hooks.arm("media_download_pinned");
+        let download=request(&h.client,&h.base,"msync","downloadFiles",&key,&serde_json::to_vec(&json!({"files":[name]})).unwrap());
+        downloads.push(tokio::spawn(async move {download.send().await.unwrap()}));
+        within(pause.arrived()).await;pauses.push(pause);
+    }
+    assert!(downloads.iter().all(|d|!d.is_finished()));
+    let meta=within(collection(&h,&key,"meta",json!({"v":11,"cv":"synthetic"}))).await;
+    assert_eq!(meta["media_usn"],4);
+    assert!(downloads.iter().all(|d|!d.is_finished()));
+    for pause in pauses {pause.resume();}
+    for (download,(name,expected)) in downloads.into_iter().zip(&fixtures) {
+        exact_download_zip(within(decoded(within(download).await.unwrap())).await,name,expected);
+    }
+    assert_eq!(h.service.temp.used(),0);let _=h.stop().await;
+}
+
+// Small synthetic loopback probe: count and exact bytes are the regressions.
+// Report whole-run wall time for comparison, without a timing assertion.
+#[tokio::test]
+async fn synthetic_media_serial_vs_four_way_throughput_probe() {
+    let h=Harness::new().await;h.setup().await;let key=login(&h,"root.admin").await;
+    let mut fixtures=Vec::new();
+    for size in [64*1024,4*1024*1024] {
+        for i in 0..8 {
+            let name=format!("probe-{size}-{i}.bin");
+            let bytes:Vec<u8>=(0..size).map(|j|((j*31+j/251+i*17)%256) as u8).collect();
+            media(&h,&key,"uploadChanges",&zip(&name,&bytes)).await;
+            fixtures.push((name,bytes));
+        }
+    }
+    for concurrency in [1,4] {
+        let started=std::time::Instant::now();let mut count=0;let mut total=0;
+        for wave in fixtures.chunks(concurrency) {
+            let mut downloads=Vec::new();
+            for (name,expected) in wave {
+                let download=request(&h.client,&h.base,"msync","downloadFiles",&key,&serde_json::to_vec(&json!({"files":[name]})).unwrap());
+                let name=name.clone();let expected=expected.clone();
+                downloads.push(tokio::spawn(async move {
+                    let bytes=decoded(download.send().await.unwrap()).await;
+                    exact_download_zip(bytes,&name,&expected);expected.len()
+                }));
+            }
+            for download in downloads {total+=within(download).await.unwrap();count+=1;}
+        }
+        eprintln!("synthetic media concurrency={concurrency} count={count} bytes={total} wall={:?}",started.elapsed());
+        assert_eq!(count,fixtures.len());assert_eq!(total,fixtures.iter().map(|(_,b)|b.len()).sum::<usize>());
+    }
+    let _=h.stop().await;
+}

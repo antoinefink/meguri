@@ -795,3 +795,59 @@ fn cancelled_hash_keeps_no_partial_facts_and_reopen_finishes_the_file() {
     assert_eq!(store.pending_batch(1).unwrap()[0].name, "outside.png");
     assert_eq!(store.sync_entry("outside.png").unwrap().unwrap().size, 131_072);
 }
+
+#[test]
+fn bounded_download_selection_and_counts_preserve_unbounded_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    store.bind_sync_owner(&owner("bounded-selection")).unwrap();
+    // Include equal USNs to check the exact-name secondary ordering.
+    let decisions: Vec<_> = [("z.png", 3), ("b.png", 2), ("a.png", 2)].into_iter()
+        .map(|(name, usn)| MediaPageDecision::Download {
+            name: name.into(), sha1: hash(b"bytes"), usn, stamp: None,
+        }).collect();
+    store.commit_media_page(&store.sync_baseline().unwrap(), 5, &decisions).unwrap();
+    let all = store.download_intents().unwrap();
+    assert_eq!(all.iter().map(|i|i.name.as_str()).collect::<Vec<_>>(), ["a.png", "b.png", "z.png"]);
+    assert_eq!(store.download_intent_count().unwrap(), 3);
+    assert_eq!(store.awaiting_count().unwrap(), 3);
+    for limit in [0, 1, 2, 3, 100] {
+        assert_eq!(store.download_intents_limit(limit).unwrap(), all[..(limit as usize).min(all.len())]);
+    }
+    save(&store, "a.png", b"bytes");
+    assert_eq!(store.download_intent_count().unwrap(), 2);
+    assert_eq!(store.awaiting_count().unwrap(), 2);
+    assert_eq!(store.sync_baseline().unwrap().usn, 1);
+    save(&store, "b.png", b"bytes");
+    assert_eq!(store.sync_baseline().unwrap().usn, 2);
+}
+
+#[test]
+fn indexed_cursor_keeps_null_zero_negative_corruption_and_bound_checks() {
+    for usns in [vec![], vec![None], vec![Some(3)], vec![Some(3), None],
+        vec![Some(-2)], vec![None, Some(-2)], vec![Some(0), Some(-2)]] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        store.bind_sync_owner(&owner("cursor-cases")).unwrap();
+        let db = Connection::open(dir.path().join("meguri-media.db")).unwrap();
+        for (i, usn) in usns.iter().enumerate() {
+            db.execute("INSERT INTO media_downloads(name,usn) VALUES(?1,?2)", params![format!("intent-{i}"),usn]).unwrap();
+        }
+        let old_min: Option<i64> = db.query_row("SELECT MIN(COALESCE(usn,0)) FROM media_downloads", [], |r|r.get(0)).unwrap();
+        let before = store.sync_baseline().unwrap();
+        let answer = store.commit_media_page(&before, 10, &[]);
+        if old_min.is_some_and(|v|v<0) {
+            assert!(answer.unwrap_err().to_string().contains("invalid media download USN"));
+            assert_eq!(store.sync_baseline().unwrap(), before);
+        } else {
+            assert_eq!(answer.unwrap(), old_min.map_or(10, |v| (v as u64).saturating_sub(1)));
+        }
+        // A late NULL or zero must still refuse to lower an applied cursor.
+        if old_min.is_none_or(|v|v>1) {
+            db.execute("INSERT INTO media_downloads(name,usn) VALUES('late',NULL)", []).unwrap();
+            let before = store.sync_baseline().unwrap();
+            assert!(store.commit_media_page(&before, 11, &[]).unwrap_err().to_string().contains("unsaved media lies below applied cursor"));
+            assert_eq!(store.sync_baseline().unwrap(), before);
+        }
+    }
+}

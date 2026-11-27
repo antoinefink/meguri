@@ -100,3 +100,4 @@ meguri-cloud.db.damaged-YYYY-MM-DD-HH.MM.SS.moving
 cloud.tracking.move.after_journal
 cloud.tracking.move.after_wal
 cloud.tracking.move.after_main
+meguri-media-download-concurrency

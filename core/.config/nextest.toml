@@ -235,3 +235,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'test(=cloud::workflow_store::tests::k10_rows_indexed_observer_and_candidate_queries_are_bounded_at_150k)'
 threads-required = "num-test-threads"
+
+# Four-request media rendezvous bounds a regression instead of hanging.
+[[profile.default.overrides]]
+filter = 'package(meguri-sync) and test(/media_reconcile::concurrent_downloads::/)'
+threads-required = "num-test-threads"

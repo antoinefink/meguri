@@ -29,7 +29,9 @@ pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,method
         "begin"=>{
             let request:Begin=framing::json(&bytes)?; let _=request.v;
             let usn=service.publish(authority,move |c|index::cursor(c,&id)).await?;
-            response(&serde_json::json!({"usn":usn,"sk":""}))
+            let mut response=response(&serde_json::json!({"usn":usn,"sk":""}))?;
+            response.headers_mut().insert("meguri-media-download-concurrency",axum::http::HeaderValue::from_static("4"));
+            Ok(response)
         },
         "mediaChanges"=>{
             let request:Changes=framing::json(&bytes)?;
