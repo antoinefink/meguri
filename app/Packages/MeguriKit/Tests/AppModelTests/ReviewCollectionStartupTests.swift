@@ -1536,7 +1536,7 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
             })
             await app.owner.startStudy(deckID: deck.id)
             let review = try #require(app.owner.review)
-            let card = try #require(review.cardID)
+            let card = try #require(review.item?.cardId)
             review.reveal(); await review.settled()
             review.rate(.good); await review.settled()
             try await CoreCollectionService().flushForBackground()
