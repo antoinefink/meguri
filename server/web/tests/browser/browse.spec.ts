@@ -310,6 +310,7 @@ test("an existing note saves with its detail revision when the initial catalog f
 
 test("a list read begun before a save cannot restore old excerpts", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3); await rows(page).first().click();
+  await expect(page.getByLabel("Example", { exact: true })).toBeFocused();
   const held = barrier(); state.pageGate = held.promise; const before = state.pageReads;
   await search(page, "aprovechar"); await expect.poll(() => state.pageReads).toBe(before + 1);
   await page.getByLabel("Example", { exact: true }).fill("aprovechar the new sentence"); state.pageGate = null;
