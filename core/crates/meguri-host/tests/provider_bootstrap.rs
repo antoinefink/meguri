@@ -138,7 +138,7 @@ fn meguri_initial_download_after_retired_absent_adoption_preserves_nearby_eviden
     let _lane = LANE.lock().unwrap();
     let root = tempfile::tempdir().unwrap();
     let config = config(&root.path().join("local"), Arc::new(meguri_model::clock::FixedClock::new(
-        NOW, meguri_model::clock::UtcOffset::UTC)));
+        NOW, meguri_model::clock::UtcOffset::UTC))).for_application();
     assert!(config.cloud.is_none());
     let live = config.collection_directory.join("collection.anki2");
     let sidecar = config.collection_directory.join("meguri-sidecar.json");
