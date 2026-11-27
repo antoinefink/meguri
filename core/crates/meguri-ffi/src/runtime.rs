@@ -88,14 +88,14 @@ fn reserve_open_on(runtime: Arc<Runtime>) -> Result<OpenReservation, CoreError> 
 impl OpenReservation {
     pub(crate) fn prepare_empty(mut self, config: meguri_host::HostConfig) -> Result<Arc<meguri_host::CoreHost>, CoreError> {
         let backups = config.backups_directory.clone();
-        let host = Arc::new(self.runtime.process.prepare_empty_collection(config)?);
+        let host = Arc::new(self.runtime.process.prepare_empty_collection(config.for_application())?);
         *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host.clone(), backups);
         self.pending = false;
         Ok(host)
     }
     pub(crate) fn prepare_provider(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let backups = config.backups_directory.clone();
-        let host = Arc::new(self.runtime.process.prepare_cloud_connection(config)?);
+        let host = Arc::new(self.runtime.process.prepare_cloud_connection(config.for_application())?);
         *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;
         Ok(())
@@ -112,7 +112,7 @@ impl OpenReservation {
         let completed = self
             .runtime
             .process
-            .import_initial(config, inspection, slot, cancel, progress)?;
+            .import_initial(config.for_application(), inspection, slot, cancel, progress)?;
         let host = Arc::new(completed.host);
         // Retain first, then propagate the typed afteractivation outcome.
         *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
@@ -121,14 +121,14 @@ impl OpenReservation {
     }
     pub(crate) fn open_manual(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let backups = config.backups_directory.clone();
-        let host = Arc::new(self.runtime.process.open_for_manual_import(config)?);
+        let host = Arc::new(self.runtime.process.open_for_manual_import(config.for_application())?);
         *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;
         Ok(())
     }
     pub(crate) fn open(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let backups = config.backups_directory.clone();
-        let host = Arc::new(self.runtime.process.open(config)?);
+        let host = Arc::new(self.runtime.process.open(config.for_application())?);
         // No fallible call between receiving the host and retaining it.
         *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host, backups);
         self.pending = false;

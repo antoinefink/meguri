@@ -550,17 +550,22 @@ impl CoreHost {
         mut config: HostConfig,
         read_startup_identity: bool,
     ) -> Result<(Self, CollectionPaths, OpenConfig), EngineError> {
+        if config.application_scope && (config.cloud.is_some() || config.cloud_key_bytes.is_some()) {
+            return Err(EngineError::InvalidArgument {
+                message: "application host cannot supply retired cloud inputs".into(),
+            });
+        }
         wiring::validate()?;
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
         // A failed migration/load is retained as blocked network admission. It
         // must not prevent local collection open or repair.
-        let retire_icloud = config.cloud.is_none();
+        let retire_icloud = config.application_scope;
         let migration = if retire_icloud {
             Self::migrate_application_provider_configuration(
                 &config.manual_transfer_directory, meguri_sync::provider::LegacyInput::Absent,
             )
         } else {
-            // Frozen internal conformance callers retain actual cloud inputs.
+            // Internal callers may open offline before restoring cloud inputs.
             meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None)
         };
         let provider = if retire_icloud {
@@ -1045,7 +1050,7 @@ mod resource_liveness_tests {
             (Selection::Meguri, Some(Selection::ICloud), true),
         ] {
             let root = tempfile::tempdir().unwrap();
-            let mut config = config_for_prepared(root.path());
+            let mut config = config_for_prepared(root.path()).for_application();
             config.manual_transfer_directory = root.path().join("installation");
             assert!(config.cloud.is_none());
             std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();

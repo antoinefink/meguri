@@ -497,6 +497,45 @@ fn historical_cloud_inputs_retain_admission_across_host_open_and_refresh() {
 }
 
 #[test]
+fn application_scope_rejects_cloud_inputs_before_retiring_provider_configuration() {
+    use meguri_engine::EngineError;
+    use meguri_sync::provider::{LegacySettings, ProviderDocument};
+    for entry in 0..4 {
+        let root = tempfile::tempdir().unwrap();
+        let account = Arc::new(Account(AtomicUsize::new(0)));
+        let mut config = unopened_fixture(root.path(), account.clone()).for_application();
+        std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
+        let path = config.manual_transfer_directory.join("provider.json");
+        let bytes = serde_json::to_vec(&ProviderDocument::migration(LegacySettings {
+            enabled: true, paused: false, automatic: true, media: true,
+        })).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+        let open = |config| match entry {
+            0 => process.open(config),
+            1 => process.open_for_manual_import(config),
+            2 => process.prepare_empty_collection(config),
+            _ => process.prepare_cloud_connection(config),
+        };
+        assert!(matches!(open(config.clone()), Err(EngineError::InvalidArgument { .. })));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        assert!(!config.collection_directory.join("meguri-sidecar.json").exists());
+        // Rejection releases the reservation, so the corrected application
+        // configuration can retire the same persisted choice on this process.
+        config.cloud = None;
+        if entry == 0 {
+            meguri_engine::bootstrap::create(&config.collection_directory.join("collection.anki2"),
+                config.clock.as_ref(), config.random.as_ref()).unwrap();
+        }
+        let host = open(config).unwrap();
+        assert_eq!(host.provider_authority().snapshot().unwrap().selection,
+            meguri_sync::provider::Selection::LocalOnly);
+        host.close().unwrap();
+    }
+}
+
+#[test]
 fn application_upgrade_reopens_archived_connected_publication_through_host_startup() {
     use meguri_engine::device_state::{AccountBinding, DeviceState, PublicationDecision};
     use meguri_sync::provider::{LegacySettings, ProviderDocument, Selection};
@@ -505,7 +544,7 @@ fn application_upgrade_reopens_archived_connected_publication_through_host_start
         for decision in [PublicationDecision::Clear, PublicationDecision::Pending] {
             let root = tempfile::tempdir().unwrap();
             let account = Arc::new(Account(AtomicUsize::new(0)));
-            let mut config = fixture(root.path(), account.clone());
+            let mut config = fixture(root.path(), account.clone()).for_application();
             config.cloud = None; // The application supplies no retired runtime.
             let original = CoreHost::open(config.clone()).unwrap();
             prepare_provider_review(&original);
@@ -564,7 +603,7 @@ fn application_upgrade_settles_absent_initial_adoption_before_prepared_host_atta
         for malformed in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let account = Arc::new(Account(AtomicUsize::new(0)));
-            let mut config = unopened_fixture(root.path(), account.clone());
+            let mut config = unopened_fixture(root.path(), account.clone()).for_application();
             config.cloud = None;
             let live = config.collection_directory.join("collection.anki2");
             let sidecar = config.collection_directory.join("meguri-sidecar.json");
@@ -636,7 +675,7 @@ fn application_absence_preparation_releases_reservation_after_unavailable_lock()
     for entry in 0..3 {
         let root = tempfile::tempdir().unwrap();
         let account = Arc::new(Account(AtomicUsize::new(0)));
-        let mut config = unopened_fixture(root.path(), account.clone());
+        let mut config = unopened_fixture(root.path(), account.clone()).for_application();
         config.cloud = None;
         let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
         let ownership = meguri_storage::lockfile::CollectionLock::acquire(&config.collection_directory).unwrap();
@@ -674,7 +713,7 @@ fn application_provider_initialization_ignores_retired_preferences_and_only_acce
     }
     for extra in [false, true] {
         let account = Arc::new(Account(AtomicUsize::new(0)));
-        let mut config = fixture(&root.path().join(if extra { "malformed" } else { "marker" }), account.clone());
+        let mut config = fixture(&root.path().join(if extra { "malformed" } else { "marker" }), account.clone()).for_application();
         config.cloud = None;
         std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
         let path = config.manual_transfer_directory.join("provider.json");
