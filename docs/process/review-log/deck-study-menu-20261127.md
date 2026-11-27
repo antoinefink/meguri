@@ -20,3 +20,5 @@ The reviewers read each complete file and classified these exact contents as pub
 ## Verification
 
 UI lint passed in `lint-ui/20261127T141827Z-98755`. Design documentation validation passed. Native render and hosted check evidence is recorded on the pull request. The repository’s [verification register](../verification-status.md) tracks the inherited open full gate.
+
+The iPhone VM run `140510Z-76742` exposed a test error. The available count’s accessibility frame covered the digit, so the test now uses the window for its width check and compares the trailing edges of the two controls. Independent review `143553Z-34441` read the complete corrected touch journey and classified its verified SHA-256 `fdf0086ac9e2b255e61c2e09e10d5be4c864c22efd52defdf8bd49cdd5f69e2d` as public.

@@ -26,16 +26,18 @@ import XCTest
         try tap("home.deckMenu.customStudy." + deck, app: app)
         _ = try visible("home.customStudy.available", app: app)
         _ = try visible("home.customStudy.amount", app: app)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
         capture(app, "filtered-touch-iphone-largest-text-custom-study-before-editing")
         let fields = app.textFields.matching(identifier: "home.customStudy.amount")
         XCTAssertEqual(fields.count, 1, "One native editable amount field at largest text")
         let amount = fields.firstMatch
         XCTAssertTrue(amount.isEnabled && amount.isHittable)
         XCTAssertEqual(amount.label, "Change in today’s limit")
+        let windowFrame = app.windows.firstMatch.frame
         let availableFrame = element(app, "home.customStudy.available").frame
-        XCTAssertLessThan(availableFrame.minX, amount.frame.minX, "The native amount stays inside the row’s usable horizontal bounds at largest text")
+        XCTAssertGreaterThanOrEqual(amount.frame.minX, windowFrame.minX, "The native amount stays inside the window at largest text")
+        XCTAssertLessThanOrEqual(amount.frame.maxX, windowFrame.maxX, "The native amount stays inside the window at largest text")
         XCTAssertEqual(amount.frame.maxX, availableFrame.maxX, accuracy: 1, "The editor aligns with the available-card count")
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
         try replace("home.customStudy.amount", with: "-99999", app: app)
         capture(app, "filtered-touch-iphone-largest-text-custom-study-signed-boundary")
         _ = try visible("home.customStudy.amount", app: app)
@@ -62,11 +64,12 @@ import XCTest
         let amount = app.textFields.matching(identifier: "home.customStudy.amount").firstMatch
         XCTAssertTrue(amount.waitForExistence(timeout: 10), "The amount remains a native editable text field")
         XCTAssertEqual(amount.label, "Change in today’s limit")
-        let availableFrame = element(app, "home.customStudy.available").frame
-        XCTAssertGreaterThan(amount.frame.minX, availableFrame.midX, "The amount occupies the trailing part of the row")
-        XCTAssertEqual(amount.frame.maxX, availableFrame.maxX, accuracy: 1, "The editor aligns with the available-card count")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         capture(app, prefix + "-custom-study-before-editing")
+        let windowFrame = app.windows.firstMatch.frame
+        let availableFrame = element(app, "home.customStudy.available").frame
+        XCTAssertGreaterThan(amount.frame.minX, windowFrame.midX, "The amount occupies the trailing half of the window")
+        XCTAssertEqual(amount.frame.maxX, availableFrame.maxX, accuracy: 1, "The editor aligns with the available-card count")
         try app.performAccessibilityAudit(for: [.trait, .sufficientElementDescription])
         try replace("home.customStudy.amount", with: "invalid", app: app)
         XCTAssertFalse(element(app, "home.customStudy.save").isEnabled)

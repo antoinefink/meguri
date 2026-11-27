@@ -846,7 +846,7 @@ PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/BackupSettingsTouchUITests.swift":
         "1008ab6ea30b0e807559cb31dc915677e7db0438e66364e34aed9040cd1a2e18",
     "app/MeguriUITests/FilteredStudyTouchUITests.swift":
-        "3b756e37eed70f82eedfbc038198122b4143a5f4901ba1c40b0077d7c54a5daa",
+        "fdf0086ac9e2b255e61c2e09e10d5be4c864c22efd52defdf8bd49cdd5f69e2d",
     "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
         "53d51f1b189acf3e833808c9ddd5157ceef6623a66c8ff6c7753d1709b67e8e8",
     "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
