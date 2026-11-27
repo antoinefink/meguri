@@ -62,8 +62,9 @@ pub struct OpenConfig {
     /// authority; only a finished adoption may preserve its decision while waiting.
     pub startup_identity_read_failed: bool,
     /// App-specific iCloud removal upgrade. Settle historical local R6 recovery
-    /// under the collection lock, then retire a connected publication to local
-    /// ownership. This supplies no account, provider or network authority.
+    /// under the collection lock using the exact archival binding for local
+    /// ownership. Preserve historical bindings and decisions; compare no live
+    /// account. This supplies no account, provider or network authority.
     pub retire_icloud_publication: bool,
     /// The SQL functions every connection of the collection registers
     /// (`storage/open-and-connections` C5).
@@ -426,7 +427,7 @@ impl Engine {
                 // the durable decision; it grants no live account authority.
                 let binding = if config.retire_icloud_publication || config.startup_publication_binding.is_some() {
                     crate::device_state::DeviceState::for_collection(path)
-                        .publication()?
+                        .settled_publication()?
                         .map(|p| p.binding)
                         .unwrap_or_else(|| config.publication_binding.clone())
                 } else {

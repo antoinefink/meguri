@@ -1237,8 +1237,8 @@ pub(crate) fn reconcile_initial_cloud_adopt(live: &Path, config: &crate::OpenCon
 /// lifecycle recovery keeps the recorded binding without treating it as a live
 /// account. A failed initial read preserves a finished adoption's decision only;
 /// unfinished adoption still receives Unknown for R6.6's mandatory account check.
-/// The explicit removal upgrade instead settles local historical ownership and
-/// retires its binding, without interpreting any input as live account authority.
+/// The explicit removal upgrade settles local historical ownership without
+/// changing archival bindings or interpreting them as live account authority.
 pub(crate) fn reconcile_startup(
     live: &Path,
     fallback: &AccountBinding,
@@ -1287,52 +1287,17 @@ pub(crate) fn reconcile_startup(
 
 /// The app has removed iCloud. Recorded bindings identify historical local
 /// journal ownership only; the ordinary R6 file/native/WAL/media checks still
-/// decide which collection stands. Project only after that journal is settled.
+/// decide which collection stands. Finished records remain byte-for-byte intact
+/// unless mandated media cleanup is outstanding.
 fn reconcile_retired_icloud(
     live: &Path,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
     random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
 ) -> Result<(), StorageError> {
-    let path = sidecar_path(live);
-    let Some(state) = sidecar::read_document(&path, decode)? else {
+    let Some(state) = sidecar::read_document(&sidecar_path(live), decode)? else {
         return Ok(());
     };
-    reconcile_local(live, &state.active.binding, clock, random, None, true)?;
-    let settled = sidecar::read_document(&path, decode)?.ok_or_else(|| failure("missing settled publication"))?;
-    if settled.intent.is_some() {
-        return Err(failure("publication retirement still has an active replacement"));
-    }
-    if !matches!(settled.active.binding, AccountBinding::Connected { .. }) {
-        return Ok(());
-    }
-    // A CloudAdopt candidate was Clear by construction. Its Pending variant
-    // records an account mismatch, which has no meaning after iCloud removal.
-    // Restore/import Pending decisions (and their reasons) remain unchanged.
-    let cloud = cloud_active(&settled)?;
-    sidecar::update_document(&path, |doc| {
-        let current = decode(Some(doc))?.ok_or_else(|| failure("missing settled publication"))?;
-        if current.intent.is_some() || current.active != settled.active || cloud_active(&current)? != cloud {
-            return Err(failure("publication changed during retirement"));
-        }
-        // Edit the raw active object so every extension and historical witness
-        // remains attached to its original identity, including binding facts.
-        let active = doc
-            .get_mut("deviceState")
-            .and_then(|state| state.get_mut("active"))
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| failure("missing active publication"))?;
-        active.insert(
-            "binding".into(),
-            serde_json::to_value(AccountBinding::LocalOnly).map_err(failure)?,
-        );
-        if cloud {
-            active.insert(
-                "decision".into(),
-                serde_json::to_value(PublicationDecision::Clear).map_err(failure)?,
-            );
-        }
-        Ok(())
-    })
+    reconcile_local(live, &state.active.binding, clock, random, None, true)
 }
 
 pub(crate) fn reconcile(
@@ -1386,7 +1351,9 @@ fn reconcile_local(
     let intent = state.intent.unwrap();
     let cloud = intent.reason == crate::replace::ReplaceReason::CloudAdopt;
     let activation_binding = if cloud && retiring_icloud {
-        &intent.candidate.binding
+        // Exact local proof may select the candidate, but the archived account
+        // cannot authorize a new Clear decision. Preserve R6's offline Pending.
+        &AccountBinding::Unknown
     } else {
         binding
     };
@@ -1394,7 +1361,7 @@ fn reconcile_local(
         Phase::WalIntent | Phase::WalActivated => return Err(failure("WAL intent lacks its authority")),
         Phase::Activated => {
             if cloud {
-                activate(live, activation_binding)?;
+                activate_inner(live, activation_binding, retiring_icloud)?;
                 return cleanup_completed_media(live, &intent.candidate.binding);
             }
             let expected = if intent.reason.requires_publication_decision() {
@@ -1430,7 +1397,7 @@ fn reconcile_local(
                 && (intent.candidate_native.is_none() || current_native == intent.candidate_native);
             match (old, candidate) {
                 (true, false) => {
-                    if cloud && !cloud_account_matches(&intent.prior.binding, binding) {
+                    if cloud && !retiring_icloud && !cloud_account_matches(&intent.prior.binding, binding) {
                         return Err(failure("prior adoption binding no longer matches"));
                     }
                     intent.prior.clone()
@@ -1837,6 +1804,13 @@ fn retained_replacements(state: &State) -> Result<Vec<ReplacementEvidence>, Stor
 }
 
 pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    activate_inner(live, binding, false)
+}
+fn activate_inner(
+    live: &Path,
+    binding: &AccountBinding,
+    preserve_activated_decision: bool,
+) -> Result<(), StorageError> {
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing activation journal"))?;
         bound(&state, binding)?;
@@ -1860,7 +1834,13 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
                 && state.active.decision == PublicationDecision::Pending
         });
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
-        state.active = activation_decision(intent, binding);
+        // Offline cleanup keeps the decision from the activated record.
+        if !(preserve_activated_decision
+            && intent.reason == crate::replace::ReplaceReason::CloudAdopt
+            && intent.phase == Phase::Activated)
+        {
+            state.active = activation_decision(intent, binding);
+        }
         if keep_pending {
             state.active.decision = PublicationDecision::Pending;
         }
@@ -2017,7 +1997,7 @@ mod retirement_tests {
     use std::sync::Arc;
 
     fn retire(live: &Path) -> Result<(), StorageError> {
-        let _ownership = meguri_storage::lockfile::CollectionLock::acquire(live.parent().unwrap())?;
+        let _ownership = meguri_storage::lockfile::CollectionLock::acquire(live.parent().unwrap()).map_err(failure)?;
         reconcile_startup(
             live,
             &AccountBinding::LocalOnly,
@@ -2030,7 +2010,7 @@ mod retirement_tests {
     }
 
     #[test]
-    fn retirement_projects_only_connected_active_binding_and_preserves_extensions() {
+    fn retirement_preserves_connected_active_binding_and_extensions_byte_for_byte() {
         let dir = tempfile::tempdir().unwrap();
         let live = dir.path().join("collection.anki2");
         let path = sidecar_path(&live);
@@ -2046,8 +2026,9 @@ mod retirement_tests {
         expected["deviceState"]["futureState"] = json!({"kept": true});
         expected["deviceState"]["active"]["futurePublication"] = json!([3, 4]);
         std::fs::write(&path, serde_json::to_vec_pretty(&expected).unwrap()).unwrap();
-        expected["deviceState"]["active"]["binding"] = json!("LocalOnly");
+        let original = std::fs::read(&path).unwrap();
         retire(&live).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
         let once = std::fs::read(&path).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&once).unwrap(), expected);
         retire(&live).unwrap();
