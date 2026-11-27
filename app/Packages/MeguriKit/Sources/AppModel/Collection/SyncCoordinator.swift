@@ -2281,7 +2281,7 @@ public final class SyncCoordinator {
         let editRevision = meguriAddressEditRevision
         let availability = MeguriWakeAvailability(generation: expected)
         // Reserve the product task before the first actor/credential suspension.
-        let task = Task {
+        let task = Task { [self] in
             defer { if meguriWake?.id == id { meguriWake = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
             while meguriWakePending, meguriCanRun, meguriRound === round,
                   meguriCurrent(owner, expected, revision), !Task.isCancelled {
