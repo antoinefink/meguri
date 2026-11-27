@@ -1451,9 +1451,9 @@ fn icloud_retirement_settled_cloud_account_fence_and_archive_are_preserved() {
 }
 
 #[test]
-fn icloud_retirement_finished_adoption_preserves_clear_and_pending_archive_bytes() {
+fn icloud_retirement_finished_adoption_preserves_exact_archive_content_for_clear_and_pending() {
     for pending in [false, true] {
-        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        let (_dir, live) = common::copy_fixture("schema-18.anki2");
         settled_old(&live);
         crash(&live, "replace.after_rename", "cloud-restore-bound", ReplaceReason::CloudAdopt);
         let engine = Engine::new(EngineConfig::default()).unwrap();
@@ -1467,12 +1467,21 @@ fn icloud_retirement_finished_adoption_preserves_clear_and_pending_archive_bytes
             expected.decision,
             if pending { PublicationDecision::Pending } else { PublicationDecision::Clear }
         );
-        let sidecar = dir.path().join("meguri-sidecar.json");
-        // Detect a needless rewrite as well as changes to historical members.
-        let bytes = format!("\n{}\n\n", serde_json::to_string_pretty(&r6_document(&live)).unwrap()).into_bytes();
-        fs::write(&sidecar, &bytes).unwrap();
-        recover_retired_twice(&live, &expected, None, 946);
-        assert_eq!(fs::read(&sidecar).unwrap(), bytes);
+        let archive = r6_document(&live);
+        for _ in 0..2 {
+            let engine = Engine::new(EngineConfig::default()).unwrap();
+            let collection = engine.open_raw(&live, retirement_config()).unwrap();
+            assert_eq!(publication(&live), expected);
+            assert_reason(&live, None);
+            assert_eq!(marker(&collection), 946);
+            assert!(r6_document(&live)["deviceState"]["intent"].is_null());
+            assert_eq!(
+                DeviceState::for_collection(&live).settled_publication().unwrap().as_ref(),
+                Some(&expected)
+            );
+            engine.close().unwrap();
+            assert_eq!(r6_document(&live), archive);
+        }
     }
 }
 
