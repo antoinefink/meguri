@@ -109,14 +109,14 @@ private struct MaintenanceSpace: DiskSpaceProviding {
     @Test func activationFailureKeepsSafetyAndPendingPublicationWhenTransportReportsFailure() {
         let restored = MeguriCoreBindings.RestoredBackup(name: "backup-2030-01-15-10.00.00.colpkg",
             safetyBackup: "backup-2030-01-15-10.00.01.colpkg", generation: 19,
-            cloudPublicationPending: true, deadlineMs: nil)
+            deadlineMs: nil)
         let raw = MeguriCoreBindings.MaintenanceFailure(cause: .io(detail: "reevaluation failed"),
             candidateActive: true, generation: 19, safetyBackup: restored.safetyBackup,
             restored: restored, backupPublication: .unpublished)
         let failure = CoreBridge.MaintenanceFailure(raw)
         #expect(failure.cause == .io("reevaluation failed") && failure.candidateActive)
         #expect(failure.generation == 19 && failure.safetyBackup == restored.safetyBackup)
-        #expect(failure.restored?.cloudPublicationPending == true)
+
         #expect(failure.restored?.generation == 19 && failure.restored?.deadlineMilliseconds == nil)
         let safetyOnly = CoreBridge.MaintenanceFailure(MeguriCoreBindings.MaintenanceFailure(cause: .cancelled,
             candidateActive: false, generation: nil, safetyBackup: restored.safetyBackup, restored: nil,
@@ -196,7 +196,7 @@ extension EventTests {
             #expect(try await service.runDueMaintenance(.deadline, operation: MaintenanceOperation(), progress: { _ in }) == nil)
             clock.advance() // Forced safety backup has a distinct wall name.
             let restored = try await service.restoreBackup(name: backup.name, operation: MaintenanceOperation(), progress: { _ in })
-            #expect(restored.generation == generation + 1 && restored.cloudPublicationPending)
+            #expect(restored.generation == generation + 1)
             let safety = try #require(restored.safetyBackup)
             #expect(files.fileExists(atPath: location.backupsDirectory.appending(path: safety).path))
             #expect(try await collections.lifecycle() == .ready(generation: generation + 1))
@@ -375,7 +375,7 @@ extension EventTests {
             try await ControlLane.shared.resetMaintenanceBoundary(gate)
             if afterActivation && !failReevaluation {
                 let restored = try result.get()
-                #expect(restored.generation == generation + 1 && restored.cloudPublicationPending)
+                #expect(restored.generation == generation + 1)
                 #expect(restored.safetyBackup != nil)
             } else {
                 guard case .failure(let error) = result else { Issue.record("Expected owned maintenance failure"); try await collections.close(); return }
@@ -386,7 +386,7 @@ extension EventTests {
                 if afterActivation {
                     guard case .io = failure.cause else { Issue.record("Expected reevaluation I/O failure"); try await collections.close(); return }
                     #expect(failure.generation == generation + 1)
-                    #expect(failure.restored?.generation == generation + 1 && failure.restored?.cloudPublicationPending == true)
+                    #expect(failure.restored?.generation == generation + 1)
                     #expect(failure.restored?.name == backup.name && failure.restored?.safetyBackup == safety)
                 } else {
                     #expect(failure.cause == .cancelled && failure.generation == nil && failure.restored == nil)
@@ -493,7 +493,7 @@ extension EventTests {
             let damagedWAL = files.fileExists(atPath: walFile.path) ? try Data(contentsOf: walFile) : nil
             clock.advance() // Damaged safety bytes must have a distinct wall name.
             let restored = try await service.restoreBackup(name: backup.name, operation: MaintenanceOperation(), progress: { _ in })
-            #expect(restored.generation == generation + 1 && restored.cloudPublicationPending)
+            #expect(restored.generation == generation + 1)
             #expect(try await collections.lifecycle() == .ready(generation: generation + 1))
             let safety = try #require(restored.safetyBackup)
             #expect(restored.name == backup.name)

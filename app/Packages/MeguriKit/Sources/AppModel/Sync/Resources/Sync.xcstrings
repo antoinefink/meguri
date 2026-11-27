@@ -23,50 +23,6 @@
         }
       }
     },
-    "sync.cancelOp.adoptUnproven.message": {
-      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri then asks how this collection syncs with iCloud."
-          }
-        }
-      }
-    },
-    "sync.cancelOp.publish.title": {
-      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancel Replacing the iCloud Collection?"
-          }
-        }
-      }
-    },
-    "sync.cancelOp.publish.message": {
-      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection stays as it was."
-          }
-        }
-      }
-    },
-    "sync.cancelOp.publish.message.switchSent": {
-      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The upload may already have replaced the iCloud collection. If it did, Meguri asks what to do next."
-          }
-        }
-      }
-    },
     "sync.cancelOp.confirm": {
       "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
       "localizations": {
@@ -144,39 +100,6 @@
         }
       }
     },
-    "sync.adopt.direction": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This device’s collection will be replaced with the iCloud collection."
-          }
-        }
-      }
-    },
-    "sync.adopt.staging": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Downloading the iCloud collection…"
-          }
-        }
-      }
-    },
-    "sync.adopt.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace Local Collection from iCloud"
-          }
-        }
-      }
-    },
     "sync.adopt.validating": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -188,17 +111,6 @@
         }
       }
     },
-    "sync.attention.adoptAfterReview": {
-      "comment": "Approved sync/status-strings T9.1 copy for a live adoption waiting for review to end.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replacing this collection with the iCloud collection continues when you finish reviewing."
-          }
-        }
-      }
-    },
     "sync.attention.adoptUnproven": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -206,63 +118,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meguri couldn’t confirm which collection file is current, so syncing stopped."
-          }
-        }
-      }
-    },
-    "sync.attention.applyFailed": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld change from iCloud couldn’t be applied. Meguri tries again later."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld changes from iCloud couldn’t be applied. Meguri tries again later."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.attention.assetUnavailable": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld change from iCloud couldn’t be downloaded. Meguri tries again the next time the collection opens."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld changes from iCloud couldn’t be downloaded. Meguri tries again the next time the collection opens."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.attention.chooseCollection": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose how this collection syncs with iCloud."
           }
         }
       }
@@ -312,17 +167,6 @@
         }
       }
     },
-    "sync.attention.crtMismatch": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection and the iCloud collection have different creation dates, so nothing syncs until you choose one."
-          }
-        }
-      }
-    },
     "sync.attention.exchangeIncomplete": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -330,17 +174,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Some changes from your last Sync Now did not sync."
-          }
-        }
-      }
-    },
-    "sync.attention.isolated": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection stopped syncing with iCloud."
           }
         }
       }
@@ -368,29 +201,6 @@
         }
       }
     },
-    "sync.attention.mediaMissing": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld media file is missing on this device and in iCloud."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld media files are missing on this device and in iCloud."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "sync.attention.oversize": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -410,97 +220,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "sync.attention.publishConflict": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection was replaced from another device while this device was uploading."
-          }
-        }
-      }
-    },
-    "sync.attention.referenceWaiting": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld change from iCloud is waiting for a related change that has not arrived."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld changes from iCloud are waiting for related changes that have not arrived."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.attention.refused": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld item can’t sync because its copy in iCloud is not valid."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld items can’t sync because their copies in iCloud are not valid."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.attention.rekeyFailed": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld item couldn’t be updated to match iCloud. Meguri tries again later."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld items couldn’t be updated to match iCloud. Meguri tries again later."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.attention.trackingError": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri couldn’t save its sync information on this device, so iCloud sync stopped."
           }
         }
       }
@@ -551,17 +270,6 @@
         }
       }
     },
-    "sync.button.label": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud Sync"
-          }
-        }
-      }
-    },
     "sync.connect.continue.confirm": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -607,39 +315,6 @@
         }
       }
     },
-    "sync.connect.downloading": {
-      "comment": "Approved specs/sync/status-strings.md#T12 copy; collection download progress while connecting to iCloud.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Downloading your collection from iCloud…"
-          }
-        }
-      }
-    },
-    "sync.connect.reading": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Getting details of the iCloud collection…"
-          }
-        }
-      }
-    },
-    "sync.connect.two.keepLocal": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep This Device’s Collection Without iCloud"
-          }
-        }
-      }
-    },
     "sync.connect.two.message": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -651,61 +326,6 @@
         }
       }
     },
-    "sync.connect.two.replace": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace the iCloud Collection with This Device’s…"
-          }
-        }
-      }
-    },
-    "sync.connect.two.replace.caption": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection can be restored for 30 days. Your other devices will ask what to do."
-          }
-        }
-      }
-    },
-    "sync.connect.two.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This Device and iCloud Each Have a Collection"
-          }
-        }
-      }
-    },
-    "sync.connect.two.useICloud": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use the iCloud Collection on This Device…"
-          }
-        }
-      }
-    },
-    "sync.connect.two.useICloud.caption": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This device’s collection is backed up, then replaced."
-          }
-        }
-      }
-    },
     "sync.connect.upload.confirm": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -713,61 +333,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Upload"
-          }
-        }
-      }
-    },
-    "sync.connect.upload.message": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your other devices can then use this collection. It uses your iCloud storage."
-          }
-        }
-      }
-    },
-    "sync.connect.upload.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upload This Collection to iCloud?"
-          }
-        }
-      }
-    },
-    "sync.connect.useICloud.confirm": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use iCloud Collection"
-          }
-        }
-      }
-    },
-    "sync.connect.useICloud.message": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This device’s empty collection is backed up, then replaced."
-          }
-        }
-      }
-    },
-    "sync.connect.useICloud.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use the iCloud Collection on This Device?"
           }
         }
       }
@@ -801,17 +366,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Decks"
-          }
-        }
-      }
-    },
-    "sync.counts.iCloud": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud"
           }
         }
       }
@@ -948,17 +502,6 @@
         }
       }
     },
-    "sync.decision.message": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Until you choose, this collection stays on this device and nothing is sent to iCloud."
-          }
-        }
-      }
-    },
     "sync.decision.notNow": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -966,28 +509,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not Now"
-          }
-        }
-      }
-    },
-    "sync.decision.replace": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace iCloud Collection…"
-          }
-        }
-      }
-    },
-    "sync.decision.replace.caption": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection is replaced with this one on all your devices."
           }
         }
       }
@@ -1010,29 +531,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Your latest answer syncs when you finish reviewing, so you can still undo it."
-          }
-        }
-      }
-    },
-    "sync.details.incoming": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld change from iCloud waiting to be applied"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld changes from iCloud waiting to be applied"
-                }
-              }
-            }
           }
         }
       }
@@ -1082,28 +580,6 @@
         }
       }
     },
-    "sync.error.cloudError": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync isn’t working right now."
-          }
-        }
-      }
-    },
-    "sync.error.conflictRecovery": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync needs your attention."
-          }
-        }
-      }
-    },
     "sync.error.localStorageFull": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1115,17 +591,6 @@
         }
       }
     },
-    "sync.error.noAccount": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud isn’t available."
-          }
-        }
-      }
-    },
     "sync.error.offline": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1133,28 +598,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "You’re offline."
-          }
-        }
-      }
-    },
-    "sync.error.quotaFull": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your iCloud storage is full."
-          }
-        }
-      }
-    },
-    "sync.error.throttled": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud is busy. Try again later."
           }
         }
       }
@@ -1511,51 +954,6 @@
         }
       }
     },
-    "sync.now.unavailable.iCloudUnavailable": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "device": {
-              "mac": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Sign in to iCloud in System Settings to sync."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Sign in to iCloud in Settings to sync."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.now.unavailable.recoveryRequired": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync needs your attention. Open iCloud Sync to see what to do."
-          }
-        }
-      }
-    },
-    "sync.now.unavailable.reviewActive": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud keeps syncing automatically while you review. Sync Now is available when you finish reviewing."
-          }
-        }
-      }
-    },
     "sync.now.unavailable.reviewActive.manual": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1590,17 +988,6 @@
         }
       }
     },
-    "sync.preview.isolatedUnsent": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Known unsent changes from an earlier iCloud connection: %lld."
-          }
-        }
-      }
-    },
     "sync.preview.conflictsKept": {
       "extractionState": "manual",
       "localizations": {
@@ -1608,17 +995,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Saved conflict copies kept: %lld."
-          }
-        }
-      }
-    },
-    "sync.preview.fetchedUnverified": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Received changes retained on this device: %lld. Their application cannot be verified. Replacing iCloud publishes only the current local collection."
           }
         }
       }
@@ -1641,28 +1017,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cancelling…"
-          }
-        }
-      }
-    },
-    "sync.publish.confirm": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace iCloud Collection"
-          }
-        }
-      }
-    },
-    "sync.publish.direction": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection will be replaced with this one on all your devices."
           }
         }
       }
@@ -1696,72 +1050,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Preparing…"
-          }
-        }
-      }
-    },
-    "sync.publish.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace iCloud Collection"
-          }
-        }
-      }
-    },
-    "sync.publish.uploading": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uploading this collection to iCloud…"
-          }
-        }
-      }
-    },
-    "sync.recovery.error.accountMismatch": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection belongs to a different iCloud account."
-          }
-        }
-      }
-    },
-    "sync.recovery.error.accountUnavailable": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud isn’t available. Check your iCloud account, then try again."
-          }
-        }
-      }
-    },
-    "sync.recovery.error.epochChanged": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection changed while you were deciding. Review the new details and choose again."
-          }
-        }
-      }
-    },
-    "sync.recovery.error.epochIncomplete": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection isn’t complete yet. Try again later."
           }
         }
       }
@@ -1968,83 +1256,6 @@
         }
       }
     },
-    "sync.settings.account.available": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signed in to iCloud"
-          }
-        }
-      }
-    },
-    "sync.settings.account.none": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Not signed in to iCloud"
-          }
-        }
-      }
-    },
-    "sync.settings.account.other": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signed in to a different iCloud account than this collection uses"
-          }
-        }
-      }
-    },
-    "sync.settings.account.restricted": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud is restricted on this device"
-          }
-        }
-      }
-    },
-    "sync.settings.account.setupNeeded": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri can’t use iCloud on this device"
-          }
-        }
-      }
-    },
-    "sync.settings.account.temporary": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud is temporarily unavailable"
-          }
-        }
-      }
-    },
-    "sync.settings.account.unknown": {
-      "comment": "Account row when no actual account status has been projected; does not infer a signed-out account from installation setup.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud account status unknown"
-          }
-        }
-      }
-    },
     "sync.settings.automatic": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2063,28 +1274,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "When this is off, changes sync only when you choose Sync Now."
-          }
-        }
-      }
-    },
-    "sync.settings.iCloud": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud"
-          }
-        }
-      }
-    },
-    "sync.settings.privacy": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your collection is stored in your private iCloud account and uses your iCloud storage. With Advanced Data Protection on, your collection’s content and media are end-to-end encrypted; some sync information, such as sizes and dates, is not."
           }
         }
       }
@@ -2199,17 +1388,6 @@
         }
       }
     },
-    "sync.status.syncing.detail": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Syncing your collection with iCloud."
-          }
-        }
-      }
-    },
     "sync.status.syncing.title": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2232,73 +1410,6 @@
         }
       }
     },
-    "sync.status.unavailable.noAccount": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "device": {
-              "mac": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Sign in to iCloud in System Settings to sync this collection."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Sign in to iCloud in Settings to sync this collection."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "sync.status.unavailable.restricted": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud is restricted on this device, so this collection can’t sync."
-          }
-        }
-      }
-    },
-    "sync.status.unavailable.setupNeeded": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri can’t use iCloud on this device."
-          }
-        }
-      }
-    },
-    "sync.status.unavailable.temporary": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud isn’t available right now. Syncing continues when it’s available again."
-          }
-        }
-      }
-    },
-    "sync.status.unavailable.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud Unavailable"
-          }
-        }
-      }
-    },
     "sync.status.upToDate.detail": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2317,17 +1428,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Up to Date"
-          }
-        }
-      }
-    },
-    "sync.service.iCloud": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud Sync"
           }
         }
       }
@@ -2409,17 +1509,6 @@
         }
       }
     },
-    "sync.service.recovery.message": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Neither service syncs this collection. The collection, its media and its backups stay on this device. Nothing in iCloud or on your Meguri Sync server is deleted, and changes that are only there are not copied. To sync again, choose a service and set it up again."
-          }
-        }
-      }
-    },
     "sync.service.recovery.confirm": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -2438,17 +1527,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meguri can’t read this device’s sync settings, so no service syncs."
-          }
-        }
-      }
-    },
-    "sync.switch.title.iCloud": {
-      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch to iCloud?"
           }
         }
       }
@@ -2482,17 +1560,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "You can change the sync service after the current review or collection change finishes."
-          }
-        }
-      }
-    },
-    "sync.switch.confirm.iCloud": {
-      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch to iCloud"
           }
         }
       }
@@ -3545,17 +2612,6 @@
         }
       }
     },
-    "sync.service.iCloud.name": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud"
-          }
-        }
-      }
-    },
     "sync.service.beta": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3567,17 +2623,6 @@
         }
       }
     },
-    "sync.service.iCloud.accessibility": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud, Beta"
-          }
-        }
-      }
-    },
     "sync.service.settingUp": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3585,17 +2630,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Setting Up…"
-          }
-        }
-      }
-    },
-    "sync.service.opFirst": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finish or cancel the collection replacement before you change the service."
           }
         }
       }
@@ -3644,39 +2678,6 @@
         }
       }
     },
-    "sync.setup.done.uploaded.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This device’s collection was uploaded to iCloud."
-          }
-        }
-      }
-    },
-    "sync.setup.done.downloaded.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection was downloaded to this device."
-          }
-        }
-      }
-    },
-    "sync.setup.done.resumed.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection syncs with iCloud again."
-          }
-        }
-      }
-    },
     "sync.setup.done.uploaded.meguri": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3695,17 +2696,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The collection on your Meguri Sync server was downloaded to this device."
-          }
-        }
-      }
-    },
-    "sync.setup.done.created.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A new, empty collection was created on this device and syncs with iCloud."
           }
         }
       }
@@ -3754,17 +2744,6 @@
         }
       }
     },
-    "sync.keep.device.effect.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection is replaced on all your devices. It stays in iCloud for 30 days and can be restored from there."
-          }
-        }
-      }
-    },
     "sync.keep.device.effect.meguri": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3772,17 +2751,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The collection on your Meguri Sync server is replaced. Meguri first saves a copy of it on this device."
-          }
-        }
-      }
-    },
-    "sync.keep.service.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep the iCloud Collection"
           }
         }
       }
@@ -3805,28 +2773,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "This device’s collection is replaced. Meguri backs it up on this device first; media files are not in the backup."
-          }
-        }
-      }
-    },
-    "sync.keep.unavailable.none": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "There is no collection in iCloud to keep."
-          }
-        }
-      }
-    },
-    "sync.keep.unavailable.unreadable": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection can’t be read, so it can’t be kept."
           }
         }
       }
@@ -4003,105 +2949,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Set Up Again…"
-          }
-        }
-      }
-    },
-    "sync.needsYou.accountChanged": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You’re signed in to a different iCloud account, and this collection was not sent to it."
-          }
-        }
-      }
-    },
-    "sync.needsYou.missing": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection is missing from iCloud, and it is still on this device."
-          }
-        }
-      }
-    },
-    "sync.needsYou.deleted": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri’s iCloud data was deleted, and your collection is still on this device."
-          }
-        }
-      }
-    },
-    "sync.needsYou.encryptionReset": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud copy can no longer be read because your iCloud encrypted data was reset."
-          }
-        }
-      }
-    },
-    "sync.needsYou.rootUnreadable": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri can’t read which collection is current in iCloud."
-          }
-        }
-      }
-    },
-    "sync.needsYou.setUp": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud isn’t set up for this collection yet."
-          }
-        }
-      }
-    },
-    "sync.needsYou.mediaMissingInICloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Media files can’t sync because Meguri’s media data is missing from iCloud."
-          }
-        }
-      }
-    },
-    "sync.needsYou.quotaFull": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your iCloud storage is full, so changes stay on this device."
-          }
-        }
-      }
-    },
-    "sync.waiting.cloudError": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync isn’t working right now. Meguri keeps trying."
           }
         }
       }
@@ -4304,17 +3151,6 @@
         }
       }
     },
-    "sync.trouble.replaceService.iCloud": {
-      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace the iCloud Collection…"
-          }
-        }
-      }
-    },
     "sync.trouble.replaceService.meguri": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -4436,39 +3272,6 @@
         }
       }
     },
-    "sync.attention.signedOut": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection stopped syncing when you signed out of iCloud."
-          }
-        }
-      }
-    },
-    "sync.attention.accountChangedBack": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection stopped syncing when the iCloud account on this device changed."
-          }
-        }
-      }
-    },
-    "sync.attention.replacedElsewhere": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The iCloud collection was replaced from another device."
-          }
-        }
-      }
-    },
     "sync.attention.fileMismatch": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -4476,39 +3279,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The collection file on this device isn’t the one that was syncing."
-          }
-        }
-      }
-    },
-    "sync.attention.publishWaiting": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uploading this collection to iCloud did not finish."
-          }
-        }
-      }
-    },
-    "sync.attention.publishAccount": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uploading this collection to iCloud stopped because the iCloud account changed."
-          }
-        }
-      }
-    },
-    "sync.attention.publishQuota": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud needs room for both collections while the previous one is kept for 30 days."
           }
         }
       }
@@ -4531,17 +3301,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Changes to the note type “%@” from another device are incomplete."
-          }
-        }
-      }
-    },
-    "sync.adopt.previous": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restore Previous iCloud Collection from %@…"
           }
         }
       }
@@ -4599,17 +3358,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "sync.attention.adoptWaiting": {
-      "comment": "Approved sync/status-strings T13.7; shown with Resume while an adoption waits on transport.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replacing this collection with the iCloud collection was not finished."
           }
         }
       }
@@ -4787,39 +3535,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "This collection stays on this device and stops syncing. You’ll be signed out of Meguri Sync. Nothing on your server is deleted."
-          }
-        }
-      }
-    },
-    "sync.switch.message.off.iCloud": {
-      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection stays on this device and stops syncing. Nothing in iCloud is deleted."
-          }
-        }
-      }
-    },
-    "sync.switch.message.meguri": {
-      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next, sign in to your Meguri Sync server. Meguri asks before it replaces a collection with your cards. Nothing in iCloud is deleted, and your other devices keep using iCloud until you change them."
-          }
-        }
-      }
-    },
-    "sync.switch.message.iCloud": {
-      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next, Meguri sets up iCloud and asks before it replaces a collection with your cards. You’ll be signed out of Meguri Sync. Nothing on your server is deleted, and your other devices keep using Meguri Sync until you change them."
           }
         }
       }
@@ -5021,6 +3736,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Shows the sync status."
+          }
+        }
+      }
+    },
+    "sync.service.recovery.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recover the sync settings and turn off Meguri Sync. Your local collection and study data stay on this device."
+          }
+        }
+      }
+    },
+    "sync.switch.message.meguri": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Meguri Sync to sync this collection with your server. Your local collection stays on this device."
           }
         }
       }

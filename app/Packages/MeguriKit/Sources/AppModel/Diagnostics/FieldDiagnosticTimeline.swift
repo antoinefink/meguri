@@ -4,7 +4,11 @@ import Synchronization
 /// Content-free observations only. Completion and convergence are separate
 /// stages; callers must report only the boundary they actually observed.
 nonisolated public struct FieldDiagnosticObservation: Codable, Sendable, Equatable {
-    public enum Component: String, Codable, Sendable { case startup, review, collectionImport, collectionExport, cloud, media, scheduling }
+    public enum Component: String, Codable, Sendable {
+        case startup, review, collectionImport, collectionExport, media, scheduling
+        // Preserve the tag in installed local diagnostic archives.
+        case sync = "cloud"
+    }
     public enum Operation: String, Codable, Sendable { case open, start, answer, save, inspect, activate, recover, prepare, publish, cleanup, status, exchange, transfer }
     public enum Stage: String, Codable, Sendable { case requested, admission, coreAccepted, persistence, presentation, inspection, activation, preparation, publication, cleanup, statusObserved, exchangeCompleted, convergenceObserved }
     public enum Outcome: String, Codable, Sendable { case observed, succeeded, failed, waiting, cancelled, refused, stale, incomplete, unknown, cleanupPending }

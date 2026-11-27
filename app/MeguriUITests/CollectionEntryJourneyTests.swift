@@ -19,9 +19,6 @@ import notify
         let bundle = try build.bundleIdentifier
         XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "Requires the development fixture installer")
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
-        let appInfo = try build.appInfo
-        try XCTSkipIf(appInfo["MeguriCloudSchemaConfigured"] as? Bool != true,
-            "Requires team signing with the cloud schema configured")
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
@@ -43,7 +40,9 @@ import notify
         XCTAssertTrue(service.isEnabled)
         try click(service, app, bundle)
         // The standard iOS Picker exposes menu choices as native buttons.
-        // T19.2: Off, Meguri Sync, iCloud; a choice made from Off asks nothing.
+        // Off and Meguri Sync; a choice made from Off asks nothing.
+        XCTAssertFalse(app.buttons["iCloud, Beta"].exists)
+        XCTAssertFalse(app.buttons["iCloud"].exists)
         let options = app.buttons.matching(NSPredicate(format: "label == %@", "Meguri Sync"))
         let meguri = try XCTUnwrap(waitForHittable(options), app.debugDescription)
         XCTAssertEqual(options.count, 1)
@@ -1785,6 +1784,9 @@ import notify
         XCTAssertTrue(close.waitForExistence(timeout: 20))
         try click(close, app, bundle)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
+        #if os(iOS)
+        XCTAssertFalse(element(app, "home.collection.error").exists)
+        #endif
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
         let after = try XCTUnwrap(HomeControls.deckCounts(app), app.debugDescription)
         capture(app, "entry-saved-answer")

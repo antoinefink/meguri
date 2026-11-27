@@ -623,7 +623,7 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: root, configuration: nil, defaults: nil),
+            sync: SyncCoordinator(directory: root, defaults: nil),
             providerDirectory: root.appending(path: "synthetic-installation"))
         let terminal = ReplacementDiscardTerminal()
         let service = SettingsTransferService(preparationRecord: decisionRecord(), discardTerminal: terminal)

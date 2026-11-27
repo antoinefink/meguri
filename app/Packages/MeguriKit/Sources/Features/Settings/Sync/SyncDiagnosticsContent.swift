@@ -29,7 +29,7 @@ public struct SyncDiagnosticsContent: View {
             Text(SyncDiagnosticsCopy.text("Sync Logs", locale: locale))
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            Text(SyncDiagnosticsCopy.text("Recent cloud and media activity.", locale: locale))
+            Text(SyncDiagnosticsCopy.text("Recent sync and media activity.", locale: locale))
             if model.isLoading {
                 Text(SyncDiagnosticsCopy.text("Loading sync logs…", locale: locale))
             }
@@ -235,7 +235,7 @@ struct SyncDiagnosticsPresentation {
             return
         }
         let events = timeline.events.enumerated().filter {
-            $0.element.observation.component == .cloud || $0.element.observation.component == .media
+            $0.element.observation.component == .sync || $0.element.observation.component == .media
         }
         let formatter = DateFormatter()
         formatter.locale = locale
@@ -244,7 +244,7 @@ struct SyncDiagnosticsPresentation {
         formatter.timeStyle = .medium
         rows = events.suffix(20).map { index, event in
             let observation = event.observation
-            let component = text(observation.roundID != nil ? "Meguri Sync" : observation.component == .cloud ? "Cloud" : "Media")
+            let component = text(observation.roundID != nil ? "Meguri Sync" : observation.component == .sync ? "Sync" : "Media")
             let operation = text(SyncDiagnosticsCopy.operation(observation.operation))
             let stage = text(observation.roundMilestone.map(SyncDiagnosticsCopy.milestone) ?? SyncDiagnosticsCopy.stage(observation.stage))
             let outcome = text(SyncDiagnosticsCopy.outcome(observation.outcome))
@@ -275,8 +275,8 @@ struct SyncDiagnosticsPresentation {
         if timeline.expiredCount > 0 { notes.append(text("Expired observations, across the app: \(timeline.expiredCount)")) }
         if timeline.truncatedCount > 0 { notes.append(text("Older observations removed, across the app: \(timeline.truncatedCount)")) }
         if timeline.invalidCount > 0 { notes.append(text("Invalid observations omitted, across the app: \(timeline.invalidCount)")) }
-        if events.count > rows.count { notes.append(text("Only the latest 20 cloud and media observations are shown.")) }
-        if rows.isEmpty { notes.append(text("No recent cloud or media observations are available.")) }
+        if events.count > rows.count { notes.append(text("Only the latest 20 sync and media observations are shown.")) }
+        if rows.isEmpty { notes.append(text("No recent sync or media observations are available.")) }
         notices = notes
     }
 }

@@ -190,12 +190,12 @@ fn configured_nonlocal_handoff_and_pending_removal_refuse() {
         match state {
             0 => { host.configure_meguri_connection(ORIGIN).unwrap(); }
             1 => {
-                let handoff = host.begin_provider_handoff(Selection::ICloud).unwrap();
+                let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap();
                 host.finish_provider_handoff(&handoff).unwrap();
-                assert_eq!(host.provider_authority().snapshot().unwrap().selection, Selection::ICloud);
+                assert_eq!(host.provider_authority().snapshot().unwrap().selection, Selection::Meguri);
             }
-            2 => { host.begin_provider_handoff(Selection::ICloud).unwrap(); }
-            _ => { host.begin_provider_handoff_with_removal(Selection::ICloud, true).unwrap(); }
+            2 => { host.begin_provider_handoff(Selection::Meguri).unwrap(); }
+            _ => { host.begin_provider_handoff_with_removal(Selection::Meguri, true).unwrap(); }
         }
         assert!(matches!(install(&host, &config, &der), Err(EngineError::Busy { .. })));
         host.close().unwrap();

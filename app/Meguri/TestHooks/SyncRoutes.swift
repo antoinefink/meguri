@@ -29,9 +29,9 @@ extension TestHooks {
             let collection = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
                 sync: .renderFixture(render.state, clock: configuration.clock))
             if render.justFinished { collection.syncPresentation.buttonFeedback.holdAccentForTestHooks() }
-            features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+            features.syncStatus = { AnyView(SyncStatusButton(collection: collection)) }
             #if os(iOS)
-            features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+            features.syncPanelMeasure = { AnyView(SyncPanelMeasure(collection: collection)) }
             #endif
         }
 
@@ -60,30 +60,17 @@ extension TestHooks {
             registry.register("settings/sync/meguri-needs-you") { settings(.meguriNeedsYou, $0) }
             // MP7 step 5: a note type structure save waits for Upload….
             registry.register("settings/sync/meguri-structure-upload") { settings(.meguriStructureUploadPending, $0) }
-            registry.register("settings/sync/icloud-selected") { settings(.iCloudSelected, $0) }
-            registry.register("settings/sync/icloud-connected") { settings(.iCloudConnected, $0) }
-            registry.register("settings/sync/icloud-needs-you") { settings(.iCloudNeedsYou, $0) }
-            registry.register("settings/sync/icloud-issues") { settings(.iCloudIssues, $0) }
             registry.register("settings/sync/wide-meguri-connected") { context in
                 .screen { SyncSettingsPreview.screen(.meguriConnected, page: .settingsInTabLayout, configuration: context.configuration) }
             }
-            registry.register("settings/sync/wide-icloud-needs-you") { context in
-                .screen { SyncSettingsPreview.screen(.iCloudNeedsYou, page: .settingsInTabLayout, configuration: context.configuration) }
-            }
-            registry.register("settings/sync/troubleshooting-icloud") { context in
-                .screen { SyncSettingsPreview.screen(.iCloudIssues, page: .troubleshooting, configuration: context.configuration) }
-            }
             registry.register("settings/sync/troubleshooting-meguri") { context in
                 .screen { SyncSettingsPreview.screen(.meguriConnected, page: .troubleshooting, configuration: context.configuration) }
-            }
-            registry.register("settings/sync/issues-list") { context in
-                .screen { SyncSettingsPreview.screen(.iCloudIssues, page: .issues, configuration: context.configuration) }
             }
             registry.register("settings/sync/keep-collection") { context in
                 .screen { SyncSettingsPreview.screen(.meguriNeedsYou, page: .keepCollection, configuration: context.configuration) }
             }
             registry.register("settings/sync/status-needs-you") { context in
-                .screen { SyncSettingsPreview.screen(.iCloudNeedsYou, page: .statusPopover, configuration: context.configuration) }
+                .screen { SyncSettingsPreview.screen(.meguriNeedsYou, page: .statusPopover, configuration: context.configuration) }
             }
             // N23 (round 10): the status panel in each state, drawn in the window.
             registry.register("settings/sync/panel/off") { panel(.off, $0) }
@@ -99,19 +86,12 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-preparing") { panel(.meguriPreparing, $0) }
             registry.register("settings/sync/panel/meguri-media-blocked") { panel(.meguriMediaBlocked, $0) }
             registry.register("settings/sync/panel/meguri-acceptance-unknown") { panel(.meguriAcceptanceUnknown, $0) }
-            registry.register("settings/sync/panel/icloud-setup-needed") { panel(.iCloudSetupNeeded, $0) }
-            registry.register("settings/sync/panel/icloud-no-account") { panel(.iCloudNoAccount, $0) }
             registry.register("settings/sync/panel/meguri-round-failed") { panel(.meguriRoundFailed, $0) }
             registry.register("settings/sync/panel/meguri-sign-in-refused") { panel(.meguriSignInRefused, $0) }
             registry.register("settings/sync/panel/meguri-choose-collection") { panel(.meguriNeedsYou, $0) }
             registry.register("settings/sync/panel/meguri-structure-upload") { panel(.meguriStructureUploadPending, $0) }
             registry.register("settings/sync/panel/meguri-blocked") { panel(.meguriBlocked, $0) }
             registry.register("settings/sync/panel/meguri-never-signed-in") { panel(.meguriNeverSignedIn, $0) }
-            registry.register("settings/sync/panel/icloud-up-to-date") { panel(.iCloudConnected, $0) }
-            registry.register("settings/sync/panel/icloud-syncing") { panel(.iCloudSyncing, $0) }
-            registry.register("settings/sync/panel/icloud-needs-you") { panel(.iCloudNeedsYou, $0) }
-            registry.register("settings/sync/panel/icloud-issues") { panel(.iCloudIssues, $0) }
-            registry.register("settings/sync/panel/icloud-not-set-up") { panel(.iCloudSelected, $0) }
             // The popover itself, opened from the toolbar (iPhone: the sheet; iPad: the popover).
             registry.register("settings/sync/status/meguri-setup-media") { context in
                 .screen { SyncSettingsPreview.screen(.meguriSetupMedia, page: .statusPopover, configuration: context.configuration) }
@@ -131,16 +111,10 @@ extension TestHooks {
             registry.register("settings/sync/window/meguri-connected") { window(.meguriConnected, $0) }
             registry.register("settings/sync/window/meguri-never-signed-in") { window(.meguriNeverSignedIn, $0) }
             registry.register("settings/sync/window/meguri-sign-in") { window(.meguriSignIn, $0) }
-            registry.register("settings/sync/window/icloud-connected") { window(.iCloudConnected, $0) }
             // T21.1: the service change confirmation, opened by the Service control
             // over the Settings window (Mac) or the Settings page (touch).
             registry.register("settings/sync/window/switch-meguri-off-unknown") { window(.meguriOffUnknown, $0) }
             registry.register("settings/sync/window/switch-meguri-off-known") { window(.meguriOffKnown, $0) }
-            registry.register("settings/sync/window/switch-meguri-icloud-unknown") { window(.meguriICloudUnknown, $0) }
-            registry.register("settings/sync/window/switch-icloud-off-none") { window(.iCloudOffNone, $0) }
-            registry.register("settings/sync/window/switch-icloud-off-known") { window(.iCloudOffKnown, $0) }
-            registry.register("settings/sync/window/switch-icloud-off-unknown") { window(.iCloudOffUnknown, $0) }
-            registry.register("settings/sync/window/switch-icloud-meguri-known") { window(.iCloudMeguriKnown, $0) }
         }
         #if os(macOS)
         /// The Settings scene shows this collection in place of the app's while a

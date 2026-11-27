@@ -25,7 +25,7 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory,
             backupsDirectory: root.appending(path: "backups"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
+            sync: SyncCoordinator(directory: directory, defaults: nil),
             providerDirectory: root.appending(path: "installation"))
         let mining = owner.sentenceMining
         let first: SentenceMining.EndpointID = migakuFirst ? .migaku : .ankiConnect
@@ -146,7 +146,7 @@ extension ReviewCollectionStartupTests {
         configuration.ankiConnectPort = 0
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
+            sync: SyncCoordinator(directory: directory, defaults: nil),
             providerDirectory: root.appending(path: "installation"))
         let mining = owner.sentenceMining
         var webSocket: URLSessionWebSocketTask?
@@ -287,7 +287,7 @@ extension ReviewCollectionStartupTests {
             configuration.collectionLocation = AppModel.CollectionLocation(directory: otherDirectory,
                 backupsDirectory: root.appending(path: "other-backups"))
             let other = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-                sync: SyncCoordinator(directory: otherDirectory, configuration: nil, defaults: nil),
+                sync: SyncCoordinator(directory: otherDirectory, defaults: nil),
                 providerDirectory: root.appending(path: "other-installation"))
             do {
                 await other.start()

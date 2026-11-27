@@ -25,8 +25,9 @@ public protocol MeguriProviderCredentialStore: Sendable {
     func save(_ credentials: MeguriProviderCredentials) async throws
     func delete(connection: MeguriProviderConnection) async throws
 }
-/// Separate from the retained manual-transfer namespace. Access is scoped to
-/// the original connection; an inactive slot is never read at iCloud startup.
+/// Separate from the retained manual-transfer namespace. Queries target one
+/// Meguri connection, including retained configuration while sync is Off;
+/// they never query iCloud or another provider's credentials.
 public actor DeviceMeguriProviderCredentialStore: MeguriProviderCredentialStore {
     private let service: String
     public init(service: String = "com.antoinefink.meguri.provider") { self.service = service }

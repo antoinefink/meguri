@@ -1,5 +1,10 @@
 # CloudKit sync policy
 
+> Availability changed 2026-11-27: `sync/meguri-provider#MP0` and
+> `native-interface-contract#N28` supersede iCloud choices, copy, native
+> controls, account and transport requirements. Those clauses are retired;
+> Meguri Sync, Off and shared collection/media/hold-back requirements remain.
+
 Spec: sync/policy
 Requirements: R88, R89, R122, R123, R124, R126, R127, R726, R1549, R1550, R1551, R1552, R1553, R1554, R1555, R1556, R1557, R1558, R1559, R1560, R1561, R1562, R2046, R2047, R2048, R2049, R2050, R2059; supports R365, R1547, R1548, R1583 (CloudKit media progress: P14.4), R1584 (visible media first: P13.2; the placeholder is `sync/cloudkit-records#K9.3`), R1588 and R1844 (bounded, resumable media transfer: P13.2, P13.3, with `sync/cloudkit-recovery#V6`), R1592, R2051, R2052, R2053, R2054, R2055, R2056, R2057, R2060, R2066
 Anki: none (Meguri design)

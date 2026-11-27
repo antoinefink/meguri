@@ -3,6 +3,40 @@
 use super::*;
 
 impl Engine {
+    /// Host-only removal startup entry for an absent pre-rename CloudAdopt.
+    /// Proves absence and settles only exact local R6 evidence under ownership;
+    /// allocates no identity and grants no live account or creation authority.
+    pub fn reconcile_retired_icloud_absence_raw(
+        &self,
+        live: &Path,
+        config: &OpenConfig,
+    ) -> Result<(), EngineError> {
+        let _control = self.job_control_lane()?;
+        let state = self.lock_state();
+        if !config.retire_icloud_publication
+            || !matches!(state.state, LifecycleState::NoCollection | LifecycleState::Failed { .. })
+            || state.current.is_some() || state.slot.is_some() || state.suspended
+            || state.recovery_ownership.is_some()
+        {
+            return Err(EngineError::unavailable("archival absence recovery requires an idle unopened owner"));
+        }
+        let _ownership = meguri_storage::lockfile::CollectionLock::acquire(
+            live.parent().unwrap_or_else(|| Path::new(".")),
+        )?;
+        require_absent(live)?;
+        crate::device_state::reconcile_startup(
+            live,
+            &config.publication_binding,
+            config.startup_publication_binding.as_ref(),
+            config.startup_identity_read_failed,
+            true,
+            config.clock.clone(),
+            config.random.clone(),
+        )?;
+        crate::device_state::DeviceState::for_collection(live).settled_publication()?;
+        require_absent(live)
+    }
+
     /// Host-only entry, with the original Host lease held by the caller.
     /// `admit` checks retained provider work without changing its evidence.
     pub fn create_empty_raw(

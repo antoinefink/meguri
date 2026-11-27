@@ -783,13 +783,6 @@ runs:
     pending: U118
 
   # --- T3: milestone and release ----------------------------------------------
-  - id: u248-soak
-    job: cloudkit-signed
-    tier: T3
-    placement: [host, vm]
-    needs: [vm, simulator]
-    class: sync
-    budget_s: 7200
   - id: similarity-whole-tree
     job: similarity
     args: [--rev, "{tip}"]
@@ -912,13 +905,8 @@ utilities:
   - {job: sync-web-browser-install, why: "On-demand pinned browser acquisition; sync-web-verify prepares its browser runtime"}
   - {job: sync-web-deps, why: "On-demand locked frontend dependency audit and preparation; sync-web-verify covers gates"}
   - {job: sync-web-image, why: "On-demand pinned frontend/browser image; sync-web-verify prepares the required gate runtime"}
-  - {job: cloud-fetch-probe-host, why: "On-demand SDK observation; no gate evidence"}
-  - {job: cloud-record-read-host, why: "On-demand read-only acknowledged-record observation; no gate or acceptance evidence"}
-  - {job: cloud-media-probe, why: "Explicit normal-app generated media diagnostic only; prepare-ui is private prepared-only PREPARATION with separate authorized Finder copy/sync evidence; staged-only or peer-byte-match never grants Q7/signed-lane acceptance"}
   - {job: vm-crash-info, why: "Explicit bounded retained Mac UI crash taxonomy with original-receipt unzoned admission and guest-completion lease fencing only; no app or gate acceptance"}
-  - {job: cloudkit-account-setup, why: "OWNER ONLY J2.2.1 explicit interactive account source producer; setup-only, never gates or catch-up"}
   - {job: vm-xcode-stage, why: "Explicit dedicated-VM Xcode staging and existing prompt-free activation only; no signed execution or app gate coverage"}
-  - {job: cloudkit-agent-install, why: "Explicit J2.1 product transfer from admitted build inputs to the parent's frozen VM selection; runtime evidence remains incomplete"}
   - {job: mac-hosted-test, why: "on-demand exact Mac app-hosted method diagnostic; focused execution receipt only, no automatic snapshot or Xcode gate coverage"}
   - {job: core-update, why: "explicitly changes a dependency; core-deny, lint and tests verify its result"}
   - {job: package-interop-check, why: "explicit generated native RF4 proof with independent bounded pre-client DB and media archive decode; requires frozen generated build inputs"}

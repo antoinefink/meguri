@@ -264,3 +264,198 @@ fn authentication_posts_only_hostkey_refuses_redirects_and_rejects_a_changed_con
         assert!(doc.binding.is_none() && !doc.permits_meguri_transfer());
     }
 }
+
+// Persisted format from before retirement: keep this literal independent of
+// ProviderDocument::migration so a future default cannot hide an upgrade bug.
+const PRE_UPGRADE_PROVIDER: &str = r#"{
+  "version":1,"revision":7,"selection":"ICloud",
+  "settings":{"enabled":true,"paused":true,"automatic":false,"media":false},
+  "binding":{"binding":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],"account":[1,2,3],
+    "publication":{"identity":[5,6],"binding":"LocalOnly","decision":"Clear","futurePublication":19},
+    "container":"synthetic-container","environment":"Development","futureCloudBinding":true},
+  "handoff":null,"legacy_binding_pending":false,
+  "meguri":{"reference":"synthetic-connection","revision":4,"endpoint":"https://sync.example.test/"},
+  "icloud_settings":{"enabled":true,"paused":true,"automatic":false,"media":false},
+  "meguri_settings":{"enabled":true,"paused":false,"automatic":false,"media":true},
+  "meguri_binding":null,
+  "meguri_bootstrap":{"connection":{"reference":"synthetic-connection","revision":4,"endpoint":"https://sync.example.test/"},
+    "operation":"synthetic-pending","operation_revision":2,"direction":"Export","futureIntent":23},
+  "future":{"untouched":[1,2,3]}
+}"#;
+
+#[test]
+fn application_upgrade_retires_persisted_icloud_and_keeps_local_bytes_and_inactive_meguri_intent() {
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("provider.json");
+    std::fs::write(&path, PRE_UPGRADE_PROVIDER).unwrap();
+    // A sentinel is deliberately not a valid collection: retirement cannot
+    // open or rewrite a user's collection as part of installation migration.
+    let collection = root.path().join("collection.anki2");
+    std::fs::write(&collection, b"synthetic unopened collection").unwrap();
+    Authority::retire_icloud(root.path()).unwrap();
+    let document = Authority::load(root.path()).snapshot().unwrap();
+    assert_eq!(document.selection, Selection::LocalOnly);
+    assert!(!document.settings.enabled && !document.settings.paused);
+    assert!(!document.legacy_binding_pending && document.binding.is_none() && document.handoff.is_none());
+    assert!(!document.permits_meguri_transfer());
+    let before: serde_json::Value = serde_json::from_str(PRE_UPGRADE_PROVIDER).unwrap();
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for key in ["future", "meguri", "meguri_binding", "meguri_bootstrap", "meguri_settings"] { assert_eq!(after[key], before[key]); }
+    assert!(!after.as_object().unwrap().contains_key("meguri_structure"));
+    assert!(!after["meguri_bootstrap"].as_object().unwrap().contains_key("media_epoch"));
+    assert_eq!(after["retiredICloud"], before);
+    assert_eq!(std::fs::read(collection).unwrap(), b"synthetic unopened collection");
+    let bytes = std::fs::read(&path).unwrap();
+    Authority::retire_icloud(root.path()).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "upgrade must be idempotent");
+}
+
+#[test]
+fn application_upgrade_leaves_steady_meguri_binding_and_pending_structure_byte_exact() {
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("provider.json");
+    let mut before: serde_json::Value = serde_json::from_str(PRE_UPGRADE_PROVIDER).unwrap();
+    before["selection"] = json!("Meguri");
+    before["settings"] = json!({"enabled":true,"paused":false,"automatic":true,"media":true});
+    before["meguri_settings"] = before["settings"].clone();
+    before["meguri_bootstrap"] = json!(null);
+    before["meguri_binding"] = json!({"connection":before["meguri"],"account":"synthetic-account",
+        "publication":[1,2],"operation":"synthetic-completed","media_epoch":{"owner":"synthetic-account","epoch":3},
+        "completed_at_ms":1000,"futureBinding":"retained"});
+    before["meguri_structure"] = json!({"binding":before["meguri_binding"],"baseline":null,
+        "automatic":true,"schema_before":12,"schema_saved":13,"futureUpload":true});
+    let bytes = serde_json::to_vec_pretty(&before).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    Authority::retire_icloud(root.path()).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let authority = Authority::load_application(root.path());
+    authority.reload().unwrap();
+    assert!(!authority.network_blocked());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let document = authority.snapshot().unwrap();
+    assert_eq!(document.selection, Selection::Meguri);
+    assert!(document.meguri_binding.is_some() && document.meguri_structure.is_some());
+    assert!(document.settings.automatic);
+}
+
+#[test]
+fn application_upgrade_retires_both_interrupted_icloud_handoff_directions_and_credentials_fence() {
+    use meguri_sync::provider::Authority;
+    for old in [Selection::Meguri, Selection::ICloud] {
+        for remove in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("provider.json");
+            let mut before: serde_json::Value = serde_json::from_str(PRE_UPGRADE_PROVIDER).unwrap();
+            before["selection"] = json!(old);
+            before["handoff"] = json!({"old":old,
+                "destination":if old == Selection::Meguri { Selection::ICloud } else { Selection::Meguri },
+                "binding":null,"publication":null,"generation":1,"revision":7,"remove_credentials":remove,
+                "futureHandoff":{"retained":true}});
+            std::fs::write(&path, serde_json::to_vec(&before).unwrap()).unwrap();
+            Authority::retire_icloud(root.path()).unwrap();
+            let document = Authority::load(root.path()).snapshot().unwrap();
+            assert_eq!(document.selection, Selection::LocalOnly);
+            assert!(document.handoff.is_none() && !document.settings.enabled);
+            assert_eq!(document.meguri.is_none(), remove);
+            assert_eq!(document.meguri_bootstrap.is_none(), remove);
+            let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(raw["retiredICloud"]["handoff"], before["handoff"]);
+        }
+    }
+}
+
+#[test]
+fn application_upgrade_preserves_active_meguri_credential_removal_to_off_byte_exact() {
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("provider.json");
+    let mut before: serde_json::Value = serde_json::from_str(PRE_UPGRADE_PROVIDER).unwrap();
+    before["selection"] = json!("Meguri");
+    before["handoff"] = json!({"old":"Meguri","destination":"LocalOnly","binding":null,
+        "publication":null,"generation":1,"revision":7,"remove_credentials":true});
+    let bytes = serde_json::to_vec_pretty(&before).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    Authority::retire_icloud(root.path()).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let authority = Authority::load_application(root.path());
+    authority.reload().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let document = authority.snapshot().unwrap();
+    assert_eq!(document.selection, Selection::Meguri);
+    assert!(document.handoff.unwrap().removal_pending());
+    assert_eq!(document.meguri.unwrap().reference, "synthetic-connection");
+    assert!(!authority.snapshot().unwrap().permits_meguri_transfer());
+}
+
+#[test]
+fn application_upgrade_retires_legacy_enabled_defaults_without_enabling_another_provider() {
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    Authority::migrate(root.path(), Some(&json!({"enabled":true,"paused":false,"automatic":true,"media":true}))).unwrap();
+    Authority::retire_icloud(root.path()).unwrap();
+    let document = Authority::load(root.path()).snapshot().unwrap();
+    assert_eq!(document.selection, Selection::LocalOnly);
+    assert!(!document.settings.enabled && document.meguri.is_none());
+}
+
+#[test]
+fn application_upgrade_accepts_only_the_exact_invalid_legacy_settings_marker() {
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("provider.json");
+    let marker = json!({"migrationFailure":"invalidLegacySettings"});
+    std::fs::write(&path, serde_json::to_vec(&marker).unwrap()).unwrap();
+    // The historical migration remains strict for internal callers.
+    assert!(Authority::migrate(root.path(), None).is_err());
+    Authority::retire_icloud(root.path()).unwrap();
+    let document = Authority::load(root.path()).snapshot().unwrap();
+    assert_eq!(document.selection, Selection::LocalOnly);
+    assert!(!document.settings.enabled && document.meguri.is_none());
+    assert!(document.handoff.is_none() && document.binding.is_none());
+    let bytes = std::fs::read(&path).unwrap();
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(raw["retiredICloud"], marker);
+    Authority::retire_icloud(root.path()).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+    for invalid in [
+        json!({"migrationFailure":"invalidLegacySettings","selection":"Meguri"}),
+        json!({"migrationFailure":"invalidLegacySettings","future":true}),
+        json!({"migrationFailure":"unknown"}), json!({}), json!(null),
+    ] {
+        let bytes = serde_json::to_vec_pretty(&invalid).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(Authority::retire_icloud(root.path()).is_err());
+        assert!(Authority::load(root.path()).snapshot().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn application_upgrade_atomic_failure_keeps_retired_intent_and_removal_authorization() {
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_sync::provider::Authority;
+    for marker in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("provider.json");
+        let mut raw: serde_json::Value = serde_json::from_str(PRE_UPGRADE_PROVIDER).unwrap();
+        raw["selection"] = json!("Meguri");
+        raw["handoff"] = json!({"old":"Meguri","destination":"ICloud","binding":null,
+            "publication":null,"generation":1,"revision":7,"remove_credentials":true});
+        if marker { raw = json!({"migrationFailure":"invalidLegacySettings"}); }
+        let bytes = serde_json::to_vec_pretty(&raw).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+        let result = Authority::retire_icloud(root.path());
+        faultpoint::disarm("storage.sidecar.before_save");
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        Authority::retire_icloud(root.path()).unwrap();
+        let document = Authority::load(root.path()).snapshot().unwrap();
+        assert_eq!(document.selection, Selection::LocalOnly);
+        assert!(document.meguri.is_none() && document.meguri_bootstrap.is_none());
+        assert!(!document.permits_meguri_transfer());
+    }
+}

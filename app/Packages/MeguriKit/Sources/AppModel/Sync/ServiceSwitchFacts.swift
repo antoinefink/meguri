@@ -9,7 +9,7 @@ public struct ServiceSwitchFacts: Sendable, Equatable {
     /// work without a count, or unknown.
     public enum Changes: Sendable, Equatable { case count(UInt64), some, unknown }
     public var changes: Changes
-    /// Review answers held back (iCloud's P14.4 `heldBack`); nil when not reported.
+    /// Review answers held back; nil when not reported.
     public var heldBack: UInt64?
     /// Media files on this device not yet sent; nil when not known. Files still
     /// to download from the service are not counted: they were never this device's to send.
@@ -22,16 +22,12 @@ public struct ServiceSwitchFacts: Sendable, Equatable {
 }
 
 extension SyncCoordinator {
-    /// The old service's local facts for the confirmation. iCloud reports its
-    /// counts (P14.4); Meguri Sync's round reports pending work without a count,
+    /// The old service's local facts for the confirmation. Meguri Sync's
+    /// round reports pending work without a count,
     /// and media counts only after a round or setup reported them.
     public func serviceSwitchFacts(source: SyncProviderSelection) -> ServiceSwitchFacts {
         if let facts = renderServiceSwitch?.facts { return facts }
         let acceptanceUnknown = meguriStage == .acceptanceUnknown || meguriRoutine == .acceptanceUnknown
-        if source == .iCloud, providerState?.selection == .iCloud, let status {
-            return .init(changes: .count(status.pending), heldBack: status.heldBack,
-                         media: status.media.uploadFiles, acceptanceUnknown: acceptanceUnknown)
-        }
         guard source == .meguri else { return .init(changes: .unknown, acceptanceUnknown: acceptanceUnknown) }
         var media: UInt64?
         // This device's side only (T18.6): files waiting to upload or excluded from it.

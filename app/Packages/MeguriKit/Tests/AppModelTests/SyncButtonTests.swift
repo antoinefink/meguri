@@ -16,28 +16,12 @@ import Testing
         // Up to date, waiting, a failure that retries: a tap syncs at once.
         for status in [SyncKinds.meguri(.init(routine: .idle)), SyncKinds.meguri(.init(routine: .pending)),
                        SyncKinds.meguri(.init(routine: .network)), SyncKinds.meguri(.init(routine: .server)),
-                       SyncKinds.cloud(state: .upToDate(asOfMilliseconds: 1)), SyncKinds.cloud(state: .changesPending)] {
+                       SyncKinds.meguri(.init(routine: .waiting))] {
             #expect(!status.needsYou, "\(status.titleKey)")
             #expect(tap(status) == .syncNow, "\(status.titleKey)")
         }
     }
 
-    @Test func t22_1NeedsYouAndNoServiceOpenThePanel() {
-        // A blind sync cannot resolve a state that needs the person.
-        let refused = SyncKinds.meguri(.init(routine: .authentication))
-        #expect(refused.needsYou)
-        #expect(tap(refused, offered: true) == .openPanel)
-        #expect(tap(refused, offered: false, available: false) == .openPanel)
-        let account = SyncKinds.cloud(state: .iCloudUnavailable(.noAccount))
-        #expect(tap(account) == .openPanel)
-        let blocked = SyncKinds.meguri(.init(providerBlocked: true))
-        #expect(tap(blocked, offered: true) == .openPanel)
-        // Even with Sync Now available, needs you opens the panel.
-        #expect(tap(refused, available: true) == .openPanel)
-        // No service: the panel, whose one button is Sync Settings.
-        let off = SyncKinds.cloud(state: .localOnly)
-        #expect(tap(off, service: false) == .openPanel)
-    }
 
     @Test func t22_1AStatusWithItsOwnActionOpensThePanel() {
         // Cancel Setup while setup prepares (it moves too), Try Again for an
@@ -51,7 +35,7 @@ import Testing
     @Test func t22_1ATapWhileMovingDoesNothing() {
         // No second sync: a tap during a round or a transfer does nothing.
         for status in [SyncKinds.meguri(.init(routine: .exchanging)), SyncKinds.meguri(.init(stage: .media)),
-                       SyncKinds.cloud(state: .syncingCollection), SyncKinds.cloud(state: .syncingMedia)] {
+                       SyncKinds.meguri(.init(stage: .collection))] {
             #expect(tap(status, available: true, moving: true) == .nothing, "\(status.titleKey)")
             #expect(tap(status, available: false, moving: true) == .nothing, "\(status.titleKey)")
         }

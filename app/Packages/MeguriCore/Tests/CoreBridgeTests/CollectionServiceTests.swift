@@ -239,7 +239,7 @@ extension EventTests {
         }
         let operations: [(MeguriCoreBindings.CollectionLongOp, CoreBridge.CollectionLongOp)] = [
             (.oneWaySync, .oneWaySync), (.restore, .restore), (.colpkgImport, .colpkgImport), (.apkgApply, .apkgApply), (.checkDatabase, .checkDatabase),
-            (.collectionExportHandoff, .collectionExportHandoff), (.cloudAdopt, .cloudAdopt),
+            (.collectionExportHandoff, .collectionExportHandoff), (.colpkgImport, .colpkgImport),
         ]
         let phases: [(MeguriCoreBindings.CollectionExclusivePhase, CoreBridge.CollectionExclusivePhase)] = [
             (.draining, .draining), (.working, .working), (.replacing, .replacing),

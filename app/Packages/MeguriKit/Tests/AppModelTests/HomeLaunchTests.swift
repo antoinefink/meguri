@@ -142,7 +142,7 @@ import Testing
             configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
             configuration.timeZone = TimeZone(secondsFromGMT: 0)
             configuration.homeSnapshotFile = snapshotFile
-            let sync = SyncCoordinator(directory: directory, configuration: nil, defaults: nil)
+            let sync = SyncCoordinator(directory: directory, defaults: nil)
             let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
                 providerDirectory: directory.appending(path: "synthetic-installation", directoryHint: .isDirectory))
             owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
@@ -252,7 +252,7 @@ extension ReviewCollectionStartupTests {
         #expect(second.homePhase != .kept)
         second.flushHomeSnapshot()
         #expect(!FileManager.default.fileExists(atPath: fixture.snapshotFile.path(percentEncoded: false)))
-        await second.waitForCloudActivation()
+        await second.waitForCollectionActivation()
         _ = await second.close()
     }
 

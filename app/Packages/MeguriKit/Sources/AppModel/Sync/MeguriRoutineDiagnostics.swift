@@ -103,7 +103,7 @@ import Foundation
         let elapsed = started.duration(to: .now).components
         let milliseconds = UInt64(max(0, elapsed.seconds)) * 1_000
             + UInt64(max(0, elapsed.attoseconds) / 1_000_000_000_000_000)
-        record(.init(component: .cloud, operation: .exchange, stage: .statusObserved, outcome: outcome,
+        record(.init(component: .sync, operation: .exchange, stage: .statusObserved, outcome: outcome,
             durationMilliseconds: milliseconds, roundID: id, roundMilestone: milestone, roundReason: reason))
     }
 }

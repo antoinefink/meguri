@@ -44,7 +44,6 @@ mg_mac_hosted_test__usage() {
 
 mg_mac_hosted_test() {
   local suite input prefix="$MG_RUN_DIR/selected" rc tree receipt
-  local MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   # No target, platform, build setting or command passthrough. Validate before
   # probing the VM, hashing sources or touching build products.
   if [ "$#" -ne 2 ] || [ "$1" != --suite ] ||
@@ -82,13 +81,6 @@ mg_mac_hosted_test() {
   if [ "$input" != "$(mg_app_input_digest)" ]; then
     mg_failure source-binding "app/core sources changed during the selected-test build"
     mg_status error
-    return 0
-  fi
-  # This Snapshot producer has no CloudAgent freeze. Revalidate its selected
-  # profile binding after building, before any products are delivered to the VM.
-  if [ -n "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" ] && ! mg_app_mac_agent_profile_check; then
-    mg_failure agent-profile "App-only Mac profile changed before selected-test VM delivery"
-    mg_status fail
     return 0
   fi
   mg_sim_take || { mg_queued_settle; return 0; }
@@ -164,7 +156,6 @@ mg_snapshots() {
   MEGURI_SIM_ALLOW_HOST=0
   export MEGURI_SIM_ALLOW_HOST
   local platforms="" devices=() filter="" mode=verify rebaseline=false p d kind kinds
-  local MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE="" mac_profile_binding=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -235,12 +226,6 @@ mg_snapshots() {
   case " $platforms " in *" iphone "* | *" ipad "*) mg_app_build ios-sim Debug Snapshot || { mg_queued_settle; return 0; } ;; esac
   case " $platforms " in *" mac "*)
     MEGURI_APP_SIGNING=team mg_app_build mac Debug Snapshot || { mg_queued_settle; return 0; }
-    mac_profile_binding="$MG_CLOUD_AGENT_MAC_PROFILE_BINDING"
-    if [ -n "$mac_profile_binding" ] && ! mg_app_mac_agent_profile_check; then
-      mg_failure agent-profile "App-only Mac profile changed after the Snapshot build"
-      mg_status fail
-      return 0
-    fi
     ;; esac
 
   MG_SNAP_MODE="$mode" MG_SNAP_FILTER="$filter" MG_SNAP_BROKEN=0
@@ -250,12 +235,6 @@ mg_snapshots() {
   [ "$begin" -eq 0 ] || { mg_queued_settle; return 0; }
   # mg_sim_take in the lease helper already copies products. Check the same
   # retained binding here, before entering that shared delivery boundary.
-  if [ -n "$mac_profile_binding" ] &&
-      { [ "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" != "$mac_profile_binding" ] || ! mg_app_mac_agent_profile_check; }; then
-    mg_failure agent-profile "App-only Mac profile changed before Snapshot VM delivery"
-    mg_status fail
-    return 0
-  fi
   mg_snapshots__sim_lease
   rc=$?
   [ "$rc" -eq 0 ] || { mg_queued_settle; return 0; }
@@ -324,7 +303,7 @@ mg_snapshots__session() {
 # MG_SNAP_TEST_EXIT without snapshot failure/output handling. Default callers
 # retain their existing behavior; only mac-hosted-test consumes this seam.
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" only=() skip=() s rc summary e sdk=iphonesimulator
+  local out="$1" dest="$2" suites="$3" only=() s rc summary e sdk=iphonesimulator
   local output="" failures probe err="$1.output.log" result_only=false
   MG_SNAP_NO_OUTPUT=""
   shift 3
@@ -340,22 +319,13 @@ mg_snapshots__xcodebuild() {
   rm -rf "$out.xcresult"
   mkdir -p "$(dirname "$out")"
   [ "$dest" != "platform=macOS,arch=arm64" ] || sdk=macosx
-  # SDK observations require dedicated inputs. Keep the input guard enabled
-  # and leave exact --result-only selections untouched.
-  if [ "$result_only" = false ]; then
-    skip=("-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()")
-    if [ "$sdk" = macosx ]; then
-      skip+=("-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()"
-        "-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()")
-    fi
-  fi
   # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
   for e in "$@"; do
     export "${e?}"
     case "$e" in TEST_RUNNER_MEGURI_SNAPSHOT_OUT=*) output="${e#*=}" ;; esac
   done
   rm -rf "$out"
-  mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"} ${skip[0]+"${skip[@]}"}
+  mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"}
   rc=$?
   for e in "$@"; do unset "${e%%=*}"; done
   [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2

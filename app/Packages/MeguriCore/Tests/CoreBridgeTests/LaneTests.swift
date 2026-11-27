@@ -79,17 +79,6 @@ extension EventTests {
             Issue.record("Expected BridgeError.cancelled from the maintenance call")
         }
         await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
-        try cloudFinalCoreCall(.cloudWorkflowValidateSdk) {
-            #expect(observation.currentCall == .cloudWorkflowValidateSdk)
-        }
-        await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
-        #expect(throws: BridgeError.cancelled) {
-            try cloudFinalCoreCall(.cloudFetchReadValidate) {
-                #expect(observation.currentCall == .cloudFetchReadValidate)
-                throw BridgeError.cancelled
-            }
-        }
-        await MaintenanceLane.shared.expectMaintenanceCallObservationIdle()
     }
 }
 #endif

@@ -1,5 +1,10 @@
 # iCloud sync strings
 
+> Availability changed 2026-11-27: `sync/meguri-provider#MP0` and
+> `native-interface-contract#N28` supersede iCloud choices, copy, native
+> controls, account and transport requirements. Those clauses are retired;
+> Meguri Sync, Off and shared collection/media/hold-back requirements remain.
+
 Spec: sync/status-strings
 Requirements: R89, R102, R103, R104, R105, R106, R107, R117, R122, R123, R124, R125, R127, R158, R166, R1548, R1551, R1555, R1558, R1559, R1560, R1561, R1562, R1583, R1592, R2046, R2048, R2049, R2050, R2054, R2055, R2056, R2058, R2059
 Anki: none (Meguri design)
@@ -1068,7 +1073,7 @@ Actions added:
 
 ### T19.5 The three kinds: Meguri Sync (T18.4 to T18.6; MP6)
 
-Changed 2026-11-27 (routine status and diagnostics; owner-approved unit). Routine rows below follow observed MP5 boundaries; pre-sanity finalising is not server acknowledgment. A no-change collection skips acknowledgment and local apply. While any routine stage runs, keep the previous fully completed exchange instant in the existing detail text (`sync.status.upToDate.detail`, MP6.6). A valid core media remainder uses `sync.meguri.round.filesLeft`: `%lld file left to download.` / `%lld files left to download.`; when the instant is also known, combine the two localized texts with `sync.meguri.round.detailWithLast`: `%1$@ %2$@`. Unknown counts remain indeterminate, and no checked/partial-file percentage is formed. No new row or control. Existing precedence, owner/generation fences, timestamp semantics, setup/structure/iCloud behavior and iOS suspension remain. Troubleshooting's persisted Sync Log and Copy Debug Info retain MP5's bounded, content-free per-round observations with optional structured fields for historical JSON compatibility.
+Changed 2026-11-27 (routine status and diagnostics; owner-approved unit). Routine rows below follow observed MP5 boundaries; pre-sanity finalising is not server acknowledgment. A no-change collection skips acknowledgment and local apply. While any routine stage runs, keep the previous fully completed exchange instant in the existing detail text (`sync.status.upToDate.detail`, MP6.6). A valid core media remainder uses `sync.meguri.round.filesLeft`: `%lld file left to download.` / `%lld files left to download.`; when the instant is also known, combine the two localized texts with `sync.meguri.round.detailWithLast`: `%1$@ %2$@`. Unknown counts remain indeterminate, and no checked/partial-file percentage is formed. No new row or control. Existing precedence, owner/generation fences, timestamp semantics, setup and structure upload behavior and iOS suspension remain. Troubleshooting's persisted Sync Log and Copy Debug Info retain MP5's bounded, content-free per-round observations with optional structured fields for historical JSON compatibility.
 
 The same four rules make the main status. The first condition that applies decides, in T18.4's order.
 

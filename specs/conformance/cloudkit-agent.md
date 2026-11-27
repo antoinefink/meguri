@@ -1,5 +1,10 @@
 # Signed CloudKit device agent
 
+> Retired from Meguri application verification on 2026-11-27 by Antoine's
+> explicit iCloud removal request. Retain this historical record; none of its
+> CloudKit-only jobs, account steps or acceptance lanes are required for the
+> unavailable service. Shared collection/media requirements remain active.
+
 Spec: conformance/cloudkit-agent
 Requirements: R2047, R2048, R2049, R2050, R2051, R2052, R2053, R2054, R2055, R2056, R2057, R2058, R2059, R2064, R2065; supports R2066
 Anki: none (Meguri design)

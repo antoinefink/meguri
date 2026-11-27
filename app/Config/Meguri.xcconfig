@@ -6,21 +6,7 @@ PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
 ASSETCATALOG_COMPILER_APPICON_NAME = $(MEGURI_APP_ICON)
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
 
-// Only tools/mg's explicit Mac or simulator Debug CloudAgent build enables this input.
-// Standard CopyFiles source filtering also applies to direct ordinary builds.
-MEGURI_CLOUD_AGENT_INJECTION = NO
-MEGURI_CLOUD_AGENT_INJECTION_DIR = $(DERIVED_FILE_DIR)/MeguriCloudAgentDisabled
-MEGURI_CLOUD_AGENT_EMBED = NO
-MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=macosx*] = $(MEGURI_CLOUD_AGENT_INJECTION)
-MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=iphonesimulator*] = $(MEGURI_CLOUD_AGENT_INJECTION)
-MEGURI_CLOUD_AGENT_EXCLUDE_NO = libXCTestBundleInject.dylib
-MEGURI_CLOUD_AGENT_EXCLUDE_YES =
-EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_CLOUD_AGENT_EXCLUDE_$(MEGURI_CLOUD_AGENT_EMBED)) $(MEGURI_UNUSED_IDENTITY_FILES)
-// Declare the disabled cleanup's exact sandbox write. When CopyFiles owns
-// the library output, the cleanup phase does no writing and declares a marker.
-MEGURI_CLOUD_AGENT_CLEANUP_NO = libXCTestBundleInject.dylib
-MEGURI_CLOUD_AGENT_CLEANUP_YES = .meguri-cloud-agent-cleanup-unused
-MEGURI_CLOUD_AGENT_CLEANUP = $(MEGURI_CLOUD_AGENT_CLEANUP_$(MEGURI_CLOUD_AGENT_EMBED))
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_UNUSED_IDENTITY_FILES)
 
 // Info.plist: the generated keys merged into the per-platform file, which
 // holds the keys other areas rely on (R499, R1629, KTD12), the `meguri` URL
@@ -38,14 +24,6 @@ INFOPLIST_KEY_CFBundleDisplayName = $(MEGURI_APP_NAME)
 INFOPLIST_KEY_CFBundleDisplayName[sdk=macosx*] = $(PRODUCT_NAME)
 // Explicit distribution policy, including personal Release without hooks.
 INFOPLIST_KEY_MeguriCardInspectionBuild = $(MEGURI_CARD_INSPECTION_BUILD)
-INFOPLIST_KEY_MeguriCloudContainer = $(MEGURI_CLOUD_CONTAINER)
-INFOPLIST_KEY_MeguriCloudEnvironment = $(MEGURI_CLOUD_ENVIRONMENT)
-// The source Info plists use a preprocessed element, not a generated string
-// key: Bundle's Bool loader requires a real <false/> or <true/> value.
-// Traditional preprocessing preserves URL/path text containing double slashes.
-INFOPLIST_PREPROCESS = YES
-INFOPLIST_OTHER_PREPROCESSOR_FLAGS = $(inherited) -traditional
-INFOPLIST_PREPROCESSOR_DEFINITIONS = $(inherited) MEGURI_CLOUD_SCHEMA_BOOLEAN=$(MEGURI_CLOUD_SCHEMA_BOOLEAN)
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
 // Debug builds start every Mac launch as a UI element (no Dock tile, never
 // reported Foreground); MeguriApp gives a launch the regular policy unless it
@@ -58,13 +36,13 @@ INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphone*] = Photograph an image to stu
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 
-// The explicit Mac CloudAgent route can pin an installed profile for this app only.
-MEGURI_MAC_AGENT_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
-MEGURI_MAC_AGENT_PROFILE_SPECIFIER =
-CODE_SIGN_STYLE[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_STYLE)
-PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_SPECIFIER)
+MEGURI_MAC_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
+MEGURI_MAC_PROFILE_SPECIFIER =
+CODE_SIGN_STYLE[sdk=macosx*] = $(MEGURI_MAC_PROFILE_STYLE)
+PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*] = $(MEGURI_MAC_PROFILE_SPECIFIER)
+
 // The owner-requested real copy on a phone (run --real-copy) pins installed
-// profiles by UUID, as the Mac route does with the settings above. Defaults
+// profiles by UUID, for the app. Defaults
 // keep every other build unchanged.
 MEGURI_DEVICE_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
 MEGURI_DEVICE_PROFILE_SPECIFIER =

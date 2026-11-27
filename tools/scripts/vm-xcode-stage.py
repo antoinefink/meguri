@@ -144,7 +144,7 @@ class Original:
 
 @contextlib.contextmanager
 def launching():
-    # Same launch deferral as cloud-agent-handoff's setup_launch: retain the
+    # For launch deferral, retain the
     # original handle even if cancellation arrives inside Popen.
     pending = []
     saved = {s: signal.signal(s, lambda number, frame: pending.append(number))

@@ -13,7 +13,6 @@ struct SyncSettingsSections: View {
     private var sync: SyncCoordinator { collection.sync }
     private var selection: SyncProviderSelection? {
         switch sync.providerState?.selection {
-        case .iCloud: .iCloud
         case .meguri: .meguri
         case .localOnly, nil: nil
         }
@@ -28,7 +27,7 @@ struct SyncSettingsSections: View {
             SyncServiceRows(collection: collection, host: host)
         } header: { heading }
         Section {
-            MeguriAccountRows(collection: collection, draft: draft, footnoteInRows: false)
+            MeguriAccountRows(collection: collection, draft: draft, host: host, footnoteInRows: false)
             // The first sign-in's progress: the status row is not shown in this form.
             if sync.mainStatus.titleKey == "sync.meguri.status.signingIn.title" {
                 ProgressView(SyncText.value("sync.meguri.status.signingIn.title"))
@@ -48,21 +47,16 @@ struct SyncSettingsSections: View {
     }
     @ViewBuilder private var troubleshooting: some View {
         Section {
-            NavigationLink {
-                SyncTroubleshootingPage(collection: collection, host: host)
-            } label: { Text(SyncText.value("sync.settings.troubleshooting")) }
-                .accessibilityIdentifier("settings.sync.troubleshooting")
-        } footer: {
-            if selection == .iCloud {
-                Text(SyncText.value("sync.settings.privacy"))
-                    .accessibilityIdentifier("settings.sync.privacyFooter")
+            SyncSettingsLink(.troubleshooting, collection: collection, host: host) {
+                Text(SyncText.value("sync.settings.troubleshooting"))
             }
+                .accessibilityIdentifier("settings.sync.troubleshooting")
         }
     }
     @ViewBuilder private var sections: some View {
         Section {
             SyncServiceRows(collection: collection, host: host)
-            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft) }
+            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft, host: host) }
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
@@ -104,18 +98,11 @@ struct SyncSettingsSections: View {
     public init() {}
 }
 
-/// The service's name; iCloud carries its Beta label as separate text (T19.1).
+/// The selected service, or Off.
 struct SyncServiceName: View {
     let selection: SyncProviderSelection?
     var body: some View {
         switch selection {
-        case .iCloud:
-            HStack(alignment: .firstTextBaseline) {
-                Text(SyncText.value("sync.service.iCloud.name"))
-                Text(SyncText.value("sync.service.beta")).font(.caption).foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(SyncText.value("sync.service.iCloud.accessibility"))
         case .meguri: Text(SyncText.value("sync.service.meguri"))
         case .localOnly, nil: Text(SyncText.value("sync.service.off"))
         }
@@ -131,7 +118,6 @@ struct SyncServiceRows: View {
     @Environment(\.dismiss) private var dismiss
     @State private var destination: String?
     @State private var switchSource: SyncProviderSelection?
-    @State private var refusedForOp = false
     private var changing: Bool {
         get { collection.syncPresentation.serviceChanging }
         nonmutating set { collection.syncPresentation.serviceChanging = newValue }
@@ -143,13 +129,10 @@ struct SyncServiceRows: View {
     private var sync: SyncCoordinator { collection.sync }
     private var selected: String {
         switch sync.providerState?.selection {
-        case .iCloud: "iCloud"
         case .meguri: "meguri"
         case .localOnly, nil: "localOnly"
         }
     }
-    /// V27.5: refused while an op could restore the binding before, or could not be read.
-    private var opBlocksChange: Bool { sync.serviceChangeRefusedForOperation }
     var body: some View {
         control
         // MP6.5: the control stays enabled while the provider is blocked.
@@ -176,11 +159,7 @@ struct SyncServiceRows: View {
                     .accessibilityIdentifier("settings.sync.service.off")
                 Text(SyncText.value("sync.service.meguri")).tag("meguri")
                     .accessibilityIdentifier("settings.sync.service.meguri")
-                // A menu item is one line of text: the label follows the name.
-                Text(verbatim: "\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))")
-                    .accessibilityLabel(SyncText.value("sync.service.iCloud.accessibility"))
-                    .accessibilityIdentifier("settings.sync.service.iCloud")
-                    .tag("iCloud")
+
             }
             .accessibilityIdentifier("settings.sync.service")
         }
@@ -191,15 +170,10 @@ struct SyncServiceRows: View {
                 .accessibilityIdentifier("settings.sync.serviceChanging")
         }
         if failed {
-            // iCloud refused on an installation that cannot use it says so (T19.4's `setupNeeded` text).
-            Text(SyncText.value(sync.serviceChangeFailure?.reason == .iCloudSetupNeeded
-                    ? "sync.status.unavailable.setupNeeded" : "sync.service.changeFailed")).foregroundStyle(.secondary)
+            Text(SyncText.value("sync.service.changeFailed")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceChangeFailed")
         }
-        if refusedForOp, opBlocksChange {
-            Text(SyncText.value("sync.service.opFirst")).foregroundStyle(.secondary)
-                .accessibilityIdentifier("settings.sync.serviceRefused")
-        } else if !changing, !sync.serviceChangeAvailable, selected != "localOnly" {
+        if !changing, !sync.serviceChangeAvailable, selected != "localOnly" {
             Text(SyncText.value(sync.serviceChangeBusyKey)).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceBusy")
         }
@@ -211,8 +185,6 @@ struct SyncServiceRows: View {
     private func choose(_ value: String) {
         guard !accountSignOut || selected == "meguri" else { return }
         guard !collection.meguriSignInPreparing, !sync.meguriBusy, value != selected else { return }
-        refusedForOp = false
-        if opBlocksChange { refusedForOp = true; return }
         // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so leaving it asks nothing.
         if selected != "localOnly", !sync.meguriSetupNotFinished {
             // T21.1: the question opens only while the change can run; the reason shows under the control.
@@ -228,12 +200,11 @@ struct SyncServiceRows: View {
         if let shown, shown != source { destination = nil; return }
         changing = true; failed = false
         Task {
-            let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
+            let target: SyncProviderSelection = value == "meguri" ? .meguri : .localOnly
             switch await collection.changeSyncService(to: target, from: source) {
             case .changed:
                 destination = nil
                 if accountSignOut { dismiss() }
-                if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
             case .superseded: destination = nil
             case .failed: failed = true
             }
@@ -246,6 +217,7 @@ struct SyncServiceRows: View {
 struct MeguriAccountRows: View {
     let collection: ReviewCollection
     let draft: MeguriSignInDraft
+    var host: AppNavigation.SheetHost = .main
     /// The setup footnote is a row here, or the group's footer (N15.7).
     var footnoteInRows = true
     private enum Field: Hashable { case address, username, password }
@@ -318,18 +290,7 @@ struct MeguriAccountRows: View {
                 }
             } else {
                 // N15.2 row 2: the username is the row's value; the page has both facts.
-                NavigationLink {
-                    Form {
-                        LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
-                            .accessibilityIdentifier("settings.sync.meguri.account.address")
-                        LabeledContent(SyncText.value("sync.meguri.username"), value: sync.meguriUsername ?? "")
-                            .accessibilityIdentifier("settings.sync.meguri.account.username")
-                        SyncServiceRows(collection: collection, host: .main, accountSignOut: true)
-                    }
-                    .formStyle(.grouped)
-                    .navigationTitle(SyncText.value("sync.settings.account"))
-                    .accessibilityIdentifier("settings.sync.meguri.account.content")
-                } label: {
+                SyncSettingsLink(.account, collection: collection, host: host) {
                     LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriUsername ?? "")
                 }
                 .accessibilityIdentifier("settings.sync.meguri.account")
@@ -599,7 +560,6 @@ struct SyncMainStatusRows: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost = .main
     /// The compact status sheet hands its destination over after it dismisses.
-    var openEntry: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
     /// Set outside Settings (the status popover): Meguri's setup sheets belong to
     /// the Sync section, so its actions open that section, asking for N15.3's sheet or not.
     var showInSettings: ((_ keepCollection: Bool) -> Void)? = nil
@@ -623,11 +583,6 @@ struct SyncMainStatusRows: View {
                         .progressViewStyle(.linear)
                         .accessibilityIdentifier("settings.sync.status.progress")
                 }
-                if !meguri, let cloud = sync.status {
-                    ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
                 if meguri, let done = sync.meguriSetupDone {
                     // T19.3: what setup did when it asked nothing.
                     Group {
@@ -642,29 +597,18 @@ struct SyncMainStatusRows: View {
                 }
             }
         } icon: {
-            SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud, secondary: true)
+            SyncStatusSymbol(status: status, secondary: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.sync.status")
-        #if DEBUG
-        .accessibilityValue([DebugCloudDiagnostics.processFetchValue, sync.debugPolicyStatusValue, DebugCloudDiagnostics.latestValue]
-            .compactMap { $0 }.joined(separator: " "))
-        #endif
-        if let failure = sync.connectionFailure {
-            Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure))).foregroundStyle(.secondary)
-                .accessibilityIdentifier("settings.sync.connectionError")
-        }
         if let action = status.action {
             SyncStatusActionButton(collection: collection, action: action, host: host,
-                openEntry: openEntry, showInSettings: showInSettings, identifier: "settings.sync.statusAction")
+                showInSettings: showInSettings, identifier: "settings.sync.statusAction")
         }
         // An issues row only for an issue beside the state itself (resume fix):
         // Meguri Sync's media-blocked row needs the files it lists.
         if SyncStatusCopy.showsIssues(sync) {
-            NavigationLink {
-                if meguri { MeguriAffectedFilesPage(collection: collection) }
-                else { SyncIssuesPage(collection: collection) }
-            } label: {
+            SyncSettingsLink(.meguriAffectedFiles, collection: collection, host: host) {
                 if let key = status.issuesRowKey, let count = MeguriAffectedCount.value(sync) {
                     Text(SyncText.format(key, Int64(clamping: count)))
                 } else {
@@ -697,25 +641,6 @@ struct SyncCopyDebugInfoButton: View {
     }
 }
 
-/// N15.4: the issues list. Each row has its text; the only button is Check Database's.
-struct SyncIssuesPage: View {
-    let collection: ReviewCollection
-    var body: some View {
-        List {
-            Section {
-                ForEach(Array(collection.sync.mainStatus.issues.enumerated()), id: \.offset) { offset, row in
-                    if let key = row.textKey {
-                        Text(row.count.map { SyncText.format(key, Int64(clamping: $0)) } ?? SyncText.value(key))
-                            .accessibilityIdentifier("sync.issues.row.\(offset)")
-                    }
-                }
-            } footer: { Text(SyncText.value("sync.issues.footer")) }
-        }
-        .navigationTitle(SyncText.value("sync.issues.title"))
-        .accessibilityIdentifier("sync.issues.list")
-    }
-}
-
 /// N15.5: the Troubleshooting page of the Sync section.
 struct SyncTroubleshootingPage: View {
     let collection: ReviewCollection
@@ -740,38 +665,17 @@ struct SyncTroubleshootingPage: View {
                         else if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
                     }
                 }
-            } else if sync.status?.accountStatus == .available {
-                Section {
-                    CloudPreviewEntryButton(collection: collection, entry: .replaceLocal, host: host,
-                        title: "sync.trouble.replaceDevice", identifier: "sync.trouble.replaceDevice")
-                    CloudPreviewEntryButton(collection: collection, entry: .replaceCloud, host: host,
-                        title: "sync.trouble.replaceService.iCloud", identifier: "sync.trouble.replaceService")
-                    if let recovery = sync.recovery, sync.mainStatus.action != .cancelOp,
-                       recovery.adoptionCancellable || recovery.publicationCancellable {
-                        CloudRecoveryCancelButton(collection: collection, recovery: recovery, identifier: "sync.trouble.cancelOp")
-                    }
-                }
             }
             if let callbacks = collection.configuration.fieldDiagnostics {
                 Section {
-                    NavigationLink {
-                        Form {
-                            SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
-                                safeExport: { try await callbacks.readableExport(sync: sync.debugFacts) }, writeClipboard: callbacks.writeClipboard)
-                        }
-                        .formStyle(.grouped)
-                        .navigationTitle(SyncText.value("sync.trouble.log"))
-                    } label: { Text(SyncText.value("sync.trouble.log")) }
+                    SyncSettingsLink(.syncLog, collection: collection, host: host) {
+                        Text(SyncText.value("sync.trouble.log"))
+                    }
                         .accessibilityIdentifier("sync.trouble.log")
                     SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: "sync.trouble.copyDebugInfo")
                 }
             }
-            if !meguri, let copies = SyncKinds.conflictCopies(sync.status?.attention ?? [:]) {
-                Section {
-                    Text(SyncText.format("sync.trouble.conflictCopies", Int64(clamping: copies)))
-                        .accessibilityIdentifier("sync.trouble.conflictCopies")
-                }
-            }
+
         }
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.troubleshooting"))

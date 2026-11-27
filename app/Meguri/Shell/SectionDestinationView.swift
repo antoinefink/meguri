@@ -19,7 +19,7 @@ private struct ReviewDestination: View {
     let collection: ReviewCollection
     var body: some View {
         let showsStatus = collection.sync.needsUser || collection.syncPresentation.statusOwnsInput
-        ReviewView(model: model, walk: walk, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
+        ReviewView(model: model, walk: walk, status: showsStatus ? AnyView(SyncStatusButton(collection: collection)) : nil,
             editNote: ReviewEditNote(flow: collection.editNoteFlow, open: { Task { await collection.openEditNote() } },
                 form: AnyView(EditNoteView(collection: collection))),
             showInBrowse: collection.reviewShowInBrowse,
@@ -177,9 +177,9 @@ struct ShellFeatures {
             AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
         }
         #endif
-        features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+        features.syncStatus = { AnyView(SyncStatusButton(collection: collection)) }
         #if os(iOS)
-        features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+        features.syncPanelMeasure = { AnyView(SyncPanelMeasure(collection: collection)) }
         #endif
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         collection.showDeckStatistics = statsPage.map { page in
@@ -228,7 +228,6 @@ struct ShellFeatures {
                     .frame(idealWidth: ContentWidth.readable, minHeight: WindowMetrics.minimum.height)
                     #endif
                 )
-            case .cloudSync(let entry): AnyView(CloudConnectionView(collection: collection, entry: entry))
             case .accountSync: AnyView(AccountSyncSheet(collection: collection))
             case .add: AnyView(AddNoteView(collection: collection))
             case .noteTypeSave: AnyView(NoteTypeSaveSheet(model: collection.noteTypes))

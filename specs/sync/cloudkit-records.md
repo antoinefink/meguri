@@ -1,5 +1,10 @@
 # CloudKit records
 
+> Retired from the application on 2026-11-27 at Antoine's explicit request.
+> Retain this historical storage/wire contract and shared primitives; its
+> CloudKit-only UI, transport, signed-lane and verification requirements no
+> longer apply to Meguri products. Availability and local upgrade: `sync/meguri-provider#MP0`.
+
 Spec: sync/cloudkit-records
 Requirements: R2043, R2044, R2045, R2052, R2053, R2057, R2058, R1572, R1592, R2066 (record contract); R1844, R1583 (CloudKit first download), R1584 (CloudKit placeholder), R1588 (CloudKit mass change), with `sync/policy#P13` (K9.3); supports R2047, R2048, R2049, R2050, R2051, R2054, R2055, R2056
 Anki: none (Meguri design)

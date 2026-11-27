@@ -798,8 +798,6 @@ struct BackupRestoreContent: View {
     }
     private var confirmationMessage: LocalizedStringKey {
         switch presentation.provider {
-        case .iCloud:
-            "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device until you choose what to do with iCloud."
         case .meguri:
             "Meguri backs up the current collection first. Media files are kept. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing."
         default:

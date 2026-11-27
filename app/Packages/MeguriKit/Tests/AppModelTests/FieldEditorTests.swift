@@ -250,7 +250,7 @@ extension ReviewCollectionStartupTests {
             appGroupSnapshot: root.appending(path: "widget"), manualTransferDirectory: root.appending(path: "transfers"))
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
-        let sync = SyncCoordinator(directory: directory, configuration: nil, defaults: nil)
+        let sync = SyncCoordinator(directory: directory, defaults: nil)
         let navigation = AppNavigation()
         let owner = ReviewCollection(configuration: configuration, navigation: navigation, sync: sync,
             providerDirectory: root.appending(path: "transfers"))

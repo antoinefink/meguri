@@ -688,9 +688,9 @@ EOF
   assert_doctor_result "$result" "$status"
 }
 
-# daily_profile <push>: an installed Mac profile for the real copy.
+# daily_profile <push> [without-keychain]: installed real-copy profiles.
 daily_profile() {
-  python3 - "$MEGURI_PROFILE_DIRS" "$1" <<'PY'
+  python3 - "$MEGURI_PROFILE_DIRS" "$1" "${2:-}" <<'PY'
 import datetime, plistlib, sys
 cloud = {"com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"],
          "com.apple.developer.icloud-services": "*",
@@ -706,6 +706,8 @@ profiles = {
         "com.apple.security.application-groups": ["group.com.antoinefink.meguri"]}),
 }
 for number, (name, (platform, grants)) in enumerate(profiles.items()):
+    if name == "daily.provisionprofile" and sys.argv[3] == "without-keychain":
+        del grants["keychain-access-groups"]
     with open(sys.argv[1] + "/" + name, "wb") as stream:
         plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": [platform],
                       "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"],
@@ -721,14 +723,14 @@ PY
   [ "$(field .details.daily_driver_profiles.mac.state)" = missing ]
   [[ "$stderr" == *"info  daily-driver"*"is not fully set up"* ]]
   [ "$(field '[.details.checks[] | select(.id | startswith("daily"))] | length')" = 0 ]
-  # The real copy signs development push: a profile granting production only is incomplete.
-  daily_profile production
+  # Missing a required Keychain grant is incomplete, regardless of unused push grants.
+  daily_profile production without-keychain
   mg doctor
   [ "$(field .status)" = pass ]
   [ "$(field .details.daily_driver_profiles.mac.state)" = incomplete ]
-  [[ "$stderr" == *"Mac: push-development"* ]]
+  [[ "$stderr" == *"Mac: keychain"* ]]
   jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false)' "$result"
-  daily_profile development
+  daily_profile production
   mg doctor
   [ "$(field .status)" = pass ]
   [ "$(field '[.user_steps[] | select(.id == "daily-driver-account")] | length')" = 0 ]
@@ -2175,16 +2177,6 @@ printf '%s\n' "${s##*/} \$*" >>"\$STUB_LOG"
 exit 1
 EOF
   done
-  cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
-mg__swift_initial_adoption_fixture() {
-  printf '%s\n' initial-adoption-fixture >>"$STUB_LOG"
-  return 0
-}
-mg__swift_cloud_service_helper() {
-  printf '%s\n' cloud-service-helper >>"$STUB_LOG"
-  return 0
-}
-EOF
   export PATH="$STUBS:$PATH"
 }
 
@@ -2225,7 +2217,7 @@ lint/glass-outside-chrome" ]
     mg $job
     [ "$(failure_ids)" = xcframework ] || { echo "$job: $(failure_ids); stderr: $stderr"; return 1; }
     case "$job" in
-      swift-test*) expected="docker-info swiftlint initial-adoption-fixture cloud-service-helper build-core-xcframework.sh " ;;
+      swift-test*) expected="docker-info swiftlint build-core-xcframework.sh " ;;
       xcode-check*) expected="docker-info swiftlint build-core-xcframework.sh " ;;
     esac
     [ "$(stub_calls)" = "$expected" ] || { echo "$job: $(stub_calls)"; return 1; }

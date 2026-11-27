@@ -179,7 +179,7 @@ public final class StudyPreparation {
 
     /// A committed change set from a sync that touched the switch (F1 item 3).
     public func changesCommitted(_ changes: ChangeSet) async {
-        guard opened, changes.source == .cloudIncoming || changes.source == .syncIncoming,
+        guard opened, changes.source == .syncIncoming,
               changes.wholeCollection || changes.configKeys.contains(where: { $0.name == "fsrs" }) else { return }
         // During the wait this read may find `ok`; it never ends the wait early.
         if phase == .waitingForExchange { await read(.afterOpen, mayWait: true) }

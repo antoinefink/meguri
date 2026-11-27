@@ -197,23 +197,6 @@ threads-required = "num-test-threads"
 filter = '(package(meguri-engine) or package(meguri-host)) and test(/resource_jobs_/)'
 threads-required = "num-test-threads"
 
-# Asset lifecycle tests use actual callback, accounting and teardown barriers.
-[[profile.default.overrides]]
-filter = 'package(meguri-ffi) and test(/asset_lifecycle_jobs_/)'
-threads-required = "num-test-threads"
-
-[[profile.default.overrides]]
-filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(=fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and_refusals)'
-threads-required = "num-test-threads"
-
-[[profile.default.overrides]]
-filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(/^bound_original_(edit_witness|ack)_survives_process_kill/)'
-threads-required = "num-test-threads"
-
-[[profile.default.overrides]]
-filter = 'package(meguri-ffi) and binary(ffi_it) and test(/^cloud_original_observation::/)'
-threads-required = "num-test-threads"
-
 # Two real consumers rendezvous at terminal Runtime time with ten-second bounds.
 [[profile.default.overrides]]
 filter = 'package(meguri-host) and binary(host_it) and (test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'

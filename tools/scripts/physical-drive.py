@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlparse
 
 # Reuse MG's descriptor-bound product inventory, bounded reads, signature
 # command handling and fixed refusal categories. No installed code is imported.
-spec = importlib.util.spec_from_file_location("mg_products", Path(__file__).with_name("cloud-agent-verify.py"))
+spec = importlib.util.spec_from_file_location("mg_products", Path(__file__).with_name("product-inventory.py"))
 products = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(products)
 Refused, need, command = products.Refused, products.need, products.command

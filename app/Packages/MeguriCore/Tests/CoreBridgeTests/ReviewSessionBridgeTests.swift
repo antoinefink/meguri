@@ -24,7 +24,7 @@ private final class StartBoundaryRecorder: Sendable {
 
 extension EventTests {
     @Test func reviewStartObservationFollowsRealBridgeAndRetainsExactInvocation() async throws {
-        try await withCloudConnection { _ in
+        try await withBridgeCollection {
             let first = ReviewStartObservation(), second = ReviewStartObservation()
             let boundaries = StartBoundaryRecorder()
             boundaries.observe(first)

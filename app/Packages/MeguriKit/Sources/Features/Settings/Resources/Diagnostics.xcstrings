@@ -97,18 +97,6 @@
         }
       }
     },
-    "Cloud": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cloud"
-          }
-        }
-      }
-    },
     "Collections reported matching": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -409,14 +397,14 @@
         }
       }
     },
-    "No recent cloud or media observations are available.": {
+    "No recent sync or media observations are available.": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No recent cloud or media observations are available."
+            "value": "No recent sync or media observations are available."
           }
         }
       }
@@ -469,14 +457,14 @@
         }
       }
     },
-    "Only the latest 20 cloud and media observations are shown.": {
+    "Only the latest 20 sync and media observations are shown.": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only the latest 20 cloud and media observations are shown."
+            "value": "Only the latest 20 sync and media observations are shown."
           }
         }
       }
@@ -577,14 +565,14 @@
         }
       }
     },
-    "Recent cloud and media activity.": {
+    "Recent sync and media activity.": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recent cloud and media activity."
+            "value": "Recent sync and media activity."
           }
         }
       }
@@ -933,6 +921,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@: %@"
+          }
+        }
+      }
+    },
+    "Sync": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
           }
         }
       }

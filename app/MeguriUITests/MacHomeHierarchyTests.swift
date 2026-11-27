@@ -22,9 +22,6 @@ final class MacHomeHierarchyTests: XCTestCase {
         let bundle = try build.bundleIdentifier
         XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "This case requires the actual hook-enabled .dev app")
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
-        let appInfo = try build.appInfo
-        XCTAssertEqual(appInfo["MeguriCloudSchemaConfigured"] as? Bool, true,
-            "This real provider journey requires MEGURI_APP_SIGNING=team")
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: journey == nil
@@ -102,7 +99,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         actionable(picker)
         // N15.2 / T19.2: native menu titles expose accessibility names;
         // iCloud's accessibility label is "iCloud, Beta", including its Beta label.
-        let accessibilityNames = ["Off", "Meguri Sync", "iCloud, Beta"]
+        let accessibilityNames = ["Off", "Meguri Sync"]
 
         func choose(_ accessibilityName: String) throws {
             actionable(picker)
@@ -110,7 +107,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             let items = picker.menuItems
             XCTAssertTrue(items.matching(NSPredicate(format: "title == %@", "Meguri Sync"))
                 .element(boundBy: 0).waitForExistence(timeout: 10))
-            XCTAssertEqual(items.count, 3, "Off is the first value of the one Service control")
+            XCTAssertEqual(items.count, 2, "Off is the first value of the one Service control")
             XCTAssertEqual(items.allElementsBoundByIndex.map(\.title), accessibilityNames,
                 "Require the full native menu's exact accessibility names, in order")
             for title in accessibilityNames {
@@ -386,6 +383,71 @@ final class MacHomeHierarchyTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         settings.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "Native Quit must finish actual close and owned cleanup")
+    }
+
+    func testSettingsSectionsDiscardPushedSyncPageAndKeepNativeBack() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.configuration == .debug, bundle == "com.antoinefink.meguri.dev" else {
+            throw XCTSkip("Requires an isolated development fixture launch")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            locale: "en_US", animations: false,
+            route: "settings/sync/window/meguri-connected").arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        func control(_ id: String) -> XCUIElement {
+            let matches = settings.descendants(matching: .any).matching(identifier: id)
+            let target = matches.firstMatch
+            XCTAssertTrue(target.waitForExistence(timeout: 10), id)
+            XCTAssertEqual(matches.count, 1, id)
+            return target
+        }
+        func press(_ target: XCUIElement) throws {
+            try app.bringToFront(bundleIdentifier: bundle)
+            let actionable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                target.exists && target.isEnabled && target.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [actionable], timeout: 10), .completed,
+                "Native action must be enabled and hittable: \(target.identifier)")
+            target.click()
+        }
+        func syncRoot() throws {
+            try press(control("settings.root.sync"))
+            _ = control("settings.sync.service")
+            XCTAssertFalse(settings.descendants(matching: .any).matching(identifier: "sync.trouble.replaceDevice").firstMatch.exists)
+        }
+        func troubleshooting() throws {
+            try press(control("settings.sync.troubleshooting"))
+            XCTAssertFalse(control("sync.trouble.replaceDevice").isEnabled,
+                "Replacement is unavailable in the connected render fixture")
+        }
+        try syncRoot()
+        try troubleshooting()
+        let back = settings.toolbars.buttons["Back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        try press(back)
+        _ = control("settings.sync.service")
+        try troubleshooting()
+        try press(control("settings.root.collection"))
+        _ = control("settings.root.importCollection")
+        let attachment = XCTAttachment(screenshot: settings.screenshot())
+        attachment.name = "Collection after leaving pushed Sync Troubleshooting"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        for (row, reached) in [("settings.backups.open", "settings.backups.create"),
+                               ("settings.root.integrations", "settings.integrations.migaku.enabled")] {
+            try syncRoot()
+            try troubleshooting()
+            try press(control(row))
+            _ = control(reached)
+        }
+        try syncRoot()
     }
 
     func testExpandedTreesKeepUniqueIDsNativeDisclosureSelectionAndChildMenus() throws {

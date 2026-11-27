@@ -1601,16 +1601,23 @@ def v_report(ctx, step, v):
     return "pass", "Antoine reported a pass on %s" % data["date"], {"date": data["date"]}
 
 
+# Existing supported jobs. General conformance and crash/fault proof remain
+# mandatory; bootstrap checks do not stand in for the pending convergence soak.
 FIRST_SYNC_RESULTS = {
-    # conformance/cloudkit-acceptance Q13. These aliases do not register jobs.
     "u246-sync-area": ("u246-conformance", "conformance-aggregate", "areas", ("sync",), None),
-    "cloudkit-fake": ("cloud-fake", "cloud-fake", "scenarios", ("cloudkit-fake",), "cloud-fake"),
-    "cloudkit-faults": ("cloud-faults", "cloud-faults", "scenarios", ("cloudkit-faults",), "cloud-faults"),
-    "cloudkit-soak-fake": ("cloud-soak-fake", "soak", "scenarios", ("cloudkit-soak-fake",), "cloud-soak-fake"),
-    "u248-soak": ("cloudkit-signed", "cloudkit-signed", "scenarios", ("cloudkit-signed",), "cloud-signed"),
-    "u250-sync-classes": ("u250-fault", "fault", "classes", ("review", "sync", "backup") + tuple(
-        "cloud-" + name for name in ("send", "fetch", "apply", "media", "rekey", "claim", "tracking",
-                                    "start", "adopt", "publish", "own", "abandon")), None),
+    "sync-server-test": ("sync-server-test", "sync-server-test", None, (), None),
+    "sync-server-package-test": ("sync-server-package-test", "sync-server-package-test", None, (), None),
+    "meguri-provider-real-server": ("meguri-provider-real-server", "meguri-provider-real-server", None, (), None),
+    "u250-sync-classes": ("u250-fault", "fault", "classes", ("review", "sync", "backup"), None),
+}
+# Same phase contract as mg_meguri_provider__result. These are synthetic
+# collection facts, never account identities or a real user's collection.
+FIRST_SYNC_PHASES = {
+    "upload": ["fresh-upload-client", "explicit-collection-and-media", "retained-safety-artifacts",
+               "all-media-accounted", "ready-automatic", "exact-fixture", "closed"],
+    "download": ["initial-no-collection", "explicit-collection-and-media", "initial-no-backup",
+                 "all-media-accounted", "ready-automatic", "exact-fixture", "closed"],
+    "reopen": ["cold-ready", "persisted-binding-epoch", "exact-fixture", "closed"],
 }
 MG_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9]+$")
 
@@ -1746,28 +1753,32 @@ def _first_sync_run(ctx, commit, run_id):
 
 
 def _first_sync_artifacts(ctx, rid, receipt):
-    """Load only known required evidence before reporting missing delegates."""
+    """Validate the existing native bootstrap producer's required phase files."""
+    if rid != "meguri-provider-real-server":
+        return [], []
     loaded, problems = [], []
-    signed = rid == "u248-soak"
-    if signed:
-        declared = [a for a in receipt["artifacts"] if os.path.basename(a["path"]) == "signed-evidence.json"]
-        if len(declared) != 1 or declared[0]["kind"] != "report":
-            problems.append("signed-artifact-declaration")
-        else:
-            path = declared[0]["path"]
-            witness = {}
-            try:
-                value = _first_sync_json(os.path.join(ctx["git"].root, "build"), path, witness=witness)
-                loaded.append(path)
-                # Digest of the very bytes decoded, not a second path read.
-                # This is a loader witness, not a missing schema's hash proof.
-                ctx.setdefault("_first_sync_artifact_hashes", {})[path] = witness["sha256"]
-                if not isinstance(value, dict) or value.get("lane") != FIRST_SYNC_RESULTS[rid][4]:
-                    problems.append("signed-artifact-substitution")
-            except Invalid as e:
-                problems.append("artifact-" + str(e))
-    if not problems:
-        problems.append("signed-validator-unavailable" if signed else "lane-evidence-validator-unavailable")
+    for phase, checks in FIRST_SYNC_PHASES.items():
+        declared = [a for a in receipt["artifacts"] if os.path.basename(a["path"]) == phase + ".json"]
+        if len(declared) != 1 or declared[0]["kind"] != "provider-phase":
+            problems.append("phase-artifact-declaration")
+            continue
+        path, witness = declared[0]["path"], {}
+        # mg_artifact declares exactly $MG_RUN_DIR/<phase>.json.
+        expected_path = os.path.join(os.path.abspath(ctx["results"].dir), receipt["job"], receipt["run_id"], phase + ".json")
+        if path != expected_path:
+            problems.append("phase-artifact-path-mismatch")
+            continue
+        try:
+            value = _first_sync_json(os.path.join(ctx["git"].root, "build"), path, witness=witness)
+            loaded.append(path)
+            ctx.setdefault("_first_sync_artifact_hashes", {})[path] = witness["sha256"]
+            expected = {"format": 1, "phase": phase, "status": "pass", "checks": checks,
+                        "counts": {"notes": 2, "cards": 2, "media": 2, "revlogs": 0, "reps": 0}}
+            if value != expected or type(value.get("format")) is not int or any(
+                    type(n) is not int for n in value["counts"].values()):
+                problems.append("phase-artifact-substitution")
+        except Invalid as error:
+            problems.append("artifact-" + str(error))
     return sorted(set(problems)), loaded
 
 
@@ -1838,11 +1849,11 @@ def _first_sync_reference(ctx, rid, reference, commit, started, resolving=()):
         raise Invalid("receipt-filtered-leg")
     if lane and receipt["details"].get("lane") != lane:
         raise Invalid("receipt-lane-mismatch")
-    scope = {"detail": detail, "items": list(items)}
+    scope = {"detail": detail, "items": list(items)} if detail else None
     if judge(receipt, [], scope)[0] != "pass":
-        raise Invalid("receipt-required-" + detail + "-scope-not-pass")
+        raise Invalid("receipt-required-" + (detail or "result") + "-scope-not-pass")
     suites = [s for m in ctx["model"]["milestones"][:ctx["mi"] + 1] for s in m["suites"]
-              if s["id"] == rid and s["run"] == run_id]
+              if s["run"] == run_id]
     if not suites or any(s.get("pending") for s in suites):
         raise Invalid("mapped-suite-missing-or-pending")
     for owner in [run] + suites:
@@ -1884,6 +1895,7 @@ def v_first_sync(ctx, step, v):
         try:
             receipt, metadata = _first_sync_reference(ctx, rid, results.get(rid), commit, started)
             problems, artifacts = _first_sync_artifacts(ctx, rid, receipt)
+            metadata["evidence_validated"] = not problems
             metadata["artifacts_checked"] = artifacts
             metadata["artifact_sha256"] = {p: ctx["_first_sync_artifact_hashes"][p] for p in artifacts}
             if build.get("dirty") is False:

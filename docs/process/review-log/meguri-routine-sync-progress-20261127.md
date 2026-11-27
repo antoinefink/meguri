@@ -58,3 +58,19 @@ contain public operational metadata.
 
 The pull request records the Swift tests and native renders. The integration
 register records inherited full-gate failures.
+
+## Integrating the iCloud retirement
+
+The integration merges PR #246 at base `042bedc1a`. The filtered fixer run
+`cleanroom/20261127T100110Z-85759` reconciled the eight conflicts. Routine
+progress remains available through Meguri Sync. The native iCloud removals
+stay in place. The Swift diagnostic case uses the existing `"cloud"` wire tag
+so installed timeline entries still decode.
+
+The independent standards reviewer, `sync_standards`, approved the complete
+merged specs as public. These are the final reviewed SHA-256 digests.
+
+| File | Reviewed SHA-256 |
+| --- | --- |
+| `specs/sync/meguri-provider.md` | `2d5502cf18f4d115f4621ba3e67142d9995b26bafa15a0fa24feafd2760bf9c9` |
+| `specs/sync/status-strings.md` | `661d66ea156479fb0dd3feda4f8cce1e36bdb4798af8ecbbd03d65b897dd928f` |

@@ -16,7 +16,7 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 ## What comes first
 
 - Usable daily reviews with our own Meguri Sync server come first (`docs/process/review-first-delivery.md`, `specs/sync/meguri-provider.md`).
-- iCloud Sync work is paused; bug fixes only. Its screens still meet the design standard. Parked items: `docs/process/verification-status.md`.
+- Meguri Sync is the only enabled sync service; Off stays supported. iCloud is retired (2026-11-27); retain historical records and local collection compatibility.
 - Meguri should look and behave like an app designed by Apple: native controls and platform defaults; customize only for a concrete functional, compatibility or verified accessibility need, and document the exception. Preserve user-authored study-card styling. Authority: `docs/design/native-interface-contract.md`. UI work starts with `docs/design/workflow.md` and the screen contract; look at the built app, a passing build is not design agreement.
 
 ## How to work

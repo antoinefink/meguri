@@ -991,8 +991,8 @@ mg_snapshots__xcodebuild "$MG_RUN_DIR/ipad" id=FAKE-IPAD "$MG_SNAP_SUITES" TEST_
 [ -z "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT+x}" ]
 EOF
   PATH="$dir/bin:$PATH" /bin/bash "$dir/dispatch.sh" "$SB" "$dir" || return 1
-  expect "VM dispatch and fetch" "$(cat "$dir/calls")" "$dir/mac Snapshot macosx platform=macOS,arch=arm64 Debug -skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow() -skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords() -skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes() env=/guest/container
-$dir/ipad Snapshot iphonesimulator id=FAKE-IPAD Debug -only-testing:MeguriSnapshotTests/GalleryComponentSnapshots -only-testing:MeguriSnapshotTests/ScreenSnapshots -skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow() env=/guest/ipad
+  expect "VM dispatch and fetch" "$(cat "$dir/calls")" "$dir/mac Snapshot macosx platform=macOS,arch=arm64 Debug env=/guest/container
+$dir/ipad Snapshot iphonesimulator id=FAKE-IPAD Debug -only-testing:MeguriSnapshotTests/GalleryComponentSnapshots -only-testing:MeguriSnapshotTests/ScreenSnapshots env=/guest/ipad
 fetch $dir/ipad"
 }
 

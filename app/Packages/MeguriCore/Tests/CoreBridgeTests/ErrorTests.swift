@@ -5,10 +5,8 @@ import Testing
 
 @Suite struct ErrorTests {
     static let cases: [(CoreError, BridgeError)] = [
-        (.CloudPolicy(failure: .staleCommand), .cloudPolicy(.staleCommand)),
-        (.CloudSdkCallbackRejected, .cloudSDKCallbackRejected),
         // A generic failure with the old fence's text is still a real error.
-        (.Unavailable(reason: "cloud runtime incarnation is stale"), .unavailable(reason: "cloud runtime incarnation is stale")),
+        (.Unavailable(reason: "synthetic owner is stale"), .unavailable(reason: "synthetic owner is stale")),
         (.Stale(table: .notetypes, key: "37"), .stale(table: .notetypes, key: "37")),
         (.StaleGeneration(planned: 37, current: 41), .staleGeneration(planned: 37, current: 41)),
         (.UndoUnavailable(reason: .alreadyUploaded), .undoUnavailable(reason: .alreadyUploaded)),

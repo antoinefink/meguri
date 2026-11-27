@@ -24,18 +24,14 @@ extension ReviewCollectionStartupTests {
         defer { drain.release(); activation.release() }
         var activationOperation: CollectionEntryOperation?
         var activationReturned = false, factories = 0, bootstraps = 0
-        var appliedSettings: CloudPolicyDeviceSettings?
-        successor.routeInput = { [weak successor] event in
-            if case .settings(let settings) = event { appliedSettings = settings }
-            if case .foreground = event { successor?.events.append("foreground") }
-            return .commands([])
-        }
+        var appliedSettings: SyncDeviceSettings?
+        successor.onAttached = { settings in appliedSettings = settings }
         let service = EntryGatedActivationService(before: { operation in
             #expect(original.closed && original.closeCount == 1 && factories == 1)
             activationOperation = operation
             await activation.hold()
         }, after: { activationReturned = true })
-        let sync = SyncCoordinator(bootstrap: { bootstraps += 1 }, makeBackend: { _ in
+        let sync = SyncCoordinator(bootstrap: { bootstraps += 1 }, makeBackend: {
             factories += 1
             if factories == 1 { return original }
             #expect(factories == 2 && original.closed && activationReturned)
@@ -46,7 +42,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         do {
             try #require(owner.state == .ready)
-            await sync.prepareConnectionAuthority()
+            await sync.waitForInputs()
             let generation = owner.generation
             original.onQuiesce = {
                 #expect(activationOperation == nil)
@@ -70,7 +66,7 @@ extension ReviewCollectionStartupTests {
             await drain.waitUntilHeld()
             #expect(owner.entry.busy && !owner.canStudy && activationOperation == nil)
             let oldEvents = original.events
-            sync.receive(.foreground)
+            await sync.foregroundAfterLocalResume()
             await sync.waitForInputs()
             #expect(original.events == oldEvents && factories == 1)
             drain.release()
@@ -79,7 +75,7 @@ extension ReviewCollectionStartupTests {
                 #expect(activationOperation == nil && factories == 1 && !original.closed)
                 #expect(owner.generation == generation && sync.operationFailed && !owner.canStudy)
                 #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
-                sync.receive(.foreground); await sync.waitForInputs()
+                await sync.foregroundAfterLocalResume(); await sync.waitForInputs()
                 #expect(original.events == oldEvents)
                 original.onQuiesce = nil
                 #expect(await owner.close())
@@ -87,16 +83,16 @@ extension ReviewCollectionStartupTests {
             }
             await activation.waitUntilHeld()
             #expect(owner.generation == generation && factories == 1)
-            sync.receive(.foreground)
+            await sync.foregroundAfterLocalResume()
             sync.setDeviceSettings(paused: true, automatic: false)
             await sync.preparePlatform(); await sync.waitForInputs()
             #expect(factories == 1 && bootstraps == 1 && successor.events.isEmpty)
             if outcome == .cancelled { await activationOperation?.cancel() }
             activation.release()
             await owner.entry.waitForCompletion()
-            await sync.prepareConnectionAuthority(); await sync.waitForReplacement()
+            await sync.waitForInputs(); await sync.waitForReplacement()
             #expect(owner.state == .ready && owner.error == nil && owner.entry.preview == nil)
-            #expect(factories == 2 && bootstraps == 1 && successor.accountReads == 1)
+            #expect(factories == 2 && bootstraps == 1 && successor.attachmentCount == 1)
             #expect(sync.generation == owner.generation && sync.setupState == .attached && !sync.operationFailed)
             #expect(appliedSettings == sync.settings)
             switch outcome {
@@ -108,7 +104,7 @@ extension ReviewCollectionStartupTests {
             case .cancelled: #expect(owner.generation == generation && owner.entry.failure?.issue == .cancelled)
             case .drainFailure: Issue.record("Drain failure must not reach activation")
             }
-            sync.receive(.foreground); await sync.waitForInputs()
+            await sync.foregroundAfterLocalResume(); await sync.waitForInputs()
             #expect(successor.events.contains("foreground"))
             #expect(await owner.close())
         } catch {
@@ -132,7 +128,7 @@ extension ReviewCollectionStartupTests {
         let cloud = SyncOwnerFake()
         var configured = false
         var retained = false
-        let sync = SyncCoordinator(bootstrap: { configured = true }, makeBackend: { _ in
+        let sync = SyncCoordinator(bootstrap: { configured = true }, makeBackend: {
             #expect(configured)
             let phase = try await CoreCollectionService().lifecycle()
             #expect(phase != .noCollection)

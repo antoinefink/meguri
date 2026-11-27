@@ -139,7 +139,7 @@ import Testing
 
     @Test func reviewsAddedOrRemovedRefreshEveryScope() async {
         for change in [Self.changes(added: [1]), Self.changes(removed: [1]), Self.changes(whole: true),
-                       Self.changes(added: [2], source: .syncIncoming), Self.changes(added: [3], source: .cloudIncoming)] {
+                       Self.changes(added: [2], source: .syncIncoming), Self.changes(added: [3], source: .syncIncoming)] {
             let service = FakeService()
             let store = ActivityHeatmapStore(service: service)
             await loaded(store, .collection, .deck(5))

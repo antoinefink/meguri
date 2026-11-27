@@ -229,21 +229,15 @@ nonisolated enum SafeFieldDiagnosticsExport {
         var metrics: [Metric]
         var diagnostics: [Diagnostic]
         var signposts: [String: [Signpost]]
-        var zoneDeletions: [CloudDiagnosticDeletion]
-        var rootReads: [CloudDiagnosticRootRead]
         var sections: [String: Section]
         let coreSnapshotIsAtomic = false
-        let cloudDiagnosticsAvailable: Bool
-        let missingDidFetchEvents: UInt64?
-        let statusEvidence: CloudDiagnosticStatusEvidence?
-        let statusEvidenceUnavailable: Bool
         // This projection does not carry complete collection-size/health facts.
         // An empty array must never imply collection health or convergence.
         let collectionDetailsUnavailable = true
     }
 
     static func make(archives: [String: Result<FieldDiagnosticDirectory, DiagnosticReadFailure>], now: Date,
-                     timeline: FieldDiagnosticTimeline, cloud: CloudDiagnosticsExport) throws -> Data {
+                     timeline: FieldDiagnosticTimeline) throws -> Data {
         var budget = Budget()
         var metricStatus = Section(detailsUnavailable: true)
         let metrics = reports(Metric.self, archives: archives, folder: "metrics", budget: &budget, status: &metricStatus)
@@ -267,13 +261,9 @@ nonisolated enum SafeFieldDiagnosticsExport {
             if !values.isEmpty { signposts[interval.name] = values }
         }
         var result = Export(header: Header(now: now), timeline: timeline, metrics: metrics, diagnostics: diagnostics,
-                            signposts: signposts, zoneDeletions: cloud.zoneDeletions,
-                            rootReads: cloud.rootReads, sections: [
-                                "metrics": metricStatus, "diagnostics": diagnosticStatus, "signposts": signpostStatus,
-                                "zoneDeletions": Section(omittedCountLowerBound: Int(clamping: cloud.zoneDeletionsOmittedCount), unavailable: !cloud.available),
-                                "rootReads": Section(omittedCountLowerBound: Int(clamping: cloud.rootReadsOmittedCount), unavailable: !cloud.available)
-                            ], cloudDiagnosticsAvailable: cloud.available, missingDidFetchEvents: cloud.missingDidFetchEvents,
-                            statusEvidence: cloud.statusEvidence, statusEvidenceUnavailable: cloud.statusEvidence == nil)
+                            signposts: signposts, sections: [
+                                "metrics": metricStatus, "diagnostics": diagnosticStatus, "signposts": signpostStatus
+                            ])
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var bytes = try encoder.encode(result)
@@ -286,10 +276,6 @@ nonisolated enum SafeFieldDiagnosticsExport {
                 result.diagnostics.removeFirst(); result.sections["diagnostics"]?.omittedCountLowerBound += 1
             } else if let key = result.signposts.keys.sorted().first {
                 result.sections["signposts"]?.omittedCountLowerBound += result.signposts.removeValue(forKey: key)?.count ?? 0
-            } else if !result.zoneDeletions.isEmpty {
-                result.zoneDeletions.removeFirst(); result.sections["zoneDeletions"]?.omittedCountLowerBound += 1
-            } else if !result.rootReads.isEmpty {
-                result.rootReads.removeFirst(); result.sections["rootReads"]?.omittedCountLowerBound += 1
             } else if !result.timeline.events.isEmpty {
                 result.timeline.events.removeFirst(); result.timeline.truncatedCount = saturatedAdd(result.timeline.truncatedCount, 1)
             } else { throw DiagnosticReadFailure.oversized }
