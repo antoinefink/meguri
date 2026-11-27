@@ -57,6 +57,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         fileprivate let selection: UInt64
     }
     private var selectedDeckEmptiness: (request: DeckPageRefreshRequest, empty: Bool)?
+    /// The open generation's deck pages whose last read set `empty` (`sched/counts#C9`). Kept
+    /// across later reads of the same page, so its action does not change while one runs.
+    private var readEmptyDecks: (generation: UInt64, ids: Set<Int64>)?
     /// Explicit synthetic owners have no Core host; their page read stays in the model.
     @ObservationIgnored var loadFixtureDeckEmptiness: (@MainActor (Int64) async throws -> Bool)?
     /// Only the visible Home page queries storage; rows keep the normal count refresh.
@@ -78,6 +81,21 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         guard let proof = selectedDeckEmptiness, proof.empty,
               proof.request == deckPageRefreshRequest else { return nil }
         return proof.request.deckID
+    }
+    /// H5.4, N14.3: the deck has no card at all (no `did` or `odid` in its subtree), as its
+    /// page last read it; a kept page uses the kept read's. False until a read says so: a
+    /// regular deck with nothing waiting is then finished.
+    public func homeDeckEmpty(_ id: Int64) -> Bool {
+        if homePhase == .kept { return keptHome?.snapshot.emptyDecks?.contains(id) == true }
+        guard let readEmptyDecks, readEmptyDecks.generation == generation else { return false }
+        return readEmptyDecks.ids.contains(id)
+    }
+    private func recordDeckPageEmptiness(_ id: Int64, empty: Bool, generation read: UInt64) {
+        guard read == generation else { return }
+        var ids = readEmptyDecks?.generation == read ? readEmptyDecks?.ids ?? [] : []
+        if empty { ids.insert(id) } else { ids.remove(id) }
+        readEmptyDecks = (generation: read, ids: ids)
+        saveHomeSnapshot()
     }
     public private(set) var review: ReviewCoordinator? {
         didSet {
@@ -2070,6 +2088,10 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             // New counts can mean another first card (a learning card came due).
             if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
+            // The kept read's empty pages hold until their own page reads them (N27.2).
+            if readEmptyDecks?.generation != tree.generation {
+                readEmptyDecks = (generation: tree.generation, ids: Set(keptHome?.snapshot.emptyDecks ?? []))
+            }
             deckTreeGeneration = tree.generation
             deckTreeFailedGeneration = nil
             countsDayEndsAt = dayEnd
@@ -2136,6 +2158,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 let empty = try await loadFixtureDeckEmptiness(request.deckID)
                 guard current() else { return }
                 selectedDeckEmptiness = (request: request, empty: empty)
+                recordDeckPageEmptiness(request.deckID, empty: empty, generation: request.generation)
                 return
             }
             let service = CoreDeckService()
@@ -2159,6 +2182,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             let actualLifecycle = try await CoreCollectionService().lifecycle()
             guard current(), actualLifecycle == .ready(generation: request.generation) else { return }
             selectedDeckEmptiness = (request: request, empty: state.empty && !entry.filtered)
+            recordDeckPageEmptiness(request.deckID, empty: state.empty && !entry.filtered, generation: request.generation)
             // A hidden empty deck needs a page projection. Tree counts remain
             // owned by loadCounts, including after a real card is added.
             if deck(request.deckID) == nil, navigation.homeDeckPage?.rawValue == request.deckID {
@@ -2767,7 +2791,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         let snapshot = HomeSnapshot(collection: identity.identity, dayEndsAt: countsDayEndsAt, decks: decks,
             // Today's numbers only with the counts of the same study day.
             studied: studiedDayEndsAt == countsDayEndsAt ? studiedToday : nil, nextLearningReadyAt: todayNumbersGeneration == generation ? nextLearningReadyAt : nil,
-            previous: previousSession, previousAnswers: previousRecord?.answers.count)
+            previous: previousSession, previousAnswers: previousRecord?.answers.count,
+            emptyDecks: readEmptyDecks?.generation == generation
+                ? (readEmptyDecks?.ids ?? []).filter { deck($0) != nil }.sorted() : [])
         guard snapshot != lastSnapshot else { return }
         lastSnapshot = snapshot
         homeSnapshots.save(snapshot)

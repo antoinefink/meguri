@@ -93,6 +93,21 @@ import Testing
         #expect(store.load(for: collection) == nil)
     }
 
+    /// N14.3: the kept read keeps which deck pages were empty; a file written before has none.
+    @Test func snapshotKeepsEmptyDeckPages() throws {
+        let identity = CollectionFileIdentity(fileNumber: 1, createdSeconds: 1, createdNanoseconds: 0)
+        var snapshot = Self.snapshot(identity, dayEndsAt: 2_000_000_000)
+        #expect(snapshot.emptyDecks == [])
+        snapshot.emptyDecks = [2]
+        let data = try JSONEncoder().encode(snapshot)
+        #expect(try JSONDecoder().decode(HomeSnapshot.self, from: data) == snapshot)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "emptyDecks")
+        let older = try JSONDecoder().decode(HomeSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(older.emptyDecks == nil)
+        #expect(older.decks == snapshot.decks)
+    }
+
     // MARK: N27.3, counts of an earlier study day
 
     @Test func countsOfAnEarlierStudyDayAreHeldBack() throws {
@@ -218,6 +233,32 @@ extension ReviewCollectionStartupTests {
         // In place: the read tree has the kept rows' identities, in the same order.
         #expect(HomeLaunchTests.flattened(second.homeDecks).map(\.id) == HomeLaunchTests.flattened(read).map(\.id))
         #expect(second.homePhase == .decks)
+        #expect(await second.close())
+    }
+
+    /// N14.3, H5.4: a deck page read empty offers Add Note on the next launch's kept page,
+    /// and still after the tree read, until its own page reads it again.
+    @Test(.timeLimit(.minutes(3))) func homeLaunchKeepsWhichDeckPagesWereEmpty() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        let first = fixture.owner()
+        await first.start()
+        let deck = try #require(first.decks.first(where: { !$0.filtered }))
+        #expect(!first.homeDeckEmpty(deck.id))
+        #expect(await first.openDeckPage(deckID: deck.id).value)
+        first.loadFixtureDeckEmptiness = { _ in true }
+        await first.refreshDeckPage(try #require(first.deckPageRefreshRequest))
+        #expect(first.homeDeckEmpty(deck.id))
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+
+        let second = fixture.owner()
+        try #require(second.homePhase == .kept)
+        #expect(second.keptHome?.snapshot.emptyDecks == [deck.id])
+        #expect(second.homeDeckEmpty(deck.id))
+        await second.start()
+        #expect(second.homePhase == .decks)
+        #expect(second.homeDeckEmpty(deck.id))
         #expect(await second.close())
     }
 

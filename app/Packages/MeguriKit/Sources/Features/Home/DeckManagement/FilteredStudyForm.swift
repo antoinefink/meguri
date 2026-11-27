@@ -290,9 +290,9 @@ struct FilteredDeckActions: View {
 
 /// The app menu shares this feature's translated catalog with both package forms.
 public enum StudyCommandText {
-    public static var create: String { String(localized: "Create Filtered Deck…", bundle: .module) }
+    public static var create: String { String(localized: "Create Filtered Deck", bundle: .module) }
     public static var edit: String { String(localized: "Edit Filtered Deck…", bundle: .module) }
-    public static var custom: String { String(localized: "Custom Study…", bundle: .module) }
+    public static var custom: String { String(localized: "Custom Study", bundle: .module) }
     public static var rebuild: String { String(localized: "Rebuild", bundle: .module) }
     public static var empty: String { String(localized: "Empty", bundle: .module) }
 }

@@ -3,7 +3,7 @@ import CoreBridge
 import SwiftUI
 
 /// The deck's long-press and right-click menu (N20.2): study and inspection,
-/// study setup, deck management, then Export Deck… and Delete Deck.
+/// Custom Study, deck management, then Export Deck… and Delete Deck.
 /// A filtered deck keeps its study actions and Export Deck…, takes neither
 /// notes nor subdecks; its settings edit the saved search definition.
 struct DeckMenu: View {
@@ -58,19 +58,13 @@ struct DeckMenu: View {
             FilteredDeckActions(collection: collection, deck: deck.id)
             Divider()
         } else {
+            // N20.2: actions on this deck only. Create Filtered Deck makes another
+            // deck, so it lives in the Add menu and the Deck menu (owner, 2026-11-27).
             Button { collection.filteredStudy.custom(deck.id) } label: {
-                Label { Text("Custom Study…", bundle: .module) } icon: { Image(systemName: "slider.horizontal.3") }
+                Label { Text("Custom Study", bundle: .module) } icon: { Image(systemName: "slider.horizontal.3") }
             }
             .disabled(!collection.filteredStudy.canCustom(deck.id))
             .accessibilityIdentifier("home.deckMenu.customStudy.\(deck.id)")
-            Button { collection.filteredStudy.create(deck: deck.id) } label: {
-                Label { Text("Create Filtered Deck…", bundle: .module) } icon: { Image(systemName: "line.3.horizontal.decrease") }
-            }
-            #if os(macOS)
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-            #endif
-            .disabled(!collection.filteredStudy.canPresent)
-            .accessibilityIdentifier("home.deckMenu.createFilteredDeck.\(deck.id)")
             Divider()
         }
         Group {

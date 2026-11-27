@@ -22,7 +22,12 @@ import XCTest
         defer { app.terminate() }
         let prefix = "filtered-touch-" + sizeClass
         let normalID = try selectDeck("Preview Source", app: app)
-        try tap("home.deck.customStudy", app: app)
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        XCTAssertFalse(element(app, "home.deck.customStudy").exists, "Cards waiting: Study alone (N14.3)")
+        try openDeckMenu(normalID, app: app)
+        XCTAssertFalse(element(app, "home.deckMenu.createFilteredDeck." + normalID).exists,
+                       "The deck menu holds actions on this deck only (N20.2)")
+        try tap("home.deckMenu.customStudy." + normalID, app: app)
         XCTAssertTrue(element(app, "home.customStudy.available").waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, "home.customStudy.state").exists, "Only relevant inputs are exposed")
         try app.performAccessibilityAudit(for: [.trait, .sufficientElementDescription])
@@ -48,10 +53,7 @@ import XCTest
         XCTAssertTrue(element(app, "home.customStudy.save").isEnabled)
         try tap("home.customStudy.cancel", app: app)
         XCTAssertTrue(element(app, "home.customStudy.sheet").waitForNonExistence(timeout: 10))
-        try openDeckMenu(normalID, app: app)
-        try tap("home.deckMenu.createFilteredDeck." + normalID, app: app)
-        XCTAssertTrue(element(app, "home.filteredStudy.name").waitForExistence(timeout: 10))
-        XCTAssertTrue((element(app, "home.filteredStudy.first.search").value as? String ?? "").contains("is:due"))
+        try openCreateFilteredDeck(app: app)
         try replace("home.filteredStudy.name", with: "Touch Preview", app: app)
         try replace("home.filteredStudy.first.limit", with: "1", app: app)
         finishCardLimitEditing(app)
@@ -128,6 +130,28 @@ import XCTest
     private func assertUnavailableBrowse(_ deck: String, app: XCUIApplication) {
         let browse = element(app, "home.deckMenu.browse." + deck)
         XCTAssertTrue(!browse.exists || !browse.isEnabled, "No enabled Browse action without a touch destination")
+    }
+
+    /// N20.1: Create Filtered Deck is in the Add menu. The deck page's presets the deck's due
+    /// search; the tab layout's deck page has Add Note there, so the list's opens a blank one.
+    private func openCreateFilteredDeck(app: XCUIApplication) throws {
+        let add = element(app, "home.collection.add")
+        let onDeckPage = add.exists && add.isHittable
+        if !onDeckPage {
+            let back = app.buttons.matching(identifier: "BackButton").firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 10))
+            back.tap()
+            XCTAssertTrue(add.waitForExistence(timeout: 10))
+        }
+        try tap("home.collection.add", app: app)
+        try tap("home.collection.createFilteredDeck", app: app)
+        XCTAssertTrue(element(app, "home.filteredStudy.name").waitForExistence(timeout: 10))
+        let search = element(app, "home.filteredStudy.first.search")
+        if onDeckPage {
+            XCTAssertTrue((search.value as? String ?? "").contains("is:due"))
+        } else {
+            try replace("home.filteredStudy.first.search", with: "deck:\"Preview Source\" is:due", app: app)
+        }
     }
 
     private func openDeckMenu(_ id: String, app: XCUIApplication) throws {

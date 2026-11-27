@@ -138,7 +138,7 @@ extension ReviewCollection {
     /// A deck page's Study on kept content (N27.4).
     public func studyKept(deckID: Int64) -> Bool {
         awaitingOpen && homePhase.showsDecks && !homeCountsHeld && navigation.sheet == nil && review == nil
-            && (homeDeck(deckID).map { DeckWaiting(counts: $0.counts, filtered: $0.filtered).offersAddNote != true } ?? false)
+            && (homeDeck(deckID).map { DeckWaiting(counts: $0.counts, filtered: $0.filtered).regularNothingWaiting != true } ?? false)
     }
 
     /// Waits while nothing is known yet, at most `firstReadWait`, and only while nothing else

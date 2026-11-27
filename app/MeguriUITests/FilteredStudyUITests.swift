@@ -15,6 +15,8 @@ import XCTest
         capture(app, "filtered-preview-home-schedule-before")
 
         try selectDeck("Preview Source", app: app, bundle: bundle)
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        XCTAssertFalse(element(app, "home.deck.customStudy").exists, "Cards waiting: Study alone (N14.3)")
         try assertCommandAvailability(filtered: false, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("f", modifierFlags: [.command, .shift])
@@ -381,9 +383,13 @@ import XCTest
             XCTAssertTrue(command.waitForExistence(timeout: 10))
             XCTAssertEqual(command.isEnabled, filtered, title)
         }
-        let custom = menuItem("Custom Study…", app: app)
+        let custom = menuItem("Custom Study", app: app)
         XCTAssertTrue(custom.waitForExistence(timeout: 10))
         XCTAssertEqual(custom.isEnabled, !filtered)
+        // Both labels without an ellipsis (owner, 2026-11-27); ⇧⌘F is the menu bar's alone.
+        let create = menuItem("Create Filtered Deck", app: app)
+        XCTAssertTrue(create.waitForExistence(timeout: 10))
+        XCTAssertTrue(create.isEnabled)
         capture(app, filtered ? "filtered-deck-enabled-native-commands" : "normal-deck-disabled-filtered-commands")
         app.typeKey(.escape, modifierFlags: [])
     }
