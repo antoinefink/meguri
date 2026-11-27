@@ -67,6 +67,31 @@ import WebKit
         if flow != "add" { #expect(draft.patch() == nil) }
     }
 
+    /// `editor/formatting` F13: a cloze wrap names its field; the page refuses
+    /// it once that field has lost the focus (Next Field during Cloze's flush).
+    @Test func theClozeWrapActsOnlyOnTheFieldItNames() async throws {
+        let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(cloze: true), deck: DeckNameEntry(id: 1, fullName: "D", filtered: false),
+                                        values: ["first", "second"])
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        BrowseFieldEditingTests.installProbe(host)
+        defer { host.shutDown() }
+        try await host.start()
+        // The page's own focus (a detached web view emits no focus event by itself).
+        try await BrowseFieldEditingTests.edit(host, "", ord: 1)
+        try await pollUntil { draft.focusedField == 1 && host.fieldFocused }
+        func wrap(_ ord: Int) async throws -> Bool? {
+            let reply = try await host.webView.callAsyncJavaScript(
+                "return (await meguriEditorRuntime.receive({type:'wrap', loadId:1, ord, prefix:'{{c1::', suffix:'}}'})).applied;",
+                arguments: ["ord": ord], contentWorld: .world(name: "Meguri.FieldEditor.v1"))
+            return reply as? Bool
+        }
+        #expect(try await wrap(0) == false)
+        #expect(try await wrap(1) == true)
+        try await host.flush(hold: false)
+        #expect(draft.values[0] == "first")
+        #expect(draft.values[1].contains("{{c1::"))
+    }
+
     /// Edit Note's page (option A, 2026-11-24) shows the same chips: `browsing` false.
     @Test(arguments: [true, false])
     func soundChipsKeepTheFieldsBytesThroughTheSourceAndAnEdit(browsing: Bool) async throws {

@@ -4,6 +4,8 @@ import Testing
 import WebKit
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 @testable import AppModel
 @testable import Editor
@@ -148,6 +150,74 @@ extension FieldEditorTests {
         draft.setFocus(0)
         #expect(page.adjacentField(previous: true) == nil && page.adjacentField(previous: false) == 1)
     }
+
+    /// N17.1 (2026-11-27): field text takes the system font in every form; the
+    /// note type's editor font and size stay with the card.
+    @Test func fieldTextTakesTheSystemFontNotTheNoteTypes() async throws {
+        let fields = ["Front", "Back"].enumerated().map { index, name in
+            NotetypeField(ord: UInt32(index), id: Int64(index), name: name, sticky: false,
+                rtl: false, fontName: "Example Serif", fontSize: 40, description: "", plainText: false,
+                collapsed: false, excludeFromSearch: false)
+        }
+        let type = NotetypeRecord(id: 79, name: "Large", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [])
+        let draft = try NoteEditorDraft(generation: 1, notetype: type, deck: Self.deck, values: ["question", "answer"])
+        let page = try FieldEditorHost(draft: draft, isCurrent: { true })
+        page.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 700)
+        defer { page.shutDown() }
+        try await page.start()
+        #expect(try await page.webView.callAsyncJavaScript("""
+            const hosts = [...document.querySelectorAll('.richHost')];
+            const body = getComputedStyle(document.body);
+            return hosts.length === 2 && hosts.every(host => host.style.fontFamily === '' && host.style.fontSize === '' &&
+                getComputedStyle(host).fontSize === body.fontSize && getComputedStyle(host).fontFamily === body.fontFamily);
+            """, contentWorld: .page) as? Bool == true)
+    }
+
+    /// `editor/cloze-wrap` W2: the cloze group follows the note type's shown cloze fields.
+    @Test func theClozeGroupShowsOnlyForAShownClozeField() throws {
+        func type(kind: Int32, cloze: [UInt32]) -> NotetypeRecord {
+            let base = Self.form(["Text", "Back Extra"], id: 80)
+            return .init(id: base.id, name: base.name, kind: kind, sortField: 0, css: "", base: [], fields: base.fields,
+                         templates: [], clozeFields: cloze)
+        }
+        let basic = try FieldEditorHost(draft: NoteEditorDraft(generation: 1, notetype: type(kind: 0, cloze: []), deck: Self.deck),
+                                        isCurrent: { true })
+        defer { basic.shutDown() }
+        #expect(!basic.showsCloze && !basic.canCloze)
+        let none = try FieldEditorHost(draft: NoteEditorDraft(generation: 1, notetype: type(kind: 1, cloze: []), deck: Self.deck),
+                                       isCurrent: { true })
+        defer { none.shutDown() }
+        #expect(!none.showsCloze)
+        let cloze = try FieldEditorHost(draft: NoteEditorDraft(generation: 1, notetype: type(kind: 1, cloze: [0]), deck: Self.deck),
+                                        isCurrent: { true })
+        defer { cloze.shutDown() }
+        #expect(cloze.showsCloze)
+        let hiddenDraft = try NoteEditorDraft(generation: 1, notetype: type(kind: 1, cloze: [0]), deck: Self.deck)
+        hiddenDraft.hiddenFields = [0]
+        let hidden = try FieldEditorHost(draft: hiddenDraft, isCurrent: { true })
+        defer { hidden.shutDown() }
+        #expect(!hidden.showsCloze)
+    }
+
+    #if os(iOS)
+    /// N17.1 (2026-11-27): the keyboard bar is Bold, Italic, Underline, Cloze,
+    /// then previous and next field, then the HTML control. It has no Done.
+    @Test func theKeyboardBarFormatsAndHasNoDone() async throws {
+        let draft = try NoteEditorDraft(generation: 1, notetype: Self.form(["Front", "Back"]), deck: Self.deck)
+        let page = try FieldEditorHost(draft: draft, isCurrent: { true })
+        page.webView.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+        defer { page.shutDown() }
+        let bar = try #require(page.webView.inputAccessoryView as? UIToolbar)
+        let items = (bar.items ?? []).filter { $0.accessibilityIdentifier != nil }
+        #expect(items.map(\.accessibilityIdentifier) == ["editor.toolbar.bold", "editor.toolbar.italic", "editor.toolbar.underline",
+            "editor.toolbar.clozeNew", "editor.add.previousField", "editor.add.nextField", "editor.add.htmlToggle"])
+        #expect(!(bar.items ?? []).contains { $0.accessibilityIdentifier == "editor.add.keyboardDone" })
+        // A basic note type hides the cloze control; with no focus nothing formats.
+        #expect(items[3].isHidden)
+        #expect(items[0...2].allSatisfy { !$0.isEnabled })
+        #expect(page.webView.scrollView.keyboardDismissMode == .interactive)
+    }
+    #endif
 
     @Test func theNextDraftLoadsIntoTheSamePage() async throws {
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.form(["Front", "Back"]), deck: Self.deck, values: ["question", "answer"])

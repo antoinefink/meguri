@@ -180,13 +180,13 @@ A patch with neither fields nor tags is not sent.
 - Each entry has the field name as its label, the input, and a mode button (H6). Accessibility identifiers: `editor.field.<ord>`, `editor.field.<ord>.label`, `editor.field.<ord>.htmlToggle`.
 - Changed 2026-11-19 (Antoine; `docs/design/native-interface-contract.md` N17.1): an entry has its label and its input, and no mode button. The editor has **one HTML mode control**, outside the field list:
   - It acts on the field that has focus; when no field has focus, on the field of this editor that last had it. Until a field has had focus it is disabled.
-  - Touch: it is in the keyboard accessory bar, at its leading end, so it shows whenever a field is being edited. Mac: it is in the editor's bottom bar, at its leading end.
+  - Touch: it is in the keyboard accessory bar, at its trailing end after Previous and Next Field (N17.1, 2026-11-27), so it shows whenever a field is being edited. Mac: it is in the editor's bottom bar, at its leading end.
   - It is shown selected while the field it acts on is in HTML mode, and its accessibility value says so. Its label is "HTML Editor" (`editor/formatting` F19's name for the command).
   - It carries the identifier `editor.field.<ord>.htmlToggle` of the field it acts on, so one element holds that identifier at a time. While no field has had focus the Add screen's control is `editor.add.htmlToggle`.
   - Activating it is H6's switch: a pending commit first, the caret into the text area or back, no input recorded. It never moves focus to another field.
   - A collapsed field cannot have focus (F3), so the control never acts on one. Each field's mode is still its own, remembered as F3 says; the control only shows and changes the mode of one field at a time.
   - H4 is unchanged: Return and Shift-Return belong to the field in both modes, and ⌘Return adds.
-- The field's `description` is its placeholder: shown as plain text (never parsed as HTML), in rich mode only, while the field's target would be empty, in the field's font size, in the secondary label color, on one line truncated at its end.
+- The field's `description` is its placeholder: shown as plain text (never parsed as HTML), in rich mode only, while the field's target would be empty, in the field's text size (F2), in the secondary label color, on one line truncated at its end.
 
 ## F2. Font, size and direction (R828)
 
@@ -194,6 +194,7 @@ A patch with neither fields nor tags is not sent.
 - Size: `font_size` CSS pixels, scaled by the Dynamic Type factor (1 at the default text size). Decided 2026-10-27: a stored size of 0 uses 20, the default of a new field (`notetypes/records` N5.2), since 0 would hide the text. The placeholder uses the same size.
 - Direction: `rtl` makes the rich content's base direction right to left. HTML mode and the label keep the interface direction.
 - These options act in the editor only. Nothing is written into field HTML, and card rendering does not read them (R828).
+- Decided 2026-11-27 (Antoine, screen contract N17.1): Meguri's editor forms do not apply the font and size above. Field text takes the system font: the body text style (Dynamic Type) on iOS and iPadOS, 13 pt in the Mac's columns form and the system body size in Browse's inspector. The values still travel in `openNote` (F7), so a later form can use them again. Direction is unchanged. This is a deliberate exception to R828: the note type's fonts show on the card.
 
 ## F3. Collapsing and mode memory (R826, R827)
 

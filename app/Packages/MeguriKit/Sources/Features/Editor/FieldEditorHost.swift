@@ -335,6 +335,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         let view = FieldEditorWebView(frame: .zero, configuration: configuration)
         // The form's grouped background shows through; the page paints only its boxes.
         view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.backgroundColor = .clear
+        // With no Done in the keyboard bar, dragging the form down hides the keyboard.
+        view.scrollView.keyboardDismissMode = .interactive
         webView = view
         #else
         webView = FieldEditorMacWebView(frame: .zero, configuration: configuration)
@@ -387,6 +389,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         view.modeItem.accessibilityIdentifier = modeControlIdentifier
         view.previousItem.isEnabled = adjacentField(previous: true) != nil
         view.nextItem.isEnabled = adjacentField(previous: false) != nil
+        for item in view.formatItems { item.isEnabled = canFormat }
+        view.clozeItem.isHidden = !showsCloze
+        view.clozeItem.isEnabled = canCloze
     }
     #else
     private func refreshAccessory() {}
@@ -567,6 +572,14 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         return draft.notetype.kind == 1 && draft.notetype.clozeFields.contains(UInt32(ord))
     }
 
+    /// W2: the cloze group shows for a cloze note type with at least one shown cloze field.
+    public var showsCloze: Bool {
+        draft.notetype.kind == 1 && draft.notetype.clozeFields.contains { field in
+            let ord = Int(field)
+            return draft.fields.indices.contains(ord) && !draft.hiddenFields.contains(ord) && !draft.hostFields.contains(ord)
+        }
+    }
+
     public func format(_ command: InlineFormat) {
         guard canFormat, let expected = activeLoad else { return }
         Task { _ = try? await call(["type": "format", "loadId": expected, "command": command.rawValue], load: expected) }
@@ -574,13 +587,17 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     /// W3: the number from every field's session value after a flush; W4: the page wraps the selection.
     public func cloze(sameNumber: Bool) {
-        guard canCloze, let expected = activeLoad else { return }
+        guard canCloze, let expected = activeLoad, let ord = draft.focusedField else { return }
         Task {
             do {
                 try await flush(hold: false)
+                // F13: the wrap names the field Cloze was chosen in. Focus can move
+                // during the flush (Next Field on the keyboard bar); the page refuses then.
+                guard draft.focusedField == ord else { return }
                 let highest = Self.highestCloze(draft.values)
                 let number = sameNumber ? max(highest, 1) : highest + 1
-                _ = try await call(["type": "wrap", "loadId": expected, "prefix": "{{c\(number)::", "suffix": "}}"], load: expected)
+                _ = try await call(["type": "wrap", "loadId": expected, "ord": ord, "prefix": "{{c\(number)::", "suffix": "}}"],
+                                   load: expected)
             } catch {}
         }
     }
@@ -1019,20 +1036,34 @@ final class FieldEditorMacWebView: WKWebView {
 #endif
 
 #if os(iOS)
-/// WebKit asks the web view for the keyboard bar, so a subclass supplies it:
-/// the mode control, previous and next field, Done. It replaces WebKit's own
-/// bar, so those three keep their place. The bar outlives a draft; its
-/// actions go to the host that currently owns the page.
+/// WebKit asks the web view for the keyboard bar, so a subclass supplies it
+/// (N17.1, 2026-11-27): Bold, Italic, Underline and Cloze at the leading
+/// edge, then previous and next field, then the HTML control. There is no
+/// Done: the form's own Done saves, and dragging the form down hides the
+/// keyboard. The bar outlives a draft; its actions go to the host that
+/// currently owns the page.
 final class FieldEditorWebView: WKWebView {
     weak var owner: FieldEditorHost?
+    private(set) lazy var boldItem = item("bold", "Bold", "editor.toolbar.bold") { $0.format(.bold) }
+    private(set) lazy var italicItem = item("italic", "Italic", "editor.toolbar.italic") { $0.format(.italic) }
+    private(set) lazy var underlineItem = item("underline", "Underline", "editor.toolbar.underline") { $0.format(.underline) }
+    /// A tap adds the next number; touching and holding offers the same number (`editor/cloze-wrap` W2).
+    private(set) lazy var clozeItem: UIBarButtonItem = {
+        let clozeItem = item("curlybraces", "Cloze Deletion", "editor.toolbar.clozeNew") { $0.cloze(sameNumber: false) }
+        let same = UIAction(title: String(localized: "Cloze Deletion (Same Number)", bundle: .module)) { [weak self] _ in
+            self?.owner?.cloze(sameNumber: true)
+        }
+        same.accessibilityIdentifier = "editor.toolbar.clozeSame"
+        clozeItem.menu = UIMenu(children: [same])
+        return clozeItem
+    }()
+    var formatItems: [UIBarButtonItem] { [boldItem, italicItem, underlineItem] }
     private(set) lazy var modeItem = item("chevron.left.forwardslash.chevron.right", "HTML Editor", "editor.add.htmlToggle") { $0.toggleFocusedMode() }
     private(set) lazy var previousItem = item("chevron.up", "Previous Field", "editor.add.previousField") { $0.moveFocus(previous: true) }
     private(set) lazy var nextItem = item("chevron.down", "Next Field", "editor.add.nextField") { $0.moveFocus(previous: false) }
     private lazy var accessory: UIToolbar = {
-        let done = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.endEditing(true) })
-        done.accessibilityIdentifier = "editor.add.keyboardDone"
         let bar = UIToolbar()
-        bar.items = [modeItem, .flexibleSpace(), previousItem, nextItem, .flexibleSpace(), done]
+        bar.items = formatItems + [clozeItem, .flexibleSpace(), previousItem, nextItem, .fixedSpace(0), modeItem]
         bar.sizeToFit()
         return bar
     }()

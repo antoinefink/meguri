@@ -628,12 +628,11 @@
         const placeholderLabel = document.createElement("span");
         placeholderLabel.className = "placeholder"; placeholderLabel.textContent = value.description;
         placeholderLabel.setAttribute("aria-hidden", "true");
-        // CSS properties are assigned as data. A field font cannot inject CSS.
-        // In Browse's inspector and the Mac's columns form the text takes the
-        // system font (the form's 13 pt, beside its 13 pt labels); the note
-        // type's fonts belong to the card (its preview). In the inspector an
+        // Every form shows field text in the system font: the body text style
+        // on touch (Dynamic Type), 13 pt on the Mac beside its 13 pt labels.
+        // The note type's editor font and size belong to the card (N17.1,
+        // 2026-11-27); the page still receives them. In the inspector an
         // unmarked field reads in its own content's direction.
-        if (!browsing && !document.documentElement.classList.contains("mac")) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
         host.style.direction = value.rtl ? "rtl" : browsing ? "" : "ltr";
         if (browsing && !value.rtl) rich.dir = "auto";
         rich.replaceChildren(loadParse(value.html)); root.append(style, rich, placeholderLabel);
@@ -827,9 +826,12 @@
             return {applied: format(current, message.command)};
         }
         case "wrap": {
-            keys(message, ["type", "loadId", "prefix", "suffix"]);
-            if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
-            if (held || !current || current.mode !== "rich") return {applied: false};
+            keys(message, ["type", "loadId", "ord", "prefix", "suffix"]);
+            if (!Number.isInteger(message.ord) || typeof message.prefix !== "string" || typeof message.suffix !== "string") {
+                throw new Error("Invalid wrap");
+            }
+            // F13: only the field the host named, and only while it still has the focus.
+            if (held || !current || current.ord !== message.ord || current.mode !== "rich") return {applied: false};
             cancelPicture(current);
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
