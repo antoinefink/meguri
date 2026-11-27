@@ -1,19 +1,15 @@
 # Verification status
 
-**2026-11-27 iCloud retirement:** CloudKit-only signed lanes, setup/probe jobs, native account/adoption/recovery screens and their verification requirements are retired by the user's removal request, superseding the former pause. Historical receipts and failures below remain historical evidence. They do not establish verification of this refactor. Required host verification: persisted provider upgrade, focused Meguri Sync/Swift suites, Apple configuration/package checks and the Account & Sync journeys. No builds or tests ran in filtered session `s-20261127T065608Z-f736fb6a`; host review and verification are pending. Shared collection, media, hold-back and Meguri Sync requirements remain active.
-
-**Filtered tooling follow-up (2026-11-27):** Active milestone text and first-sync
-receipt inputs now use Meguri Sync server/package/native bootstrap checks; general
-U246/U250 conformance/fault proof and U248 convergence/optimizer soak remain
-required. Packaging checks cover both targets, both Info plists, signed grants
-and app/widget main/debug executables. Supported owner/preview authorization,
-identity, profile, credential and group gates remain. Changed Python, shell and Bats sources parse. The MG manifest consistency
-check could not start because this runner lacks `jq` and PyYAML. No runtime
-verification is established. Host follow-up: focused
-`tools/mg selftest` for sync build configuration, physical-device dispatch,
-real-copy, Xcode project, milestone gate and snapshot dispatch, plus Apple
-configuration/package checks through MG. Independent complete-content review,
-privacy/provenance checks and hosted similarity remain the integrator's work.
+**2026-11-27 iCloud retirement:** The removal supersedes the former pause
+and retires the CloudKit account, adoption, recovery and signed test paths.
+The iCloud migration, local recovery and Meguri Sync paths passed 252
+focused Rust cases. The Mac Account & Sync and Settings navigation
+journeys passed in the test VM. Both app targets and the remaining
+verification tooling passed focused package and VM-dispatch selftests.
+The [unit review log](review-log/remove-icloud-20261127.md) identifies the
+receipts. [PR #246](https://github.com/antoinefink/meguri/pull/246) records
+subsequent Swift, simulator and hosted verification. Shared collection,
+media, hold-back and Meguri Sync requirements remain active.
 
 **Integration status: failed.** No current passing full gate is established.
 

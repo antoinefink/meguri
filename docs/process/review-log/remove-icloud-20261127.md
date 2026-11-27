@@ -15,10 +15,22 @@ settings on Mac, iPhone and iPad.
 - The independent privacy reviewer read the complete N30 contract and
   classified it as PUBLIC. The verified SHA-256 is
   `cd47b8392bcb4edbe3c2cbfaf62585f0cc7d64e36f00f4b831cb340aa1041c4e`.
-  The five initial session records contain only public operational metadata.
+  The independent review also covered all 20 session records added through
+  `0f1402451`. Each contains only operational metadata.
 
-## Verification still in progress
+## Focused verification
 
-The first app patch removes the native SDK transport, signing capabilities
-and service choice. Remaining app workflow and FFI cleanup, Apple builds,
-native journeys and hosted checks are in progress.
+- `core-test/20261127T081126Z-6865` passed 252 cases across provider migration,
+  collection open and recovery, first Meguri download, and the FFI.
+  `core-lint/20261127T081326Z-9233` passed.
+- `ui-test/20261127T083248Z-39185` passed both Mac journeys in the test VM on
+  `bb479044e`. It verified the Meguri setup controls, cancellation of a switch
+  to Off, and native Settings Back navigation.
+- `selftest/20261127T083248Z-39352` passed 11 packaging and preview cases.
+  `selftest/20261127T083954Z-52927` passed 14 VM dispatch and performance-policy
+  cases. `milestone-gate/20261127T074530Z-53769` passed its manifest check.
+- The Swift package compile on `bb479044e` identified the stale factory call
+  in the integrated suspend fixture. `131c76066` corrected it.
+  [PR #246](https://github.com/antoinefink/meguri/pull/246) records subsequent
+  Swift, simulator and hosted verification. The full integration gate is
+  tracked in the shared verification register.
