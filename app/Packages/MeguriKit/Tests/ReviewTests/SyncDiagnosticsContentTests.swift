@@ -8,6 +8,30 @@ import Testing
     private let locale = Locale(identifier: "en")
     private let instant = Date(timeIntervalSince1970: 1_800_000_000)
 
+    @Test func routineDetailsKeepLastWholeExchangeWithKnownAndUnknownMediaWork() throws {
+        for fixture in [SyncCoordinator.RenderState.meguriSyncing, .meguriApplying, .meguriCheckingMedia,
+                        .meguriSyncingMedia, .meguriSyncingMediaUnknown] {
+            let sync = SyncCoordinator.renderFixture(fixture, clock: .fixed(instant))
+            let at = try #require(sync.meguriLastExchange)
+            let last = SyncText.format("sync.status.upToDate.detail", SyncText.instant(at, now: instant))
+            let detail = try #require(SyncStatusCopy.detail(sync, now: instant))
+            #expect(detail.contains(last))
+            if fixture == .meguriSyncingMedia { #expect(detail.contains("42")) }
+            if fixture == .meguriSyncingMediaUnknown { #expect(sync.mainStatus.detailCount == nil) }
+        }
+    }
+
+    @Test func roundLogNamesTheObservedBoundaryAndCorrelation() async throws {
+        let id = UUID()
+        let value = await snapshot([.init(component: .sync, operation: .exchange, stage: .statusObserved,
+            outcome: .observed, durationMilliseconds: 12, roundID: id, roundMilestone: .serverAcknowledged)])
+        let presentation = SyncDiagnosticsPresentation(value, locale: locale)
+        let row = try #require(presentation.rows.first)
+        #expect(row.result.contains("Server finish acknowledged"))
+        #expect(row.observedTime.contains(id.uuidString))
+        #expect(row.duration?.contains("12") == true)
+    }
+
     @Test func sharedAdmissionSurvivesCancelledConsumersAndRemountUntilProducersReturn() async throws {
         // Owned scalar fixture, no diagnostics store or system clipboard.
         let value = try JSONDecoder().decode(FieldDiagnosticTimeline.self, from: Data("""

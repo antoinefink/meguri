@@ -66,7 +66,7 @@ public final class SyncCoordinator {
     @ObservationIgnored private var providerChangeReason: ProviderFailureReason = .other
     public private(set) var settings: SyncDeviceSettings
     public private(set) var generation: UInt64 = 0 {
-        didSet { if generation != oldValue { meguriLastExchange = nil } }
+        didSet { if generation != oldValue { meguriLastExchange = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
     }
     #if DEBUG
     public private(set) var debugMeguriRoundSuccessSequence: UInt64 = 0
@@ -106,7 +106,7 @@ public final class SyncCoordinator {
     private var attachmentTask: Task<Void, Never>?
     private var attachmentFailure: (any Error)?
     private var hostRevision: UInt64 = 0 {
-        didSet { if hostRevision != oldValue { meguriLastExchange = nil } }
+        didSet { if hostRevision != oldValue { meguriLastExchange = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
     }
     // Preserve the old defaults key for installed collections.
     private static let settingsKey = "meguri.cloud.deviceSettings"
@@ -145,16 +145,25 @@ public final class SyncCoordinator {
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .unconfigured; meguriEndpoint = ""
             renderConnected = false
-        case .meguriSyncing, .meguriRoundFailed, .meguriSignInRefused, .meguriMediaBlocked, .meguriAcceptanceUnknown:
+        case .meguriSyncing, .meguriApplying, .meguriCheckingMedia, .meguriSyncingMedia, .meguriSyncingMediaUnknown, .meguriRoundFailed, .meguriSignInRefused, .meguriMediaBlocked, .meguriAcceptanceUnknown:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
             meguriRoutine = switch state {
-            case .meguriSyncing: .exchanging
+            case .meguriSyncing, .meguriApplying, .meguriCheckingMedia, .meguriSyncingMedia, .meguriSyncingMediaUnknown: .exchanging
             case .meguriRoundFailed: .network
             case .meguriMediaBlocked: .mediaBlocked
             case .meguriAcceptanceUnknown: .acceptanceUnknown
             default: .authentication
             }
+            meguriRoutinePhase = switch state {
+            case .meguriSyncing: .collection
+            case .meguriApplying: .applying
+            case .meguriCheckingMedia: .checkingMedia
+            case .meguriSyncingMedia, .meguriSyncingMediaUnknown: .syncingMedia
+            default: nil
+            }
+            meguriReady = meguriRoutine == .exchanging
+            meguriRoutineFilesLeft = state == .meguriSyncingMedia ? 42 : nil
             meguriLastExchange = recent
             renderConnected = true
         case .meguriSetupMedia:
@@ -340,7 +349,9 @@ public final class SyncCoordinator {
             meguriConnection: providerState?.selection == .meguri ? "\(connection)" : nil,
             meguriSetupStage: meguriStage.map { "\($0)" }, meguriRoutine: meguriRoutine.map { "\($0)" },
             statusTitleKey: status.titleKey, statusDetailKey: status.detailKey,
-            serviceChangeFailure: serviceChangeFailure)
+            serviceChangeFailure: serviceChangeFailure,
+            meguriBindingReady: providerState?.selection == .meguri ? meguriReady : nil,
+            meguriActivePhase: meguriRoutine == .exchanging ? meguriRoutinePhase : nil)
     }
     /// MP6.5: blocked metadata stops network work, including the work already
     /// running. Nothing is discarded: a stopped media step or round keeps its
@@ -404,7 +415,8 @@ public final class SyncCoordinator {
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
             mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
             structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending,
-            signedInBefore: meguriSignedInBefore, signInRefused: meguriFirstSignInRefused)
+            signedInBefore: meguriSignedInBefore, signInRefused: meguriFirstSignInRefused,
+            routinePhase: meguriRoutinePhase, routineFilesLeft: meguriRoutineFilesLeft)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerHandoff: ProviderHandoffOwnership?
@@ -424,7 +436,7 @@ public final class SyncCoordinator {
     private var retryingProviderAttachment = false
     private let meguriCredentialStore: (any MeguriProviderCredentialStore)?
     private var meguriConnectionOwner: MeguriProviderConnectionOwner? {
-        didSet { if meguriConnectionOwner !== oldValue { meguriLastExchange = nil } }
+        didSet { if meguriConnectionOwner !== oldValue { meguriLastExchange = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
     }
     public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured {
         // T21.2: a sign-in on this connection makes a later sign-out a problem;
@@ -471,6 +483,8 @@ public final class SyncCoordinator {
     public private(set) var meguriSignInErrorKey: String?
     public private(set) var meguriRoutine: MeguriRoutineState?
     /// Device-local observation for this attachment, not cross-device convergence.
+    public private(set) var meguriRoutinePhase: MeguriRoutinePhase?
+    public private(set) var meguriRoutineFilesLeft: UInt64?
     public private(set) var meguriLastExchange: Int64?
     public private(set) var meguriRoundReport: MeguriRoundReport?
     public private(set) var meguriLastCommand: MeguriBootstrapCommandResult?
@@ -559,10 +573,10 @@ public final class SyncCoordinator {
     private var meguriActiveFacade: MeguriProviderBootstrapService?
     private var meguriAction: (id: UUID, task: Task<Void, Never>)?
     private var meguriRound: CoreMeguriRoundService? {
-        didSet { if meguriRound !== oldValue { meguriLastExchange = nil } }
+        didSet { if meguriRound !== oldValue { meguriLastExchange = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
     }
     private var meguriReady = false {
-        didSet { if !meguriReady { meguriLastExchange = nil } }
+        didSet { if !meguriReady { meguriLastExchange = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
     }
     private var meguriWakePending = false
     private var meguriWakeManual = false
@@ -1710,8 +1724,8 @@ public final class SyncCoordinator {
         let editRevision = meguriAddressEditRevision
         let availability = MeguriWakeAvailability(generation: expected)
         // Reserve the product task before the first actor/credential suspension.
-        let task = Task {
-            defer { if meguriWake?.id == id { meguriWake = nil } }
+        let task = Task { [self] in
+            defer { if meguriWake?.id == id { meguriWake = nil; meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil } }
             while meguriWakePending, meguriCanRun, meguriRound === round,
                   meguriCurrent(owner, expected, revision), !Task.isCancelled {
                 let manual = meguriWakeManual
@@ -1721,13 +1735,28 @@ public final class SyncCoordinator {
                 // MP6.10: this round carries every change committed so far.
                 meguriReviewRounds.roundStarting()
                 meguriRoutine = .exchanging
+                meguriRoutinePhase = .preparing; meguriRoutineFilesLeft = nil
+                let diagnostics = MeguriRoutineDiagnostics(record: recordDiagnostic)
                 let availabilityRevision = availability.revision
                 do {
-                    let report = try await round.fullRound()
+                    let report = try await round.fullRound { [weak self] progress in
+                        await MainActor.run { [weak self] in
+                            var phase = diagnostics.observe(progress.routineSync)
+                            if progress.phase == .named("meguri-media-checking") { phase = .checkingMedia }
+                            if progress.phase == .named("meguri-media-transfer") { phase = .syncingMedia }
+                            guard let self, self.meguriWake?.id == id,
+                                  self.meguriCurrent(owner, expected, revision), self.meguriRound === round,
+                                  self.meguriAddressEditRevision == editRevision else { return }
+                            self.meguriRoutinePhase = phase ?? self.meguriRoutinePhase
+                            self.meguriRoutineFilesLeft = phase == .syncingMedia ? progress.syncFilesLeft : nil
+                        }
+                    }
+                    diagnostics.finish(report)
                     // Retain actual terminal effects before checking retirement.
                     meguriRoundReport = report
                     meguriCollectionFinalization = nil; meguriMediaFinalization = nil
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
+                    meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil
                     meguriAccounting = nil
                     reduceMeguriRound(report)
                     // Only this actual routine round can supply a new instant.
@@ -1767,9 +1796,11 @@ public final class SyncCoordinator {
                     if missedAvailability { meguriWakePending = true }
                     else if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
                 } catch {
+                    diagnostics.finish(error: error)
                     meguriLastError = error
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round,
                           editRevision == meguriAddressEditRevision else { return }
+                    meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil
                     if !applyMeguriRoundCredentialFailure(error) {
                         meguriRoutine = error is CancellationError ? .cancelled : .failed
                     }
@@ -2705,6 +2736,7 @@ extension SyncCoordinator {
     public enum RenderState: String, Equatable, CaseIterable, Sendable {
         case off, meguriConnected, meguriSignIn, meguriNeedsYou
         /// N23's panel states (round 10).
+        case meguriApplying, meguriCheckingMedia, meguriSyncingMedia, meguriSyncingMediaUnknown
         case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused
         case meguriPreparing, meguriMediaBlocked, meguriAcceptanceUnknown
         /// MP6.5 (resume fix): setup's media step paused, and stopped after its automatic attempts.

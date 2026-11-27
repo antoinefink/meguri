@@ -19,6 +19,18 @@ nonisolated public struct FieldDiagnosticObservation: Codable, Sendable, Equatab
         static func storageFailure(for _: any Error) -> Self { .storageUnavailable }
     }
 
+    public enum RoundMilestone: String, Codable, Sendable {
+        case started, collectionStarted, serverAcknowledged, applyStarted, applyCompleted
+        case mediaCheckStarted, mediaTransferStarted, terminal
+    }
+    public enum RoundReason: String, Codable, Sendable {
+        case completed, cancelled, refused, acceptanceUnknown, fullSyncRequired, authentication
+        case network, server, mediaIncomplete, localFailure, unavailable
+    }
+    /// Random local correlation only, unrelated to any account, job or collection.
+    public let roundID: UUID?
+    public let roundMilestone: RoundMilestone?
+    public let roundReason: RoundReason?
     public let component: Component
     public let operation: Operation
     public let stage: Stage
@@ -28,7 +40,9 @@ nonisolated public struct FieldDiagnosticObservation: Codable, Sendable, Equatab
     public let durationMilliseconds: UInt64?
 
     public init(component: Component, operation: Operation, stage: Stage, outcome: Outcome,
-                failure: Failure? = nil, count: UInt64? = nil, durationMilliseconds: UInt64? = nil) {
+                failure: Failure? = nil, count: UInt64? = nil, durationMilliseconds: UInt64? = nil,
+                roundID: UUID? = nil, roundMilestone: RoundMilestone? = nil, roundReason: RoundReason? = nil) {
+        self.roundID = roundID; self.roundMilestone = roundMilestone; self.roundReason = roundReason
         self.component = component; self.operation = operation; self.stage = stage; self.outcome = outcome
         self.failure = failure; self.count = count; self.durationMilliseconds = durationMilliseconds
     }

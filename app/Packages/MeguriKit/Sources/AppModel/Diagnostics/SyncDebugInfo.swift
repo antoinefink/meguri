@@ -67,6 +67,8 @@ public struct SyncDebugFacts: Codable, Sendable, Equatable {
     public var meguriConnection: String?
     public var meguriSetupStage: String?
     public var meguriRoutine: String?
+    public var meguriBindingReady: Bool?
+    public var meguriActivePhase: MeguriRoutinePhase?
     public var statusTitleKey: String
     public var statusDetailKey: String?
     public var serviceChangeFailure: SyncServiceChangeFailure?
@@ -74,7 +76,9 @@ public struct SyncDebugFacts: Codable, Sendable, Equatable {
                 blockedReason: ProviderFailureReason? = nil, meguriConnection: String? = nil,
                 meguriSetupStage: String? = nil, meguriRoutine: String? = nil,
                 statusTitleKey: String, statusDetailKey: String? = nil,
-                serviceChangeFailure: SyncServiceChangeFailure? = nil) {
+                serviceChangeFailure: SyncServiceChangeFailure? = nil,
+                meguriBindingReady: Bool? = nil, meguriActivePhase: MeguriRoutinePhase? = nil) {
+        self.meguriBindingReady = meguriBindingReady; self.meguriActivePhase = meguriActivePhase
         self.serviceChangeFailure = serviceChangeFailure
         self.service = service; self.providerPhase = providerPhase
         self.blockedSource = blockedSource; self.blockedReason = blockedReason
@@ -131,6 +135,9 @@ public enum SyncDebugInfoText {
                 lines.append("Blocked by: \(source.rawValue)\(sync.blockedReason.map { " (\($0.rawValue))" } ?? "")")
             }
             if sync.service == "meguri" {
+                if sync.meguriBindingReady == true { lines.append("Binding ready") }
+                else if sync.meguriBindingReady == false { lines.append("Binding not ready") }
+                if let phase = sync.meguriActivePhase { lines.append("Active phase: \(phase.rawValue)") }
                 lines.append("Meguri: connection \(sync.meguriConnection ?? "none"), setup \(sync.meguriSetupStage ?? "none"), routine \(sync.meguriRoutine ?? "none")")
             }
             lines.append("Status: \(sync.statusTitleKey)\(sync.statusDetailKey.map { " / \($0)" } ?? "")")

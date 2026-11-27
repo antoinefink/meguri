@@ -40,6 +40,19 @@ public struct SyncKindRow: Sendable, Equatable {
     }
 }
 
+public enum MeguriRoutinePhase: String, Sendable, Codable {
+    case preparing, collection, applying, checkingMedia, syncingMedia
+    public var titleKey: String {
+        switch self {
+        case .preparing: "sync.meguri.round.preparing.title"
+        case .collection: "sync.meguri.round.collection.title"
+        case .applying: "sync.meguri.round.applying.title"
+        case .checkingMedia: "sync.meguri.round.checkingMedia.title"
+        case .syncingMedia: "sync.meguri.round.syncingMedia.title"
+        }
+    }
+}
+
 /// Inputs of T19.5's table, in T18.4's order.
 public struct MeguriKindFacts: Sendable, Equatable {
     public var handoffRecovery: Bool
@@ -47,6 +60,8 @@ public struct MeguriKindFacts: Sendable, Equatable {
     public var connection: MeguriProviderConnectionPhase
     public var stage: MeguriSetupStage?
     public var routine: MeguriRoutineState?
+    public var routinePhase: MeguriRoutinePhase?
+    public var routineFilesLeft: UInt64?
     /// T18.5's failure key of a failed setup stage.
     public var failureKey: String?
     /// The core permits Finish Setup.
@@ -73,7 +88,9 @@ public struct MeguriKindFacts: Sendable, Equatable {
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
                 automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true,
                 structureStage: MeguriStructureStage? = nil, structureUploadPending: Bool = false,
-                signedInBefore: Bool = true, signInRefused: Bool = false) {
+                signedInBefore: Bool = true, signInRefused: Bool = false,
+                routinePhase: MeguriRoutinePhase? = nil, routineFilesLeft: UInt64? = nil) {
+        self.routinePhase = routinePhase; self.routineFilesLeft = routineFilesLeft
         self.signInRefused = signInRefused
         self.structureStage = structureStage; self.structureUploadPending = structureUploadPending
         self.signedInBefore = signedInBefore
@@ -227,7 +244,9 @@ public enum SyncKinds {
         switch routine {
         case .idle: return .init(nil, facts.automatic ? nil : "sync.status.automaticOff.detail")
         case .pending, .waiting, .cancelled: return .init(nil, "sync.status.pending.detail")
-        case .exchanging: return .init(nil, nil)
+        case .exchanging:
+            let left = facts.routinePhase == .syncingMedia ? facts.routineFilesLeft : nil
+            return .init(nil, left == nil ? nil : "sync.meguri.round.filesLeft", count: left)
         case .mediaBlocked: return facts.mediaBlockedRow
         case .authentication: return .init(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn)
         case .acceptanceUnknown: return .init(.waiting, "sync.meguri.round.acceptanceUnknown", .meguriTryAgain)
@@ -274,7 +293,7 @@ public enum SyncKinds {
         case .idle?:
             return facts.automatic ? (SyncSymbol.upToDate, "sync.status.upToDate.title")
                 : (SyncSymbol.waiting, "sync.status.automaticOff.title")
-        case .exchanging?: return (busy, "sync.status.syncing.title")
+        case .exchanging?: return (busy, (facts.routinePhase ?? .preparing).titleKey)
         case .mediaBlocked?: return (stopped, "sync.meguri.status.mediaBlocked.title")
         case .pending?, .waiting?, .cancelled?: return (SyncSymbol.waiting, "sync.status.pending.title")
         case .acceptanceUnknown?: return (stopped, "sync.meguri.status.acceptanceUnknown.title")

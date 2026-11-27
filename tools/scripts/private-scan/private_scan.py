@@ -1141,9 +1141,9 @@ PUBLIC_ARTIFACTS = {
     # Complete bounded-content PUBLIC review: Codex r10_native_failure_diagnosis, 2026-11-17.
     'app/Packages/MeguriCore/Sources/CoreBridge/Sync/ProviderBootstrapService.swift':
         'edba139cde56f1dc7c10598a9de920c034b31d800320ed3e0068480e8fe6fb99',
-    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+    # Complete final-content PUBLIC review: Codex sync_standards, 2026-11-27.
     'specs/sync/status-strings.md':
-        '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
+        '661d66ea156479fb0dd3feda4f8cce1e36bdb4798af8ecbbd03d65b897dd928f',
     # Complete public design review for native backup recovery, 2026-11-26.
     'docs/design/screens.md':
         '56e8aee5d42aec1c619bdf279c17454872a227f2a607bc0e8e554b7a379096f0',
@@ -1238,7 +1238,7 @@ PUBLIC_ARTIFACTS = {
     'specs/sync/one-way.md':
         '8de7695fada9f38fa5d6c54c26538d025cd7e3b45b1867a1b8650417533b0812',
     'specs/sync/meguri-provider.md':
-        'a3ba46013feac12fb76e211b7ff4660bf50fa13e8055ec71426e2d3d2fa0c899',
+        '2d5502cf18f4d115f4621ba3e67142d9995b26bafa15a0fa24feafd2760bf9c9',
     'docs/process/review-log/meguri-provider-contract-20261116.md':
         '70b7eb39ea3f7ea6886d3d1f82717e81be96938d078147a01947f912794ef7f9',
     "app/MeguriSnapshotTests/NativeReplayAccessibilityTests.swift":

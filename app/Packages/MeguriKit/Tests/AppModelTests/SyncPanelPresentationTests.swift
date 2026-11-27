@@ -10,6 +10,34 @@ import Testing
 @MainActor @Suite struct SyncPanelPresentationTests {
     private typealias Slot = SyncPanel.Slot
 
+    @Test func routineStagesKeepOneIndeterminateIndicatorAndOnlyUseCoreRemainders() {
+        let fallback = SyncKinds.meguri(.init(routine: .exchanging))
+        #expect(fallback.titleKey == MeguriRoutinePhase.preparing.titleKey)
+        #expect(fallback.detailKey == nil && fallback.detailCount == nil)
+        #expect(fallback.action == nil && !fallback.needsYou)
+        #expect(SyncPanel.progress(fallback, setupValue: nil, moving: true) == .indeterminate)
+        for phase in [MeguriRoutinePhase.preparing, .collection, .applying, .checkingMedia, .syncingMedia] {
+            let status = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: phase))
+            #expect(status.titleKey == phase.titleKey && status.action == nil && !status.needsYou)
+            #expect(status.detailCount == nil)
+            #expect(SyncPanel.progress(status, setupValue: nil, moving: true) == .indeterminate)
+        }
+        let known = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: .syncingMedia, routineFilesLeft: 42))
+        #expect(known.detailKey == "sync.meguri.round.filesLeft" && known.detailCount == 42)
+        #expect(SyncText.format("sync.meguri.round.filesLeft", Int64(1)) == "1 file left to download.")
+        #expect(SyncText.format("sync.meguri.round.filesLeft", Int64(42)) == "42 files left to download.")
+        let zero = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: .syncingMedia, routineFilesLeft: 0))
+        #expect(zero.detailCount == 0)
+        for phase in [MeguriRoutinePhase.preparing, .collection, .applying, .checkingMedia] {
+            let stale = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: phase, routineFilesLeft: 42))
+            #expect(stale.detailCount == nil && stale.detailKey == nil)
+        }
+        let blocked = SyncKinds.meguri(.init(providerBlocked: true, routine: .exchanging, routinePhase: .applying))
+        #expect(blocked.needsYou && blocked.action == .copyDebugInfo)
+        let setup = SyncKinds.meguri(.init(stage: .media, routine: .exchanging, routinePhase: .applying))
+        #expect(setup.titleKey != MeguriRoutinePhase.applying.titleKey)
+    }
+
     @Test func syncNowStaysDisabledWhileMovingAndTheTitleIsNotRepeated() {
         #expect(SyncPanel.syncNowEnabled(available: true, moving: false))
         #expect(!SyncPanel.syncNowEnabled(available: true, moving: true))

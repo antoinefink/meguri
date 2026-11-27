@@ -244,22 +244,24 @@ struct SyncDiagnosticsPresentation {
         formatter.timeStyle = .medium
         rows = events.suffix(20).map { index, event in
             let observation = event.observation
-            let component = text(observation.component == .sync ? "Sync" : "Media")
+            let component = text(observation.roundID != nil ? "Meguri Sync" : observation.component == .sync ? "Sync" : "Media")
             let operation = text(SyncDiagnosticsCopy.operation(observation.operation))
-            let stage = text(SyncDiagnosticsCopy.stage(observation.stage))
+            let stage = text(observation.roundMilestone.map(SyncDiagnosticsCopy.milestone) ?? SyncDiagnosticsCopy.stage(observation.stage))
             let outcome = text(SyncDiagnosticsCopy.outcome(observation.outcome))
-            let time: String
+            var time: String
             if (-62_135_596_800_000...253_402_300_799_999).contains(event.observedAtUnixMilliseconds) {
                 let instant = formatter.string(from: Date(timeIntervalSince1970: Double(event.observedAtUnixMilliseconds) / 1_000))
                 time = text("Observed at \(instant)")
             } else {
                 time = text("Observation time: Not recorded")
             }
+            if let round = observation.roundID { time += " · " + text("Round \(round.uuidString)") }
             return Row(id: index, summary: SyncDiagnosticsCopy.format("syncDiagnosticsObservationSummary", component, operation, locale: locale),
                        result: SyncDiagnosticsCopy.format("syncDiagnosticsObservationResult", stage, outcome, locale: locale), observedTime: time,
                        count: observation.count.map { text("Recorded count: \($0)") },
                        duration: observation.durationMilliseconds.map { text("Recorded duration: \($0) ms") },
-                       failure: observation.failure.map { text(SyncDiagnosticsCopy.failure($0)) })
+                       failure: observation.roundReason.map { text(SyncDiagnosticsCopy.reason($0)) }
+                        ?? observation.failure.map { text(SyncDiagnosticsCopy.failure($0)) })
         }
         var notes: [String] = []
         if timeline.storage != .available { notes.append(text(SyncDiagnosticsCopy.storage(timeline.storage))) }
@@ -286,6 +288,35 @@ private enum SyncDiagnosticsCopy {
 
     static func format(_ key: String.LocalizationValue, _ first: String, _ second: String, locale: Locale) -> String {
         String(format: text(key, locale: locale), locale: locale, arguments: [first, second])
+    }
+
+    static func milestone(_ value: FieldDiagnosticObservation.RoundMilestone) -> String.LocalizationValue {
+        switch value {
+        case .started: "Sync round started"
+        case .collectionStarted: "Syncing collection"
+        case .serverAcknowledged: "Server finish acknowledged"
+        case .applyStarted: "Applying changes on this device"
+        case .applyCompleted: "Changes applied on this device"
+        case .mediaCheckStarted: "Checking media"
+        case .mediaTransferStarted: "Syncing media"
+        case .terminal: "Sync round ended"
+        }
+    }
+
+    static func reason(_ value: FieldDiagnosticObservation.RoundReason) -> String.LocalizationValue {
+        switch value {
+        case .completed: "Collection and media completed"
+        case .cancelled: "Round cancelled"
+        case .refused: "Round refused"
+        case .acceptanceUnknown: "Server acceptance unknown"
+        case .fullSyncRequired: "Collection choice required"
+        case .authentication: "Sign-in required"
+        case .network: "Connection interrupted"
+        case .server: "Server could not complete the round"
+        case .mediaIncomplete: "Media incomplete"
+        case .localFailure: "Local work could not complete"
+        case .unavailable: "Round outcome unavailable"
+        }
     }
 
     static func operation(_ value: FieldDiagnosticObservation.Operation) -> String.LocalizationValue {

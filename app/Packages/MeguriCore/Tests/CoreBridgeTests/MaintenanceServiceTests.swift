@@ -135,7 +135,7 @@ private struct MaintenanceSpace: DiskSpaceProviding {
         let (stream, continuation) = AsyncStream<CoreProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let relay = ProgressRelay(continuation)
         for done in UInt64(0)...3 {
-            relay.onProgress(update: .init(jobId: 133, phase: .planning, etaMillis: nil,
+            relay.onProgress(update: .init(sequence: done, jobId: 133, routineSync: [], syncFilesLeft: nil, phase: .planning, etaMillis: nil,
                 completed: done, total: 3, collectionMediaPrepared: nil))
         }
         let completion = JobCompletion(progress: continuation)

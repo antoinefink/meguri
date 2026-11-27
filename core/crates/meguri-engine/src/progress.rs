@@ -12,6 +12,13 @@ use crate::monotonic::{self, MonotonicClock};
 /// At most ten updates a second reach the listener (R1858).
 pub const MIN_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Finite, content-free routine sync evidence, retained even before attachment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutineSyncMilestone {
+    CollectionStarted, ServerAcknowledged, ApplyStarted, ApplyCompleted,
+    MediaCheckStarted, MediaTransferStarted,
+}
+
 /// What the reporting work is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProgressPhase {
@@ -40,6 +47,9 @@ pub struct ObjectCounts {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Progress {
+    pub sequence: u64,
+    pub routine_sync: Vec<RoutineSyncMilestone>,
+    pub sync_files_left: Option<u64>,
     /// Normal-sync object counts, retained across phase changes. Transport
     /// byte progress uses its own job sink and never overwrites these values.
     pub objects: Option<ObjectCounts>,
@@ -73,7 +83,10 @@ struct Inner {
 }
 
 struct State {
+    sequence: u64,
     listener: Option<Arc<dyn ProgressListener>>,
+    routine_sync: Vec<RoutineSyncMilestone>,
+    sync_files_left: Option<u64>,
     phase: ProgressPhase,
     phase_started: Duration,
     completed: u64,
@@ -112,7 +125,10 @@ impl ProgressSink {
             inner: Arc::new(Inner {
                 clock,
                 state: Mutex::new(State {
+                    sequence: 0,
                     listener: None,
+                    routine_sync: Vec::new(),
+                    sync_files_left: None,
                     phase: ProgressPhase::Planning,
                     phase_started: now,
                     completed: 0,
@@ -129,9 +145,16 @@ impl ProgressSink {
     }
 
     /// Attaches the listener of every later update, replacing any earlier
-    /// one. Nothing is delivered until the next report or phase change.
+    /// one. Routine sync replays its retained evidence; other jobs wait for
+    /// the next report or phase change.
     pub fn set_listener(&self, listener: Arc<dyn ProgressListener>) {
-        self.lock().listener = Some(listener);
+        let now = (self.inner.clock)();
+        let replay = {
+            let mut state = self.lock();
+            state.listener = Some(listener);
+            if state.routine_sync.is_empty() { None } else { state.deliver(now) }
+        };
+        if let Some((listener, progress)) = replay { listener.on_progress(&progress); }
     }
 
     /// Unthrottled operation facts. Clone the listener under the sink lock,
@@ -141,6 +164,43 @@ impl ProgressSink {
         if let Some(listener) = listener {
             listener.on_collection_media_prepared(counts);
         }
+    }
+
+    /// Each code is recorded once, so the retained evidence is bounded at six.
+    /// Delivery bypasses count throttling; every later update carries the evidence.
+    pub fn observe_routine_sync(&self, milestone: RoutineSyncMilestone) {
+        let now = (self.inner.clock)();
+        let delivery = {
+            let mut state = self.lock();
+            if state.routine_sync.contains(&milestone) { return; }
+            state.routine_sync.push(milestone);
+            state.deliver(now)
+        };
+        if let Some((listener, progress)) = delivery { listener.on_progress(&progress); }
+    }
+
+    /// Publish routine media activity, evidence and counts as one snapshot.
+    /// Knowledge and phase changes bypass throttling; generic checked counts
+    /// retain the existing count reporter's meaning.
+    pub fn report_routine_media(&self, transferring: bool, transfer_started: bool, checked: u64, left: Option<u64>) {
+        let now = (self.inner.clock)();
+        let delivery = {
+            let mut state = self.lock();
+            let phase = ProgressPhase::Named(if transferring { "meguri-media-transfer" } else { "meguri-media-checking" });
+            let left = if transferring { left } else { None };
+            let phase_changed = state.phase != phase;
+            let knowledge_changed = state.sync_files_left.is_some() != left.is_some();
+            let new_transfer = transfer_started && !state.routine_sync.contains(&RoutineSyncMilestone::MediaTransferStarted);
+            if new_transfer { state.routine_sync.push(RoutineSyncMilestone::MediaTransferStarted); }
+            if phase_changed { state.phase_started = now; }
+            state.phase = phase;
+            state.sync_files_left = left;
+            state.completed = checked;
+            state.total = None;
+            let due = state.last_delivery.is_none_or(|last| now.saturating_sub(last) >= MIN_INTERVAL);
+            if phase_changed || knowledge_changed || new_transfer || due { state.deliver(now) } else { None }
+        };
+        if let Some((listener, progress)) = delivery { listener.on_progress(&progress); }
     }
 
     pub fn phase(&self) -> ProgressPhase {
@@ -201,9 +261,13 @@ impl State {
     fn deliver(&mut self, now: Duration) -> Option<(Arc<dyn ProgressListener>, Progress)> {
         let listener = self.listener.clone()?;
         self.last_delivery = Some(now);
+        self.sequence = self.sequence.saturating_add(1);
         Some((
             listener,
             Progress {
+                sequence: self.sequence,
+                routine_sync: self.routine_sync.clone(),
+                sync_files_left: self.sync_files_left,
                 objects: self.objects,
                 phase: self.phase.clone(),
                 completed: self.completed,

@@ -221,6 +221,8 @@ impl CoreHost {
             let (key, options, transport) = access.into_round_inputs();
             let finished = engine.stream().subscribe();
             let job = self.engine().start_job(JobKind::MediaSync, move |ctx| {
+                ctx.progress.set_phase(meguri_engine::ProgressPhase::Named("meguri-media-checking"));
+                ctx.progress.observe_routine_sync(meguri_engine::progress::RoutineSyncMilestone::MediaCheckStarted);
                 let options = options.cancel(ctx.cancel.clone());
                 let job = match transport { Some(transport) => Job::with_transport(&options, Some(key), random.as_ref(), transport),
                     None => Job::new(&options, Some(key), random.as_ref()) };
@@ -230,7 +232,15 @@ impl CoreHost {
                     return Err(EngineError::Internal { message: "Meguri media transport initialization".into() });
                 } };
                 let result = media::reconcile_bound(engine.threads(), &mut job, &media, generation.0, admitted,
-                    &mut |snapshot| ctx.progress.report(snapshot.totals.checked, None));
+                    &mut |snapshot| {
+                        use media::MediaPhase;
+                        let transferring = snapshot.transfer_started
+                            && matches!(snapshot.phase, MediaPhase::Downloading | MediaPhase::Uploading);
+                        // Only an active download has a complete known remainder.
+                        // Listing/checking counters and upload batches are not totals.
+                        ctx.progress.report_routine_media(transferring, snapshot.transfer_started, snapshot.totals.checked,
+                            (transferring && snapshot.phase == MediaPhase::Downloading).then_some(snapshot.files_left));
+                    });
                 let failed = result.outcome().is_err();
                 *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(Ok(result));
                 if failed { Err(EngineError::Internal { message: "Meguri media round failed".into() }) } else { Ok(()) }
