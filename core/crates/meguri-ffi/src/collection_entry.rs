@@ -498,10 +498,6 @@ pub fn start_collection_inspection(
         Arc::new(ForeignSpace(disk_space)),
     );
     config.manual_transfer_directory = manual_transfer_directory.into();
-    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
-        config.cloud = Some(inputs);
-        config.cloud_key_bytes = key_bytes;
-    }
     let engine = runtime::engine()?.clone();
     let result = Arc::new(CollectionInspectResult {
         cell: Arc::new(ResultCell(Mutex::new(None))),

@@ -137,7 +137,7 @@ extension ReviewCollectionStartupTests {
             wallTime: .init(year: 2030, month: 1, day: 2, hour: 9, minute: 0, second: 0), sizeBytes: 1234)
         await service.configure(entries: [entry], refusal: .init(cause: .corrupt))
         var factories = 0
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: {
             factories += 1
             return factories == 1 ? original : (factories == 2 ? successor : SyncOwnerFake())
         }, defaults: nil)
@@ -148,7 +148,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         do {
             try #require(owner.state == .ready)
-            await sync.prepareConnectionAuthority()
+            await sync.waitForInputs()
             await owner.backups.openedRestore()
             let generation = owner.generation
             original.onQuiesce = { throw BridgeError.internal("Synthetic pre-write drain refusal") }
@@ -161,9 +161,9 @@ extension ReviewCollectionStartupTests {
                 #expect(await service.restoredNames.isEmpty)
                 #expect(!owner.canStudy && !owner.backups.canCreate && owner.backups.canOpenRestore)
                 #expect(sync.operationFailed && !original.closed && factories == 1)
-                #expect(owner.backups.failure == .busy(runningOperation: "iCloud drain"))
+                #expect(owner.backups.failure == .busy(runningOperation: "sync drain"))
                 let events = original.events
-                sync.receive(.foreground); await sync.waitForInputs()
+                await sync.foregroundAfterLocalResume(); await sync.waitForInputs()
                 #expect(original.events == events) // Failed drain kept original sync admission closed.
             }
             if cancellation != "none" {
@@ -194,8 +194,8 @@ extension ReviewCollectionStartupTests {
                 #expect(!successor.closed)
                 await sync.waitForInputs()
                 let originalEvents = original.events, successorEvents = successor.events
-                // Background still reaches policy while resume proof is pending.
-                sync.receive(.background(deadlineMilliseconds: 123_000)); await sync.waitForInputs()
+                // Background still reaches the reattached owner.
+                _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: 123_000); await sync.waitForInputs()
                 #expect(successor.events == successorEvents + ["background"])
                 #expect(original.events == originalEvents)
             }
@@ -282,7 +282,7 @@ extension ReviewCollectionStartupTests {
     }
 
     private func backupRaceOwner(_ configuration: LaunchConfiguration, root: URL) -> ReviewCollection {
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil, cloudConfigured: false)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { SyncOwnerFake() }, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
         owner.studyPreparation.runsUnprompted = false

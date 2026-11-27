@@ -1155,17 +1155,12 @@ class PublicSwiftImportTests(unittest.TestCase):
                 self.assertEqual(bool(private_scan.line_hits(matcher, encoded)), expected)
                 self.check_all(encoded, expected, matcher)
 
-    def test_exact_approved_literal_digest_and_restored_source(self):
+    def test_exact_approved_literal_and_digest(self):
         self.assertEqual(self.fact, "import MachO")
         self.assertEqual(private_scan.PUBLIC_SWIFT_IMPORT_SHA256,
                          "0cd4593e5b7c20a193357a8d46e91ae8d04f5d92d0ecf4aa3167ac4dc0379c5a")
         self.assertEqual(hashlib.sha256(self.fact.encode("utf-8")).hexdigest(),
                          private_scan.PUBLIC_SWIFT_IMPORT_SHA256)
-        root = Path(SCRIPT).resolve().parents[3]
-        source = root / "app/Packages/MeguriKit/Tests/AppModelTests/CloudKitAgent/Support/AgentRunningProduct.swift"
-        lines = source.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(lines.count(self.fact), 1)
-        self.assertEqual(lines[:4], ["import Darwin", "import Foundation", self.fact, "import ObjectiveC"])
 
     def test_only_complete_raw_and_quoted_spans_hide_contained_matches(self):
         for text in (self.fact, '"' + self.fact + '"', "'" + self.fact + "'", '`' + self.fact + '`'):

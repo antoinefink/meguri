@@ -129,7 +129,7 @@
 #   capture       {index, cases | cases_file}: the JSON index {cases: [{id},
 #                 ...]} lists every case id; cases_file is a JSON file of the
 #                 same shape that lists the required ids
-#   first-sync    {results: [<id>, ...]}: the first real sync with CloudKit
+#   first-sync    {results: [<id>, ...]}: the first real sync with Meguri Sync
 #                 (M1R): {build: {commit, dirty}, sync_started_at, results:
 #                 {<id>: {job, commit, finished_at, outcome}}, backup: {file,
 #                 taken_at}} (times YYYY-MM-DDTHH:MM:SSZ). It passes only when
@@ -176,7 +176,7 @@
 # Anki server work is frozen indefinitely by Antoine (2026-10-26).
 # See the plan scope override and docs/process/review-first-delivery.md.
 # Frozen unit entries remain in the plan Frozen Unit Index, outside these
-# active memberships. Mixed suites retain only their CloudKit/file/safety
+# active memberships. Mixed suites retain only their Meguri Sync/file/safety
 # scope; server evidence cannot satisfy them or reactivate server work.
 version: 1
 plan: docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md
@@ -282,8 +282,8 @@ milestones:
   - id: M1R
     name: Reviews first
     plan:
-      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, backup (AE86). U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
-      user_steps: "Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
+      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 Meguri Sync convergence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, backup (AE86). U251's M1R legs: kill during review and during a Meguri Sync exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
+      user_steps: "Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with Meguri Sync, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, Meguri Sync server tests and packaged-server checks, native bootstrap/download/reopen, U250 sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
     units: [U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41,
       U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80,
       U82a, U85a, U113, U114, U117, U118, U124a, U126, U127, U132,
@@ -315,13 +315,16 @@ milestones:
         plan:
           - {text: "gated by U241 against the review-loop budgets (R1807–R1817)", items: [review]}
         why: U241 gates U243's review loop against the review-loop budgets (R1807-R1817)
-      - id: u248-soak
-        run: u248-soak
+      - id: u248-convergence
+        run: u248-convergence
         pending: U248
-        scope: {detail: scenarios, items: [cloudkit-signed]}
+        scope: {detail: scenarios, items: [meguri-sync-convergence]}
         plan:
-          - {text: "U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210)", items: [cloudkit-signed]}
-        why: U248 signed CloudKit convergence soak, run by tools/mg milestone; its optimizer race comes with U47 (M1)
+          - {text: "U248 Meguri Sync convergence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210)", items: [meguri-sync-convergence]}
+        why: U248 Meguri Sync convergence soak, run by tools/mg milestone; its optimizer race comes with U47 (M1)
+      - {id: sync-server-test, run: sync-server-test, require: [{id: no-skips, summary: skipped, max: 0}], why: "Meguri Sync server protocol and data-safety tests"}
+      - {id: sync-server-package-test, run: sync-server-package-test, require: [{id: no-skips, summary: skipped, max: 0}], why: "Existing exact packaged release server runtime checks"}
+      - {id: meguri-provider-real-server, run: meguri-provider-real-server, require: [{id: no-skips, summary: skipped, max: 0}], why: "Native two-client first upload, first download and cold reopen against the packaged release server"}
       - {id: u36-preservation, run: conformance, plan: ["U36 preservation suite (R2017)"], why: "active preservation scenarios in both T0 lanes; core-test also runs the engine churn guards (R2017)"}
       - id: u250-fault
         run: u250-fault
@@ -334,7 +337,7 @@ milestones:
         pending: U251
         scope: {detail: cases, items: [kill-review, kill-sync, background-suspend, corrupt-collection, restore]}
         plan:
-          - text: "U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
+          - text: "U251's M1R legs: kill during review and during a Meguri Sync exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
             items: [kill-review, kill-sync, background-suspend, corrupt-collection, restore]
         why: U251's M1R legs (AE86), restore through Settings (U163a)
       - {id: u38-wiring, run: u38-wiring, plan: ["U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check)"], why: "pending providers must belong to later milestones"}
@@ -365,18 +368,18 @@ milestones:
         validator: {type: device-run, device: mac}
         plan: ["U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks)"]
       - id: first-sync
-        description: The first real sync with CloudKit, made with a clean-tree build after its M1R sync conformance results passed on its commit and after a backup of the real collection; it starts the M1R trial
+        description: The first real sync with Meguri Sync, made with a clean-tree build after its M1R sync conformance results passed on its commit and after a backup of the real collection; it starts the M1R trial
         evidence: docs/process/milestone-records/M1R/first-sync.json
-        validator: {type: first-sync, results: [u246-sync-area, cloudkit-fake, cloudkit-faults, cloudkit-soak-fake, u248-soak, u250-sync-classes]}
+        validator: {type: first-sync, results: [u246-sync-area, sync-server-test, sync-server-package-test, meguri-provider-real-server, u250-sync-classes]}
         plan:
-          - text: "The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
-            items: [u246-sync-area, u248-soak, u250-sync-classes]
+          - text: "The first real sync with Meguri Sync, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, Meguri Sync server tests and packaged-server checks, native bootstrap/download/reopen, U250 sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards)"
+            items: [u246-sync-area, sync-server-test, sync-server-package-test, meguri-provider-real-server, u250-sync-classes]
     deferred: []
 
   - id: M1
     name: Daily review driver
     plan:
-      gate: "Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
+      gate: "Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 Meguri Sync convergence soak, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
       user_steps: "U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged"
     units: [U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101,
       U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184,
@@ -421,12 +424,12 @@ milestones:
         scope: {detail: groups, items: [review, memory]}
         plan: [{text: "U245 review and memory subset", items: [review, memory]}]
         why: U245 review and memory subset
-      - id: u248-soak
-        run: u248-soak
+      - id: u248-convergence
+        run: u248-convergence
         pending: U248
-        scope: {detail: scenarios, items: [cloudkit-signed, cloudkit-two-device-optimizer]}
-        plan: [{text: "U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race", items: [cloudkit-signed, cloudkit-two-device-optimizer]}]
-        why: U248 CloudKit convergence soak with its two-device optimizer race (U47)
+        scope: {detail: scenarios, items: [meguri-sync-convergence, two-device-optimizer]}
+        plan: [{text: "U248 Meguri Sync convergence soak, with its two-device optimizer race", items: [meguri-sync-convergence, two-device-optimizer]}]
+        why: U248 Meguri Sync convergence soak with its two-device optimizer race (U47)
       - {id: u36-preservation, run: conformance, plan: [U36 preservation suite (R2017)], why: "active preservation scenarios in both T0 lanes; core-test also runs the engine churn guards (R2017)"}
       - id: u250-fault
         run: u250-fault

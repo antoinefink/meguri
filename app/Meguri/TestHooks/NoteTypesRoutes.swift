@@ -19,7 +19,7 @@ extension TestHooks {
     ///   the first counts renews it with larger losses. No collection or server.
     /// - `notetypes/fields/edited`: a draft that deletes Tavrin Notes and adds
     ///   Origin: "Edited" in the list, "Save…" in the toolbar.
-    /// - `notetypes/save/losses`: that draft's Save sheet with iCloud or no
+    /// - `notetypes/save/losses`: that draft's Save sheet with Off or no
     ///   service: the losses, then Cancel and a destructive Save.
     /// - `notetypes/save/meguri-sync`: the same with a ready Meguri Sync
     ///   binding: the sync paragraph and Save and Upload.

@@ -46,7 +46,12 @@
     },
     "Export Deck…": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Export Deck…" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Deck…"
+          }
+        }
       }
     },
     "Add Note": {
@@ -701,16 +706,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Set Up Sync"
-          }
-        }
-      }
-    },
-    "Get your collection from Meguri Sync or iCloud.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Get your collection from Meguri Sync or iCloud."
           }
         }
       }
@@ -2084,6 +2079,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "No eligible cards matched. Edit the study choices and try again. The previous session is unchanged."
+          }
+        }
+      }
+    },
+    "Get your collection from Meguri Sync.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get your collection from Meguri Sync."
           }
         }
       }

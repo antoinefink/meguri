@@ -102,15 +102,15 @@ extension EventTests {
 private actor HeldProviderReplies: MeguriProviderConnectionService {
     let core: CoreProviderService
     let reply: ProviderAuthenticationReply
-    let authenticationGate: CloudCallbackGate?
+    let authenticationGate: DeferredTestGate?
     var configurationRequests: [String] = []
     var configurations: [String: MeguriProviderConnectionOwnership] = [:]
     var authentications: [MeguriProviderConnection] = []
-    var heldConfigurations: [String: (gate: CloudCallbackGate, beforeCore: Bool, fails: Bool)] = [:]
-    init(_ core: CoreProviderService, authenticationGate: CloudCallbackGate? = nil) {
+    var heldConfigurations: [String: (gate: DeferredTestGate, beforeCore: Bool, fails: Bool)] = [:]
+    init(_ core: CoreProviderService, authenticationGate: DeferredTestGate? = nil) {
         self.core = core; reply = ProviderAuthenticationReply(core); self.authenticationGate = authenticationGate
     }
-    func holdConfiguration(_ endpoint: String, at gate: CloudCallbackGate, beforeCore: Bool = false, fails: Bool = false) {
+    func holdConfiguration(_ endpoint: String, at gate: DeferredTestGate, beforeCore: Bool = false, fails: Bool = false) {
         heldConfigurations[endpoint] = (gate, beforeCore, fails)
     }
     func configureMeguri(endpoint: String) async throws -> MeguriProviderConnectionOwnership {
@@ -135,9 +135,9 @@ private actor HeldProviderReplies: MeguriProviderConnectionService {
 }
 
 private actor HeldProviderReadStore: MeguriProviderCredentialStore {
-    var nextRead: (CloudCallbackGate, Bool)?
+    var nextRead: (DeferredTestGate, Bool)?
     var value: MeguriProviderCredentials?
-    func holdRead(at gate: CloudCallbackGate, fails: Bool) { nextRead = (gate, fails) }
+    func holdRead(at gate: DeferredTestGate, fails: Bool) { nextRead = (gate, fails) }
     func load(connection: MeguriProviderConnection) async throws -> MeguriProviderCredentials? {
         if let (gate, fails) = nextRead {
             nextRead = nil
@@ -162,10 +162,10 @@ private actor HeldProviderReadStore: MeguriProviderCredentialStore {
     }
     throw BridgeError.unavailable(reason: "Synthetic provider rendezvous did not arrive")
 }
-@MainActor private func awaitProviderGate(_ gate: CloudCallbackGate) async throws {
+@MainActor private func awaitProviderGate(_ gate: DeferredTestGate) async throws {
     try await awaitProviderCondition { await gate.pendingWaiterCount() > 0 }
 }
-@MainActor private func releaseProviderTasks(_ gates: [CloudCallbackGate], _ tasks: [Task<Void, any Error>]) async {
+@MainActor private func releaseProviderTasks(_ gates: [DeferredTestGate], _ tasks: [Task<Void, any Error>]) async {
     for task in tasks { task.cancel() }
     for gate in gates { await gate.open() }
     for task in tasks { _ = await task.result }
@@ -191,7 +191,7 @@ private actor HeldProviderReadStore: MeguriProviderCredentialStore {
 extension EventTests {
     @Test @MainActor func endpointEditsJoiningOneHeldAuthenticationKeepLatestIntentClosed() async throws {
         try await withProviderOwnerCollection { core in
-            let authentication = CloudCallbackGate(), configuration = CloudCallbackGate()
+            let authentication = DeferredTestGate(), configuration = DeferredTestGate()
             let reply = HeldProviderReplies(core, authenticationGate: authentication)
             let store = FailingProviderStore("")
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)
@@ -238,7 +238,7 @@ extension EventTests {
     @Test(arguments: [false, true], [false, true])
     @MainActor func configurationDeliveryCannotPublishAnOlderIntent(beforeCore: Bool, olderFails: Bool) async throws {
         try await withProviderOwnerCollection { core in
-            let olderGate = CloudCallbackGate(), latestGate = CloudCallbackGate()
+            let olderGate = DeferredTestGate(), latestGate = DeferredTestGate()
             let reply = HeldProviderReplies(core)
             let store = FailingProviderStore("")
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)
@@ -287,7 +287,7 @@ extension EventTests {
     @Test(arguments: [false, true], [false, true])
     @MainActor func configurationDrainCannotReleaseASuccessorSlot(beforeCore: Bool, removing: Bool) async throws {
         try await withProviderOwnerCollection { core in
-            let olderGate = CloudCallbackGate(), latestGate = CloudCallbackGate()
+            let olderGate = DeferredTestGate(), latestGate = DeferredTestGate()
             let reply = HeldProviderReplies(core)
             let store = FailingProviderStore("")
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)
@@ -364,7 +364,7 @@ extension EventTests {
     @Test(arguments: [false, true], [false, true])
     @MainActor func credentialReadCannotPublishAfterAnEndpointEdit(fails: Bool, signingIn: Bool) async throws {
         try await withProviderOwnerCollection { core in
-            let read = CloudCallbackGate(), configuration = CloudCallbackGate()
+            let read = DeferredTestGate(), configuration = DeferredTestGate()
             let reply = HeldProviderReplies(core)
             let store = HeldProviderReadStore()
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)
@@ -408,7 +408,7 @@ extension EventTests {
     @Test(arguments: [false, true])
     @MainActor func credentialReadCannotUndoCredentialRemoval(fails: Bool) async throws {
         try await withProviderOwnerCollection { core in
-            let read = CloudCallbackGate()
+            let read = DeferredTestGate()
             let reply = HeldProviderReplies(core)
             let store = HeldProviderReadStore()
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)
@@ -485,7 +485,7 @@ extension EventTests {
     #if DEBUG
     @Test @MainActor func ProviderBootstrapSignInDrainsHeldReadBeforeAuthenticating() async throws {
         try await withProviderOwnerCollection { core in
-            let read = CloudCallbackGate()
+            let read = DeferredTestGate()
             let reply = ProviderAuthenticationReply(core)
             let store = HeldProviderReadStore()
             let owner = MeguriProviderConnectionOwner(service: reply, store: store)

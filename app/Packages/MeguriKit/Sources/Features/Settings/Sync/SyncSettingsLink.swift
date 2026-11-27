@@ -2,10 +2,9 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-/// Values observed by the Mac Settings detail path. Keep provider-specific
-/// destinations distinct so a push retains the provider chosen at the click.
+/// Values observed by the Mac Settings detail path.
 enum SyncSettingsDestination: Hashable {
-    case troubleshooting, account, issues, meguriAffectedFiles, syncLog
+    case troubleshooting, account, meguriAffectedFiles, syncLog
 
     @MainActor @ViewBuilder func view(collection: ReviewCollection, host: AppNavigation.SheetHost) -> some View {
         switch self {
@@ -22,8 +21,6 @@ enum SyncSettingsDestination: Hashable {
             .formStyle(.grouped)
             .navigationTitle(SyncText.value("sync.settings.account"))
             .accessibilityIdentifier("settings.sync.meguri.account.content")
-        case .issues:
-            SyncIssuesPage(collection: collection)
         case .meguriAffectedFiles:
             MeguriAffectedFilesPage(collection: collection)
         case .syncLog:

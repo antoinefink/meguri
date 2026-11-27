@@ -61,6 +61,11 @@ pub struct OpenConfig {
     /// The provider failed to read the initial identity. This grants no account
     /// authority; only a finished adoption may preserve its decision while waiting.
     pub startup_identity_read_failed: bool,
+    /// App-specific iCloud removal upgrade. Settle historical local R6 recovery
+    /// under the collection lock using the exact archival binding for local
+    /// ownership. Preserve historical bindings and decisions; compare no live
+    /// account. This supplies no account, provider or network authority.
+    pub retire_icloud_publication: bool,
     /// The SQL functions every connection of the collection registers
     /// (`storage/open-and-connections` C5).
     pub initializers: Initializers,
@@ -88,6 +93,7 @@ impl OpenConfig {
             publication_binding: crate::device_state::AccountBinding::LocalOnly,
             startup_publication_binding: None,
             startup_identity_read_failed: false,
+            retire_icloud_publication: false,
             initializers: Initializers::default(),
             ports: Ports::default(),
             backups_directory: None,
@@ -405,9 +411,13 @@ impl Engine {
                 &config.publication_binding,
                 config.startup_publication_binding.as_ref(),
                 config.startup_identity_read_failed,
+                config.retire_icloud_publication,
                 config.clock.clone(),
                 config.random.clone(),
             )?;
+            if config.retire_icloud_publication {
+                config.publication_binding = crate::device_state::AccountBinding::LocalOnly;
+            }
             // A proven absent old view must stay absent, including its optional
             // publication record. Let the ordinary open gate report the missing
             // collection without allocating an identity on a failed open.
@@ -415,9 +425,9 @@ impl Engine {
                 // Startup recovery has compared the actual account or retained
                 // an unverified finished adoption. Local reopen ownership follows
                 // the durable decision; it grants no live account authority.
-                let binding = if config.startup_publication_binding.is_some() {
+                let binding = if config.retire_icloud_publication || config.startup_publication_binding.is_some() {
                     crate::device_state::DeviceState::for_collection(path)
-                        .publication()?
+                        .settled_publication()?
                         .map(|p| p.binding)
                         .unwrap_or_else(|| config.publication_binding.clone())
                 } else {

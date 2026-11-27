@@ -17,7 +17,7 @@ extension ReviewCollectionStartupTests {
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
+            sync: SyncCoordinator(directory: directory, defaults: nil),
             providerDirectory: root.appending(path: "transfers"))
         do {
             await owner.start(); await owner.startEmpty()

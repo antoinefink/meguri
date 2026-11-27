@@ -34,7 +34,7 @@ extension EventTests {
             await #expect(throws: (any Error).self) { _ = try await original.retryFailedPublication() }
             let recovered = try await current.recoverHandoffToLocalOnly()
             #expect(recovered.selection == .localOnly && recovered.phase == .localOnly)
-            #expect(!recovered.permitsICloudStartup && !recovered.removalPending)
+            #expect(!recovered.removalPending)
             let committed = try Data(contentsOf: file)
             #expect(committed != intent)
             await #expect(throws: (any Error).self) {
@@ -63,7 +63,7 @@ extension EventTests {
             await #expect(throws: (any Error).self) { _ = try await current.recoverHandoffToLocalOnly() }
             let stopped = try await current.refresh()
             #expect(stopped.phase == .handoffRecovery && stopped.removalPending)
-            #expect(!stopped.permitsICloudStartup)
+
             #expect(try Data(contentsOf: file) == intent)
         }
     }

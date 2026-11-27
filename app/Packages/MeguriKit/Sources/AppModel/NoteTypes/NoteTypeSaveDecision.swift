@@ -5,7 +5,7 @@ import Foundation
 public nonisolated enum NoteTypeSaveService: Sendable, Hashable {
     /// Meguri Sync with a ready binding (MP5).
     case meguriSync
-    /// iCloud (Beta), Off, or Meguri Sync chosen but not set up (D3).
+    /// Off, or Meguri Sync chosen but not set up (D3).
     case other
 }
 

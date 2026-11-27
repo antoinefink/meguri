@@ -30,16 +30,14 @@ public struct ServiceSwitchConfirmation: Sendable, Equatable {
     public let closing: Closing
     public let acceptanceUnknown: Bool
 
-    /// `destination` is the Service control's tag: "localOnly", "meguri" or "iCloud".
+    /// `destination` is the Service control's tag: "localOnly" or "meguri".
     public init(source: SyncProviderSelection, destination: String, facts: ServiceSwitchFacts) {
         switch destination {
         case "meguri":
             titleKey = "sync.switch.title.meguri"; messageKey = "sync.switch.message.meguri"; confirmKey = "sync.switch.confirm.meguri"
-        case "iCloud":
-            titleKey = "sync.switch.title.iCloud"; messageKey = "sync.switch.message.iCloud"; confirmKey = "sync.switch.confirm.iCloud"
         default:
             titleKey = "sync.switch.title.off"; confirmKey = "sync.switch.confirm.off"
-            messageKey = source == .meguri ? "sync.switch.message.off.meguri" : "sync.switch.message.off.iCloud"
+            messageKey = "sync.switch.message.off.meguri"
         }
         var unsent: [Unsent] = []
         var unknown = false
@@ -56,9 +54,9 @@ public struct ServiceSwitchConfirmation: Sendable, Equatable {
         acceptanceUnknown = facts.acceptanceUnknown
     }
 
-    /// The old service's name in the lines: T19.1's names, iCloud without its label inside a sentence.
+    /// The old service's name in the lines: T19.1's supported service names.
     public static func serviceName(_ source: SyncProviderSelection) -> String {
-        SyncText.value(source == .meguri ? "sync.service.meguri" : "sync.service.iCloud.name")
+        SyncText.value("sync.service.meguri")
     }
 
     /// The alert's message: the paragraph, then the list and its closing

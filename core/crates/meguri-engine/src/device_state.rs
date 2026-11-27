@@ -1223,6 +1223,7 @@ pub(crate) fn reconcile_initial_cloud_adopt(live: &Path, config: &crate::OpenCon
             &config.publication_binding,
             config.startup_publication_binding.as_ref(),
             config.startup_identity_read_failed,
+            config.retire_icloud_publication,
             config.clock.clone(),
             config.random.clone(),
         )?;
@@ -1236,14 +1237,20 @@ pub(crate) fn reconcile_initial_cloud_adopt(live: &Path, config: &crate::OpenCon
 /// lifecycle recovery keeps the recorded binding without treating it as a live
 /// account. A failed initial read preserves a finished adoption's decision only;
 /// unfinished adoption still receives Unknown for R6.6's mandatory account check.
+/// The explicit removal upgrade settles local historical ownership without
+/// changing archival bindings or interpreting them as live account authority.
 pub(crate) fn reconcile_startup(
     live: &Path,
     fallback: &AccountBinding,
     actual: Option<&AccountBinding>,
     identity_read_failed: bool,
+    retire_icloud_publication: bool,
     clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
     random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
 ) -> Result<(), StorageError> {
+    if retire_icloud_publication {
+        return reconcile_retired_icloud(live, clock, random);
+    }
     if identity_read_failed && matches!(actual, Some(AccountBinding::Unknown)) {
         let state = sidecar::read_document(&sidecar_path(live), decode)?;
         if let Some(state) = state
@@ -1277,6 +1284,22 @@ pub(crate) fn reconcile_startup(
     };
     reconcile(live, &binding, clock, random)
 }
+
+/// The app has removed iCloud. Recorded bindings identify historical local
+/// journal ownership only; the ordinary R6 file/native/WAL/media checks still
+/// decide which collection stands. Finished records remain byte-for-byte intact
+/// unless mandated media cleanup is outstanding.
+fn reconcile_retired_icloud(
+    live: &Path,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
+) -> Result<(), StorageError> {
+    let Some(state) = sidecar::read_document(&sidecar_path(live), decode)? else {
+        return Ok(());
+    };
+    reconcile_local(live, &state.active.binding, clock, random, None, true)
+}
+
 pub(crate) fn reconcile(
     live: &Path,
     binding: &AccountBinding,
@@ -1292,6 +1315,17 @@ pub(crate) fn reconcile_with_media(
     random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
     shared: Option<&meguri_storage::media::MediaStore>,
 ) -> Result<(), StorageError> {
+    reconcile_local(live, binding, clock, random, shared, false)
+}
+
+fn reconcile_local(
+    live: &Path,
+    binding: &AccountBinding,
+    clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
+    shared: Option<&meguri_storage::media::MediaStore>,
+    retiring_icloud: bool,
+) -> Result<(), StorageError> {
     let path = sidecar_path(live);
     let state = sidecar::read_document(&path, decode)?;
     let Some(state) = state else {
@@ -1302,7 +1336,9 @@ pub(crate) fn reconcile_with_media(
         };
     };
     if state.intent.is_none() && cloud_active(&state)? {
-        reconcile_cloud_active(live, &state, binding)?;
+        if !retiring_icloud {
+            reconcile_cloud_active(live, &state, binding)?;
+        }
         return cleanup_completed_media(live, &state.active.binding);
     }
     bound(&state, binding)?;
@@ -1314,11 +1350,18 @@ pub(crate) fn reconcile_with_media(
     }
     let intent = state.intent.unwrap();
     let cloud = intent.reason == crate::replace::ReplaceReason::CloudAdopt;
+    let activation_binding = if cloud && retiring_icloud {
+        // Exact local proof may select the candidate, but the archived account
+        // cannot authorize a new Clear decision. Preserve R6's offline Pending.
+        &AccountBinding::Unknown
+    } else {
+        binding
+    };
     let decision = match intent.phase {
         Phase::WalIntent | Phase::WalActivated => return Err(failure("WAL intent lacks its authority")),
         Phase::Activated => {
             if cloud {
-                activate(live, binding)?;
+                activate_inner(live, activation_binding, retiring_icloud)?;
                 return cleanup_completed_media(live, &intent.candidate.binding);
             }
             let expected = if intent.reason.requires_publication_decision() {
@@ -1354,7 +1397,7 @@ pub(crate) fn reconcile_with_media(
                 && (intent.candidate_native.is_none() || current_native == intent.candidate_native);
             match (old, candidate) {
                 (true, false) => {
-                    if cloud && !cloud_account_matches(&intent.prior.binding, binding) {
+                    if cloud && !retiring_icloud && !cloud_account_matches(&intent.prior.binding, binding) {
                         return Err(failure("prior adoption binding no longer matches"));
                     }
                     intent.prior.clone()
@@ -1363,7 +1406,7 @@ pub(crate) fn reconcile_with_media(
                     // A crash after rename may have preceded directory sync.
                     meguri_storage::atomic_file::sync_directory(live.parent().unwrap_or(Path::new(".")))?;
                     finish_media(live, &intent, true, clock.clone(), random.clone(), shared)?;
-                    activate(live, binding)?;
+                    activate(live, activation_binding)?;
                     return cleanup_completed_media(live, if cloud { &intent.candidate.binding } else { binding });
                 }
                 _ => {
@@ -1761,6 +1804,13 @@ fn retained_replacements(state: &State) -> Result<Vec<ReplacementEvidence>, Stor
 }
 
 pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), StorageError> {
+    activate_inner(live, binding, false)
+}
+fn activate_inner(
+    live: &Path,
+    binding: &AccountBinding,
+    preserve_activated_decision: bool,
+) -> Result<(), StorageError> {
     sidecar::update_document(&sidecar_path(live), |doc| {
         let mut state = decode(Some(doc))?.ok_or_else(|| failure("missing activation journal"))?;
         bound(&state, binding)?;
@@ -1784,7 +1834,13 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
                 && state.active.decision == PublicationDecision::Pending
         });
         let intent = state.intent.as_mut().ok_or_else(|| failure("missing intent"))?;
-        state.active = activation_decision(intent, binding);
+        // Offline cleanup keeps the decision from the activated record.
+        if !(preserve_activated_decision
+            && intent.reason == crate::replace::ReplaceReason::CloudAdopt
+            && intent.phase == Phase::Activated)
+        {
+            state.active = activation_decision(intent, binding);
+        }
         if keep_pending {
             state.active.decision = PublicationDecision::Pending;
         }
@@ -1811,7 +1867,18 @@ pub(crate) fn activate(live: &Path, binding: &AccountBinding) -> Result<(), Stor
                 replacement: evidence.clone(),
                 native,
             };
-            if previous_cloud_proof.as_ref() != Some(&proof) {
+            if previous_cloud_proof.as_ref() == Some(&proof) {
+                use std::os::unix::fs::MetadataExt;
+                // Local writes may change bytes after publication, but cleanup
+                // still belongs only to the independently linked R6 inode.
+                let metadata = std::fs::symlink_metadata(live)?;
+                if !metadata.is_file()
+                    || metadata.nlink() != 1
+                    || (metadata.dev(), metadata.ino()) != (proof.native.device, proof.native.inode)
+                {
+                    return Err(failure("activated candidate native identity differs from R6 proof"));
+                }
+            } else {
                 // R6 owns the closed candidate here. Reuse its descriptor-bound
                 // verifier; never compare the DELETE-mode digest after SQLite
                 // has reopened it in WAL mode or performed a day write.
@@ -1928,6 +1995,99 @@ pub(crate) fn finish_restore_wal(live: &Path, binding: &AccountBinding) -> Resul
     let state = sidecar::read_document(&sidecar_path(live), decode)?.ok_or_else(|| failure("missing WAL state"))?;
     bound(&state, binding)?;
     retained_wal::reconcile_wal(live, state, binding)
+}
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+    use meguri_model::{
+        clock::{StepClock, UtcOffset},
+        rng::SeededRandom,
+    };
+    use serde_json::json;
+    use std::sync::Arc;
+
+    fn retire(live: &Path) -> Result<(), StorageError> {
+        let _ownership = meguri_storage::lockfile::CollectionLock::acquire(live.parent().unwrap()).map_err(failure)?;
+        reconcile_startup(
+            live,
+            &AccountBinding::LocalOnly,
+            Some(&AccountBinding::Unknown),
+            true,
+            true,
+            Arc::new(StepClock::new(0, UtcOffset::UTC, "UTC")),
+            Arc::new(SeededRandom::new(41)),
+        )
+    }
+
+    #[test]
+    fn retirement_preserves_connected_active_binding_and_extensions_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        let path = sidecar_path(&live);
+        std::fs::write(&live, b"stable collection is never opened by retirement").unwrap();
+        let binding = AccountBinding::Connected {
+            account: "synthetic-account".into(),
+            configuration: "synthetic-app".into(),
+            environment: "test".into(),
+        };
+        ensure(&live, &binding, &SeededRandom::new(4)).unwrap();
+        let mut expected: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        expected["futureTop"] = json!({"kept": [1, 2]});
+        expected["deviceState"]["futureState"] = json!({"kept": true});
+        expected["deviceState"]["active"]["futurePublication"] = json!([3, 4]);
+        std::fs::write(&path, serde_json::to_vec_pretty(&expected).unwrap()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        retire(&live).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let once = std::fs::read(&path).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&once).unwrap(), expected);
+        retire(&live).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), once);
+        assert_eq!(std::fs::read(live).unwrap(), b"stable collection is never opened by retirement");
+    }
+
+    #[test]
+    fn retirement_current_local_publication_is_byte_and_inode_preserving() {
+        use std::os::unix::fs::MetadataExt;
+        for decision in [PublicationDecision::Clear, PublicationDecision::Pending] {
+            let dir = tempfile::tempdir().unwrap();
+            let live = dir.path().join("collection.anki2");
+            let path = sidecar_path(&live);
+            ensure(&live, &AccountBinding::LocalOnly, &SeededRandom::new(4)).unwrap();
+            let mut doc: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            doc["deviceState"]["active"]["decision"] = serde_json::to_value(decision).unwrap();
+            if decision == PublicationDecision::Pending {
+                doc["deviceState"]["pendingDecisionReason"] = json!("restore");
+            }
+            doc["deviceState"]["futureState"] = json!({"kept": true});
+            // Deliberate noncanonical whitespace detects even a no-op rewrite.
+            let bytes = format!("\n{}\n\n", serde_json::to_string_pretty(&doc).unwrap()).into_bytes();
+            std::fs::write(&path, &bytes).unwrap();
+            let inode = path.metadata().unwrap().ino();
+            let publication = DeviceState::for_collection(&live).settled_publication().unwrap();
+            for _ in 0..2 {
+                retire(&live).unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+                assert_eq!(path.metadata().unwrap().ino(), inode);
+                // Meguri readiness compares this persistent identity with its
+                // provider binding; retirement never reallocates it.
+                assert_eq!(DeviceState::for_collection(&live).settled_publication().unwrap(), publication);
+            }
+        }
+    }
+
+    #[test]
+    fn retirement_absent_state_does_not_allocate_identity_or_rewrite_neighbors() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("collection.anki2");
+        retire(&live).unwrap();
+        assert!(!sidecar_path(&live).exists());
+        let bytes = b"{ \"futureTop\": [1, 2] }\n";
+        std::fs::write(sidecar_path(&live), bytes).unwrap();
+        retire(&live).unwrap();
+        assert_eq!(std::fs::read(sidecar_path(&live)).unwrap(), bytes);
+    }
 }
 
 #[cfg(test)]

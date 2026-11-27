@@ -72,7 +72,7 @@ actor BackupServiceProbe: MaintenanceService {
         await beforeRestore?()
         if let refusal { throw refusal }
         return RestoredBackup(name: name, safetyBackup: "backup-predecessor.colpkg", generation: 2,
-            cloudPublicationPending: true, deadlineMilliseconds: 300_000)
+            deadlineMilliseconds: 300_000)
     }
     func runDueMaintenance(_ trigger: MaintenanceTrigger, operation: MaintenanceOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> Int64? {
         triggers.append(trigger)
@@ -178,7 +178,7 @@ actor BackupServiceProbe: MaintenanceService {
         let restoreResult = await restore.result
         #expect(try maintenanceResult.get() == 4_000)
         #expect(try restoreResult.get() == RestoredBackup(name: name, safetyBackup: "backup-predecessor.colpkg",
-            generation: 2, cloudPublicationPending: true, deadlineMilliseconds: 300_000))
+            generation: 2, deadlineMilliseconds: 300_000))
         #expect(await service.releaseWaiters.isEmpty)
     }
 

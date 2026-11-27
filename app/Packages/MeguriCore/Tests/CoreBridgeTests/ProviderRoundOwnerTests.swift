@@ -9,11 +9,11 @@ import Testing
 private actor RoundCredentialStore: MeguriProviderCredentialStore {
     enum Failure: Error { case read }
     var value: MeguriProviderCredentials?
-    var heldRead: (gate: CloudCallbackGate, onCancel: (@Sendable () -> Void)?)?
+    var heldRead: (gate: DeferredTestGate, onCancel: (@Sendable () -> Void)?)?
     var failsRead = false
     var deletions: [MeguriProviderConnection] = []
     var reads: [MeguriProviderConnection] = []
-    func hold(_ gate: CloudCallbackGate, onCancel: (@Sendable () -> Void)? = nil) {
+    func hold(_ gate: DeferredTestGate, onCancel: (@Sendable () -> Void)? = nil) {
         heldRead = (gate, onCancel)
     }
     func failRead(_ value: Bool) { failsRead = value }
@@ -172,7 +172,7 @@ extension EventTests {
             let facade = try await owner.roundService()
             let exact = try #require(await store.value)
             let deletionCount = await store.deletions.count
-            let read = CloudCallbackGate()
+            let read = DeferredTestGate()
             let finished = Mutex(false)
             let roundFinished = Mutex(false)
             let calls = Mutex<[BridgeCall]>([])
@@ -264,7 +264,7 @@ extension EventTests {
             let store = RoundCredentialStore()
             let owner = try await roundOwner(core, store)
             let facade = try await owner.roundService()
-            let read = CloudCallbackGate()
+            let read = DeferredTestGate()
             let finished = Mutex(false)
             let credentialCancelled = Mutex(false)
             let calls = Mutex<[BridgeCall]>([])

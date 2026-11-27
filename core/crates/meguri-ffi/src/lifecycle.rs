@@ -52,7 +52,6 @@ pub enum CollectionLongOp {
     ApkgApply,
     CheckDatabase,
     CollectionExportHandoff,
-    CloudAdopt,
 }
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CollectionExclusivePhase {
@@ -121,7 +120,7 @@ impl From<engine::LifecycleState> for CollectionLifecycle {
                     engine::LongOp::ApkgApply => CollectionLongOp::ApkgApply,
                     engine::LongOp::CheckDatabase => CollectionLongOp::CheckDatabase,
                     engine::LongOp::CollectionExportHandoff => CollectionLongOp::CollectionExportHandoff,
-                    engine::LongOp::CloudAdopt => CollectionLongOp::CloudAdopt,
+                    engine::LongOp::CloudAdopt => CollectionLongOp::ColpkgImport,
                 },
                 phase: match phase {
                     engine::ExclusivePhase::Draining => CollectionExclusivePhase::Draining,

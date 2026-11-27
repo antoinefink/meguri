@@ -27,6 +27,144 @@ fn owner(host: Arc<meguri_host::CoreHost>) -> Arc<ProviderOwner> {
     Arc::new(ProviderOwner { host, generation })
 }
 
+#[test]
+fn application_ffi_entry_routes_retire_prior_icloud_and_keep_malformed_metadata_blocked() {
+    use crate::collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock};
+    use crate::collection_entry::{self, CollectionActivationOutcome, CollectionInspectOutcome};
+    use crate::manual_transfers::{ManualTransferOutcome, ManualTransferSession, ManualTransferValue};
+    use meguri_engine::{EventKind, JobId, JobOutcome};
+    use meguri_sync::provider::{LegacySettings, ProviderDocument, Selection};
+    struct Clock;
+    impl HostClock for Clock {
+        fn now_ms(&self) -> i64 { 1_894_701_600_000 }
+        fn offset_from_utc(&self, _: i64) -> i32 { 0 }
+        fn zone_id(&self) -> String { "UTC".into() }
+    }
+    struct Space;
+    impl DiskSpaceProvider for Space {
+        fn available_bytes(&self, _: String) -> DiskCapacity { DiskCapacity::Available { bytes: u64::MAX } }
+    }
+    let events = runtime::engine().unwrap().stream().subscribe();
+    let wait = |id: u64| loop {
+        let event = events.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+        if let EventKind::JobFinished { id: actual, outcome } = &event.kind && *actual == JobId(id) {
+            assert_eq!(outcome, &JobOutcome::Succeeded);
+            break;
+        }
+    };
+    // Ordinary open, direct creation, retained preparation/creation, initial
+    // activation, and offline manual setup all enter through FFI reservations.
+    for entry in 0..5 {
+        let root = tempfile::tempdir().unwrap();
+        let config = if entry == 0 { configuration(root.path()) } else { unopened_configuration(root.path()) };
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../conformance/fixtures/storage/schema-18.anki2");
+        if entry == 4 {
+            // Manual setup opens an existing public synthetic collection, with
+            // no login, account inputs, endpoint or server connection.
+            std::fs::copy(&fixture, config.collection_directory.join("collection.anki2")).unwrap();
+        }
+        std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
+        let path = config.manual_transfer_directory.join("provider.json");
+        let mut prior = serde_json::to_value(ProviderDocument::migration(LegacySettings {
+            enabled: true, paused: false, automatic: true, media: true,
+        })).unwrap();
+        prior["future"] = serde_json::json!({"retained":true});
+        std::fs::write(&path, serde_json::to_vec(&prior).unwrap()).unwrap();
+        let location = CollectionLocation {
+            collection_directory: config.collection_directory.to_str().unwrap().into(),
+            backups_directory: config.backups_directory.to_str().unwrap().into(),
+            app_group_snapshot: config.app_group_snapshot.to_str().unwrap().into(),
+            manual_transfer_directory: config.manual_transfer_directory.to_str().unwrap().into(),
+        };
+        match entry {
+            0 => wait(collection::start_open(location, Arc::new(Clock), Arc::new(Space), 151).unwrap().id),
+            1 => wait(collection::start_create_empty(location, Arc::new(Clock), Arc::new(Space), 151).unwrap().id),
+            2 => {
+                collection::prepare_provider_host(location.clone(), Arc::new(Clock), Arc::new(Space), 151).unwrap();
+                assert!(!config.collection_directory.join("collection.anki2").exists());
+                let prepared = runtime::host().unwrap().provider_authority().snapshot().unwrap();
+                assert_eq!(prepared.selection, Selection::LocalOnly);
+                assert!(!prepared.settings.enabled);
+                wait(collection::start_create_empty(location, Arc::new(Clock), Arc::new(Space), 151).unwrap().id);
+            }
+            3 => {
+                let source = root.path().join("input.colpkg");
+                meguri_package::write_collection_package_from_standalone(&fixture, &source,
+                    &meguri_package::CollectionPackageWriteContext {
+                        collection_directory: &config.collection_directory,
+                        purpose: meguri_storage::atomic_file::Purpose::Export,
+                        finalisation: meguri_package::Finalisation::ExclusiveCreate,
+                        clock: config.clock.as_ref(), random: config.random.as_ref(),
+                        space: config.disk_space_provider.as_ref(), is_cancelled: &|| false,
+                    }).unwrap();
+                let inspected = collection_entry::start_collection_inspection(source.to_str().unwrap().into(),
+                    location, Arc::new(Clock), Arc::new(Space), 151).unwrap();
+                wait(inspected.job.id);
+                let CollectionInspectOutcome::Ready { inspection } = inspected.result.outcome().unwrap() else {
+                    panic!("initial inspection must be ready")
+                };
+                let activated = collection_entry::start_collection_activation(inspection).unwrap();
+                wait(activated.job.id);
+                assert!(matches!(activated.result.outcome().unwrap(), CollectionActivationOutcome::Activated { .. }));
+            }
+            _ => {
+                assert!(config.collection_directory.join("collection.anki2").is_file());
+                let session = ManualTransferSession::new(location, Arc::new(Clock), Arc::new(Space), 151).unwrap();
+                let setup = session.start_setup().unwrap();
+                wait(setup.job.id);
+                assert!(matches!(setup.result.outcome().unwrap(),
+                    ManualTransferOutcome::Value { value: ManualTransferValue::Ready }));
+            }
+        }
+        let host = runtime::host().unwrap();
+        assert!(host.collection().is_ok());
+        assert!(host.cloud_runtime().is_none());
+        let authority = host.provider_authority();
+        let document = authority.snapshot().unwrap();
+        assert_eq!(document.selection, Selection::LocalOnly);
+        assert!(!document.settings.enabled && document.handoff.is_none());
+        assert!(!document.permits_meguri_transfer() && !authority.permits_icloud_account_read());
+        let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after["retiredICloud"], prior);
+        assert_eq!(after["future"], prior["future"]);
+        drop(host);
+        crate::lifecycle::close_collection().unwrap();
+    }
+    // Only the exact historical failure marker may recover through application
+    // startup. Malformed metadata stays byte-for-byte intact and fails closed.
+    for (bytes, blocked) in [
+        ("null", true),
+        ("{}", true),
+        (r#"{"migrationFailure":"invalidLegacySettings"}"#, false),
+        (r#"{"migrationFailure":"invalidLegacySettings","selection":"Meguri"}"#, true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let config = configuration(root.path());
+        std::fs::create_dir_all(&config.manual_transfer_directory).unwrap();
+        let path = config.manual_transfer_directory.join("provider.json");
+        std::fs::write(&path, bytes).unwrap();
+        let location = CollectionLocation {
+            collection_directory: config.collection_directory.to_str().unwrap().into(),
+            backups_directory: config.backups_directory.to_str().unwrap().into(),
+            app_group_snapshot: config.app_group_snapshot.to_str().unwrap().into(),
+            manual_transfer_directory: config.manual_transfer_directory.to_str().unwrap().into(),
+        };
+        wait(collection::start_open(location, Arc::new(Clock), Arc::new(Space), 151).unwrap().id);
+        let host = runtime::host().unwrap();
+        assert!(host.collection().is_ok());
+        assert!(host.cloud_runtime().is_none());
+        let authority = host.provider_authority();
+        assert_eq!(authority.snapshot().is_err(), blocked);
+        assert_eq!(authority.network_blocked(), blocked);
+        assert!(!authority.permits_icloud_account_read());
+        if blocked { assert_eq!(std::fs::read(&path).unwrap(), bytes.as_bytes()); }
+        else { assert_eq!(authority.snapshot().unwrap().selection, Selection::LocalOnly); }
+        drop(host);
+        crate::lifecycle::close_collection().unwrap();
+    }
+}
+
 fn assert_absent_collection_without_provider_authority(host: &meguri_host::CoreHost, config: &meguri_host::HostConfig) {
     assert_eq!(host.engine().state(), meguri_engine::LifecycleState::NoCollection);
     assert!(host.collection().is_err());

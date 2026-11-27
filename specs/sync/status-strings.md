@@ -1,5 +1,10 @@
 # iCloud sync strings
 
+> Availability changed 2026-11-27: `sync/meguri-provider#MP0` and
+> `native-interface-contract#N28` supersede iCloud choices, copy, native
+> controls, account and transport requirements. Those clauses are retired;
+> Meguri Sync, Off and shared collection/media/hold-back requirements remain.
+
 Spec: sync/status-strings
 Requirements: R89, R102, R103, R104, R105, R106, R107, R117, R122, R123, R124, R125, R127, R158, R166, R1548, R1551, R1555, R1558, R1559, R1560, R1561, R1562, R1583, R1592, R2046, R2048, R2049, R2050, R2054, R2055, R2056, R2058, R2059
 Anki: none (Meguri design)

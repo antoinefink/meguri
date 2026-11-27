@@ -1,5 +1,10 @@
 # CloudKit acceptance and robustness
 
+> Retired from Meguri application verification on 2026-11-27 by Antoine's
+> explicit iCloud removal request. Retain this historical record; none of its
+> CloudKit-only jobs, account steps or acceptance lanes are required for the
+> unavailable service. Shared collection/media requirements remain active.
+
 Spec: conformance/cloudkit-acceptance
 Requirements: R2047, R2048, R2049, R2050, R2051, R2052, R2053, R2054, R2055, R2056, R2057, R2058, R2059, R2064, R2065, R2066; supports R88, R365, R1548, R1592, R2043, R2044, R2045, R2046; AE9, AE91, AE92, AE93, AE94, AE96
 Anki: none (Meguri design)

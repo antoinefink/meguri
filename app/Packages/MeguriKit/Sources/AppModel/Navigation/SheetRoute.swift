@@ -17,7 +17,6 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case newDeckOptionsPreset
     /// Explicit server-transfer preparation, decisions and retained history.
     case manualTransfer
-    case cloudSync(CloudSyncEntry)
     /// Account & Sync over mobile review; closing preserves the retained card.
     case accountSync
     /// The Note Types section's Save sheet (`notetypes/draft-save` D4), for

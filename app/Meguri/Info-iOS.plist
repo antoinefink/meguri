@@ -85,16 +85,6 @@
 	<string>$(MEGURI_APP_GROUP)</string>
 	<key>MeguriCardInspectionBuild</key>
 	<string>$(MEGURI_CARD_INSPECTION_BUILD)</string>
-	<key>MeguriCloudContainer</key>
-	<string>$(MEGURI_CLOUD_CONTAINER)</string>
-	<key>MeguriCloudEnvironment</key>
-	<string>$(MEGURI_CLOUD_ENVIRONMENT)</string>
-	<key>MeguriCloudSchemaConfigured</key>
-#if MEGURI_CLOUD_SCHEMA_BOOLEAN
-	<true/>
-#else
-	<false/>
-#endif
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
@@ -105,10 +95,6 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<!-- N27.7: the launch screen is the background of the first frame, a grouped list on

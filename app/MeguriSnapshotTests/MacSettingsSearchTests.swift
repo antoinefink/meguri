@@ -109,6 +109,42 @@ import Testing
             } catch { _ = await collection.close(); throw error }
         }
     }
+    private func selectNativeService(_ selection: SyncProviderSelection, in graph: NativeAccountGraph) throws {
+        let control = try #require(graph.element("settings.sync.service"))
+        let roles = Set([NSAccessibility.Role.popUpButton.rawValue, NSAccessibility.Role.radioGroup.rawValue])
+        let role = try nativeAccountString(in: control, selector: #selector(NSAccessibilityProtocol.accessibilityRole))
+        guard roles.contains(role ?? "") else { throw NativeAccountStateFailure.inappropriateRole }
+        let descendants = graph.descendants(of: control)
+        if role == NSAccessibility.Role.popUpButton.rawValue {
+            let popups = graph.nodes.values.compactMap { node -> NSPopUpButton? in
+                guard node.object === control || descendants.contains(ObjectIdentifier(node.object)) else { return nil }
+                return node.object as? NSPopUpButton
+            }
+            guard popups.count == 1, let popup = popups.first else { throw NativeAccountStateFailure.inappropriateRole }
+            guard popup.itemArray.map(\.title) == ["Off", "Meguri Sync"], popup.isEnabled,
+                  let action = popup.action else { throw NativeAccountStateFailure.invalidOptions }
+            popup.selectItem(withTitle: selection == .meguri ? "Meguri Sync" : "Off")
+            guard popup.sendAction(action, to: popup.target) else { throw NativeAccountStateFailure.actionFailed }
+            return
+        }
+        let options = graph.nodes.values.filter {
+            descendants.contains(ObjectIdentifier($0.object))
+                && ($0.role == NSAccessibility.Role.menuItem.rawValue || $0.role == NSAccessibility.Role.radioButton.rawValue)
+        }
+        var named: [String: NSObject] = [:]
+        for option in options {
+            let title = try nativeAccountString(in: option.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
+            guard let title, ["Off", "Meguri Sync"].contains(title), named[title] == nil else {
+                throw NativeAccountStateFailure.invalidOptions
+            }
+            named[title] = option.object
+        }
+        guard named.count == 2, let target = named[selection == .meguri ? "Meguri Sync" : "Off"] else {
+            throw NativeAccountStateFailure.invalidOptions
+        }
+        try performNativeAccountPress(on: target)
+    }
+
     private func waitForNativeAccountState(line: Int = #line, _ ready: () throws -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while ContinuousClock.now < deadline {
@@ -274,47 +310,6 @@ import Testing
         inspect(root, parent: nil, depth: 0, native: false)
         return graph
     }
-    private func selectNativeService(_ intended: SyncProviderSelection, in graph: NativeAccountGraph) throws {
-        let matches = graph.matches("settings.sync.service")
-        guard graph.complete else { throw NativeAccountStateFailure.incompleteGraph }
-        guard matches.count == 1, let service = matches.first else {
-            throw NativeAccountStateFailure.duplicateIdentifier
-        }
-        let serviceRoles: Set<String> = [NSAccessibility.Role.popUpButton.rawValue,
-            NSAccessibility.Role.menuButton.rawValue, NSAccessibility.Role.comboBox.rawValue]
-        guard let role = service.role, serviceRoles.contains(role) else {
-            throw NativeAccountStateFailure.inappropriateRole
-        }
-        let optionRoles: Set<String> = [NSAccessibility.Role.menuItem.rawValue, NSAccessibility.Role.radioButton.rawValue]
-        let options = graph.descendants(of: service.object).compactMap { graph.nodes[$0] }.filter {
-            guard let role = $0.role else { return false }
-            return optionRoles.contains(role)
-        }
-        // T19.2: Off, Meguri Sync and iCloud. iCloud's one-line menu caption carries
-        // its Beta label; an element that reports the spoken label instead is the same choice.
-        guard options.count == 3 else { throw NativeAccountStateFailure.invalidOptions }
-        let labels = try options.map {
-            try nativeAccountString(in: $0.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
-        }
-        let off = SyncText.value("sync.service.off"), meguri = SyncText.value("sync.service.meguri")
-        let iCloud: Set<String> = ["\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))",
-            SyncText.value("sync.service.iCloud.accessibility")]
-        let found = labels.compactMap { $0 }
-        guard found.count == 3, found.filter({ $0 == off }).count == 1, found.filter({ $0 == meguri }).count == 1,
-              found.filter({ iCloud.contains($0) }).count == 1 else { throw NativeAccountStateFailure.invalidOptions }
-        let targets = zip(options, labels).filter { _, label in
-            guard let label else { return false }
-            switch intended {
-            case .localOnly: return label == off
-            case .meguri: return label == meguri
-            case .iCloud: return iCloud.contains(label)
-            }
-        }.map { $0.0 }
-        guard targets.count == 1, let target = targets.first else { throw NativeAccountStateFailure.invalidOptions }
-        // Only options ALREADY exposed by this exact control are actionable here.
-        // Never open the picker: public menu-opening actions may synchronously track.
-        try performNativeAccountPress(on: target.object)
-    }
     private func performNativeAccountPress(on object: NSObject) throws {
         let succeeded: Bool
         guard object.responds(to: #selector(NSAccessibilityProtocol.accessibilityPerformPress)) else {
@@ -331,7 +326,7 @@ import Testing
 
     @Test func nativeSidebarSearchIdentifiersSurviveRemountWithText() throws {
         let collection = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
-        collection.syncPresentation.settingsSearch = "iCloud"
+        collection.syncPresentation.settingsSearch = "Meguri Sync"
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -382,7 +377,7 @@ import Testing
             }
             try #require(identified.count == 1)
             #expect(identified[0] === search)
-            #expect(field.stringValue == "iCloud")
+            #expect(field.stringValue == "Meguri Sync")
             // A remount must identify the new native elements, without relying
             // on a retained field, timer or global window lookup.
             window.contentViewController = nil

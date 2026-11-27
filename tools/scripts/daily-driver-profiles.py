@@ -4,10 +4,7 @@
 Read-only: it decodes the profiles Xcode installed (`security cms -D -i`,
 which modifies no keychain) and reports, per platform, whether one authorizes
 the app's signed claims: the identity `<team>.com.antoinefink.meguri`, its
-App Group and Keychain group, the production CloudKit container
-`iCloud.com.antoinefink.meguri` in the Production environment, and
-development push (the real copy signs development push: standing decision
-2026-11-21). It never requests, downloads or registers anything (one-time step
+App Group and Keychain group. It never requests, downloads or registers anything (one-time step
 `daily-driver-account`, docs/process/one-time-setup.md).
 
   daily-driver-profiles.py [--require mac|ios] [--team TEAM] [--device UDID] [--ios-device UDID]
@@ -32,7 +29,6 @@ import subprocess
 import sys
 
 BUNDLE = "com.antoinefink.meguri"
-CONTAINER = "iCloud.com.antoinefink.meguri"
 DEFAULT_DIRS = ["~/Library/Developer/Xcode/UserData/Provisioning Profiles",
                 "~/Library/MobileDevice/Provisioning Profiles"]
 
@@ -71,7 +67,6 @@ def missing_grants(profile, platform, team, bundle):
     grants = profile.get("Entitlements", {})
     identity = grants.get("com.apple.application-identifier", grants.get("application-identifier"))
     group = (team + "." + BUNDLE) if platform == "mac" else ("group." + BUNDLE)
-    push = "com.apple.developer.aps-environment" if platform == "mac" else "aps-environment"
     checks = [
         ("identity", authorizes(identity, team + "." + bundle)),
         ("app-group", authorizes(grants.get("com.apple.security.application-groups"), group)),
@@ -81,13 +76,6 @@ def missing_grants(profile, platform, team, bundle):
         return [name for name, ok in checks if not ok]
     checks += [
         ("keychain", authorizes(grants.get("keychain-access-groups"), team + "." + BUNDLE)),
-        # Exactly the production container: the signed claim lists only it,
-        # and the product check compares the two lists.
-        ("icloud-container", grants.get("com.apple.developer.icloud-container-identifiers") == [CONTAINER]),
-        ("icloud-services", authorizes(grants.get("com.apple.developer.icloud-services"), "CloudKit")),
-        ("icloud-production", authorizes(grants.get("com.apple.developer.icloud-container-environment"), "Production")),
-        # Exactly "development", as the product check compares it.
-        ("push-development", grants.get(push) == "development"),
     ]
     return [name for name, ok in checks if not ok]
 

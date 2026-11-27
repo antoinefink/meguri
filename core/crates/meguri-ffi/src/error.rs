@@ -9,14 +9,6 @@ use meguri_engine::EngineError;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
-    CloudPolicy {
-        failure: crate::cloud_policy::CloudPolicyFailure,
-    },
-    CloudConnection {
-        failure: crate::cloud_connection::CloudConnectionFailure,
-    },
-    /// A guarded SDK callback belongs to an incarnation that no longer owns it.
-    CloudSdkCallbackRejected,
     Maintenance {
         cause: crate::maintenance::MaintenanceError,
     },
@@ -128,9 +120,6 @@ pub enum CoreError {
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CoreError::CloudPolicy { .. } => f.write_str("cloud policy refused"),
-            CoreError::CloudConnection { .. } => f.write_str("cloud connection refused"),
-            CoreError::CloudSdkCallbackRejected => f.write_str("old cloud SDK callback rejected"),
             CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
             CoreError::ExportInvalidIds => f.write_str("export ids need Check Database"),
@@ -251,15 +240,6 @@ impl From<EngineError> for CoreError {
 impl From<CoreError> for EngineError {
     fn from(error: CoreError) -> EngineError {
         match error {
-            CoreError::CloudPolicy { .. } => EngineError::CollectionUnavailable {
-                reason: "cloud policy refused".into(),
-            },
-            CoreError::CloudConnection { .. } => EngineError::CollectionUnavailable {
-                reason: "cloud connection refused".into(),
-            },
-            CoreError::CloudSdkCallbackRejected => EngineError::CollectionUnavailable {
-                reason: "old cloud SDK callback rejected".into(),
-            },
             CoreError::Maintenance { cause } => EngineError::Internal {
                 message: format!("maintenance: {cause:?}"),
             },

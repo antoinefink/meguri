@@ -33,79 +33,15 @@ whether the account is present; it does not establish profile validity.
 `ui-test --physical-device <identifier>` uses team signing and lets Xcode refresh
 profiles. Preserve the app and widget's shared-group entitlements.
 
-### `cloudkit-setup`
+### Retired iCloud setup (2026-11-27)
 
-Only Antoine configures containers, capabilities, profiles and schema promotion
-(R2065). `tools/mg doctor` does not verify this step. Packaging checks are not
-evidence of a working account or encrypted schema.
-
-Review the proposed container IDs in `app/Config/Cloud.xcconfig`:
-`MEGURI_CLOUD_CONTAINER_development` is `iCloud.com.antoinefink.meguri.dev`;
-`MEGURI_CLOUD_CONTAINER_production` is `iCloud.com.antoinefink.meguri`.
-Verify their existence during setup and use separate private databases.
-Development and test configurations use the isolated container. The Mac
-personal preview also requests development explicitly, together with `.dev`;
-the suffix by itself supplies no cloud selection or permission. Ordinary
-Release and AppStore builds use the production container.
-
-Assign only the isolated development container to development app profiles;
-keep daily-driver container access out of those profiles. Enable CloudKit and
-push for the app's Mac/iOS identities, with the selected container, CloudKit
-service, `Development`/`Production` iCloud environment and
-`development`/`production` push environment. Mac uses
-`com.apple.developer.aps-environment`; iOS uses `aps-environment`. Preserve
-existing App Groups, private app Keychain and sandbox grants. Widgets receive
-no CloudKit or push grants. Personal Release.dev uses development-only
-container/environment authorization, just like other development/test profiles.
-Refresh the appropriate profiles and verify their grants, signer, device
-coverage and expiry before signed builds. Ad-hoc Mac previews need none of
-these grants and always report schema readiness false.
-
-Create and inspect the encrypted record schema in
-[`sync/cloudkit-records` K2–K5](../../specs/sync/cloudkit-records.md): the six
-record types use encrypted `e` values and only the specified asset fields;
-collection content must not become plaintext custom fields. Verify the isolated
-development schema, explicitly promote/verify the daily-driver production schema,
-and retain separate environment/container evidence from signed multi-device runs.
-Only after each environment's actual identifiers, profile grants and encrypted
-schema are verified may its `MEGURI_CLOUD_SCHEMA_CONFIGURED_development` or
-`MEGURI_CLOUD_SCHEMA_CONFIGURED_production` change from `NO` to `YES`. Never
-enable readiness to satisfy a build check. The packaged
-`MeguriCloudContainer`, `MeguriCloudEnvironment` and Boolean
-`MeguriCloudSchemaConfigured` must match that verified setup.
-
-The integrator can check packaging with
-`tools/mg xcode-check --no-ui --cloud-signing-matrix` once profiles exist. This
-adds team Mac/device/simulator builds for every configuration without launching
-them or requesting provisioning updates; it retains resolved settings, generated
-Info and signed/embedded entitlements under `build/xcode-check/cloud-*`. It
-does not certify portal configuration, schema encryption/promotion, push delivery
-or signed multi-device sync. Those external checks remain required.
-
-
-### `cloudkit-test-accounts`
-
-Only Antoine runs `tools/mg cloudkit-account-setup --label acct1` in his own
-foreground Terminal, from clean master with no competing Apple or VM job.
-Source `.local/activate` first. Use `MEGURI_APP_SIGNING=team`; if the verified
-Mac build pins an installed profile with `MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE`,
-retain that same setting. Keep the dedicated VM signed in to the intended
-isolated development test account.
-
-The setup-only producer verifies the signed product and observes the live
-account. At its terminal prompt, Antoine confirms the intended account with
-`approve acct1`. A fresh matching observation precedes publication of the
-private approved source. Agents never run this command or enter the approval.
-No account value or private file content needs to be shared; report only the
-setup outcome and run ID. `acct1` is enough for the initial same-account check;
-`acct2` is a separate setup for account-isolation checks, after `acct1` exists.
-
-The source belongs to this host user's OS Application Support data. Copying the
-repository or VM to another Mac does not publish it on the new host. No source
-importer or candidate-file adoption is supported. Missing source input is a
-setup requirement, not evidence of a failed CloudKit exchange. Successful setup
-supplies no signed-sync or release acceptance.
-
+`cloudkit-setup` and `cloudkit-test-accounts` are retired. Do not enable iCloud
+or push capabilities, configure CloudKit schemas, approve test accounts, or run
+the removed setup/signing-matrix jobs for Meguri. Earlier setup records and
+receipts remain historical evidence. Meguri Sync is the only supported sync
+service; Off remains supported. Existing profiles may authorize unused iCloud
+or push capabilities: packaging checks require those grants to be absent from
+the actual app and widget signatures and both products' Info and linkage.
 
 ### `docker-resources`
 
@@ -147,8 +83,7 @@ Only for the real copy, "Meguri" with the daily-driver ids, which Antoine studie
 
 1. In Certificates, Identifiers & Profiles › Identifiers, register the App IDs `com.antoinefink.meguri` and `com.antoinefink.meguri.widget`.
 2. Turn on App Groups for both, with the group `group.com.antoinefink.meguri` (register it if it is missing). On the Mac the routes sign the team-prefixed `DNQ34W43XX.com.antoinefink.meguri`, which needs no registration.
-3. On `com.antoinefink.meguri` only, turn on iCloud (CloudKit) with the container `iCloud.com.antoinefink.meguri` (register it under iCloud Containers if it is missing), and Push Notifications. Push needs no key or certificate. The container needs no schema: iCloud Sync stays off in the real copy while `MEGURI_CLOUD_SCHEMA_CONFIGURED_production` is `NO` (`app/Config/Cloud.xcconfig`).
-4. In Profiles, create development profiles. For each one, select the Apple Development certificate installed on this Mac, and the device it is for:
+3. In Profiles, create development profiles. For each one, select the Apple Development certificate installed on this Mac, and the device it is for:
    - for the Mac: one **macOS App Development** profile for `com.antoinefink.meguri`, with this Mac;
    - for the iPhone: one **iOS App Development** profile for `com.antoinefink.meguri` and one for `com.antoinefink.meguri.widget`, with the iPhone.
 
@@ -158,9 +93,12 @@ Only for the real copy, "Meguri" with the daily-driver ids, which Antoine studie
 
    The Mac widget is expected to sign without a profile, as in the personal preview. That is unverified until the first run; if the build asks for one, the widget needs a macOS profile and a route change.
 
-The real copy signs push `development`, so these ordinary development profiles authorize it. CloudKit stays production. This is an exception to KTD22 for these routes only (standing decision 2026-11-21).
+The real copy signs no iCloud or push grants. Preserve App Groups, private
+app Keychain, certificate, expiry, identity and device authorization. Profiles
+with unused iCloud/push authorization remain usable; their presence does not
+permit those grants in the signed product.
 
-Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on this Mac: identity, App Group, Keychain group, the production container and environment, development push, expiry, this Mac. It also reports the iOS app and widget states. It lists this step while any of the three (Mac app, iOS app, iOS widget) is missing or incomplete. It cannot see the developer portal, nor whether the profile's certificate is on this Mac; the build checks that.
+Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on this Mac: identity, App Group, Keychain group, expiry and this Mac. It also reports the iOS app and widget states. It lists this step while any of the three (Mac app, iOS app, iOS widget) is missing or incomplete. It cannot see the developer portal, nor whether the profile's certificate is on this Mac; the build checks that.
 
 Building and installing the real copy, at Antoine's request only. The coordinator installs (standing decision 2026-11-21); nothing launches it:
 - **Mac:** `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested --install`.
@@ -172,7 +110,7 @@ Building and installing the real copy, at Antoine's request only. The coordinato
 - **iPhone:** `tools/mg run --platform iphone --physical-device <id> --real-copy --owner-requested`.
   - Quit Meguri on the phone first.
   - Unlock the phone and keep it unlocked; Developer Mode must be on (`device-developer-mode`).
-  - It checks the app and widget profiles for that phone, then Developer Mode, pairing and lock (read-only), builds the Release with development push, verifies it, and installs it with `devicectl` (a private install witness). It never launches it, and leaves no build product behind.
+  - It checks the app and widget profiles for that phone, then Developer Mode, pairing and lock (read-only), builds the Release, verifies it, and installs it with `devicectl` (a private install witness). It never launches it, and leaves no build product behind.
   - Installing over an earlier real copy keeps its data.
 
 ### `nightly-scheduler`

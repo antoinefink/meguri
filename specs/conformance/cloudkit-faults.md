@@ -1,5 +1,10 @@
 # CloudKit fault points
 
+> Retired from Meguri application verification on 2026-11-27 by Antoine's
+> explicit iCloud removal request. Retain this historical record; none of its
+> CloudKit-only jobs, account steps or acceptance lanes are required for the
+> unavailable service. Shared collection/media requirements remain active.
+
 Spec: conformance/cloudkit-faults
 Requirements: R2051, R2054, R2055, R2056, R2057; supports R2002, R2003 (sync slice), R2015 (sync slice), R2066; AE92
 Anki: none (Meguri design)

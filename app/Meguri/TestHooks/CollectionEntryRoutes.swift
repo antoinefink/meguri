@@ -95,7 +95,7 @@ extension TestHooks {
     }
 
     /// Production form and Settings composition, using a real generated local
-    /// collection. Explicitly absent CloudKit setup admits no native account read.
+    /// collection. The fixture uses the local provider owner.
     struct AccountSyncInspection: View {
         private let configuration: LaunchConfiguration
         private let preferences: UserDefaults
@@ -107,7 +107,7 @@ extension TestHooks {
             preferences.set("accountSync", forKey: "settings.selectedSection")
             self.preferences = preferences
             let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
-                clock: configuration.clock, configuration: nil, defaults: nil)
+                clock: configuration.clock, defaults: nil)
             _collection = State(initialValue: ReviewCollection(configuration: configuration,
                 navigation: AppNavigation(), sync: sync))
         }

@@ -14,8 +14,6 @@ pub enum OpSource {
     Optimizer,
     Rollover,
     Maintenance,
-    CloudIncoming,
-    CloudRekey,
 }
 
 /// How one row changed in an op.
@@ -93,8 +91,8 @@ impl From<model::OpSource> for OpSource {
             model::OpSource::Optimizer => OpSource::Optimizer,
             model::OpSource::Rollover => OpSource::Rollover,
             model::OpSource::Maintenance => OpSource::Maintenance,
-            model::OpSource::CloudIncoming => OpSource::CloudIncoming,
-            model::OpSource::CloudRekey => OpSource::CloudRekey,
+            model::OpSource::CloudIncoming => OpSource::SyncIncoming,
+            model::OpSource::CloudRekey => OpSource::SyncIncoming,
         }
     }
 }
@@ -174,8 +172,6 @@ impl From<OpSource> for model::OpSource {
             OpSource::Optimizer => model::OpSource::Optimizer,
             OpSource::Rollover => model::OpSource::Rollover,
             OpSource::Maintenance => model::OpSource::Maintenance,
-            OpSource::CloudIncoming => model::OpSource::CloudIncoming,
-            OpSource::CloudRekey => model::OpSource::CloudRekey,
         }
     }
 }

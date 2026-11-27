@@ -9,8 +9,8 @@ extension ReviewCollectionStartupTests {
         let root = FileManager.default.temporaryDirectory.appending(path: "native-backups-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let configuration = try backupConfiguration(root)
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() },
-            defaults: nil, cloudConfigured: false)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { SyncOwnerFake() },
+            defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
         owner.studyPreparation.runsUnprompted = false
@@ -258,8 +258,8 @@ extension ReviewCollectionStartupTests {
         // probe. Seed T2.3's persisted reference so the real deadline is nil.
         // Probe automatic maintenance so the future clock cannot advance the
         // process-wide periodic attempt floor; forced backups do not set it.
-        let initialSync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() },
-            defaults: nil, cloudConfigured: false)
+        let initialSync = SyncCoordinator(bootstrap: {}, makeBackend: { SyncOwnerFake() },
+            defaults: nil)
         let initial = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: initialSync, providerDirectory: root.appending(path: "synthetic-installation"),
             maintenanceService: BackupServiceProbe())
@@ -280,8 +280,8 @@ extension ReviewCollectionStartupTests {
         // Off has no cloud policy to acknowledge Quit. Keep startup inert:
         // sync and study-preparation writes have their own regression suites.
         let backend = SyncOwnerFake()
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend },
-            defaults: nil, cloudConfigured: false)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { backend },
+            defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"), maintenanceService: service)
@@ -427,7 +427,7 @@ extension ReviewCollectionStartupTests {
     }
     private func backupOwner(_ configuration: LaunchConfiguration, root: URL) -> ReviewCollection {
         ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil),
+            sync: SyncCoordinator(bootstrap: {}, makeBackend: { SyncOwnerFake() }, defaults: nil),
             providerDirectory: root.appending(path: "synthetic-installation"))
     }
 }

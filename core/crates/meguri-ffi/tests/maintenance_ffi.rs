@@ -450,7 +450,6 @@ fn restore_replaces_generation_retains_current_safety_copy_and_publication_choic
         request: CustomStudyRequest { mode: CustomStudyMode::IncreaseNew, amount: 5,
             state: CustomStudyState::New, include_tags: vec![], exclude_tags: vec![] } }, generation).unwrap_err(), stale);
     assert_eq!(filtered_study::filtered_study_deck_scope(1, generation + 1).unwrap(), original_scope);
-    assert!(restored.cloud_publication_pending);
     assert_eq!(restored.name, backup.name);
     assert_eq!(f.deck_name(), original_name);
     assert_eq!(
@@ -596,7 +595,6 @@ fn after_activation_failure_keeps_new_generation_and_owned_restore_facts() {
     assert_eq!(failure.generation, Some(generation + 1));
     let restored = failure.restored.unwrap();
     assert_eq!(restored.generation, generation + 1);
-    assert!(restored.cloud_publication_pending);
     assert_eq!(restored.safety_backup, failure.safety_backup);
     assert!(f.backup_path(&failure.safety_backup.unwrap()).is_file());
     assert_eq!(
@@ -727,7 +725,6 @@ fn opened_unclean_real_page_damage_reports_corrupt_and_public_restore_recovers()
             generation: generation + 1
         }
     );
-    assert!(restored.cloud_publication_pending);
     assert!(f.backup_path(&restored.safety_backup.unwrap()).is_file());
 }
 

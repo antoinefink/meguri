@@ -41,6 +41,31 @@ def generated(version=2):
 
 
 class PhysicalDriveEvidenceTests(unittest.TestCase):
+    def test_product_inventory_resolves_internal_links_before_parent_components(self):
+        directory, file = {"type": "directory"}, {"type": "file"}
+        entries = {"Versions": directory, "Versions/A": directory, "Versions/A/Nested": directory,
+                   "Versions/A/Widget": file, "Versions/A/OnlyInternal": file, "Widget": file, "RootOnly": file,
+                   "Versions/Current": {"type": "symlink", "target": "A"},
+                   "nested": {"type": "symlink", "target": "Versions/Current/Nested"}}
+        for target, terminal in (("Versions/Current/Widget", "Versions/A/Widget"),
+                                 ("nested/../Widget", "Versions/A/Widget"),
+                                 ("nested/../OnlyInternal", "Versions/A/OnlyInternal"),
+                                 ("nested/../../A/Widget", "Versions/A/Widget")):
+            with self.subTest(target=target):
+                entries["link"] = {"type": "symlink", "target": target}
+                self.assertEqual(drive.products.link_terminal(entries, "link"), terminal)
+        for target in ("nested/../RootOnly", "nested/../../Widget", "missing/../Widget", "Widget/../Widget",
+                       "nested/../../../../Widget", "escape/../Widget", "loop", "long0"):
+            with self.subTest(target=target):
+                entries["escape"] = {"type": "symlink", "target": "../outside"}
+                entries["loop"] = {"type": "symlink", "target": "loop"}
+                for index in range(41):
+                    entries["long" + str(index)] = {"type": "symlink", "target": "long" + str(index + 1)}
+                entries["long41"] = file
+                entries["link"] = {"type": "symlink", "target": target}
+                with self.assertRaises(drive.Refused):
+                    drive.products.link_terminal(entries, "link")
+
     def test_signature_requires_team_identity_and_development_grants(self):
         metadata = ("Identifier=" + drive.APP + "\nTeamIdentifier=ABCDEFGHIJ\nCDHash=" + "a" * 40 +
                     "\nAuthority=Apple Development: synthetic\n").encode()
@@ -787,30 +812,6 @@ class PersonalPreviewTests(unittest.TestCase):
                     query.assert_not_called()
                     artifacts.assert_not_called()
 
-    def test_personal_preview_cloud_policy_allows_team_ios_release_only_with_explicit_development_facts(self):
-        spec = importlib.util.spec_from_file_location("cloud_configuration", Path(__file__).with_name("cloud_build_configuration.py"))
-        cloud = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cloud)
-        settings = {
-            "PRODUCT_BUNDLE_IDENTIFIER": drive.APP, "MEGURI_BUNDLE_ID_SUFFIX": ".dev",
-            "MEGURI_CLOUD_CONTAINER_development": "iCloud.example.isolated",
-            "MEGURI_CLOUD_CONTAINER_production": "iCloud.example.daily",
-            "MEGURI_CLOUD_CONFIGURATION": "development", "MEGURI_CLOUD_CONTAINER": "iCloud.example.isolated",
-            "MEGURI_CLOUD_ENVIRONMENT": "development", "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT": "Development",
-            "MEGURI_CLOUD_PUSH_ENVIRONMENT": "development", "INFOPLIST_KEY_MeguriCloudContainer": "iCloud.example.isolated",
-            "INFOPLIST_KEY_MeguriCloudEnvironment": "development", "MEGURI_CLOUD_SCHEMA_CONFIGURED_development": "NO",
-            "MEGURI_CLOUD_SCHEMA_CONFIGURED_production": "NO", "MEGURI_CLOUD_SCHEMA_CONFIGURED": "NO", "MEGURI_CLOUD_SCHEMA_BOOLEAN": "0"}
-        info = {"MeguriCloudContainer": "iCloud.example.isolated", "MeguriCloudEnvironment": "development", "MeguriCloudSchemaConfigured": False}
-        grants = {"com.apple.developer.icloud-container-identifiers": ["iCloud.example.isolated"],
-                  "com.apple.developer.icloud-services": ["CloudKit"], "com.apple.developer.icloud-container-environment": "Development",
-                  "aps-environment": "development", "get-task-allow": True}
-        cloud.check(settings, "Release", "ios", "team", info, grants, {}, personal_preview=True)
-        for preview, config, signing, entitlements, widget in ((False, "Release", "team", grants, {}),
-                (True, "Debug", "team", grants, {}), (True, "Release", "adhoc", grants, {}),
-                (True, "Release", "team", {**grants, "aps-environment": "production"}, {}),
-                (True, "Release", "team", grants, {"aps-environment": "development"})):
-            with self.assertRaises(ValueError):
-                cloud.check(settings, config, "ios", signing, info, entitlements, widget, personal_preview=preview)
 
 
 if __name__ == "__main__":

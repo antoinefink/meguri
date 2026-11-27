@@ -7,7 +7,7 @@ import SwiftUI
 /// views over an inert coordinator. No collection, account or server exists.
 public enum SyncSettingsPreview {
     public enum Page: Equatable, Sendable {
-        case settings, troubleshooting, issues, keepCollection, statusPopover
+        case settings, troubleshooting, keepCollection, statusPopover
         /// N23's panel as a person sees it. Mac: drawn at the popover's size under
         /// the toolbar button, since a window capture does not include the
         /// popover's own window. Touch: the real popover (the sheet at compact width).
@@ -26,24 +26,15 @@ public enum SyncSettingsPreview {
     /// The service change confirmation's examples (T21.1): the old service's
     /// state, the new value, and invented facts about unsent work.
     public enum ServiceSwitchExample: String, CaseIterable, Sendable {
-        case meguriOffUnknown, meguriOffKnown, meguriICloudUnknown
-        case iCloudOffNone, iCloudOffKnown, iCloudOffUnknown, iCloudMeguriKnown
+        case meguriOffUnknown, meguriOffKnown
         public var state: SyncCoordinator.RenderState {
-            switch self {
-            case .meguriOffUnknown, .meguriOffKnown, .meguriICloudUnknown: .meguriConnected
-            default: .iCloudConnected
-            }
+            .meguriConnected
         }
         public var request: SyncCoordinator.RenderServiceSwitch {
             switch self {
             case .meguriOffUnknown: .init(destination: "localOnly", facts: .init(changes: .unknown))
             // Pending work without a count (Meguri Sync's round gives none) and a known media count.
             case .meguriOffKnown: .init(destination: "localOnly", facts: .init(changes: .some, heldBack: 0, media: 3))
-            case .meguriICloudUnknown: .init(destination: "iCloud", facts: .init(changes: .unknown))
-            case .iCloudOffNone: .init(destination: "localOnly", facts: .init(changes: .count(0), heldBack: 0, media: 0))
-            case .iCloudOffKnown: .init(destination: "localOnly", facts: .init(changes: .count(12), heldBack: 3, media: 2))
-            case .iCloudOffUnknown: .init(destination: "localOnly", facts: .init(changes: .count(0), heldBack: 0, media: nil))
-            case .iCloudMeguriKnown: .init(destination: "meguri", facts: .init(changes: .count(12), heldBack: 0, media: 2))
             }
         }
     }
@@ -61,8 +52,6 @@ private struct SyncSettingsPreviewScreen: View {
                 .environment(\.shellLayout, .compact)
         case .troubleshooting:
             NavigationStack { SyncTroubleshootingPage(collection: collection) }
-        case .issues:
-            NavigationStack { SyncIssuesPage(collection: collection) }
         case .keepCollection:
             // Presented as the sheet it is, over the Settings page.
             NavigationStack { SettingsView(collection: collection) }
@@ -78,7 +67,7 @@ private struct SyncSettingsPreviewScreen: View {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .topTrailing) {
-                        SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
+                        SyncStatusPanel(collection: collection, showSettings: { _ in })
                             .padding()
                             .frame(width: ContentWidth.primaryAction)
                             .fixedSize(horizontal: false, vertical: true)
@@ -87,7 +76,7 @@ private struct SyncSettingsPreviewScreen: View {
                             .accessibilityIdentifier("sync.status.popover")
                             .padding(.trailing, Spacing.small)
                     }
-                    .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
+                    .toolbar { ToolbarItem(placement: .primaryAction) { SyncStatusButton(collection: collection) } }
             }
             #else
             // Touch captures include the popover (the sheet at compact width): the real one.
@@ -102,7 +91,7 @@ private struct SyncSettingsPreviewScreen: View {
         NavigationStack {
             Form {}
                 .formStyle(.grouped)
-                .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
+                .toolbar { ToolbarItem(placement: .primaryAction) { SyncStatusButton(collection: collection) } }
                 .task { collection.syncPresentation.statusPresented = true }
         }
     }
@@ -117,5 +106,4 @@ private struct SyncSettingsPreviewScreen: View {
 }
 
 #Preview("Meguri Sync connected") { SyncSettingsPreview.screen(.meguriConnected) }
-#Preview("iCloud needs you") { SyncSettingsPreview.screen(.iCloudNeedsYou) }
-#Preview("Troubleshooting") { SyncSettingsPreview.screen(.iCloudIssues, page: .troubleshooting) }
+#Preview("Troubleshooting") { SyncSettingsPreview.screen(.meguriRoundFailed, page: .troubleshooting) }

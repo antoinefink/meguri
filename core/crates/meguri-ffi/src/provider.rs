@@ -26,12 +26,12 @@ pub(crate) fn owner_for_testing(host: Arc<meguri_host::CoreHost>) -> Result<Arc<
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ProviderSelection { LocalOnly, ICloud, Meguri }
+pub enum ProviderSelection { LocalOnly, Meguri }
 impl From<ProviderSelection> for p::Selection {
-    fn from(value: ProviderSelection) -> Self { match value { ProviderSelection::LocalOnly => Self::LocalOnly, ProviderSelection::ICloud => Self::ICloud, ProviderSelection::Meguri => Self::Meguri } }
+    fn from(value: ProviderSelection) -> Self { match value { ProviderSelection::LocalOnly => Self::LocalOnly, ProviderSelection::Meguri => Self::Meguri } }
 }
 impl From<p::Selection> for ProviderSelection {
-    fn from(value: p::Selection) -> Self { match value { p::Selection::LocalOnly => Self::LocalOnly, p::Selection::ICloud => Self::ICloud, p::Selection::Meguri => Self::Meguri } }
+    fn from(value: p::Selection) -> Self { match value { p::Selection::LocalOnly => Self::LocalOnly, p::Selection::ICloud => Self::LocalOnly, p::Selection::Meguri => Self::Meguri } }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ProviderSettings { pub enabled: bool, pub paused: bool, pub automatic: bool, pub media: bool }
@@ -42,14 +42,14 @@ impl From<p::LegacySettings> for ProviderSettings {
     fn from(v: p::LegacySettings) -> Self { Self { enabled: v.enabled, paused: v.paused, automatic: v.automatic, media: v.media } }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ProviderPhase { LocalOnly, SetupRequired, ICloud, HandoffRecovery, Blocked }
+pub enum ProviderPhase { LocalOnly, SetupRequired, HandoffRecovery, Blocked }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ProviderSnapshot { pub selection: Option<ProviderSelection>, pub phase: ProviderPhase, pub settings: Option<ProviderSettings>, pub revision: u64, pub removal_pending: bool }
 fn snapshot(value: Result<p::ProviderDocument, meguri_storage::StorageError>) -> ProviderSnapshot {
     match value {
         Ok(doc) => ProviderSnapshot { selection: Some(doc.selection.into()), phase: if doc.handoff.is_some() { ProviderPhase::HandoffRecovery }
             else if doc.selection == p::Selection::LocalOnly { ProviderPhase::LocalOnly }
-            else if doc.selection == p::Selection::ICloud && doc.binding.is_some() { ProviderPhase::ICloud }
+            else if doc.selection == p::Selection::ICloud { ProviderPhase::Blocked }
             else { ProviderPhase::SetupRequired }, settings: Some(doc.settings.into()), revision: doc.revision,
             removal_pending: doc.handoff.as_ref().is_some_and(p::HandoffIntent::removal_pending) },
         Err(_) => ProviderSnapshot { selection: None, phase: ProviderPhase::Blocked, settings: None, revision: 0, removal_pending: false },
@@ -81,7 +81,7 @@ pub fn migrate_provider(root: String, legacy_json: Option<String>) -> Result<Pro
             Ok(settings) => p::LegacyInput::Settings(settings), Err(_) => p::LegacyInput::Invalid,
         },
     };
-    meguri_host::CoreHost::migrate_provider_configuration(std::path::Path::new(&root), input)?;
+    meguri_host::CoreHost::migrate_application_provider_configuration(std::path::Path::new(&root), input)?;
     Ok(snapshot(p::Authority::load(std::path::Path::new(&root)).snapshot()))
 }
 #[derive(uniffi::Object)]
@@ -118,8 +118,6 @@ impl ProviderOwner {
         Ok(())
     }
 }
-#[derive(uniffi::Object)]
-pub struct ProviderDiscovery { _inner: p::Discovery }
 #[derive(uniffi::Object)]
 pub struct ProviderHandoff { owner: Arc<ProviderOwner>, inner: Mutex<Option<meguri_host::ProviderHandoff>> }
 #[derive(uniffi::Object)]
@@ -214,20 +212,6 @@ impl ProviderOwner {
     pub fn save_settings(&self, settings: ProviderSettings) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.save_settings"); self.validate()?;
         self.host.save_provider_settings_for_generation(self.generation, settings.into())?;
-        Ok(owner_snapshot(&self.host))
-    }
-    pub fn begin_icloud_discovery(&self) -> Result<Arc<ProviderDiscovery>, CoreError> {
-        callback::enter("ProviderOwner.begin_icloud_discovery"); self.validate()?;
-        Ok(Arc::new(ProviderDiscovery { _inner: self.host.provider_authority().begin_discovery()? }))
-    }
-    pub fn accept_icloud_connection(&self) -> Result<ProviderSnapshot, CoreError> {
-        callback::enter("ProviderOwner.accept_icloud_connection"); self.validate()?;
-        if !self.host.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
-            return Err(CoreError::Busy { running_op: "manual transfer recovery".into() });
-        }
-        self.host.cloud_runtime().ok_or_else(|| CoreError::Unavailable { reason: "iCloud unavailable".into() })?
-            .provider_accept_icloud_connection().map_err(|_| CoreError::Unavailable { reason: "iCloud connection requires recovery".into() })?;
-        self.host.refresh_provider_admission();
         Ok(owner_snapshot(&self.host))
     }
     pub fn configure_meguri(self: Arc<Self>, endpoint: String) -> Result<Arc<ProviderConnection>, CoreError> {

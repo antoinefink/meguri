@@ -139,7 +139,6 @@ pub struct RestoredBackup {
     pub name: String,
     pub safety_backup: Option<String>,
     pub generation: u64,
-    pub cloud_publication_pending: bool,
     pub deadline_ms: Option<i64>,
 }
 impl From<meguri_package::restore::RestoredBackup> for RestoredBackup {
@@ -148,7 +147,6 @@ impl From<meguri_package::restore::RestoredBackup> for RestoredBackup {
             name: r.name,
             safety_backup: r.safety_backup,
             generation: r.generation.0,
-            cloud_publication_pending: r.cloud_publication_pending,
             deadline_ms: r.deadline.map(|v| v.0),
         }
     }

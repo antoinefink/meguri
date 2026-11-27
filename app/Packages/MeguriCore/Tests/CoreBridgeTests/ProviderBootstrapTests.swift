@@ -7,10 +7,10 @@ import Testing
 
 private actor BootstrapCredentialStore: MeguriProviderCredentialStore {
     var value: MeguriProviderCredentials?
-    var heldRead: CloudCallbackGate?
+    var heldRead: DeferredTestGate?
     var deletions: [MeguriProviderConnection] = []
     var reads: [MeguriProviderConnection] = []
-    func hold(_ gate: CloudCallbackGate) { heldRead = gate }
+    func hold(_ gate: DeferredTestGate) { heldRead = gate }
     func load(connection: MeguriProviderConnection) async throws -> MeguriProviderCredentials? {
         reads.append(connection)
         let original = value
@@ -101,7 +101,7 @@ extension EventTests {
             let facade = try await owner.bootstrapService()
             let original = try #require(await store.value)
             let deletions = await store.deletions.count
-            let read = CloudCallbackGate()
+            let read = DeferredTestGate()
             let drained = Mutex(false)
             let calls = Mutex<[BridgeCall]>([])
             await store.hold(read)
@@ -290,7 +290,7 @@ extension EventTests {
             let store = BootstrapCredentialStore()
             let owner = try await bootstrapOwner(core, store)
             let facade = try await owner.bootstrapService()
-            let gate = CloudCallbackGate()
+            let gate = DeferredTestGate()
             await store.hold(gate)
             let calls = Mutex<[BridgeCall]>([])
             try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {

@@ -9,8 +9,6 @@
 # One test per line, as nextest prints it: `<binary id> <test name>  # reason`.
 # When a test is fixed, delete its line: the shards then run it again.
 
-meguri-ffi sync::tests::media_port::nonempty_download_waits_for_collection_drain_and_arrives_in_engine_media_store  # hosted run 44703674187 (docs and specs only): SuspendDeadline at "resource cutoff"
-
 # Seen once, under watch (not listed; add a line only if one fails again on a
 # hosted runner). Hosted run 44726666111 (pull request #6), three consecutive
 # meguri-ffi tests with deadline errors:

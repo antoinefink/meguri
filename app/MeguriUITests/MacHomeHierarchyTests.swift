@@ -22,9 +22,6 @@ final class MacHomeHierarchyTests: XCTestCase {
         let bundle = try build.bundleIdentifier
         XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "This case requires the actual hook-enabled .dev app")
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
-        let appInfo = try build.appInfo
-        XCTAssertEqual(appInfo["MeguriCloudSchemaConfigured"] as? Bool, true,
-            "This real provider journey requires MEGURI_APP_SIGNING=team")
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: journey == nil
@@ -102,7 +99,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         actionable(picker)
         // N15.2 / T19.2: native menu titles expose accessibility names;
         // iCloud's accessibility label is "iCloud, Beta", including its Beta label.
-        let accessibilityNames = ["Off", "Meguri Sync", "iCloud, Beta"]
+        let accessibilityNames = ["Off", "Meguri Sync"]
 
         func choose(_ accessibilityName: String) throws {
             actionable(picker)
@@ -110,7 +107,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             let items = picker.menuItems
             XCTAssertTrue(items.matching(NSPredicate(format: "title == %@", "Meguri Sync"))
                 .element(boundBy: 0).waitForExistence(timeout: 10))
-            XCTAssertEqual(items.count, 3, "Off is the first value of the one Service control")
+            XCTAssertEqual(items.count, 2, "Off is the first value of the one Service control")
             XCTAssertEqual(items.allElementsBoundByIndex.map(\.title), accessibilityNames,
                 "Require the full native menu's exact accessibility names, in order")
             for title in accessibilityNames {

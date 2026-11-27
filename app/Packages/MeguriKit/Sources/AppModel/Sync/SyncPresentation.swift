@@ -30,12 +30,6 @@ public enum SyncText {
 nonisolated public enum SettingsPage: String, Hashable, Codable, CaseIterable, Sendable {
     case accountSync, collection, backups, ankiServer, integrations
 }
-nonisolated public enum CloudSyncEntry: String, Hashable, Sendable {
-    case connect, publicationChoice, replaceLocal, replaceCloud
-}
-
-public enum CloudConnectionConfirmation: Sendable, Equatable { case publication, adoption, resume }
-
 /// Presentation only; the retained coordinator owns all work and authority.
 @Observable public final class SyncPresentation {
     public var statusPresented = false {
@@ -48,7 +42,6 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     }
     public private(set) var statusPresentationID = UUID()
     fileprivate enum StatusDestination {
-        case cloudSync(CloudSyncEntry, AppNavigation.SheetHost)
         case accountSync(keepCollection: Bool)
     }
     fileprivate struct StatusEntry {
@@ -70,12 +63,11 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var serviceChanging = false
     public var serviceChangeFailed = false
     public var showStatusForCommands = true
-    public var connectionPath: [CloudSyncEntry] = []
     /// N23.6: the sync the person started from the toolbar button, until it ends.
     public var buttonFeedback = SyncButton.Feedback()
     /// N23.1: the panel's measured height in the sheet and in the popover's sheet
     /// (iPhone), so a sheet opens at its one detent. Measured by the shell, out of
-    /// the toolbar, while no sheet shows (`CloudSyncPanelMeasure`).
+    /// the toolbar, while no sheet shows (`SyncPanelMeasure`).
     public var panelSheetHeight: Double?
     public var panelPopoverHeight: Double?
     /// N23.6: the one sync button that presents the panel: the last one that
@@ -89,18 +81,6 @@ public struct SyncStatusPresentation {
     public static func providerNeedsAttention(_ state: SyncProviderState?) -> Bool {
         state?.phase == .blocked || state?.phase == .handoffRecovery
     }
-    /// Whether iCloud sync waits on the person: a decision, an account or a
-    /// problem that will not clear by itself. Waiting, transfers and a pause
-    /// the person chose do not count (N16.2).
-    public static func needsUser(_ state: CloudPolicyStatusState?, setup: SyncCoordinator.SetupState) -> Bool {
-        // The installation cannot reach iCloud until it is set up: a setup step.
-        if setup == .configurationUnavailable { return true }
-        return switch state {
-        case .needsAttention, .paused(.decisionRequired): true
-        case .iCloudUnavailable(let reason): reason != .temporary
-        default: false
-        }
-    }
     /// N16.2 with N15.4's kinds: the review shows the status button for a
     /// needs you row or an issues row, never for waiting rows alone.
     public static func needsUser(_ status: SyncMainStatus) -> Bool { status.needsYou || status.hasIssues }
@@ -109,169 +89,24 @@ public struct SyncStatusPresentation {
     public static func showsStatusAfterSyncNow(requested: Bool, reviewing: Bool, needsUser: Bool) -> Bool {
         requested && (!reviewing || needsUser)
     }
-    public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
-        if recovery.adoptionRecoveredCancelOnly || recovery.adoptionAfterReview { return false }
-        switch recovery.step {
-        case .staging, .staged, .ready: return recovery.adoptionTransportWait
-        default: return true
-        }
-    }
-    public static func recoveryStatusKey(_ recovery: CloudRecoveryStatus) -> String {
-        if recovery.adoptionRecoveredCancelOnly { return "sync.attention.adoptUnproven" }
-        if recovery.adoptionAfterReview { return "sync.attention.adoptAfterReview" }
-        return switch recovery.step {
-        case .confirmed, .bound, .ready: "sync.publish.preparing"
-        case .zones: "sync.publish.uploading"
-        case .sent, .complete: "sync.publish.finishing"
-        case .cancelling: "sync.publish.cancelling"
-        case .staging: "sync.adopt.staging"
-        case .staged: "sync.adopt.validating"
-        }
-    }
-    public static func cancellationMessageKey(_ recovery: CloudRecoveryStatus) -> String {
-        if recovery.adoptionRecoveredCancelOnly { return "sync.cancelOp.adoptUnproven.message" }
-        return switch recovery.step {
-        case .staging, .staged, .ready: "sync.cancelOp.adopt.message"
-        default: recovery.switchSent ? "sync.cancelOp.publish.message.switchSent" : "sync.cancelOp.publish.message"
-        }
-    }
-    public let symbol: String
-    public let titleKey: String
-    public let detailKey: String?
-    public init(state: CloudPolicyStatusState?, setup: SyncCoordinator.SetupState) {
-        let values: (String, String, String?)
-        switch state {
-        case .localOnly:
-            values = (SyncSymbol.off, "sync.status.off.title", "sync.status.localOnly.detail")
-        case .iCloudUnavailable(let reason):
-            values = (SyncSymbol.waiting, "sync.status.unavailable.title", Self.unavailableKey(reason))
-        case .paused(.decisionRequired):
-            // The fence's reason is not exposed by this projection.
-            values = (SyncSymbol.waiting, "sync.status.paused.title", "sync.needsYou.fence.none")
-        case .paused(.automaticOff), .paused(.userPaused):
-            // P25.2: `userPaused` is never reported; the update hold reads as auto off.
-            values = (SyncSymbol.waiting, "sync.status.automaticOff.title", "sync.status.automaticOff.detail")
-        case .needsAttention:
-            values = (SyncSymbol.needsYou, "sync.status.needsAttention.title", nil)
-        case .offline:
-            values = (SyncSymbol.waiting, "sync.status.offline.title", "sync.status.offline.detail")
-        case .syncingCollection:
-            values = (SyncSymbol.moving, "sync.status.syncing.title", "sync.status.syncing.detail")
-        case .syncingMedia:
-            values = (SyncSymbol.moving, "sync.status.syncingMedia.title", nil)
-        case .changesPending:
-            values = (SyncSymbol.waiting, "sync.status.pending.title", "sync.status.pending.detail")
-        case .upToDate:
-            values = (SyncSymbol.upToDate, "sync.status.upToDate.title", nil)
-        case .awaitingEvidence, nil:
-            if setup == .configurationUnavailable {
-                values = (SyncSymbol.waiting, "sync.status.unavailable.title", "sync.status.unavailable.setupNeeded")
-            } else {
-                values = (SyncSymbol.waiting, "sync.button.label", "sync.counts.unknown")
-            }
-        }
-        symbol = values.0; titleKey = values.1; detailKey = values.2
-    }
-    public static func unavailableKey(_ reason: CloudPolicyUnavailableReason) -> String {
-        switch reason {
-        case .noAccount: "sync.status.unavailable.noAccount"
-        case .restricted: "sync.status.unavailable.restricted"
-        case .temporary: "sync.status.unavailable.temporary"
-        case .setupNeeded: "sync.status.unavailable.setupNeeded"
-        }
-    }
-    public static func permitsPublication(_ decision: CloudConnectionDecision) -> Bool {
-        decision == .confirmUpload || decision == .chooseCollection
-    }
-    public static func permitsPublication(_ decision: CloudConnectionDecision, on page: CloudSyncEntry) -> Bool {
-        switch page {
-        case .connect: decision == .confirmUpload
-        case .replaceCloud: permitsPublication(decision)
-        case .publicationChoice, .replaceLocal: false
-        }
-    }
-    /// UI readiness only; confirmation still consumes the coordinator's retained authority.
-    public static func publicationReady(_ decision: CloudConnectionDecision?, accountAvailable: Bool, busy: Bool) -> Bool {
-        guard let decision else { return false }
-        return permitsPublication(decision) && accountAvailable && !busy
-    }
-    public static func permitsResume(_ decision: CloudConnectionDecision) -> Bool {
-        decision == .confirmResume
-    }
-    public static func permits(_ intent: CloudConnectionConfirmation, decision: CloudConnectionDecision) -> Bool {
-        switch intent {
-        case .publication: permitsPublication(decision)
-        case .adoption: permitsAdoption(decision)
-        case .resume: permitsResume(decision)
-        }
-    }
-    public static func connectionErrorKey(_ failure: CloudConnectionFailure) -> String {
-        switch failure {
-        case .accountMismatch: "sync.recovery.error.accountMismatch"
-        case .accountUnavailable: "sync.recovery.error.accountUnavailable"
-        case .authorityChanged: "sync.recovery.error.epochChanged"
-        case .epochIncomplete: "sync.recovery.error.epochIncomplete"
-        case .closed, .wrongOwner, .consumed, .notOffered: "sync.recovery.error.notOffered"
-        case .busy: "sync.recovery.error.other"
-        case .keyUnavailable, .unreadableControl, .incomingStagingUnavailable, .mediaApplyUnavailable,
-             .resetRecoveryUnavailable, .tracking, .incomplete, .fileIdentityUnavailable: "sync.recovery.error.other"
-        }
-    }
-    public static func permitsAdoption(_ decision: CloudConnectionDecision) -> Bool {
-        decision == .confirmAdoption || decision == .chooseCollection
-    }
-    public static func availability(_ projected: CloudPolicySyncNowAvailability?,
-                                    setup: SyncCoordinator.SetupState) -> CloudPolicySyncNowAvailability {
-        if let projected { return projected }
-        return .unavailable(setup == .configurationUnavailable ? .iCloudUnavailable : .collectionUnavailable)
-    }
-    public static func reviewAvailabilityKey(_ controls: CloudPolicyControls?) -> String {
-        controls?.automaticEligible == true ? "sync.now.unavailable.reviewActive" : "sync.now.unavailable.reviewActive.manual"
-    }
-    public static func errorKey(_ error: CloudPolicyOperationError) -> String {
-        switch error {
-        case .noAccount: "sync.error.noAccount"
-        case .configuration: "sync.status.unavailable.setupNeeded"
-        case .offline: "sync.error.offline"
-        case .throttled: "sync.error.throttled"
-        case .quotaFull: "sync.error.quotaFull"
-        case .localStorageFull: "sync.error.localStorageFull"
-        case .trackingError: "sync.error.trackingError"
-        case .conflictRecovery: "sync.error.conflictRecovery"
-        case .unsupportedSchema: "sync.error.unsupportedSchema"
-        case .other: "sync.error.cloudError"
-        }
-    }
 }
 
 extension ReviewCollection {
     public var syncPresentation: SyncPresentation {
         navigation.featureState { SyncPresentation() }
     }
-    public func cloudPreviewEntryUnavailableReason(_ entry: CloudSyncEntry) -> String? {
-        // P25.2: the update hold disables nothing; the entry clears it.
-        if sync.setupState == .configurationUnavailable { return "sync.status.unavailable.setupNeeded" }
-        if sync.connectionService == nil,
-           !(entry == .connect && lifecycle == .noCollection && sync.setupState == .prepared) {
-            return "sync.now.unavailable.collectionUnavailable"
-        }
-        if sync.setupState == .failed { return "sync.recovery.error.other" }
-        if sync.connectionOperationActive { return "sync.recovery.error.busy" }
-        if sync.connectionPreviewActive { return "sync.connect.reading" }
-        return nil
-    }
     /// Every control uses Rust's projection, or the actual installation fact
     /// while that projection is absent. No binding or account is inferred.
-    public func syncNowAvailability() -> CloudPolicySyncNowAvailability {
+    public func syncNowAvailability() -> SyncNowAvailability {
         if sync.providerState?.selection == .meguri {
             switch sync.meguriStatus.route {
             case .round, .account: return .available
             case .disabled: return .unavailable(.recoveryRequired)
             }
         }
-        return SyncStatusPresentation.availability(sync.status?.syncNow, setup: sync.setupState)
+        return .unavailable(.notConnected)
     }
-    @discardableResult public func requestSyncNow(source: CloudPolicySource = .command, showStatus: Bool = false) -> Bool {
+    @discardableResult public func requestSyncNow(source: SyncSource = .command, showStatus: Bool = false) -> Bool {
         guard navigation.sheet == nil, syncNowAvailability() == .available else { return false }
         if sync.providerState?.selection == .meguri, case .account(let key) = sync.meguriStatus.route {
             if key == "sync.meguri.media.showAffected" { syncPresentation.meguriAffectedFilesPresented = true }
@@ -291,21 +126,6 @@ extension ReviewCollection {
     }
     /// A preview cannot enable sync. Preparing the existing entry location also
     /// preserves the collection's subscription and platform-configuration order.
-    public func prepareCloudConnectionPreview(allowDuringReview: Bool = false) async throws {
-        guard review == nil || allowDuringReview else { throw BridgeError.sessionActive }
-        // Refused before any write or Host: this installation cannot use iCloud.
-        guard !sync.iCloudUnsupported else { throw BridgeError.unavailable(reason: "configuration") }
-        // A recovery call the person starts clears the update hold first (P25.2).
-        guard await sync.clearUpdateHold() else { throw BridgeError.unavailable(reason: "paused") }
-        try await prepareCloudConnectionHost()
-        try Task.checkCancellation()
-        guard sync.setupState != .configurationUnavailable else {
-            throw BridgeError.unavailable(reason: "configuration")
-        }
-        guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-        guard !sync.settings.paused else { throw BridgeError.unavailable(reason: "paused") }
-        sync.beginConnectionPreview()
-    }
     public enum SyncServiceChangeOutcome: Sendable, Equatable {
         case changed
         /// The selection was no longer the one the person saw: nothing changed, and they choose again.
@@ -317,23 +137,15 @@ extension ReviewCollection {
     /// and reason for Copy Debug Info; the control stays usable, so choosing
     /// again is the retry.
     public func changeSyncService(to target: SyncProviderSelection, from source: SyncProviderSelection?) async -> SyncServiceChangeOutcome {
-        let destination = switch target { case .meguri: "meguri"; case .iCloud: "iCloud"; case .localOnly: "off" }
+        let destination = switch target { case .meguri: "meguri"; case .localOnly: "off" }
         func failed(_ step: SyncServiceChangeFailure.Step, _ reason: SyncServiceChangeFailure.Reason) -> SyncServiceChangeOutcome {
             // The coordinator that owns the selection now, also after a handoff replaced it.
             sync.serviceChangeFailed(.init(destination: destination, step: step, reason: reason))
             return .failed
         }
         sync.serviceChangeBegan()
-        // An installation that cannot use iCloud never makes it the service. One
-        // that has it stored cannot read or stop its binding, so it stays as it is.
-        if sync.iCloudUnsupported, target == .iCloud || source == .iCloud || sync.providerState?.selection == .iCloud {
-            return failed(.preparation, .iCloudSetupNeeded)
-        }
         do { try await prepareSyncServiceSelection() }
         catch { return failed(.preparation, .init(ProviderFailureReason(error))) }
-        // Preparation may be what first read a stored iCloud selection: refuse
-        // again before the update hold is written.
-        if sync.iCloudUnsupported, sync.providerState?.selection == .iCloud { return failed(.preparation, .iCloudSetupNeeded) }
         let current = sync
         // A choice in the Service control clears the update hold, by writing
         // `paused: false` before the change itself is asked for (P25.2).
@@ -342,26 +154,11 @@ extension ReviewCollection {
         // ends this switch, and the person confirms again.
         // No state yet shows as Off, the same as `.localOnly`.
         guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else { return .superseded }
-        if target == .localOnly, source == .iCloud {
-            // V27.5's rows, through the retained operations.
-            return await current.turnOffICloud() ? .changed : failed(.handoff, .refused)
-        }
         if await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri) { return .changed }
         return failed(.handoff, .init(current.providerChangeFailureReason))
     }
-    public func presentCloudSync(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
-        syncPresentation.cancelStatusHandoff()
-        guard navigation.sheet == nil || navigation.sheet == .accountSync else { return }
-        syncPresentation.statusPresented = false
-        syncPresentation.connectionPath = []
-        navigation.present(.cloudSync(entry))
-        navigation.sheetHost = host
-    }
     /// Compact status and its destination use separate native presentations. Only the
     /// status sheet's actual onDismiss may consume this presentation request.
-    public func queueCloudSyncAfterStatusDismissal(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
-        queueSyncStatusDestination(.cloudSync(entry, host))
-    }
     public func queueAccountSyncAfterStatusDismissal(keepCollection: Bool = false) {
         queueSyncStatusDestination(.accountSync(keepCollection: keepCollection))
     }
@@ -390,7 +187,6 @@ extension ReviewCollection {
               request.generation == generation, request.navigationIntent == navigation.intentRevision,
               request.reviewID == navigation.review?.id, navigation.sheet == nil else { return }
         switch request.destination {
-        case .cloudSync(let entry, let host): presentCloudSync(entry, host: host)
         case .accountSync(let keepCollection): openAccountSyncFromStatus(keepCollection: keepCollection)
         }
     }

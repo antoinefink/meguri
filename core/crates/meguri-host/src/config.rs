@@ -6,6 +6,8 @@ use meguri_model::{clock::Clock, rng::RandomSource};
 /// Platform inputs only: callers cannot register their own engine ports.
 #[derive(Clone)]
 pub struct HostConfig {
+    /// Explicit application retirement policy, independent of transport availability.
+    pub(crate) application_scope: bool,
     pub collection_directory: PathBuf,
     /// May be missing; the forced writer preflights its existing ancestor before creation.
     pub backups_directory: PathBuf,
@@ -40,6 +42,7 @@ impl HostConfig {
             .unwrap_or(std::path::Path::new("."))
             .join("ManualTransfers");
         Self {
+            application_scope: false,
             manual_transfer_directory,
             publication_binding: meguri_engine::device_state::AccountBinding::LocalOnly,
             collection_directory,
@@ -55,6 +58,14 @@ impl HostConfig {
             #[cfg(feature = "test-hooks")]
             test_backup: None,
         }
+    }
+
+    /// Apply the application's retired-provider policy on open and initial activation.
+    /// Ordinary internal callers may omit transport temporarily without retiring
+    /// their persisted provider choice. Application scope rejects cloud inputs.
+    pub fn for_application(mut self) -> Self {
+        self.application_scope = true;
+        self
     }
 
     /// A harness witness is never counted as a production provider at a gate.

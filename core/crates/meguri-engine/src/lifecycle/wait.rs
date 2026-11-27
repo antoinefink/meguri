@@ -308,6 +308,25 @@ impl SlotGuard {
                 {
                     config.publication_binding = prior.binding;
                 }
+            } else if config.retire_icloud_publication {
+                // Failed/NoCollection restore bypasses ordinary open. Settle
+                // exact local proof under this lock before preparing recovery;
+                // a historically Connected owner must not use LocalOnly.
+                crate::device_state::reconcile_startup(
+                    live,
+                    &config.publication_binding,
+                    config.startup_publication_binding.as_ref(),
+                    config.startup_identity_read_failed,
+                    true,
+                    config.clock.clone(),
+                    config.random.clone(),
+                )
+                .map_err(EngineError::from)?;
+                config.publication_binding = crate::device_state::DeviceState::for_collection(live)
+                    .settled_publication()
+                    .map_err(EngineError::from)?
+                    .map(|p| p.binding)
+                    .unwrap_or(crate::device_state::AccountBinding::LocalOnly);
             } else {
                 crate::device_state::reconcile(
                     live,
@@ -378,7 +397,11 @@ impl SlotGuard {
                 });
             }
             self.engine.lock_state().recovery_ownership = Some(ownership.clone());
-            let cloud_account = if reason == crate::replace::ReplaceReason::CloudAdopt {
+            let cloud_account = if reason == crate::replace::ReplaceReason::CloudAdopt
+                && config.retire_icloud_publication
+            {
+                Some(crate::device_state::AccountBinding::Unknown)
+            } else if reason == crate::replace::ReplaceReason::CloudAdopt {
                 config
                     .ports
                     .cloud_publication_authority

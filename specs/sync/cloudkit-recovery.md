@@ -1,5 +1,10 @@
 # CloudKit recovery
 
+> Retired from the application on 2026-11-27 at Antoine's explicit request.
+> Retain this historical storage/wire contract and shared primitives; its
+> CloudKit-only UI, transport, signed-lane and verification requirements no
+> longer apply to Meguri products. Availability and local upgrade: `sync/meguri-provider#MP0`.
+
 Spec: sync/cloudkit-recovery
 Requirements: R2051, R2054, R2055, R2056, R1548, R1593 (connecting: V13), R2066 (recovery contract); supports R89, R117, R125, R158, R169, R458, R1553, R1555, R1558, R1559, R1561, R1562, R1592, R2010, R2012, R2043, R2046, R2049, R2057, R2059
 Anki: none (Meguri design)
