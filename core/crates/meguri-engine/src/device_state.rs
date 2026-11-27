@@ -1867,7 +1867,18 @@ fn activate_inner(
                 replacement: evidence.clone(),
                 native,
             };
-            if previous_cloud_proof.as_ref() != Some(&proof) {
+            if previous_cloud_proof.as_ref() == Some(&proof) {
+                use std::os::unix::fs::MetadataExt;
+                // Local writes may change bytes after publication, but cleanup
+                // still belongs only to the independently linked R6 inode.
+                let metadata = std::fs::symlink_metadata(live)?;
+                if !metadata.is_file()
+                    || metadata.nlink() != 1
+                    || (metadata.dev(), metadata.ino()) != (proof.native.device, proof.native.inode)
+                {
+                    return Err(failure("activated candidate native identity differs from R6 proof"));
+                }
+            } else {
                 // R6 owns the closed candidate here. Reuse its descriptor-bound
                 // verifier; never compare the DELETE-mode digest after SQLite
                 // has reopened it in WAL mode or performed a day write.

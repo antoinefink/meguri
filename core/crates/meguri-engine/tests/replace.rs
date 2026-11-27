@@ -1835,6 +1835,105 @@ fn cloud_adopt_requires_both_native_and_finalized_byte_proof_before_resolving_an
     }
 }
 
+#[test]
+fn cloud_adopt_activated_completion_requires_the_original_single_link_regular_inode() {
+    use std::os::unix::fs::MetadataExt;
+
+    for damage in ["absent", "directory", "symlink", "different-inode", "hardlink"] {
+        let (dir, live) = common::copy_fixture("schema-18.anki2");
+        settled_old(&live);
+        crash(&live, "replace.after_durable_activation", "cloud-restore-bound", ReplaceReason::CloudAdopt);
+        let before = r6_document(&live);
+        let state = &before["deviceState"];
+        assert_eq!(state["intent"]["phase"], "Activated");
+        assert_eq!(state["cloudAdoptActivation"]["replacement"], state["lastReplacement"]);
+        assert_recorded_file_proof(&live, &state["intent"], true);
+        let original = fs::symlink_metadata(&live).unwrap();
+        let held = live.with_extension("held-activation");
+        fs::rename(&live, &held).unwrap();
+        match damage {
+            "absent" => {}
+            "directory" => fs::create_dir(&live).unwrap(),
+            "symlink" => std::os::unix::fs::symlink(&held, &live).unwrap(),
+            "different-inode" => {
+                fs::copy(&held, &live).unwrap();
+                let substitute = fs::symlink_metadata(&live).unwrap();
+                assert_ne!((substitute.dev(), substitute.ino()), (original.dev(), original.ino()));
+                assert_eq!(fs::read(&live).unwrap(), fs::read(&held).unwrap());
+            }
+            "hardlink" => {
+                fs::hard_link(&held, &live).unwrap();
+                let linked = fs::symlink_metadata(&live).unwrap();
+                assert_eq!((linked.dev(), linked.ino()), (original.dev(), original.ino()));
+                assert_eq!(linked.nlink(), 2);
+            }
+            _ => unreachable!(),
+        }
+        let evidence = recovery_files(dir.path());
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        if damage == "absent" {
+            // Exercise the host's exact absence entry too: it must not consume
+            // this already activated journal when its candidate has vanished.
+            assert!(engine.reconcile_retired_icloud_absence_raw(&live, &retirement_config()).is_err());
+            assert_eq!(recovery_files(dir.path()), evidence);
+            assert_eq!(r6_document(&live), before);
+        }
+        let error = engine.open_raw(&live, retirement_config()).unwrap_err();
+        if damage != "absent" {
+            // open_raw reconciles under ownership before the storage open gate.
+            // In particular directories and symlinks must reach this R6 check.
+            assert!(
+                matches!(&error, EngineError::Storage(StorageError::Io { detail })
+                    if detail.contains("activated candidate native identity differs from R6 proof")),
+                "{damage}: {error}"
+            );
+        }
+        assert_eq!(recovery_files(dir.path()), evidence, "{damage}");
+        assert_eq!(r6_document(&live), before, "{damage}");
+        match damage {
+            "absent" => assert_eq!(live.symlink_metadata().unwrap_err().kind(), std::io::ErrorKind::NotFound),
+            "directory" => {
+                assert!(live.symlink_metadata().unwrap().is_dir());
+                fs::remove_dir(&live).unwrap();
+            }
+            _ => fs::remove_file(&live).unwrap(),
+        }
+        drop(engine);
+        fs::rename(&held, &live).unwrap();
+        let restored = fs::symlink_metadata(&live).unwrap();
+        assert_eq!((restored.dev(), restored.ino()), (original.dev(), original.ino()));
+        assert_eq!(restored.nlink(), 1);
+        let expected: Publication = serde_json::from_value(state["active"].clone()).unwrap();
+        recover_retired_twice(&live, &expected, None, 946);
+        let after = r6_document(&live);
+        assert_eq!(after["deviceState"]["cloudAdoptActivation"], state["cloudAdoptActivation"]);
+        assert_eq!(after["deviceState"]["replacements"], state["replacements"]);
+    }
+}
+
+#[test]
+fn cloud_adopt_activated_completion_accepts_same_inode_after_wal_changes() {
+    use std::os::unix::fs::MetadataExt;
+
+    let (_dir, live) = common::copy_fixture("schema-18.anki2");
+    settled_old(&live);
+    crash(&live, "replace.after_durable_activation", "cloud-restore-bound", ReplaceReason::CloudAdopt);
+    let before = r6_document(&live);
+    let original = fs::symlink_metadata(&live).unwrap();
+    let bytes = fs::read(&live).unwrap();
+    let db = meguri_storage::raw::PlainDatabase::open(&live).unwrap();
+    db.execute_batch("PRAGMA journal_mode=WAL; UPDATE col SET dty=999; PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    drop(db);
+    let current = fs::symlink_metadata(&live).unwrap();
+    assert_eq!((current.dev(), current.ino()), (original.dev(), original.ino()));
+    assert_ne!(fs::read(&live).unwrap(), bytes);
+    let expected: Publication = serde_json::from_value(before["deviceState"]["active"].clone()).unwrap();
+    recover_retired_twice(&live, &expected, None, 999);
+    let after = r6_document(&live);
+    assert_eq!(after["deviceState"]["cloudAdoptActivation"], before["deviceState"]["cloudAdoptActivation"]);
+}
+
 fn settled_old(live: &Path) {
     let engine = Engine::new(EngineConfig::default()).unwrap();
     engine.open_raw(live, config(binding(), 7)).unwrap();
