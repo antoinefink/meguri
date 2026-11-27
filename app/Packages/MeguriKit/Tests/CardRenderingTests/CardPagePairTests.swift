@@ -16,6 +16,48 @@ extension WebKitSuites {
             CardPagePair(configuration: configuration ?? CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved(), compare: compare)
         }
 
+        /// After an edit the review presents the card again and, when the answer
+        /// was showing, reveals it at once: the reveal waits for the swap's
+        /// commit instead of failing with `notPrepared`.
+        @Test func aRevealRightAfterPresentWaitsForTheCommit() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let pair = fixture.pair
+            let question = try await pair.prepare(CardPayload(cardID: 11, question: "front", answer: "back"))
+            let page = pair.idle
+            // As the review coordinator does after an edit (keepAnswer): present in a
+            // transaction of its own, then reveal in the same main-actor turn.
+            let presentedBeforeReveal = try await Spike.deadline("reveal after an uncommitted present", timeout: .seconds(5)) { @MainActor in
+                CATransaction.begin()
+                _ = try pair.present(question)
+                CATransaction.commit()
+                let presented = page.presented
+                _ = try await pair.showAnswer()
+                return presented
+            }
+            #expect(!presentedBeforeReveal)
+            #expect(pair.current === page && page.presented && page.update?.side == .answer && page.update?.card == 11)
+        }
+
+        @Test func aRevealWaitingForTheCommitFailsWhenThePairCloses() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let pair = fixture.pair
+            let question = try await pair.prepare(CardPayload(cardID: 12, question: "front", answer: "back"))
+            let page = pair.idle
+            let outcome = try await Spike.deadline("a waiting reveal ends with the pair", timeout: .seconds(5)) { @MainActor () -> String in
+                CATransaction.begin()
+                _ = try pair.present(question)
+                CATransaction.commit()
+                // Main-actor work queued now runs before the run loop commits the swap.
+                Task { @MainActor in pair.close() }
+                do { _ = try await pair.showAnswer(); return "revealed" }
+                catch CardPage.Failure.notPrepared { return "notPrepared" }
+            }
+            #expect(outcome == "notPrepared")
+            #expect(page.update?.side != .answer)
+        }
+
         @Test func replayBindingRequiresCurrentShownAndCompletedPresentation() async throws {
             let fixture = try await CardBehaviorFixture()
             defer { fixture.close() }

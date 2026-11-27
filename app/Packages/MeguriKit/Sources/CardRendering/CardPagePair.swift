@@ -100,6 +100,10 @@ public final class CardPagePair {
     private var preparedAnswer: (question: CardUpdate, answer: CardUpdate)?
     private var closed = false
     private var commitSerial: UInt64 = 0
+    /// The update `present` swapped in whose commit has not yet presented
+    /// its page, and the reveals waiting for that commit.
+    private var pendingCommit: CardUpdate?
+    private var commitWaiters: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var hostInstallation = UUID()
     private var hostSource: String?
     private var recovery: Task<Void, Never>?
@@ -321,6 +325,7 @@ public final class CardPagePair {
         // A tap counts only for the card it was on: the next card needs its own.
         lastTap = nil
         cancelPresentationWork()
+        settleCommit(presented: false)
         cancelRecovery()
         Self.raise(next.webView, in: container)
         next.beginPresentation()
@@ -346,9 +351,13 @@ public final class CardPagePair {
         if audio.allowsAudio(audioIntent), let payload = next.payload { audio.prepare(payload: payload, update: answer, intent: audioIntent) }
         commitSerial += 1
         let serial = commitSerial
+        pendingCommit = update
         CATransaction.setCompletionBlock { [weak self, weak next] in
             Task { @MainActor in
-                guard let self, !self.closed, !self.suspended, !self.lifecycleSuspended, self.commitSerial == serial, let next, self.current === next, next.update == update else { return }
+                guard let self else { return }
+                // Whatever ends this commit settles the reveals waiting for it.
+                defer { if self.commitSerial == serial { self.settleCommit(presented: next?.presented == true && next?.update == update) } }
+                guard !self.closed, !self.suspended, !self.lifecycleSuspended, self.commitSerial == serial, let next, self.current === next, next.update == update else { return }
                 if let payload = next.payload { self.audio.present(payload: payload, update: update, intent: audioIntent) }
                 do { try await next.present(token: token.sequence) }
                 catch { next.diagnostics.record("presentFailed", update: update) }
@@ -365,7 +374,10 @@ public final class CardPagePair {
     public func showAnswer(inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) async throws -> SwapToken {
         let audioIntent = audio.audioIntent
         let page = current
-        guard !closed, !suspended, !lifecycleSuspended, !page.needsReconstruction, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
+        // A reveal right after `present` (the side kept after an edit) meets
+        // the swap before its commit presents the page: wait for that commit.
+        if !page.presented, let pendingCommit, pendingCommit == page.update { try await waitForCommit() }
+        guard !closed, !suspended, !lifecycleSuspended, current === page, !page.needsReconstruction, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
         #if DEBUG
         let logger = Logger(subsystem: "Meguri", category: "ReviewAnswerStage")
         logger.debug("questionShown.begin")
@@ -573,11 +585,43 @@ public final class CardPagePair {
         presentationWork = nil
     }
 
+    private func waitForCommit() async throws {
+        let id = UUID()
+        // Native completion can disappear during process recovery or
+        // occlusion (as in Browse's preview): fail as before, only later.
+        let limit = Task { @MainActor [weak self] in
+            guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
+            self?.commitWaiters.removeValue(forKey: id)?.resume(throwing: CardPage.Failure.notPrepared)
+        }
+        defer { limit.cancel() }
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { commitWaiters[id] = $0 }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.commitWaiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    /// The pending commit ended: presented, or superseded by a newer present,
+    /// a suspension, close or a terminated web process (each bumps
+    /// `commitSerial`). Resumption leaves the commit, and its waiters, alone.
+    private func settleCommit(presented: Bool) {
+        pendingCommit = nil
+        let waiters = commitWaiters.values
+        commitWaiters.removeAll()
+        for waiter in waiters {
+            if presented { waiter.resume() } else { waiter.resume(throwing: CardPage.Failure.notPrepared) }
+        }
+    }
+
     /// Close page admission synchronously before starting asynchronous cleanup.
     private func beginSuspension() {
         cancelPresentationWork()
         cancelRecovery()
         commitSerial += 1
+        settleCommit(presented: false)
         preparedAnswer = nil
         audio.stop()
         releaseHTMLAudio()
@@ -702,6 +746,7 @@ public final class CardPagePair {
         container.setAccessibilityChildrenInNavigationOrder([])
         #endif
         cancelPresentationWork()
+        settleCommit(presented: false)
         physicalStop?.cancel(); physicalStop = nil
         stopBindings.removeAll()
         finishStopWaiters()
@@ -742,6 +787,7 @@ public final class CardPagePair {
         if page !== current { page.invalidate(); return }
         cancelPresentationWork()
         commitSerial += 1; preparedAnswer = nil
+        settleCommit(presented: false)
         audio.stop(); releaseHTMLAudio()
         cancelRecovery()
         if !suspended && !lifecycleSuspended { scheduleRecovery() }
