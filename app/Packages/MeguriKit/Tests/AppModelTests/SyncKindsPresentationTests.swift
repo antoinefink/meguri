@@ -10,31 +10,6 @@ import Testing
         SyncKinds.cloudRows(attention: [item: 2], facts: facts).first
     }
 
-    @Test func cloudStateRowsGiveTheirKindTextAndAction() {
-        #expect(SyncKinds.cloudStateRow(.localOnly) == nil)
-        #expect(SyncKinds.cloudStateRow(.iCloudUnavailable(.noAccount)) == Row(.needsYou, "sync.status.unavailable.noAccount"))
-        #expect(SyncKinds.cloudStateRow(.iCloudUnavailable(.restricted)) == Row(.needsYou, "sync.status.unavailable.restricted"))
-        #expect(SyncKinds.cloudStateRow(.iCloudUnavailable(.temporary)) == Row(.waiting, "sync.status.unavailable.temporary"))
-        #expect(SyncKinds.cloudStateRow(.iCloudUnavailable(.setupNeeded))
-            == Row(.needsYou, "sync.status.unavailable.setupNeeded", .copyDebugInfo))
-        #expect(SyncKinds.cloudStateRow(.paused(.decisionRequired), fence: .restore)
-            == Row(.needsYou, "sync.needsYou.fence.restore", .chooseCollection))
-        #expect(SyncKinds.cloudStateRow(.paused(.decisionRequired), fence: .importCollection)
-            == Row(.needsYou, "sync.needsYou.fence.import", .chooseCollection))
-        #expect(SyncKinds.cloudStateRow(.paused(.decisionRequired))
-            == Row(.needsYou, "sync.needsYou.fence.none", .chooseCollection))
-        #expect(SyncKinds.cloudStateRow(.offline)?.kind == .waiting)
-        for state: CloudPolicyStatusState in [.paused(.automaticOff), .syncingCollection, .syncingMedia,
-                                              .changesPending, .upToDate(asOfMilliseconds: 1)] {
-            #expect(SyncKinds.cloudStateRow(state) == nil)
-        }
-        let off = SyncKinds.cloud(state: .localOnly)
-        #expect(off.titleKey == "sync.status.off.title" && off.detailKey == "sync.status.localOnly.detail")
-        #expect(off.kind == nil && off.action == nil)
-        // The update hold shows as Sync Automatically off (P25.2).
-        let hold = SyncKinds.cloud(state: .paused(.automaticOff))
-        #expect(hold.titleKey == "sync.status.automaticOff.title" && hold.kind == nil)
-    }
 
     @Test func cloudNeedsYouRowsOneToTwentyFive() {
         #expect(one(.collectionCorrupt) == Row(.needsYou, "sync.attention.collectionCorrupt", .repair))
@@ -106,21 +81,6 @@ import Testing
         #expect(all.filter { $0.action != nil }.map(\.action) == [.checkDatabase])
     }
 
-    @Test func firstNeedsYouRowInTableOrderShows() {
-        let status = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
-            attention: [.quotaFull: 1, .trackingError: 1, .refused: 3, .cloudError: 1])
-        #expect(status.kind == .needsYou && status.symbol == SyncKinds.needsYouSymbol)
-        #expect(status.titleKey == "sync.status.needsAttention.title")
-        #expect(status.detailKey == "sync.attention.trackingError" && status.action == .tryAgain)
-        #expect(status.issues == [Row(.issues, "sync.attention.refused", count: 3)])
-        // Once it is settled, the next shows.
-        let next = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
-            attention: [.quotaFull: 1, .refused: 3])
-        #expect(next.detailKey == "sync.needsYou.quotaFull")
-        // A state row comes before the attention rows.
-        let account = SyncKinds.cloud(state: .iCloudUnavailable(.noAccount), attention: [.quotaFull: 1])
-        #expect(account.detailKey == "sync.status.unavailable.noAccount" && account.action == nil)
-    }
 
     @Test func waitingOrIssuesAloneKeepTheStateUnderneath() {
         let underneath: [(CloudPolicyStatusState, String, String)] = [

@@ -422,7 +422,7 @@ mg_doctor() {
   else
     printf '  %-4s  %-16s %s\n' info daily-driver "optional: the real copy (com.antoinefink.meguri) is not fully set up; Mac: $daily_missing; iOS: $daily_ios"
     mg_user_step daily-driver-account missing false "Set up the real copy's identifiers and profiles (daily driver)" \
-      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push Notifications on the app, then development profiles with this Mac's certificate: macOS for the app with this Mac, iOS for the app and the widget with the iPhone (docs/process/one-time-setup.md#daily-driver-account)."
+      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, then development profiles with this Mac's certificate: macOS for the app with this Mac, iOS for the app and the widget with the iPhone (docs/process/one-time-setup.md#daily-driver-account)."
   fi
   [ -z "$daily" ] || mg_detail daily_driver_profiles "$daily"
 

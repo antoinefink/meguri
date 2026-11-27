@@ -3,8 +3,8 @@ import CoreFoundation
 import Instrumentation
 internal import MeguriCoreBindings
 
-public enum SyncProviderSelection: Sendable, Equatable { case localOnly, iCloud, meguri }
-public enum SyncProviderPhase: Sendable, Equatable { case localOnly, setupRequired, iCloud, handoffRecovery, blocked }
+public enum SyncProviderSelection: Sendable, Equatable { case localOnly, meguri }
+public enum SyncProviderPhase: Sendable, Equatable { case localOnly, setupRequired, handoffRecovery, blocked }
 public struct SyncProviderState: Sendable {
     public let selection: SyncProviderSelection?
     public let phase: SyncProviderPhase
@@ -12,13 +12,13 @@ public struct SyncProviderState: Sendable {
     public let revision: UInt64
     public let removalPending: Bool
     init(_ value: MeguriCoreBindings.ProviderSnapshot) {
-        selection = value.selection.map { switch $0 { case .localOnly: .localOnly; case .iCloud: .iCloud; case .meguri: .meguri } }
-        phase = switch value.phase { case .localOnly: .localOnly; case .setupRequired: .setupRequired; case .iCloud: .iCloud; case .handoffRecovery: .handoffRecovery; case .blocked: .blocked }
+        selection = value.selection.map { switch $0 { case .localOnly: .localOnly; case .meguri: .meguri } }
+        phase = switch value.phase { case .localOnly: .localOnly; case .setupRequired: .setupRequired; case .handoffRecovery: .handoffRecovery; case .blocked: .blocked }
         settings = value.settings.map { .init(enabled: $0.enabled, paused: $0.paused, automatic: $0.automatic, media: $0.media) }
         revision = value.revision
         removalPending = value.removalPending
     }
-    public var permitsICloudStartup: Bool { selection == .iCloud && phase != .blocked && phase != .handoffRecovery && settings?.enabled == true && settings?.paused == false }
+    public var permitsICloudStartup: Bool { false }
     public static let blocked = SyncProviderState(selection: nil, phase: .blocked, settings: nil, revision: 0)
     /// Rendering fixtures only: a synthetic value that describes no stored selection.
     public static func renderFixture(selection: SyncProviderSelection, phase: SyncProviderPhase) -> SyncProviderState {
@@ -27,10 +27,6 @@ public struct SyncProviderState: Sendable {
     private init(selection: SyncProviderSelection?, phase: SyncProviderPhase, settings: CloudPolicyDeviceSettings?, revision: UInt64) {
         self.selection = selection; self.phase = phase; self.settings = settings; self.revision = revision; removalPending = false
     }
-}
-public final class ProviderDiscoveryOwnership: Sendable {
-    private let raw: MeguriCoreBindings.ProviderDiscovery
-    init(_ raw: MeguriCoreBindings.ProviderDiscovery) { self.raw = raw }
 }
 public final class ProviderHandoffOwnership: Sendable {
     fileprivate let raw: MeguriCoreBindings.ProviderHandoff
@@ -63,7 +59,7 @@ public actor CoreProviderService: MeguriProviderConnectionService {
         guard let dictionary = value as? [String: Any], ["enabled", "paused", "automatic", "media"].allSatisfy({ key in
             guard let number = dictionary[key] as? NSNumber else { return false }
             return CFGetTypeID(number) == CFBooleanGetTypeID()
-        }) else { throw BridgeError.unavailable(reason: "iCloud device settings require recovery") }
+        }) else { throw BridgeError.unavailable(reason: "Sync settings could not be read") }
         return String(decoding: try JSONSerialization.data(withJSONObject: dictionary), as: UTF8.self)
     }
     public static func legacyMigrationJSON(_ value: Any?) -> String? {
@@ -72,7 +68,7 @@ public actor CoreProviderService: MeguriProviderConnectionService {
     public static func legacySettings(_ value: Any?) throws -> CloudPolicyDeviceSettings {
         guard let text = try strictLegacyJSON(value) else { return .init(enabled: false, paused: false, automatic: true, media: true) }
         let values = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Bool]
-        guard let values else { throw BridgeError.unavailable(reason: "iCloud device settings require recovery") }
+        guard let values else { throw BridgeError.unavailable(reason: "Sync settings could not be read") }
         return .init(enabled: values["enabled"] == true, paused: values["paused"] == true, automatic: values["automatic"] == true, media: values["media"] == true)
     }
     public static func migrate(directory: URL, legacyJSON: String?) async throws -> SyncProviderState {
@@ -105,17 +101,9 @@ public actor CoreProviderService: MeguriProviderConnectionService {
         let value = MeguriCoreBindings.ProviderSettings(enabled: settings.enabled, paused: settings.paused, automatic: settings.automatic, media: settings.media)
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerSaveSettings) { try raw.saveSettings(settings: value) })
     }
-    public func beginICloudDiscovery() async throws -> ProviderDiscoveryOwnership {
-        let raw = raw
-        return ProviderDiscoveryOwnership(try await MaintenanceLane.shared.call(.providerBeginDiscovery) { try raw.beginIcloudDiscovery() })
-    }
-    public func acceptICloudConnection() async throws -> SyncProviderState {
-        let raw = raw
-        return SyncProviderState(try await MaintenanceLane.shared.call(.providerAcceptICloud) { try raw.acceptIcloudConnection() })
-    }
     public func beginHandoff(to destination: SyncProviderSelection, removeCredentials: Bool = false) async throws -> ProviderHandoffOwnership {
         let raw = raw
-        let target: MeguriCoreBindings.ProviderSelection = switch destination { case .localOnly: .localOnly; case .iCloud: .iCloud; case .meguri: .meguri }
+        let target: MeguriCoreBindings.ProviderSelection = switch destination { case .localOnly: .localOnly; case .meguri: .meguri }
         return ProviderHandoffOwnership(try await MaintenanceLane.shared.call(.providerBeginHandoff) { try raw.beginHandoff(destination: target, removeCredentials: removeCredentials) })
     }
     /// Call only after the existing original owner has actually joined. There

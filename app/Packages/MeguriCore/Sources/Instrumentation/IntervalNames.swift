@@ -181,8 +181,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerSnapshot = BridgeCall("ProviderOwner.snapshot")
     public static let providerRefresh = BridgeCall("ProviderOwner.refresh")
     public static let providerSaveSettings = BridgeCall("ProviderOwner.save_settings")
-    public static let providerBeginDiscovery = BridgeCall("ProviderOwner.begin_icloud_discovery")
-    public static let providerAcceptICloud = BridgeCall("ProviderOwner.accept_icloud_connection")
     public static let providerBeginHandoff = BridgeCall("ProviderOwner.begin_handoff")
     public static let providerFinishHandoff = BridgeCall("ProviderOwner.finish_handoff")
     public static let providerRecoverHandoffToLocalOnly = BridgeCall("ProviderOwner.recover_handoff_to_local_only")
@@ -772,7 +770,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
         migrateProvider, providerOwner, providerSnapshot, providerRefresh, providerSaveSettings,
-        providerBeginDiscovery, providerAcceptICloud, providerBeginHandoff, providerFinishHandoff,
+        providerBeginHandoff, providerFinishHandoff,
         providerRecoverHandoffToLocalOnly, providerRetryFailedPublication,
         providerConfigureMeguri, providerConfiguredMeguri, providerConnectionInformation, providerStartLogin, providerLoginResult,
         providerBootstrapPrepare, providerBootstrapConfirm, providerBootstrapMediaPrepare,

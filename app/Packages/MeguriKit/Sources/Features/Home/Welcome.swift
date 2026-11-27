@@ -33,7 +33,7 @@ nonisolated enum WelcomeChoice: CaseIterable, Sendable {
     }
     var explanation: String {
         switch self {
-        case .sync: String(localized: "Get your collection from Meguri Sync or iCloud.", bundle: .module)
+        case .sync: String(localized: "Get your collection from Meguri Sync.", bundle: .module)
         case .importFile: String(localized: "Open a .colpkg file exported from Meguri or Anki.", bundle: .module)
         case .startEmpty: String(localized: "Begin with no decks and add your own notes.", bundle: .module)
         }

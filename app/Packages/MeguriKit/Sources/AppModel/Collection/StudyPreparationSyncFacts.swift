@@ -22,10 +22,7 @@ struct StudyPreparationSyncInput: Equatable, Sendable {
     var meguriRoutine: MeguriRoutineState?
     var meguriLastExchange: Int64?
 
-    // iCloud Sync
-    var cloudAttached = false
-    var cloudState: CloudPolicyStatusState?
-    var cloudLastEnded: Int64?
+
 }
 
 extension StudyPreparationSyncFacts {
@@ -62,20 +59,7 @@ extension StudyPreparationSyncFacts {
                  .server, .failed:
                 return .init(exchangeExpected: true, activity: .settled(endedMilliseconds: input.meguriLastExchange))
             }
-        case .iCloud:
-            guard input.cloudAttached else { return .none }
-            switch input.cloudState {
-            case .localOnly, .paused, .needsAttention:
-                return .none
-            case .iCloudUnavailable(let reason):
-                return reason == .temporary ? waiting : .none
-            case .syncingCollection:
-                return .init(exchangeExpected: true, activity: .exchanging)
-            case nil, .offline, .awaitingEvidence:
-                return waiting
-            case .syncingMedia, .changesPending, .upToDate:
-                return .init(exchangeExpected: true, activity: .settled(endedMilliseconds: input.cloudLastEnded))
-            }
+
         }
     }
 }
@@ -88,9 +72,7 @@ extension SyncCoordinator {
             paused: settings.paused, selection: providerState?.selection,
             meguriPhase: meguriPhase, meguriReady: meguriAutomaticSettingVisible,
             meguriSettled: meguriLocalActionAvailable,
-            meguriRoutine: meguriRoutine, meguriLastExchange: meguriLastExchange,
-            cloudAttached: setupState == .attached, cloudState: status?.state,
-            cloudLastEnded: status?.lastAttempt?.endedMilliseconds)
+            meguriRoutine: meguriRoutine, meguriLastExchange: meguriLastExchange)
     }
     var studyPreparationFacts: StudyPreparationSyncFacts { .mapping(studyPreparationInput) }
 }

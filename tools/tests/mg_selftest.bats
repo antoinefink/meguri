@@ -2175,16 +2175,6 @@ printf '%s\n' "${s##*/} \$*" >>"\$STUB_LOG"
 exit 1
 EOF
   done
-  cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
-mg__swift_initial_adoption_fixture() {
-  printf '%s\n' initial-adoption-fixture >>"$STUB_LOG"
-  return 0
-}
-mg__swift_cloud_service_helper() {
-  printf '%s\n' cloud-service-helper >>"$STUB_LOG"
-  return 0
-}
-EOF
   export PATH="$STUBS:$PATH"
 }
 
@@ -2225,7 +2215,7 @@ lint/glass-outside-chrome" ]
     mg $job
     [ "$(failure_ids)" = xcframework ] || { echo "$job: $(failure_ids); stderr: $stderr"; return 1; }
     case "$job" in
-      swift-test*) expected="docker-info swiftlint initial-adoption-fixture cloud-service-helper build-core-xcframework.sh " ;;
+      swift-test*) expected="docker-info swiftlint build-core-xcframework.sh " ;;
       xcode-check*) expected="docker-info swiftlint build-core-xcframework.sh " ;;
     esac
     [ "$(stub_calls)" = "$expected" ] || { echo "$job: $(stub_calls)"; return 1; }

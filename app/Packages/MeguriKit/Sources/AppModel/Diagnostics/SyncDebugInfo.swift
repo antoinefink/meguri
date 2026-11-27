@@ -33,8 +33,6 @@ public struct SyncServiceChangeFailure: Codable, Sendable, Equatable {
     /// write; `handoff`: the change itself (MP3).
     public enum Step: String, Codable, Sendable, Equatable { case preparation, updateHold, handoff }
     public enum Reason: String, Codable, Sendable, Equatable {
-        /// This installation cannot use iCloud (`iCloudUnavailable{setupNeeded}`).
-        case iCloudSetupNeeded
         /// A step answered no and named no error.
         case refused
         case busy, unavailable, cancelled, unsupported, invalidArgument, internalFailure, other
@@ -50,7 +48,7 @@ public struct SyncServiceChangeFailure: Codable, Sendable, Equatable {
             }
         }
     }
-    /// `off`, `meguri` or `iCloud`.
+    /// `off` or `meguri`.
     public var destination: String
     public var step: Step
     public var reason: Reason
@@ -71,15 +69,13 @@ public struct SyncDebugFacts: Codable, Sendable, Equatable {
     public var meguriRoutine: String?
     public var statusTitleKey: String
     public var statusDetailKey: String?
-    /// Present, and false, only on an installation whose build cannot use iCloud.
-    public var iCloudConfigured: Bool?
     public var serviceChangeFailure: SyncServiceChangeFailure?
     public init(service: String, providerPhase: String, blockedSource: ProviderBlockedSource? = nil,
                 blockedReason: ProviderFailureReason? = nil, meguriConnection: String? = nil,
                 meguriSetupStage: String? = nil, meguriRoutine: String? = nil,
                 statusTitleKey: String, statusDetailKey: String? = nil,
-                iCloudConfigured: Bool? = nil, serviceChangeFailure: SyncServiceChangeFailure? = nil) {
-        self.iCloudConfigured = iCloudConfigured; self.serviceChangeFailure = serviceChangeFailure
+                serviceChangeFailure: SyncServiceChangeFailure? = nil) {
+        self.serviceChangeFailure = serviceChangeFailure
         self.service = service; self.providerPhase = providerPhase
         self.blockedSource = blockedSource; self.blockedReason = blockedReason
         self.meguriConnection = meguriConnection; self.meguriSetupStage = meguriSetupStage
@@ -138,7 +134,6 @@ public enum SyncDebugInfoText {
                 lines.append("Meguri: connection \(sync.meguriConnection ?? "none"), setup \(sync.meguriSetupStage ?? "none"), routine \(sync.meguriRoutine ?? "none")")
             }
             lines.append("Status: \(sync.statusTitleKey)\(sync.statusDetailKey.map { " / \($0)" } ?? "")")
-            if sync.iCloudConfigured == false { lines.append("iCloud: not configured in this build") }
             if let failure = sync.serviceChangeFailure {
                 lines.append("Service change to \(failure.destination) failed: \(failure.step.rawValue) (\(failure.reason.rawValue))")
             }

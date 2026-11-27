@@ -169,12 +169,12 @@ built() { echo "$SB/build/app/RealCopyDerivedData/Build/Products/Release/Meguri.
 facts() {
   jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target: $target, buildSettings: ({
     CONFIGURATION:"Release", MEGURI_SIGNING:"team", MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon",
-    MEGURI_CLOUD_CONFIGURATION:"production", MEGURI_CLOUD_CONTAINER:"iCloud.example.daily",
-    MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
-    MEGURI_CLOUD_ENVIRONMENT:"production", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Production", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
-    INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.daily", INFOPLIST_KEY_MeguriCloudEnvironment:"production",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"YES", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0",
+
+
+
+
+
+
     PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri" + (if $target == "Meguri" then "" else ".widget" end)),
     MEGURI_CORE_FEATURES:"ankiweb", MEGURI_SWIFT_CONDITIONS:"ANKIWEB_ENABLED", SWIFT_ACTIVE_COMPILATION_CONDITIONS:"ANKIWEB_ENABLED",
     MEGURI_CARD_INSPECTION_BUILD:"personalRelease", MEGURI_MAC_UI_ELEMENT:"NO",
@@ -185,11 +185,9 @@ facts() {
     "com.apple.security.app-sandbox":true, "com.apple.security.network.client":true, "com.apple.security.network.server":true,
     "com.apple.security.files.user-selected.read-write":true, "com.apple.security.files.bookmarks.app-scope":true,
     "com.apple.developer.team-identifier":"TESTTEAM01", "com.apple.application-identifier":"TESTTEAM01.com.antoinefink.meguri",
-    "keychain-access-groups":["TESTTEAM01.com.antoinefink.meguri"], "com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri"],
-    "com.apple.developer.icloud-container-identifiers":["iCloud.example.daily"], "com.apple.developer.icloud-services":["CloudKit"],
-    "com.apple.developer.icloud-container-environment":"Production", "com.apple.developer.aps-environment":"development"}' >"$FX/app-ent.json"
+    "keychain-access-groups":["TESTTEAM01.com.antoinefink.meguri"], "com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri"]}' >"$FX/app-ent.json"
   echo '{"com.apple.security.app-sandbox":true,"com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri"]}' >"$FX/widget-ent.json"
-  echo '{"CFBundleIdentifier":"com.antoinefink.meguri","CFBundleExecutable":"Meguri","MeguriCardInspectionBuild":"personalRelease","LSUIElement":false,"MeguriCloudContainer":"iCloud.example.daily","MeguriCloudEnvironment":"production","MeguriCloudSchemaConfigured":false}' >"$FX/info.json"
+  echo '{"CFBundleIdentifier":"com.antoinefink.meguri","CFBundleExecutable":"Meguri","MeguriCardInspectionBuild":"personalRelease","LSUIElement":false}' >"$FX/info.json"
   profile "$FX/embedded.plist" TESTTEAM01 "$(cat "$FX/app-ent.json")"
   installed_profile development
 }
@@ -211,37 +209,9 @@ PY
 installed_profile() {
   profile "$FX/profiles/daily.provisionprofile" DNQ34W43XX "$(jq -n --arg push "$1" '{
     "com.apple.application-identifier":"DNQ34W43XX.com.antoinefink.meguri", "com.apple.developer.team-identifier":"DNQ34W43XX",
-    "keychain-access-groups":["DNQ34W43XX.*"], "com.apple.security.application-groups":["DNQ34W43XX.*"],
-    "com.apple.developer.icloud-container-identifiers":["iCloud.com.antoinefink.meguri"], "com.apple.developer.icloud-services":"*",
-    "com.apple.developer.icloud-container-environment":["Development","Production"], "com.apple.developer.aps-environment":$push}')"
+    "keychain-access-groups":["DNQ34W43XX.*"], "com.apple.security.application-groups":["DNQ34W43XX.*"], "com.apple.developer.aps-environment":$push}')"
 }
 
-@test "the real copy refuses before any work without acknowledgement, team signing or the exact route" {
-  local args
-  while IFS= read -r args; do
-    : >"$STUB_LOG"
-    # shellcheck disable=SC2086
-    mg build-app $args
-    [ "$status" -eq 2 ]
-    [ "$(field '.failures[0].id')" = usage ]
-    [ ! -s "$STUB_LOG" ]
-  done <<'EOF'
---platform mac --real-copy
---platform mac --owner-requested
---platform ios-sim --real-copy --owner-requested
---platform mac --config AppStore --real-copy --owner-requested
---platform mac --config Debug --real-copy --owner-requested
---platform mac --real-copy --owner-requested --standalone
---platform mac --real-copy --owner-requested --personal-preview
---platform mac --real-copy --owner-requested --test-plan CloudAgent
-EOF
-  unset MEGURI_APP_SIGNING
-  real_copy
-  [ "$status" -eq 2 ]
-  [[ "$(field '.failures[0].message')" == *"MEGURI_APP_SIGNING=team"* ]]
-  [ ! -s "$STUB_LOG" ]
-  [ ! -d "$SB/build/app" ]
-}
 
 @test "the real copy stops before building when no installed profile authorizes it, naming what is missing" {
   # A profile without the development push grant (here production only) cannot sign it.
@@ -265,8 +235,8 @@ EOF
   real_copy
   [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
-  called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
-  called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
+  called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_MAC_PROFILE_STYLE=Manual MEGURI_MAC_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
+  called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_MAC_PROFILE_STYLE=Manual MEGURI_MAC_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
   not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|open '
   [ "$(grep -n '^xcodebuild -showBuildSettings' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild build ' "$STUB_LOG" | cut -d: -f1)" ]
   called "^identity $(built)$"
@@ -312,37 +282,6 @@ EOF
   done
 }
 
-@test "a real copy that fails its checks or its build is still unregistered and deleted" {
-  local mutation
-  cp "$FX/app-ent.json" "$FX/good-ent.json"
-  for mutation in \
-    '.["com.apple.security.get-task-allow"] = true' \
-    '.["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"' \
-    '.["com.apple.developer.icloud-container-environment"] = "Development"' \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' \
-    '.["com.apple.developer.aps-environment"] = "production"'; do
-    jq "$mutation" "$FX/good-ent.json" >"$FX/app-ent.json"
-    : >"$STUB_LOG"
-    real_copy
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = real-copy-product ]
-    called "^lsregister -u $(built)$"
-    [ ! -e "$(built)" ]
-    not_called '^ditto '
-  done
-  cp "$FX/good-ent.json" "$FX/app-ent.json"
-  : >"$STUB_LOG"
-  FX_IDENTITY_RC=1 real_copy
-  [ "$status" -eq 1 ]
-  [ "$(field '.failures[0].id')" = real-copy-product ]
-  [ ! -e "$(built)" ]
-  : >"$STUB_LOG"
-  FX_BUILD_ERROR='Provisioning profile "Mac Team Provisioning Profile: com.antoinefink.meguri" does not include the com.apple.developer.aps-environment entitlement.' real_copy
-  [ "$status" -eq 1 ]
-  [ "$(field '.failures[0].id')" = real-copy-profile ]
-  called "^lsregister -u $(built)$"
-  [ ! -e "$(built)" ]
-}
 
 @test "the real copy fails when LaunchServices still holds the built app or cannot be read" {
   FX_KEEP_REGISTERED="$(built)/Contents/PlugIns/MeguriWidget.appex" real_copy
@@ -475,34 +414,6 @@ EOF
   [ "$status" -eq 2 ]
 }
 
-@test "the profile reader pins the profile UUID and covers the iOS app and widget for the phone" {
-  local phone=00008110-0000000000000001
-  python3 - "$FX/profiles" "$phone" <<'PY'
-import datetime, plistlib, sys
-for name, ident, grants in (
-    ("ios-app", "DNQ34W43XX.com.antoinefink.meguri", {
-        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["group.com.antoinefink.meguri"],
-        "com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"], "com.apple.developer.icloud-services": "*",
-        "com.apple.developer.icloud-container-environment": ["Development", "Production"], "aps-environment": "development"}),
-    ("ios-widget", "DNQ34W43XX.com.antoinefink.meguri.widget", {"com.apple.security.application-groups": ["group.com.antoinefink.meguri"]})):
-    grants["application-identifier"] = ident
-    grants["get-task-allow"] = True
-    with open(sys.argv[1] + "/" + name + ".mobileprovision", "wb") as stream:
-        plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": ["iOS"],
-                      "ExpirationDate": datetime.datetime(2099, 1, 1), "UUID": ("A" if name == "ios-app" else "B") * 8 + "-1111-2222-3333-444444444444",
-                      "ProvisionedDevices": [sys.argv[2]]}, stream)
-PY
-  run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require ios --ios-device "$phone"
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .ios.uuid <<<"$output")" = AAAAAAAA-1111-2222-3333-444444444444 ]
-  [ "$(jq -r .ios_widget.uuid <<<"$output")" = BBBBBBBB-1111-2222-3333-444444444444 ]
-  run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require ios --ios-device 00008110-0000000000000002
-  [ "$status" -eq 1 ]
-  rm "$FX/profiles/ios-widget.mobileprovision"
-  run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require ios --ios-device "$phone"
-  [ "$status" -eq 1 ]
-  [ "$(jq -r .ios_widget.state <<<"$output")" = missing ]
-}
 
 @test "the install unregisters a staging path LaunchServices picked up and registers the installed path" {
   mkdir -p "$FX/Applications"

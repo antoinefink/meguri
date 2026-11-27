@@ -28,10 +28,6 @@ extension SyncCoordinator {
     public func serviceSwitchFacts(source: SyncProviderSelection) -> ServiceSwitchFacts {
         if let facts = renderServiceSwitch?.facts { return facts }
         let acceptanceUnknown = meguriStage == .acceptanceUnknown || meguriRoutine == .acceptanceUnknown
-        if source == .iCloud, providerState?.selection == .iCloud, let status {
-            return .init(changes: .count(status.pending), heldBack: status.heldBack,
-                         media: status.media.uploadFiles, acceptanceUnknown: acceptanceUnknown)
-        }
         guard source == .meguri else { return .init(changes: .unknown, acceptanceUnknown: acceptanceUnknown) }
         var media: UInt64?
         // This device's side only (T18.6): files waiting to upload or excluded from it.

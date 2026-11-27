@@ -1770,18 +1770,6 @@ public actor CloudKitSyncAdapter {
             catch {
                 CloudMediaCancellationContext.current?.observe(error)
                 sendError = error
-                #if canImport(CloudKit)
-                let losses = try NativeCloudKitSendError.zoneLosses(error, zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
-                if !losses.isEmpty, await valid(origin) {
-                    instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
-                    do {
-                        if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
-                    } catch BridgeError.cloudSDKCallbackRejected {
-                        // Preserve sendError: this rejects only the old loss report.
-                    }
-                    await requestLossAccountRead(origin: origin)
-                }
-                #endif
                 #if DEBUG
                 diagnostic?.record(site, error: error)
                 if CloudMediaCancellationContext.current != nil, let action = CloudMediaCancellationContext.selectedAction {
@@ -1941,18 +1929,6 @@ public actor CloudKitSyncAdapter {
                 #if DEBUG
                 DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
                 #endif
-                #if canImport(CloudKit)
-                let losses = try NativeCloudKitSendError.zoneLosses(error, zones: scope)
-                if !losses.isEmpty, await valid(origin) {
-                    instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
-                    do {
-                        if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
-                    } catch BridgeError.cloudSDKCallbackRejected {
-                        // The original failed SDK operation still throws below.
-                    }
-                    await requestLossAccountRead(origin: origin)
-                }
-                #endif
                 policyOperationOutputs.append(contentsOf: invocationOutputs.take())
                 if await valid(origin) {
                     _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
@@ -2054,7 +2030,7 @@ public actor CloudKitSyncAdapter {
         instance.rootReadOperation = operation
         defer { instance.rootReadOperation = nil }
         var transportError: (any Error)?
-        var nativeFailure: CloudFetchReadNativeFailure?
+        let nativeFailure: CloudFetchReadNativeFailure? = nil
         let result: CloudControlRead
         do {
             let context = CloudMediaCancellationContext.current
@@ -2104,8 +2080,6 @@ public actor CloudKitSyncAdapter {
                     #endif
                     // Only the original native reply's explicit shape refusal
                     // supplies this fact. Core still decides its acceptance.
-                    if epochPreparation, let native = error as? NativeCloudKitFailure,
-                       case .unsupportedRecord = native { nativeFailure = .malformedRecord }
                     throw error
                 }
                 guard case .read(let result) = reply else { throw CloudOwnTransportFailure.unexpectedReply }

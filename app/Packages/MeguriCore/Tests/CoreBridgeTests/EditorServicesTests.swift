@@ -3,7 +3,7 @@ import Testing
 
 extension EventTests {
     @Test func editorTagCompletionRoundTripKeepsRegistryRowsLimitsAndExplicitCancellation() async throws {
-        try await withCloudConnection { _ in
+        try await withBridgeCollection {
             // Registration with no notes leaves real unused registry rows.
             _ = try await CoreTagService().addNoteTags(notes: [], text: "Grammar::Japan Japan Japanese::Audio Straße")
             let editor: any EditorServices = CoreEditorServices()

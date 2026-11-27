@@ -764,23 +764,6 @@ struct SyncCoordinatorTests {
         #expect(await later.cancelAndDrain())
     }
 
-    @Test func anOperationThatCannotBeReadKeepsTheHold() async throws {
-        struct Unreadable: Error {}
-        let (defaults, name) = try round2Defaults(nil)
-        defer { defaults.removePersistentDomain(forName: name) }
-        let (sync, inputs) = await attach(["enabled": true, "paused": true, "automatic": true, "media": false],
-            operation: .failure(Unreadable()), defaults: defaults)
-        // Not proved absent: nothing opens, and Sync Automatically still reads off.
-        #expect(inputs.first == .init(enabled: true, paused: true, automatic: false, media: true))
-        #expect(sync.updateHold && !sync.storedAutomatic)
-        #expect(await sync.cancelAndDrain())
-        // The decision itself, for each service.
-        #expect(SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: .iCloud))
-        #expect(SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: nil))
-        #expect(!SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: .meguri))
-        #expect(SyncCoordinator.keepsUpdateHold(operation: .success(true), selection: .iCloud))
-        #expect(!SyncCoordinator.keepsUpdateHold(operation: .success(false), selection: .iCloud))
-    }
 
     @Test func anEarlierOffWithoutPauseIsCarriedToTheDeviceAndSurvivesAServiceChange() async throws {
         // P25.3: the earlier build kept Sync Automatically with the service's settings.
@@ -847,26 +830,6 @@ struct SyncCoordinatorTests {
         }
     }
 
-    @Test func offIsRefusedWhileAnOperationCouldRestoreTheBindingOrCannotBeRead() {
-        // V27.5's rows.
-        typealias S = SyncCoordinator
-        #expect(!S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: nil, readFailed: false))
-        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: false, readFailed: false))
-        // A `publish` op whose switch conflict is set permits Off: it keeps local only.
-        #expect(!S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: true, readFailed: false))
-        // An op that could not be read is not proved absent.
-        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: nil, readFailed: true))
-        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: true, readFailed: true))
-        // Only iCloud has these ops.
-        for selection: SyncProviderSelection? in [.meguri, .localOnly, nil] {
-            #expect(!S.serviceChangeRefused(selection: selection, operationSwitchConflict: false, readFailed: true))
-        }
-        // Row 1: an active binding with no op stops. Row 2: every other permitted state keeps local only.
-        #expect(S.offStopsBinding(bindingActive: true, operationPresent: false))
-        #expect(!S.offStopsBinding(bindingActive: true, operationPresent: true))
-        #expect(!S.offStopsBinding(bindingActive: false, operationPresent: false))
-        #expect(!S.offStopsBinding(bindingActive: nil, operationPresent: false))
-    }
 
     @Test func offWithNoServiceSelectedOrNoICloudWritesNothing() async {
         for state in [SyncCoordinator.RenderState.off, .meguriConnected] {
@@ -992,100 +955,6 @@ extension ReviewCollectionStartupTests {
     }
 
     #if os(macOS)
-    @Test(arguments: [true, false])
-    func unchangedScreenMediaIsIssuedAgainAfterCoreRuntimeRebind(completeSuspend: Bool) async throws {
-        let seed = try InitialCloudFixture.load()
-        let scratch = FileManager.default.temporaryDirectory.appending(path: "synthetic-media-resume-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: scratch) }
-        let serviceHome = scratch.appending(path: "service")
-        try FileManager.default.createDirectory(at: serviceHome, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let serviceProcess = try await CloudServiceProcess.open(stateDirectory: serviceHome, transport: .binaryAssetsV1)
-        var retainedApp: ServiceAppHarness?
-        var commandDrains: [Task<Void, Never>] = []
-        do {
-            let serviceWire = try ServiceWorkflowWire(process: serviceProcess, directory: scratch.appending(path: "transport"))
-            let app = try ServiceAppHarness(root: scratch.appending(path: "collection"), wire: serviceWire)
-            retainedApp = app
-            defer { app.defaults.removePersistentDomain(forName: app.suite) }
-            try await serviceWire.seed(seed)
-            try await app.adopt()
-            let adoptedBackendCount = app.backends.count
-            let retainedNativeOwner = try app.backend
-            func waitForCommandDrain(stage: String) async throws {
-                let drained = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
-                defer { drained.continuation.finish() }
-                let observation = Task { @MainActor in
-                    await app.sync.drainOperations()
-                    drained.continuation.yield(true)
-                    drained.continuation.finish()
-                }
-                commandDrains.append(observation)
-                try #require(try await serviceAppSignal(drained.stream, stage: stage))
-                await observation.value
-            }
-            var issuedReferences: [[String]] = []
-            retainedNativeOwner.onCommands = { issuedBatch in
-                for issued in issuedBatch {
-                    if case .prioritizeMedia(let references) = issued.action { issuedReferences.append(references) }
-                }
-            }
-            defer { retainedNativeOwner.onCommands = nil }
-            let retainedReferences = ["retained-current.png", "retained-head.mp3"]
-            let openedGeneration = app.owner.generation
-            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
-            await app.sync.waitForInputs()
-            try #require(issuedReferences == [retainedReferences])
-            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
-            await app.sync.waitForInputs()
-            #expect(issuedReferences.count == 1)
-            // Input reduction alone does not join the original command ACKs.
-            try await waitForCommandDrain(stage: "original media commands and acknowledgements before Core rebind")
-            try #require(!app.sync.operationFailed)
-
-            // Exercise completed suspension and Core resume while still active,
-            // as when the owner's background flush or freeze did not complete.
-            let coreControl = CoreCollectionService()
-            if completeSuspend {
-                try await coreControl.flushForBackground()
-                try #require(await app.sync.backgroundAfterLocalFlush(deadlineMilliseconds: nil))
-                try #require(try await coreControl.suspend(timeoutMilliseconds: 1_500) == .suspended)
-            } else {
-                try #require(try await coreControl.lifecycle() == .ready(generation: openedGeneration))
-            }
-            #expect(issuedReferences == [retainedReferences])
-            _ = try await coreControl.resume()
-            try #require(try await coreControl.lifecycle() == .ready(generation: openedGeneration))
-            await app.sync.foregroundAfterLocalResume()
-            await app.sync.prepareConnectionAuthority()
-            try await waitForCommandDrain(stage: "post-resume media commands and acknowledgements")
-
-            // No replacement screen input occurs between the two commands.
-            #expect(issuedReferences == [retainedReferences, retainedReferences])
-            #expect(app.backends.count == adoptedBackendCount)
-            let resumedNativeOwner = try app.backend
-            #expect(resumedNativeOwner === retainedNativeOwner)
-            #expect(app.owner.generation == openedGeneration)
-            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
-            await app.sync.waitForInputs()
-            try await waitForCommandDrain(stage: "duplicate media input commands and acknowledgements")
-            #expect(issuedReferences.count == 2)
-            #expect(!app.sync.operationFailed)
-            try #require(await app.owner.close())
-            let shutdown = await serviceProcess.close()
-            try #require(shutdown.status == 0 && shutdown.joined && !shutdown.unexpectedOutput && !shutdown.ioFailed)
-            try #require(shutdown.diagnostics.isEmpty && !shutdown.diagnosticLimitExceeded)
-            for observation in commandDrains { await observation.value }
-        } catch {
-            if let retainedApp { await retainedApp.cleanupAfterServiceFailure() }
-            else {
-                let shutdown = await serviceProcess.cancel()
-                #expect(shutdown.joined, "Join the service owned by the media resume fixture")
-            }
-            for observation in commandDrains { await observation.value }
-            throw error
-        }
-    }
     #endif
 }
 

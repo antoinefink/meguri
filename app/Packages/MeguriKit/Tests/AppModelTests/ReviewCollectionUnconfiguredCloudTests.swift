@@ -26,7 +26,6 @@ extension ReviewCollectionStartupTests {
             // The values the Release build of the daily-driver ids resolves:
             // MeguriCloudEnvironment production, MeguriCloudSchemaConfigured false.
             let sync = SyncCoordinator(directory: root,
-                configuration: .init(container: "iCloud.synthetic.unconfigured", environment: .production, schemaConfigured: false),
                 defaults: UserDefaults(suiteName: suite), meguriCredentialStore: store)
             owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
                 providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory))
@@ -119,39 +118,4 @@ extension ReviewCollectionStartupTests {
         }
     }
 
-    @Test(.timeLimit(.minutes(1))) func iCloudStaysRefusedWithItsReasonWhereTheBuildCannotUseIt() async throws {
-        try await withUnconfiguredCloudInstallation { root, suite, store in
-            let app = UnconfiguredCloudApp(root: root, suite: suite, store: store)
-            do {
-                await app.owner.start()
-                try #require(app.owner.state == .noFile)
-                let calls = Mutex<[BridgeCall]>([])
-                try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
-                    #expect(await app.owner.changeSyncService(to: .iCloud, from: app.sync.providerState?.selection) == .failed)
-                    let refusal = SyncServiceChangeFailure(destination: "iCloud", step: .preparation, reason: .iCloudSetupNeeded)
-                    #expect(app.sync.serviceChangeFailure == refusal)
-                    #expect(app.sync.debugFacts.serviceChangeFailure == refusal && app.sync.debugFacts.iCloudConfigured == false)
-                    // Refused before any Host or handoff: nothing was written.
-                    #expect(calls.withLock { !$0.contains(.prepareCloudConnectionHost) && !$0.contains(.providerBeginHandoff) })
-                    #expect((app.sync.providerState?.selection ?? .localOnly) == .localOnly)
-                    // The coordinator itself refuses too, with an attached provider.
-                    try await app.owner.prepareSyncServiceSelection()
-                    #expect(!(await app.sync.changeProvider(to: .iCloud)))
-                    #expect(calls.withLock { !$0.contains(.providerBeginHandoff) })
-                    #expect(try await CoreProviderService.attached().refresh().selection != .iCloud)
-                    await #expect(throws: BridgeError.self) { try await app.owner.prepareCloudConnectionPreview() }
-                    #expect(app.sync.preview == nil && app.sync.connectionService == nil)
-                    // A later change that finishes clears the recorded failure.
-                    #expect(await app.owner.changeSyncService(to: .meguri, from: app.sync.providerState?.selection) == .changed)
-                    #expect(app.sync.serviceChangeFailure == nil && app.sync.providerState?.selection == .meguri)
-                    let text = try SyncDebugInfoText.compose(export: Data(#"{"timeline":{"events":[]}}"#.utf8),
-                        sync: .init(service: "off", providerPhase: "localOnly", statusTitleKey: "synthetic.title",
-                                    iCloudConfigured: false, serviceChangeFailure: refusal))
-                    #expect(text.contains("iCloud: not configured in this build"))
-                    #expect(text.contains("Service change to iCloud failed: preparation (iCloudSetupNeeded)"))
-                }
-                try #require(await app.owner.close())
-            } catch { _ = await app.owner.close(); throw error }
-        }
-    }
 }

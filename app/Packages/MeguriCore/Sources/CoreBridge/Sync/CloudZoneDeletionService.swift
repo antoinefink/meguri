@@ -125,10 +125,6 @@ public enum CloudZoneDeletionDiagnostics {
 
 extension CloudZoneDeletionFailure {
     static func evidence(_ error: any Error) -> Self {
-        #if canImport(CloudKit)
-        return .native(error)
-        #else
         return .init(code: nil)
-        #endif
     }
 }

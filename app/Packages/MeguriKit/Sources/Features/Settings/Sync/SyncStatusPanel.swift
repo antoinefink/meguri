@@ -5,11 +5,9 @@ import SwiftUI
 
 /// N23.2: the status symbol, the same in the toolbar, the panel and the Sync
 /// section: one system symbol, drawn by the system at its place's size and
-/// weight. Only needs you has a colour. The `icloud` symbols are for iCloud
-/// only; other services get unrestricted symbols (N23.4).
+/// weight. Only needs you has a colour.
 struct SyncStatusSymbol: View {
     let status: SyncMainStatus
-    let iCloud: Bool
     /// Only the toolbar button's symbol turns (N23.1).
     var turning = false
     /// The panel and the Sync section draw it in the secondary colour, the
@@ -19,7 +17,7 @@ struct SyncStatusSymbol: View {
     /// from the button succeeds: the accent colour, then the default again.
     var accented = false
     var body: some View {
-        let glyph = Image(systemName: SyncSymbol.glyph(status.symbol, iCloud: iCloud))
+        let glyph = Image(systemName: status.symbol)
             // Only the moving symbol ever turns, whatever drives `turning`.
             .symbolEffect(.rotate, options: .repeating, isActive: turning && status.symbol == SyncSymbol.moving)
         Group {
@@ -38,7 +36,6 @@ struct SyncStatusSymbol: View {
 /// state's one action, trailing. The status is the Sync section's.
 struct SyncStatusPanel: View {
     let collection: ReviewCollection
-    let openEntry: (CloudSyncEntry, AppNavigation.SheetHost) -> Void
     let showSettings: (_ keepCollection: Bool) -> Void
     @Environment(\.appClock) private var clock
     #if !os(macOS)
@@ -59,7 +56,7 @@ struct SyncStatusPanel: View {
         let status = sync.mainStatus
         VStack(alignment: .leading, spacing: Spacing.medium) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud, secondary: true)
+                SyncStatusSymbol(status: status, secondary: true)
                     .font(.title2)
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
                     Text(SyncText.value(status.titleKey)).font(.headline)
@@ -138,7 +135,7 @@ struct SyncStatusPanel: View {
                 .modifier(PanelDefault(isDefault: true))
         case .action(let action):
             SyncStatusActionButton(collection: collection, action: action, host: .main,
-                openEntry: openEntry, showInSettings: showSettings, identifier: "sync.status.action", inPanel: true)
+                showInSettings: showSettings, identifier: "sync.status.action", inPanel: true)
                 .modifier(PanelDefault(isDefault: SyncPanel.slotIsDefault(slot)))
         }
     }
@@ -185,7 +182,6 @@ struct SyncStatusActionButton: View {
     let action: SyncStatusAction
     var host: AppNavigation.SheetHost = .main
     /// The compact status sheet hands its destination over after it dismisses.
-    var openEntry: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
     /// Set outside Settings (the panel): Meguri's setup sheets belong to the
     /// Sync section, so its actions open that section, asking for N15.3's sheet or not.
     var showInSettings: ((_ keepCollection: Bool) -> Void)? = nil
@@ -202,8 +198,8 @@ struct SyncStatusActionButton: View {
         switch action {
         case .chooseCollection:
             return sync.providerState?.selection != .meguri || (sync.meguriCanChoose && !sync.meguriBusy)
-        case .setUpAgain, .resume, .tryAgain, .serviceRecovery, .meguriConnectionRetry: return true
-        case .cancelOp, .resumeOp: return sync.recovery != nil
+        case .tryAgain, .serviceRecovery, .meguriConnectionRetry: return true
+        case .setUpAgain, .resume, .cancelOp, .resumeOp: return false
         case .copyDebugInfo, .repair:
             // The damaged-collection screen (V19) is not built: Copy Debug Info
             // is the one action that can run for that row.
@@ -232,11 +228,7 @@ struct SyncStatusActionButton: View {
         #if os(macOS)
         // N23.3: on Mac a transient popover can close when its alert takes the
         // keys, so an action with a confirmation opens the Sync section, whose row asks.
-        if inPanel, action == .cancelOp {
-            Button(title) { showInSettings?(false) }
-                .disabled(sync.recovery.map { !($0.adoptionCancellable || $0.publicationCancellable) } ?? true)
-                .accessibilityIdentifier(id)
-        } else if inPanel, action == .serviceRecovery {
+        if inPanel, action == .serviceRecovery {
             Button(title) { showInSettings?(false) }
                 .disabled(collection.syncPresentation.serviceChanging)
                 .accessibilityIdentifier(id)
@@ -249,37 +241,15 @@ struct SyncStatusActionButton: View {
     @ViewBuilder private func actionButton(title: String, id: String) -> some View {
         switch action {
         case .chooseCollection:
-            if meguri {
-                Button(title) { askKeepCollection() }
-                    .accessibilityLabel(SyncText.value("sync.decision.action.label"))
-                    .accessibilityIdentifier(id)
-            } else {
-                Button(title) {
-                    open(sync.status?.controls.decisionRequired == true ? .publicationChoice : .connect)
-                }
+            Button(title) { askKeepCollection() }
                 .accessibilityLabel(SyncText.value("sync.decision.action.label"))
-                .disabled(collection.cloudPreviewEntryUnavailableReason(.connect) != nil)
                 .accessibilityIdentifier(id)
-            }
-        case .setUpAgain, .resume:
-            Button(title) { open(.connect) }
-                .disabled(collection.cloudPreviewEntryUnavailableReason(.connect) != nil)
-                .accessibilityIdentifier(id)
+        case .setUpAgain, .resume, .cancelOp, .resumeOp:
+            EmptyView()
         case .tryAgain:
             Button(title) { collection.requestSyncNow() }
                 .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
                 .accessibilityIdentifier(id)
-        case .cancelOp:
-            if let recovery = sync.recovery {
-                CloudRecoveryCancelButton(collection: collection, recovery: recovery, label: title, identifier: id)
-            }
-        case .resumeOp:
-            if let recovery = sync.recovery {
-                // `resume_recovery_op` clears the update hold first (P25.2).
-                Button(title) { Task { await sync.resumeRecoveryOperation() } }
-                    .disabled(recovery.switchConflict || recovery.step == .cancelling)
-                    .accessibilityIdentifier(id)
-            }
         case .copyDebugInfo, .repair:
             if let callbacks = collection.configuration.fieldDiagnostics {
                 SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: id)
@@ -344,8 +314,5 @@ struct SyncStatusActionButton: View {
     private func askKeepCollection() {
         if let showInSettings { showInSettings(true) }
         else { collection.syncPresentation.keepCollectionRequested = true }
-    }
-    private func open(_ entry: CloudSyncEntry) {
-        if let openEntry { openEntry(entry, host) } else { collection.presentCloudSync(entry, host: host) }
     }
 }

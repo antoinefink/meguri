@@ -21,38 +21,6 @@ public struct AccountSyncView: View {
     }
 }
 
-struct CloudPreviewEntryButton: View {
-    let collection: ReviewCollection
-    let entry: CloudSyncEntry
-    var host: AppNavigation.SheetHost = .main
-    var entryAction: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
-    var title: String? = nil
-    var identifier: String? = nil
-    private var reason: String? {
-        collection.cloudPreviewEntryUnavailableReason(entry)
-    }
-    var body: some View {
-        Button(SyncText.value(title ?? titleKey)) {
-            if let entryAction { entryAction(entry, host) }
-            else { collection.presentCloudSync(entry, host: host) }
-        }
-            .disabled(reason != nil || (collection.navigation.sheet != nil && collection.navigation.sheet != .accountSync))
-            .help(SyncText.value(reason ?? title ?? titleKey))
-            .accessibilityIdentifier(identifier ?? "settings.sync.\(entry.rawValue)")
-        if let reason { Text(SyncText.value(reason)).foregroundStyle(.secondary) }
-    }
-    private var titleKey: String {
-        switch entry {
-        case .connect:
-            collection.sync.status?.controls.resumeBindingOffered == true
-                ? "sync.action.resume" : "sync.needsYou.action.setUp"
-        case .publicationChoice: "sync.decision.action"
-        case .replaceLocal: "sync.trouble.replaceDevice"
-        case .replaceCloud: "sync.trouble.replaceService.iCloud"
-        }
-    }
-}
-
 /// The mobile sheet owns keyboard input and leaves the review/navigation intact.
 public struct AccountSyncSheet: View {
     let collection: ReviewCollection

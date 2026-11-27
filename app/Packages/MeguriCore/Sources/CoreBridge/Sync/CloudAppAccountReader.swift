@@ -1,8 +1,5 @@
 import Foundation
 import Synchronization
-#if canImport(CloudKit)
-import CloudKit
-#endif
 
 public struct CloudAppAccountReadResult: Sendable {
     public let outputs: [CloudPolicyOutput]
@@ -248,12 +245,7 @@ public final class CloudAppAccountReader {
                 await adapter.accountReadCompleted(id: id, available: false)
                 return .init(outputs: [], error: resolverError, verified: false)
             }
-            var setupFailure = false
-            #if canImport(CloudKit)
-            setupFailure = (resolverError as? CKError).map {
-                [.missingEntitlement, .badContainer, .permissionFailure, .managedAccountRestricted, .badDatabase].contains($0.code)
-            } ?? false
-            #endif
+            let setupFailure = false
             let accepted = (try? await workflow.completeIdentityRead(id: id,
                 status: setupFailure ? .configuration : .couldNotDetermine, identity: nil)) == true
             if let afterFallbackIdentityCompletion { await afterFallbackIdentityCompletion(accepted) }

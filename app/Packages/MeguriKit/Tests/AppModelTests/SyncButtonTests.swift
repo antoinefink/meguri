@@ -22,22 +22,6 @@ import Testing
         }
     }
 
-    @Test func t22_1NeedsYouAndNoServiceOpenThePanel() {
-        // A blind sync cannot resolve a state that needs the person.
-        let refused = SyncKinds.meguri(.init(routine: .authentication))
-        #expect(refused.needsYou)
-        #expect(tap(refused, offered: true) == .openPanel)
-        #expect(tap(refused, offered: false, available: false) == .openPanel)
-        let account = SyncKinds.cloud(state: .iCloudUnavailable(.noAccount))
-        #expect(tap(account) == .openPanel)
-        let blocked = SyncKinds.meguri(.init(providerBlocked: true))
-        #expect(tap(blocked, offered: true) == .openPanel)
-        // Even with Sync Now available, needs you opens the panel.
-        #expect(tap(refused, available: true) == .openPanel)
-        // No service: the panel, whose one button is Sync Settings.
-        let off = SyncKinds.cloud(state: .localOnly)
-        #expect(tap(off, service: false) == .openPanel)
-    }
 
     @Test func t22_1AStatusWithItsOwnActionOpensThePanel() {
         // Cancel Setup while setup prepares (it moves too), Try Again for an

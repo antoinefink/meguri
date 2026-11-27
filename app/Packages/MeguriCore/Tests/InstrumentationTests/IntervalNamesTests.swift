@@ -69,7 +69,7 @@ import Testing
         ]
         #expect(BridgeCall.all.map(\.name) == [
             "migrate_provider", "provider_owner", "ProviderOwner.snapshot", "ProviderOwner.refresh", "ProviderOwner.save_settings",
-            "ProviderOwner.begin_icloud_discovery", "ProviderOwner.accept_icloud_connection", "ProviderOwner.begin_handoff", "ProviderOwner.finish_handoff",
+            "ProviderOwner.begin_handoff", "ProviderOwner.finish_handoff",
             "ProviderOwner.recover_handoff_to_local_only", "ProviderOwner.retry_failed_publication",
             "ProviderOwner.configure_meguri", "ProviderOwner.configured_meguri", "ProviderConnection.information", "ProviderConnection.start_login", "ProviderLoginResult.result",
             "ProviderConnection.start_bootstrap_prepare", "ProviderConnection.start_bootstrap_confirm", "ProviderConnection.start_bootstrap_media_prepare",

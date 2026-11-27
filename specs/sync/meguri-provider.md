@@ -9,13 +9,21 @@ Review: docs/process/review-log/meguri-provider-contract-20261116.md#contract-re
 
 Antoine explicitly requested iCloud Sync and Meguri Sync using Meguri's own server on 2026-11-16. Root adopted MP1–MP5 after independent contract review and closure of the media-exclusion finding. This is delegated routine implementation authority, not technical acceptance or owner approval of every detailed clause. It changes no existing CloudKit record/recovery wire contract and does not authorize legacy Anki transfers or AnkiWeb work.
 
+## MP0. Availability and upgrade (2026-11-27)
+
+Antoine's explicit removal request supersedes every two-service and iCloud-availability clause below. Meguri Sync is the sole enabled service on macOS, iOS and iPadOS, including Debug and development variants. Off remains supported. No Apple account discovery, transport, recovery, deletion, notification or settings route is available. Products carry no CloudKit linkage, iCloud or push entitlements, cloud build settings or Info keys. Private Keychain and shared app-group behavior remain.
+
+Before application provider attachment, locally retire a persisted iCloud selection, legacy enabled defaults, or an interrupted handoff with iCloud on either side to Off. This upgrade never opens or changes a collection, contacts Apple, deletes remote data or implies consent to another server. Keep the complete original provider record and unknown members as historical evidence. Preserve inactive Meguri config, bindings and pending intentions unless that handoff requested credential removal; then retire its active connection reference and dependent binding/intent so stored credentials cannot be reused. The historical record is not credential admission. Steady Meguri Sync, including ready bindings, settings and pending structure/media/bootstrap work, stays byte-for-byte unchanged by retirement. Present invalid metadata still blocks network work while local collection use remains available.
+
+Account & Sync's primary task is to connect or turn off Meguri Sync and see its connection and sync status. The native Service picker offers Off and Meguri Sync. Keep sign-in, setup directions, automatic sync and troubleshooting in their existing places. Hidden frozen Anki server code and tests remain unchanged.
+
 ## MP1. Provider, account and collection are separate
 
-There are two services: **iCloud Sync** and **Meguri Sync**. Local-only use remains supported without either account. One provider can own synchronization of the installed collection on this device. An account can be configured without owning the collection.
+There is one enabled service: **Meguri Sync**. Local-only use remains supported without an account. One provider can own synchronization of the installed collection on this device. An account can be configured without owning the collection.
 
 Store selected provider, pause/automatic settings and connection references in device-local state, outside the transferable collection. Import, export and bootstrap always include collection and media; these flows offer no media-scope or media-off choice. Store the active provider binding and handoff intent durably through existing guarded metadata seams. The binding names the provider, opaque account reference, collection/publication generation and admission revision. Never treat a UI picker value as admission authority. Present-but-invalid metadata blocks network work; absence alone permits migration defaults.
 
-An upgrade preserves the existing iCloud choice, pause state, binding, pending work and publication fence. Changed 2026-11-19 (MP6.2; decided 2026-11-19 (review F10)): "pause/automatic settings" above and "pause state" here are the Sync Automatically setting alone; an upgrade turns a stored pause into Sync Automatically off (`sync/policy#P25.2`). Devices with no established choice remain local-only. Never infer an account or upload permission from collection stamps. A backup restore, package import, collection replacement or account change invalidates incompatible provider admission before work resumes.
+MP0 supersedes the prior iCloud-preserving upgrade rule. Changed 2026-11-19 (MP6.2; decided 2026-11-19 (review F10)): "pause/automatic settings" above and "pause state" here are the Sync Automatically setting alone; an upgrade turns a stored pause into Sync Automatically off (`sync/policy#P25.2`). Devices with no established choice remain local-only. Never infer an account or upload permission from collection stamps. A backup restore, package import, collection replacement or account change invalidates incompatible provider admission before work resumes.
 
 ## MP2. Native Settings and credentials
 

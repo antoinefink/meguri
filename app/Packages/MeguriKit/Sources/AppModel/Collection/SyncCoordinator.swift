@@ -3,28 +3,6 @@ import Foundation
 import Network
 import Observation
 import Synchronization
-#if canImport(CloudKit)
-import CloudKit
-#endif
-
-public struct CloudBuildConfiguration: Sendable {
-    public let container: String
-    public let environment: CloudPlatformEnvironment
-    public let schemaConfigured: Bool
-    public init(container: String, environment: CloudPlatformEnvironment, schemaConfigured: Bool) {
-        self.container = container; self.environment = environment; self.schemaConfigured = schemaConfigured
-    }
-    public static var fromBundle: Self? {
-        let bundle = Bundle.main
-        guard let container = bundle.object(forInfoDictionaryKey: "MeguriCloudContainer") as? String,
-              !container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let name = bundle.object(forInfoDictionaryKey: "MeguriCloudEnvironment") as? String else { return nil }
-        let environment: CloudPlatformEnvironment
-        switch name { case "development": environment = .development; case "production": environment = .production; default: return nil }
-        return Self(container: container, environment: environment,
-            schemaConfigured: bundle.object(forInfoDictionaryKey: "MeguriCloudSchemaConfigured") as? Bool == true)
-    }
-}
 
 // This seam substitutes transport only in focused owner tests. Production
 // constructs NativeCollectionCloudBackend and the retained Rust services below.
@@ -570,37 +548,6 @@ public final class SyncCoordinator {
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .unconfigured; meguriEndpoint = ""
             renderConnected = false
-        case .iCloudSelected:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            status = .renderFixture(state: .localOnly, syncNow: .unavailable(.notConnected), controls: .init(enable: .connect))
-            renderConnected = false
-        case .iCloudConnected:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .upToDate(asOfMilliseconds: recent),
-                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
-        case .iCloudNeedsYou:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .needsAttention, stateWithoutAttention: .changesPending,
-                attention: [.quotaFull: 1, .oversize: 2], pending: 12,
-                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
-        case .iCloudIssues:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .needsAttention, stateWithoutAttention: .upToDate(asOfMilliseconds: recent),
-                attention: [.oversize: 2, .refused: 1, .conflicts: 3],
-                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
-        case .iCloudSyncing:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .syncingCollection,
-                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
-        case .iCloudSetupNeeded:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .iCloudUnavailable(.setupNeeded), accountStatus: .configuration,
-                syncNow: .unavailable(.iCloudUnavailable))
         case .meguriSyncing, .meguriRoundFailed, .meguriSignInRefused, .meguriMediaBlocked, .meguriAcceptanceUnknown:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
@@ -630,11 +577,6 @@ public final class SyncCoordinator {
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
             meguriStage = .preparing; meguriBusy = true
             renderConnected = false
-        case .iCloudNoAccount:
-            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
-            settings = .init(enabled: true, paused: false, automatic: true, media: true)
-            status = .renderFixture(state: .iCloudUnavailable(.noAccount), accountStatus: .noAccount,
-                syncNow: .unavailable(.iCloudUnavailable))
         case .meguriStructureUploadPending:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
@@ -652,7 +594,6 @@ public final class SyncCoordinator {
         if let renderConnected { return renderConnected }
         switch providerState?.selection {
         case .meguri: return meguriAutomaticSettingVisible
-        case .iCloud: return status?.controls.bindingUsable == true
         case .localOnly, nil: return false
         }
     }
@@ -710,7 +651,6 @@ public final class SyncCoordinator {
         guard let defaults, round2MigrationPending else { return }
         // No op can be read where iCloud is unusable; with iCloud stored as the
         // service it is not proved absent, so nothing opens (P25.2).
-        guard cloudConfigured || providerState?.selection != .iCloud else { return }
         let operation = retainedOperationForMigration?() ?? retained.map { $0 != nil }
         var next = settings
         // P25.3: an off the person chose under the earlier build belongs to the
@@ -818,7 +758,6 @@ public final class SyncCoordinator {
     public var debugFacts: SyncDebugFacts {
         let service = switch providerState?.selection {
         case .meguri: "meguri"
-        case .iCloud: "iCloud"
         case .localOnly: "off"
         case nil: "unread"
         }
@@ -829,7 +768,7 @@ public final class SyncCoordinator {
             meguriConnection: providerState?.selection == .meguri ? "\(connection)" : nil,
             meguriSetupStage: meguriStage.map { "\($0)" }, meguriRoutine: meguriRoutine.map { "\($0)" },
             statusTitleKey: status.titleKey, statusDetailKey: status.detailKey,
-            iCloudConfigured: cloudConfigured ? nil : false, serviceChangeFailure: serviceChangeFailure)
+            serviceChangeFailure: serviceChangeFailure)
     }
     /// MP6.5: blocked metadata stops network work, including the work already
     /// running. Nothing is discarded: a stopped media step or round keeps its
@@ -898,19 +837,18 @@ public final class SyncCoordinator {
     /// N23.3: a service is selected, so Sync Now has a place in the panel.
     public var panelServiceSelected: Bool {
         switch providerState?.selection {
-        case .meguri, .iCloud: true
+        case .meguri: true
         case .localOnly, nil: false
         }
     }
     /// N23.2: draw the `icloud` symbols, which refer to Apple's iCloud only.
-    public var symbolsAreICloud: Bool { providerState?.selection == .iCloud && !providerNeedsAttention }
+    public var symbolsAreICloud: Bool { false }
     /// Sync waits on the person, so review shows its status button (N16.2).
     public var needsUser: Bool {
         if providerNeedsAttention { return true }
         return switch providerState?.selection {
         // T21.2: an unfinished setup is not a problem; nothing waits on the person yet.
         case .meguri: meguriStatus.needsUser && !meguriSetupNotFinished
-        case .iCloud: SyncStatusPresentation.needsUser(mainStatus)
         case .localOnly, nil: false
         }
     }
@@ -945,9 +883,8 @@ public final class SyncCoordinator {
         if providerState?.selection == .meguri || providerNeedsAttention {
             return SyncKinds.meguri(meguriKindFacts)
         }
-        return SyncKinds.cloud(state: status?.state, stateWithoutAttention: status?.stateWithoutAttention,
-            attention: status?.attention ?? [:], facts: cloudKindFacts, setup: setupState,
-            selectedNotSetUp: providerState?.selection == .iCloud && status?.controls.enable == .connect)
+        return SyncKinds.cloud(state: .localOnly, stateWithoutAttention: nil,
+            attention: [:], facts: CloudKindFacts(), setup: .prepared, selectedNotSetUp: false)
     }
     public var meguriKindFacts: MeguriKindFacts {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
@@ -958,7 +895,6 @@ public final class SyncCoordinator {
             signedInBefore: meguriSignedInBefore, signInRefused: meguriFirstSignInRefused)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
-    private var providerDiscovery: ProviderDiscoveryOwnership?
     private var providerHandoff: ProviderHandoffOwnership?
     private var providerHandoffDestination: SyncProviderSelection?
     private var providerSettingsTask: Task<Void, Never>?
@@ -2436,7 +2372,7 @@ public final class SyncCoordinator {
     }
     private var providerAllowsAccountRead: Bool {
         cloudConfigured && desiredProviderSettings?.paused != true
-            && (providerDirectory == nil || providerDiscovery != nil || providerState?.permitsICloudStartup == true)
+            && (providerDirectory == nil || providerState?.permitsICloudStartup == true)
     }
 
     func makeProviderSuccessor(generation expected: UInt64) async throws -> SyncCoordinator {
@@ -2496,36 +2432,16 @@ public final class SyncCoordinator {
     }
 
     public convenience init(directory: URL, clock: AppClock = .system,
-                            configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard,
+                            defaults: UserDefaults? = .standard,
                             meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
                             recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         let providerDirectory = CoreBridge.CollectionLocation(collectionDirectory: directory,
             backupsDirectory: directory, appGroupSnapshot: directory).manualTransferDirectory
-        // iCloud needs a verified container and schema (R2065). Without them the
-        // owner is the provider alone: Off and Meguri Sync work, and nothing here
-        // constructs a CloudKit object or configures Core's cloud platform.
-        let cloudConfigured = configuration.map {
-            $0.schemaConfigured && !$0.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        } ?? false
-        self.init(bootstrap: {
-            guard cloudConfigured, let configuration else { return }
-            // No potentially network-bound account lookup precedes local open.
-            // CouldNotDetermine maps to Rust's ReadFailed, never signed-out.
-            try await CoreCloudWorkflowService.configurePlatform(container: configuration.container,
-                environment: configuration.environment, status: .couldNotDetermine, identity: nil)
-        }, makeBackend: { persisted in
-            guard cloudConfigured, let configuration else {
-                return ProviderOnlySyncBackend(provider: try await CoreProviderService.attached())
-            }
-            #if canImport(CloudKit)
-            return try await NativeCollectionCloudBackend.make(configuration: configuration,
-                directory: directory, persisted: persisted)
-            #else
-            throw SyncOwnerFailure.configurationUnavailable
-            #endif
+        self.init(bootstrap: {}, makeBackend: { _ in
+            ProviderOnlySyncBackend(provider: try await CoreProviderService.attached())
         }, defaults: defaults, clock: clock, directory: directory, observeSignals: true,
            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore,
-           cloudConfigured: cloudConfigured, recordDiagnostic: recordDiagnostic)
+           cloudConfigured: false, recordDiagnostic: recordDiagnostic)
     }
 
     init(bootstrap: @escaping @MainActor () async throws -> Void,
@@ -2925,7 +2841,6 @@ public final class SyncCoordinator {
         startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: preparation) { [self] in
             defer { readingPreview = false; finishOwnWork() }
             do {
-                if let provider { providerDiscovery = try await provider.beginICloudDiscovery() }
                 guard !Task.isCancelled, !closing, !suspended, !replacing,
                       expected == generation, revision == hostRevision, self.backend === backend else { throw CancellationError() }
                 // No native own work has started. Issue the real producer on
@@ -2976,7 +2891,7 @@ public final class SyncCoordinator {
                     observeInitialAdoptionAcceptance?()
                     do {
                         _ = try await connection.confirmAdoption(handle)
-                        if let provider { providerState = try await provider.acceptICloudConnection() }
+                        if let provider { providerState = try await provider.refresh() }
                         if expected == generation, revision == hostRevision, !closing { connectionFailure = nil }
                     }
                     catch {
@@ -3026,12 +2941,6 @@ public final class SyncCoordinator {
     /// MP-E can present these typed commands later. No service picker or
     /// transfer producer is introduced here.
     @discardableResult public func changeProvider(to destination: SyncProviderSelection, removeMeguriCredentials: Bool = false) async -> Bool {
-        // iCloud is never made the service of an installation that cannot use it.
-        // A stored iCloud selection there keeps its binding and any op: nothing
-        // here can read or stop them (V27.5), so leaving it stays refused too.
-        guard cloudConfigured || (destination != .iCloud && providerState?.selection != .iCloud) else {
-            providerChangeReason = .unsupported; return false
-        }
         guard providerChangeAllowed(), let provider, !suspended, !replacing,
               !providerActionInProgress, !entryActivationHeld,
               !closing || providerHandoff != nil else {
@@ -3078,7 +2987,7 @@ public final class SyncCoordinator {
             let committed = try await provider.finishHandoff(providerHandoff)
             guard current(joinedRevision) else { return false }
             providerState = committed
-            self.providerHandoff = nil; providerHandoffDestination = nil; providerDiscovery = nil
+            self.providerHandoff = nil; providerHandoffDestination = nil
             if let committed = providerState?.settings { settings = committed }
             self.provider = nil; meguriConnectionOwner = nil
             // The original coordinator stays closed with its completed drain.
@@ -3159,7 +3068,7 @@ public final class SyncCoordinator {
         }
         providerState = state
         if let committed = state.settings { settings = committed }
-        providerRecoveryDrain = nil; providerDiscovery = nil
+        providerRecoveryDrain = nil
         provider = nil; meguriConnectionOwner = nil; desiredProviderSettings = nil
         do { try await attachProviderSuccessor(self) }
         catch { recordConnectionFailure(error); throw error }
@@ -3437,9 +3346,9 @@ public final class SyncCoordinator {
                         } else if prepareEditorReplacement != nil { throw CancellationError() }
                     }
                     try requireCurrentAdoption()
-                    let state = try await provider.acceptICloudConnection()
+                    let state = try await provider.refresh()
                     try requireCurrentAdoption()
-                    guard state.selection == .iCloud, state.permitsICloudStartup,
+                    guard state.selection == .localOnly, state.permitsICloudStartup,
                           let committed = state.settings, committed == acceptedSettings else {
                         throw BridgeError.unavailable(reason: "Provider settings require recovery")
                     }
@@ -3448,7 +3357,7 @@ public final class SyncCoordinator {
                     providerState = state
                     saveSettings(committed)
                 } else {
-                    if let provider { providerState = try await provider.acceptICloudConnection() }
+                    if let provider { providerState = try await provider.refresh() }
                     try await persistSettings(.init(enabled: true, paused: settings.paused,
                         automatic: settings.automatic && storedAutomatic, media: true))
                 }
@@ -3520,24 +3429,13 @@ public final class SyncCoordinator {
             readFailed: recoveryReadFailed)
     }
     /// `operationSwitchConflict` is nil with no op.
-    static func serviceChangeRefused(selection: SyncProviderSelection?, operationSwitchConflict: Bool?, readFailed: Bool) -> Bool {
-        guard selection == .iCloud else { return false }
-        if readFailed { return true }
-        guard let operationSwitchConflict else { return false }
-        return !operationSwitchConflict
-    }
+    static func serviceChangeRefused(selection: SyncProviderSelection?, operationSwitchConflict: Bool?, readFailed: Bool) -> Bool { false }
     /// V27.5's first two rows: an active binding with no op stops; every other permitted state keeps local only.
     static func offStopsBinding(bindingActive: Bool?, operationPresent: Bool) -> Bool {
         bindingActive == true && !operationPresent
     }
     /// V27.5's rows for Off with iCloud selected. Writes nothing when refused.
-    @discardableResult public func turnOffICloud() async -> Bool {
-        guard providerState?.selection == .iCloud, cloudConfigured, !serviceChangeRefusedForOperation else { return false }
-        if Self.offStopsBinding(bindingActive: status?.controls.bindingActive, operationPresent: recovery != nil) {
-            await stopUsingICloud()
-        } else { await keepLocalOnly() }
-        return providerState?.selection != .iCloud
-    }
+    @discardableResult public func turnOffICloud() async -> Bool { false }
     /// User action only. Automatic connection/policy wakes cannot release a wait.
     public func resumeWaitingAdoption() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
@@ -4912,7 +4810,7 @@ public final class SyncCoordinator {
             try await backend?.close()
             backendRetired = true
             backend = nil
-            provider = nil; providerDiscovery = nil; meguriConnectionOwner = nil
+            provider = nil; meguriConnectionOwner = nil
             providerHandoff = nil; providerHandoffDestination = nil
             readyPreviewOwner = nil
             while !closing {
@@ -5165,7 +5063,6 @@ public final class SyncCoordinator {
                 try await backend?.close()
                 backendRetired = true
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
-                providerDiscovery = nil
                 desiredVisibleMedia = nil; deliveredVisibleMedia = nil
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; retainedHostAdmitted = false
@@ -5190,7 +5087,7 @@ public final class SyncCoordinator {
         let (paths, sink) = AsyncStream<Bool>.makeStream(bufferingPolicy: .unbounded)
         monitor.pathUpdateHandler = { sink.yield($0.status == .satisfied) }
         networkMonitor = monitor
-        monitor.start(queue: DispatchQueue(label: "Meguri.cloud.reachability"))
+        monitor.start(queue: DispatchQueue(label: "Meguri.sync.reachability"))
         networkTask = Task { [weak self] in
             var wasReachable = false
             for await reachable in paths {
@@ -5200,26 +5097,16 @@ public final class SyncCoordinator {
                 wasReachable = reachable
             }
         }
-        let (accounts, changes) = AsyncStream<Void>.makeStream(bufferingPolicy: .unbounded)
-        #if canImport(CloudKit)
-        accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { _ in changes.yield(()) }
-        #endif
-        accountEventsTask = Task { [weak self] in
-            for await _ in accounts {
-                guard let self, !Task.isCancelled else { return }
-                await accountChanged()
-            }
-        }
         observePlatformSignalLifetime?(.started)
     }
 }
 
 extension SyncCoordinator {
     public enum RenderState: String, Equatable, CaseIterable, Sendable {
-        case off, meguriConnected, meguriSignIn, meguriNeedsYou, iCloudSelected, iCloudConnected, iCloudNeedsYou, iCloudIssues
+        case off, meguriConnected, meguriSignIn, meguriNeedsYou
         /// N23's panel states (round 10).
-        case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused, iCloudSyncing
-        case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
+        case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused
+        case meguriPreparing, meguriMediaBlocked, meguriAcceptanceUnknown
         /// MP6.5 (resume fix): setup's media step paused, and stopped after its automatic attempts.
         case meguriSetupMediaPaused, meguriSetupMediaStopped
         /// MP7 step 5: a note type structure save waits for Upload….

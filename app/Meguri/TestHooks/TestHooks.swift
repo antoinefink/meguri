@@ -96,24 +96,11 @@ enum TestHooks {
         if arguments.contains("-MeguriOwnedProviderFixture") {
             do throws(TestHookError) {
                 if admittedOptions?.ownedProviderFixture == true {
-                    guard ["MEGURI_CLOUD_AGENT_PATH_PREFLIGHT", "MEGURI_CLOUD_ACCOUNT_SETUP",
-                        "MEGURI_CLOUD_AGENT_RUN_DIRECTORY"].allSatisfy({ environment[$0] == nil }) else {
-                        throw TestHookError("OwnedProviderFixture is incompatible with setup-only or agent startup")
-                    }
+
                 }
             } catch { return Session(error: error) }
         }
         #if DEBUG
-        if CloudAgentPreflight.requested() {
-            CloudAgentPreflight.excludeNormalStartup()
-            return Session(setupOnly: true)
-        }
-        #endif
-        #if DEBUG && os(macOS)
-        if CloudAccountSetupStartup.requested() {
-            CloudAccountSetupStartup.excludeNormalStartup()
-            return Session(setupOnly: true)
-        }
         #endif
         // Performance tests ask for a warmed web content process (R1866).
         WebContentWarmup.shared.listen()

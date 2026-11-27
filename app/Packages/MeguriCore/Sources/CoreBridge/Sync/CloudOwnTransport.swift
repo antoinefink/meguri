@@ -3,9 +3,6 @@ import Synchronization
 #if DEBUG
 import Observation
 #endif
-#if DEBUG && canImport(CloudKit)
-import CloudKit
-#endif
 
 /// Commands contain only native transport inputs projected by Rust. Recovery
 /// decisions and confirmations remain in the retained core handles.
@@ -297,12 +294,6 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
             }
         }
         // Exact value types only: conditional casts alone can bridge fake domains.
-        #if canImport(CloudKit)
-        if type(of: error) == CKError.self, let native = error as? CKError {
-            guard let code = Int32(exactly: native.code.rawValue) else { return "other" }
-            return "CKErrorDomain:\(code)"
-        }
-        #endif
         if type(of: error) == URLError.self, let native = error as? URLError {
             guard let code = Int32(exactly: native.code.rawValue) else { return "other" }
             return "NSURLErrorDomain:\(code)"

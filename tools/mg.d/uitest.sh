@@ -668,7 +668,7 @@ mg_ui_test__owned_private() {
   mg_app_build mac Debug || return 1
   mg_native_route__stage vm-delivery
   mg_mac_ui_take || return 1
-  mg_app_mac_agent_profile_check && [ "$input" = "$(mg_app_input_digest)" ] || return 1
+  [ "$input" = "$(mg_app_input_digest)" ] || return 1
   app="$(mg_app_products mac Debug)/Meguri.app"
   codesign --verify --strict "$app" || return 1
   mg_native_route__stage ownership-plan

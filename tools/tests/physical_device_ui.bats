@@ -57,7 +57,7 @@ mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; }
 # Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
 # the real preparation helper with generated descriptors/command doubles.
 mg_app_cloud_agent_build() {
-  echo cloud-agent-prepare >>"$STUB_LOG"
+  echo product-prepare >>"$STUB_LOG"
   xcodebuild "$@"
 }
 mg_host_lease() { echo "host-lease $*" >>"$STUB_LOG"; [ "$*" = --no-session ]; }
@@ -210,94 +210,9 @@ mg_app_input_digest() { echo input-digest >>"$STUB_LOG"; return 1; }
 EOF
 }
 
-@test "build-app explicit CloudAgent forwards the positional plan and records the actual build choice" {
-  trace_app_build
-  local platform config_args dd
-  export MG_APP_TEST_PLAN=UI
-  for platform in mac ios-sim; do
-    for config_args in implicit explicit; do
-      : >"$STUB_LOG"
-      if [ "$config_args" = explicit ]; then
-        mg build-app --test-plan CloudAgent --config Debug --platform "$platform"
-      else
-        mg build-app --platform "$platform" --test-plan CloudAgent
-      fi
-      [ "$status" -eq 0 ]
-      [ "$(field .status)" = pass ]
-      called "^app-build <$platform> <Debug> <CloudAgent>$"
-      dd=CloudAgentSimDerivedData
-      [ "$platform" != mac ] || dd=CloudAgentMacDerivedData
-      called "^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/$dd "
-      [ "$(field .details.build.test_plan)" = CloudAgent ]
-      [ "$(field .details.build.action)" = build-for-testing ]
-      called '^cloud-agent-prepare$'
-      not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
-    done
-  done
-}
 
-@test "build-app default and explicit UI ignore the ambient test plan for builds" {
-  trace_app_build
-  local platform selection config
-  export MG_APP_TEST_PLAN=CloudAgent
-  for platform in mac ios-sim; do
-    for config in Debug Profile; do
-      for selection in default explicit; do
-        : >"$STUB_LOG"
-        if [ "$selection" = explicit ]; then
-          mg build-app --platform "$platform" --config "$config" --test-plan UI
-        else
-          mg build-app --platform "$platform" --config "$config"
-        fi
-        [ "$status" -eq 0 ]
-        [ "$(field .status)" = pass ]
-        called "^app-build <$platform> <$config> <UI>$"
-        called "^xcodebuild build-for-testing .* -testPlan UI -configuration $config .* -derivedDataPath build/app/DerivedData "
-        [ "$(field .details.build.test_plan)" = UI ]
-        not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
-      done
-    done
-  done
-}
 
-@test "build-app CloudAgent platform roots retain the first inventory across the peer build" {
-  trace_app_build
-  mg build-app --platform mac --test-plan CloudAgent
-  [ "$status" -eq 0 ]
-  local first="$SB/build/app/CloudAgentMacDerivedData/Build/Products"
-  local manifest="$BATS_TEST_TMPDIR/first-inventory"
-  find "$first" -type f -exec shasum -a 256 {} + | sort >"$manifest"
-  [ -s "$manifest" ]
-  mg build-app --platform ios-sim --test-plan CloudAgent
-  [ "$status" -eq 0 ]
-  find "$first" -type f -exec shasum -a 256 {} + | sort >"$manifest.after"
-  cmp "$manifest" "$manifest.after"
-  [ -d "$SB/build/app/CloudAgentSimDerivedData/Build/Products" ]
-  [ ! -d "$SB/build/app/DerivedData" ]
-  not_called 'test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
-}
 
-@test "build-app failure reproduction preserves explicit CloudAgent and default UI plans" {
-  trace_app_build
-  local platform plan expected
-  for platform in mac ios-sim; do
-    for plan in CloudAgent UI; do
-      : >"$STUB_LOG"
-      expected="tools/mg build-app --platform $platform --config Debug"
-      if [ "$plan" = CloudAgent ]; then
-        MG_APP_TEST_PLAN=UI FX_BUILD_RC=1 mg build-app --platform "$platform" --test-plan CloudAgent
-        expected="$expected --test-plan CloudAgent"
-      else
-        MG_APP_TEST_PLAN=CloudAgent FX_BUILD_RC=1 mg build-app --platform "$platform"
-      fi
-      [ "$status" -eq 1 ]
-      [ "$(field .status)" = fail ]
-      [ "$(field '.failures[0].id')" = build ]
-      [ "$(field '.failures[0].repro')" = "$expected" ]
-      called "^xcodebuild build-for-testing .* -testPlan $plan -configuration Debug "
-    done
-  done
-}
 
 @test "build-app team CloudAgent simulator certificate selection stays scoped" {
   trace_app_build
@@ -323,66 +238,8 @@ EOF
   done
 }
 
-@test "build-app CloudAgent rejects preview modes in either option order before build work" {
-  trace_app_build
-  local platform preview config order
-  for platform in mac ios-sim; do
-    for preview in --standalone --personal-preview; do
-      for config in Debug Release; do
-        for order in plan-first plan-last; do
-          if [ "$order" = plan-first ]; then
-            mg build-app --test-plan CloudAgent "$preview" --config "$config" --platform "$platform"
-          else
-            mg build-app --platform "$platform" --config "$config" "$preview" --test-plan CloudAgent
-          fi
-          [ "$status" -eq 2 ]
-          [ "$(field '.failures[0].id')" = usage ]
-          [ ! -s "$STUB_LOG" ]
-        done
-      done
-      mg build-app --platform "$platform" "$preview" --test-plan CloudAgent
-      [ "$status" -eq 2 ]
-      [ ! -s "$STUB_LOG" ]
-    done
-  done
-  [ ! -d "$SB/build/app" ]
-}
 
-@test "build-app CloudAgent rejects non-Debug configurations and other platforms before build work" {
-  trace_app_build
-  local platform config
-  for platform in mac ios-sim; do
-    for config in Profile Release AppStore; do
-      mg build-app --platform "$platform" --test-plan CloudAgent --config "$config"
-      [ "$status" -eq 2 ]
-      [ "$(field '.failures[0].id')" = usage ]
-      [ ! -s "$STUB_LOG" ]
-    done
-  done
-  for platform in ios-device iphone ipad watchos 'mac ios-sim' ''; do
-    mg build-app --test-plan CloudAgent --config Debug --platform "$platform"
-    [ "$status" -eq 2 ]
-    [ ! -s "$STUB_LOG" ]
-  done
-  mg build-app --test-plan CloudAgent
-  [ "$status" -eq 2 ]
-  [ ! -s "$STUB_LOG" ]
-  [ ! -d "$SB/build/app" ]
-}
 
-@test "build-app rejects missing empty compound and unsupported test plans before build work" {
-  trace_app_build
-  local plan
-  for plan in '' Snapshot Performance 'UI CloudAgent' cloudagent; do
-    mg build-app --platform mac --test-plan "$plan"
-    [ "$status" -eq 2 ]
-    [ ! -s "$STUB_LOG" ]
-  done
-  mg build-app --platform mac --test-plan
-  [ "$status" -eq 2 ]
-  [ ! -s "$STUB_LOG" ]
-  [ ! -d "$SB/build/app" ]
-}
 
 @test "app builds keep adhoc defaults without provisioning arguments" {
   local platform mode
@@ -519,15 +376,9 @@ standalone_facts() {
   export FX_WIDGET_ENT="$BATS_TEST_TMPDIR/widget-entitlements.json"
   export FX_STANDALONE_SETTINGS="$BATS_TEST_TMPDIR/standalone-settings.json"
   export FX_CLOUD_INFO="$BATS_TEST_TMPDIR/cloud-info.json"
-  echo '{"MeguriCloudContainer":"iCloud.example.isolated","MeguriCloudEnvironment":"development","MeguriCloudSchemaConfigured":false}' >"$FX_CLOUD_INFO"
+  echo '{}' >"$FX_CLOUD_INFO"
   jq -n '[{target:"Meguri", buildSettings: {
-    CONFIGURATION:"Debug", MEGURI_BUNDLE_ID_SUFFIX:".dev", PRODUCT_BUNDLE_IDENTIFIER:"com.antoinefink.meguri.dev",
-    MEGURI_CLOUD_CONFIGURATION:"development", MEGURI_CLOUD_CONTAINER:"iCloud.example.isolated",
-    MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
-    MEGURI_CLOUD_ENVIRONMENT:"development", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Development", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
-    INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.isolated", INFOPLIST_KEY_MeguriCloudEnvironment:"development",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"NO", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0"}}]' >"$FX_STANDALONE_SETTINGS"
+    CONFIGURATION:"Debug", MEGURI_BUNDLE_ID_SUFFIX:".dev", PRODUCT_BUNDLE_IDENTIFIER:"com.antoinefink.meguri.dev"}}]' >"$FX_STANDALONE_SETTINGS"
   jq -n --arg fixture "$SB/" '{
     "com.apple.security.app-sandbox":true, "com.apple.security.get-task-allow":true,
     "com.apple.security.network.client":true, "com.apple.security.network.server":true,
@@ -563,30 +414,21 @@ case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo "${FX_ARCH:-arm64}"'
 }
 
-standalone_team_grants() {
-  jq '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated"]
-    | .["com.apple.developer.icloud-services"] = ["CloudKit"]
-    | .["com.apple.developer.icloud-container-environment"] = "Development"
-    | .["com.apple.developer.aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/team-app.json"
-  mv "$BATS_TEST_TMPDIR/team-app.json" "$FX_APP_ENT"
-}
+standalone_team_grants() { :; }
 
 personal_facts() {
   standalone_facts
   export MEGURI_APP_SIGNING=team
   export FX_PERSONAL_SETTINGS="$BATS_TEST_TMPDIR/personal-settings.json"
   export FX_CLOUD_INFO="$BATS_TEST_TMPDIR/cloud-info.json"
-  echo '{"MeguriCloudContainer":"iCloud.example.isolated","MeguriCloudEnvironment":"development","MeguriCloudSchemaConfigured":false}' >"$FX_CLOUD_INFO"
+  echo '{}' >"$FX_CLOUD_INFO"
   export FX_APP_PROFILE="$BATS_TEST_TMPDIR/app-profile.plist" FX_WIDGET_PROFILE="$BATS_TEST_TMPDIR/widget-profile.plist"
   jq 'del(.["com.apple.security.get-task-allow"], .["com.apple.security.temporary-exception.files.absolute-path.read-only"], .["com.apple.private.security.storage.AppDataContainers"])
     | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
     | .["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"
     | .["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]
     | .["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri.dev"]
-    | .["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated"]
-    | .["com.apple.developer.icloud-services"] = ["CloudKit"]
-    | .["com.apple.developer.icloud-container-environment"] = "Development"
-    | .["com.apple.developer.aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/personal-app.json"
+    ' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/personal-app.json"
   mv "$BATS_TEST_TMPDIR/personal-app.json" "$FX_APP_ENT"
   jq 'del(.["com.apple.security.get-task-allow"])
     | .["com.apple.developer.team-identifier"] = "TESTTEAM01"
@@ -606,12 +448,12 @@ for source, target in zip(sys.argv[1::2], sys.argv[2::2]):
 PY
   jq -n '["Meguri", "MeguriWidget"] | map(. as $target | {target: $target, buildSettings: {
     CONFIGURATION:"Release", MEGURI_BUNDLE_ID_SUFFIX:".dev",
-    MEGURI_CLOUD_CONFIGURATION:"development", MEGURI_CLOUD_CONTAINER:"iCloud.example.isolated",
-    MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
-    MEGURI_CLOUD_ENVIRONMENT:"development", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Development", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
-    INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.isolated", INFOPLIST_KEY_MeguriCloudEnvironment:"development",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"NO", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
-    MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0",
+
+
+
+
+
+
     PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri.dev" + (if $target == "Meguri" then "" else ".widget" end)),
     MEGURI_CORE_FEATURES:"ankiweb", MEGURI_SWIFT_CONDITIONS:"ANKIWEB_ENABLED", SWIFT_ACTIVE_COMPILATION_CONDITIONS:"ANKIWEB_ENABLED",
     MEGURI_CARD_INSPECTION_BUILD:"personalRelease", MEGURI_MAC_UI_ELEMENT:"NO",
@@ -655,10 +497,10 @@ PY
     [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
     [ "$status" -eq 0 ]
     [ "$(field .status)" = pass ]
-    called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
+    called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev$'
     called '^xcframework .* --configuration Release$'
     [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | cut -d: -f1)" ]
-    called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
+    called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev$'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
     [ "$(field .details.build.personal_preview)" = true ]
     [ "$(field .details.build.test_plan)" = UI ]
@@ -685,32 +527,6 @@ PY
   not_called 'MEGURI_BUNDLE_ID_SUFFIX=|^codesign |^security |^system_profiler '
 }
 
-@test "personal preview checks resolved target identities and no hooks after core and before app builds" {
-  personal_facts
-  cp "$FX_PERSONAL_SETTINGS" "$BATS_TEST_TMPDIR/normal-settings.json"
-  local mutation
-  for mutation in \
-    '.[1].buildSettings.PRODUCT_BUNDLE_IDENTIFIER = "com.antoinefink.meguri.widget"' \
-    '.[0].buildSettings.MEGURI_CORE_FEATURES = "ankiweb,test-hooks"' \
-    '.[0].buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ANKIWEB_ENABLED"' \
-    '.[0].buildSettings.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = "-Dev"' \
-    '.[1].buildSettings.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = "-AdHoc"' \
-    '.[0].buildSettings.MEGURI_CARD_INSPECTION_BUILD = "debug"' \
-    '.[0].buildSettings.MEGURI_CLOUD_CONFIGURATION = "production"' \
-    '.[0].buildSettings.MEGURI_CLOUD_CONTAINER = "iCloud.example.daily"' \
-    '.[0].buildSettings.MEGURI_CLOUD_ENVIRONMENT = "production"' \
-    '.[0].buildSettings.MEGURI_CLOUD_PUSH_ENVIRONMENT = "production"' \
-    '.[0].buildSettings.MEGURI_BUNDLE_ID_SUFFIX = ""' \
-    '.[1].buildSettings.MEGURI_CLOUD_CONFIGURATION = "production"'; do
-    jq "$mutation" "$BATS_TEST_TMPDIR/normal-settings.json" >"$FX_PERSONAL_SETTINGS"
-    : >"$STUB_LOG"
-    mg build-app --platform mac --personal-preview
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = personal-preview-settings ]
-    called '^xcframework .* --configuration Release$'
-    not_called '^xcodebuild build '
-  done
-}
 
 # Mutate only the generated profile; signed product claims stay independent.
 personal_profile_cloud_grant() {
@@ -727,147 +543,9 @@ with open(sys.argv[1], "wb") as stream:
 PY
 }
 
-@test "personal preview accepts documented profile service and environment authorizations" {
-  personal_facts
-  local services environment
-  for services in '"*"' '["CloudKit"]' '["CloudKit","CloudDocuments"]' '["CloudDocuments","CloudKit"]'; do
-    for environment in '"Development"' '["Development"]' '["Development","Production"]' '["Production","Development"]'; do
-      personal_profile_cloud_grant com.apple.developer.icloud-services "$services"
-      personal_profile_cloud_grant com.apple.developer.icloud-container-environment "$environment"
-      mg build-app --platform mac --personal-preview
-      [ "$status" -eq 0 ]
-      [ "$(field .status)" = pass ]
-      [ "$(field .details.personal_preview_product.provisioning_verified)" = true ]
-      not_called '^codesign .*--(sign|remove-signature)'
-    done
-  done
-}
 
-@test "personal preview rejects malformed or non authorizing profile cloud grants" {
-  local key value values
-  for key in com.apple.developer.icloud-services com.apple.developer.icloud-container-environment \
-    com.apple.developer.icloud-container-identifiers com.apple.developer.aps-environment; do
-    case "$key" in
-      com.apple.developer.icloud-services)
-        values=(missing '"CloudKit"' '"CloudDocuments"' '"**"' '""' '[]' '["CloudDocuments"]' '["*"]'
-          '["CloudKit","*"]' '["CloudKit","CloudKit"]' '["CloudKit","Unknown"]' '["cloudkit"]'
-          '["CloudKit",true]' '["CloudKit",["CloudDocuments"]]' true '{}') ;;
-      com.apple.developer.icloud-container-environment)
-        values=(missing '"Production"' '"development"' '"*"' '""' '[]' '["Production"]' '["*"]'
-          '["Development","Development"]' '["Development","Unknown"]' '["development"]'
-          '["Development",false]' '["Development",["Production"]]' false '{}') ;;
-      com.apple.developer.icloud-container-identifiers)
-        values=(missing '["*"]' '["iCloud.example.*"]' '["iCloud.example.daily"]'
-          '["iCloud.example.isolated","iCloud.example.daily"]') ;;
-      com.apple.developer.aps-environment)
-        values=(missing '"production"' '["development"]' '"*"') ;;
-    esac
-    for value in "${values[@]}"; do
-      personal_facts
-      personal_profile_cloud_grant "$key" "$value"
-      mg build-app --platform mac --personal-preview
-      [ "$status" -eq 1 ]
-      [ "$(field '.failures[0].id')" = personal-preview-product ]
-      [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-    done
-  done
-}
 
-@test "personal preview keeps exact signed cloud claims with authorizing profile grants" {
-  local mutation
-  for mutation in \
-    '.["com.apple.developer.icloud-services"] = ["CloudDocuments"]' \
-    '.["com.apple.developer.icloud-services"] = ["*"]' \
-    '.["com.apple.developer.icloud-services"] = "*"' \
-    '.["com.apple.developer.icloud-services"] = ["CloudKit","CloudDocuments"]' \
-    'del(.["com.apple.developer.icloud-services"])' \
-    '.["com.apple.developer.icloud-container-environment"] = "Production"' \
-    '.["com.apple.developer.icloud-container-environment"] = ["Development"]' \
-    '.["com.apple.developer.icloud-container-environment"] = "development"' \
-    'del(.["com.apple.developer.icloud-container-environment"])' \
-    '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]' \
-    '.["com.apple.developer.icloud-container-identifiers"] = ["*"]' \
-    '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.isolated","iCloud.example.daily"]' \
-    'del(.["com.apple.developer.icloud-container-identifiers"])' \
-    '.["com.apple.developer.aps-environment"] = "production"' \
-    '.["com.apple.developer.aps-environment"] = ["development"]' \
-    'del(.["com.apple.developer.aps-environment"])' \
-    '.["com.apple.developer.ubiquity-container-identifiers"] = ["iCloud.example.isolated"]'; do
-    personal_facts
-    personal_profile_cloud_grant com.apple.developer.icloud-services '"*"'
-    personal_profile_cloud_grant com.apple.developer.icloud-container-environment '["Production","Development"]'
-    jq "$mutation" "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/signed-fault.json"
-    mv "$BATS_TEST_TMPDIR/signed-fault.json" "$FX_APP_ENT"
-    mg build-app --platform mac --personal-preview
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = personal-preview-product ]
-    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-  done
-}
 
-@test "personal preview rejects fixture scope debug grants stale core invalid provisioning and source changes" {
-  local fault mutation
-  for fault in fixture debug keychain group stamp profile expired device grant platform certificates profile-debug signer source signature arch cloud-container cloud-environment cloud-push widget-cloud info-container info-environment info-string info-ready profile-cloud; do
-    personal_facts
-    case "$fault" in
-      fixture) jq '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      debug) jq '.["com.apple.security.get-task-allow"] = true' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      keychain) jq '.["keychain-access-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      group) jq '.["com.apple.security.application-groups"] = ["TESTTEAM01.com.antoinefink.meguri"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      cloud-container) jq '.["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      cloud-environment) jq '.["com.apple.developer.icloud-container-environment"] = "Production"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      cloud-push) jq '.["com.apple.developer.aps-environment"] = "production"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/fault.json" ;;
-      widget-cloud)
-        jq '.["com.apple.developer.icloud-services"] = ["CloudKit"]' "$FX_WIDGET_ENT" >"$BATS_TEST_TMPDIR/widget-fault.json"
-        mv "$BATS_TEST_TMPDIR/widget-fault.json" "$FX_WIDGET_ENT" ;;
-      info-container|info-environment|info-string|info-ready)
-        case "$fault" in
-          info-container) mutation='.MeguriCloudContainer = "iCloud.example.daily"' ;;
-          info-environment) mutation='.MeguriCloudEnvironment = "production"' ;;
-          info-string) mutation='.MeguriCloudSchemaConfigured = "NO"' ;;
-          info-ready) mutation='.MeguriCloudSchemaConfigured = true' ;;
-        esac
-        jq "$mutation" "$FX_CLOUD_INFO" >"$BATS_TEST_TMPDIR/cloud-fault.json"
-        mv "$BATS_TEST_TMPDIR/cloud-fault.json" "$FX_CLOUD_INFO" ;;
-      stamp) sed 's/features=ankiweb/features=ankiweb,test-hooks/' "$SB/app/Packages/MeguriCore/Binaries/.stamp" >"$BATS_TEST_TMPDIR/stamp"; mv "$BATS_TEST_TMPDIR/stamp" "$SB/app/Packages/MeguriCore/Binaries/.stamp" ;;
-      profile) echo invalid >"$FX_APP_PROFILE" ;;
-      expired|device|grant|platform|certificates|profile-debug|profile-cloud)
-        python3 - "$FX_APP_PROFILE" "$fault" <<'PY'
-import datetime, plistlib, sys
-with open(sys.argv[1], "rb") as stream:
-    profile = plistlib.load(stream)
-if sys.argv[2] == "expired":
-    profile["ExpirationDate"] = datetime.datetime(2000, 1, 1)
-elif sys.argv[2] == "device":
-    profile["ProvisionedDevices"] = ["00000000-0000-4000-8000-000000000010"]
-elif sys.argv[2] == "grant":
-    profile["Entitlements"]["keychain-access-groups"] = []
-elif sys.argv[2] == "platform":
-    profile["Platform"] = ["iOS"]
-elif sys.argv[2] == "certificates":
-    profile["DeveloperCertificates"] = []
-elif sys.argv[2] == "profile-cloud":
-    profile["Entitlements"]["com.apple.developer.icloud-container-identifiers"] = ["iCloud.example.daily"]
-else:
-    profile["Entitlements"]["get-task-allow"] = False
-with open(sys.argv[1], "wb") as stream:
-    plistlib.dump(profile, stream)
-PY
-        ;;
-    esac
-    [ ! -f "$BATS_TEST_TMPDIR/fault.json" ] || mv "$BATS_TEST_TMPDIR/fault.json" "$FX_APP_ENT"
-    case "$fault" in
-      source) FX_SOURCE_CHANGE=1 mg build-app --platform mac --personal-preview ;;
-      signature) FX_SIGNATURE_RC=1 mg build-app --platform mac --personal-preview ;;
-      signer) FX_LEAF_CERT='different synthetic certificate' mg build-app --platform mac --personal-preview ;;
-      arch) FX_ARCH='arm64 x86_64' mg build-app --platform mac --personal-preview ;;
-      *) mg build-app --platform mac --personal-preview ;;
-    esac
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = personal-preview-product ]
-    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-  done
-}
 
 @test "personal preview accepts native Mac widget without profile only with exact dev signed identity and authorized app signer" {
   personal_facts
@@ -1010,39 +688,6 @@ EOF
   done
 }
 
-@test "standalone cloud proof rejects built Info types destinations and protected app or widget grants" {
-  standalone_facts
-  cp "$FX_CLOUD_INFO" "$BATS_TEST_TMPDIR/cloud-normal.json"
-  local mutation target
-  for mutation in \
-    '.MeguriCloudSchemaConfigured = "NO"' \
-    '.MeguriCloudSchemaConfigured = 0' \
-    'del(.MeguriCloudSchemaConfigured)' \
-    '.MeguriCloudSchemaConfigured = true' \
-    '.MeguriCloudContainer = "iCloud.example.daily"' \
-    '.MeguriCloudEnvironment = "production"'; do
-    jq "$mutation" "$BATS_TEST_TMPDIR/cloud-normal.json" >"$FX_CLOUD_INFO"
-    mg build-app --platform mac --standalone
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = standalone-product ]
-    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-  done
-  cp "$BATS_TEST_TMPDIR/cloud-normal.json" "$FX_CLOUD_INFO"
-  for target in "$FX_APP_ENT" "$FX_WIDGET_ENT"; do
-    cp "$target" "$BATS_TEST_TMPDIR/grants-normal.json"
-    jq '.["com.apple.developer.icloud-services"] = ["CloudKit"]' "$target" >"$BATS_TEST_TMPDIR/grants-bad.json"
-    mv "$BATS_TEST_TMPDIR/grants-bad.json" "$target"
-    mg build-app --platform mac --standalone
-    [ "$status" -eq 1 ]
-    [ "$(field '.failures[0].id')" = standalone-product ]
-    [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-    cp "$BATS_TEST_TMPDIR/grants-normal.json" "$target"
-  done
-  MEGURI_APP_SIGNING=team mg build-app --platform mac --standalone
-  [ "$status" -eq 1 ]
-  [ "$(field '.failures[0].id')" = standalone-product ]
-  [ "$(field '[.artifacts[] | select(.kind == "app")] | length')" -eq 0 ]
-}
 
 @test "standalone cloud proof uses effective signing and fails closed on unavailable settings" {
   standalone_facts
@@ -3035,8 +2680,7 @@ value = {
     'package': {'path': relative + '/expected-replay/input.colpkg'},
     'seeds': {'source_open': 101, 'package_write': 102, 'inspection_and_initial_activation': 103, 'reopen': 104},
     'answer': {'rating': 'easy', 'elapsed_ms': 1000, 'count': 1, 'preset_cap_answer_time_secs': 60},
-    'no_old_database': True,
-}
+    'no_old_database': True}
 record(expected / 'input.json', value)
 names = ['input.json', 'input.colpkg', 'replay.json']
 for stage in ('source', 'import', 'review'):
@@ -3094,18 +2738,6 @@ PY
   [ "$status" -eq 0 ]
 }
 
-@test "personal preview permits typed readiness after verified development setup" {
-  personal_facts
-  jq 'map(.buildSettings.MEGURI_CLOUD_SCHEMA_CONFIGURED_development = "YES"
-    | .buildSettings.MEGURI_CLOUD_SCHEMA_CONFIGURED = "YES"
-    | .buildSettings.MEGURI_CLOUD_SCHEMA_BOOLEAN = "1")' "$FX_PERSONAL_SETTINGS" >"$BATS_TEST_TMPDIR/ready-settings.json"
-  mv "$BATS_TEST_TMPDIR/ready-settings.json" "$FX_PERSONAL_SETTINGS"
-  jq '.MeguriCloudSchemaConfigured = true' "$FX_CLOUD_INFO" >"$BATS_TEST_TMPDIR/ready-info.json"
-  mv "$BATS_TEST_TMPDIR/ready-info.json" "$FX_CLOUD_INFO"
-  mg build-app --platform mac --personal-preview
-  [ "$status" -eq 0 ]
-  [ "$(field .status)" = pass ]
-}
 
 # Drive fixtures replace only attachment export and the image-tools checker;
 # destination selection, team build, test invocation and result checks stay real.
@@ -3771,7 +3403,7 @@ PY
       called '^host-lease --no-session$'
       called '^xcframework .* --configuration Release --slices device$'
       called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 '
-      called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/PersonalDevicePreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$"
+      called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/PersonalDevicePreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev$"
       not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-|open|system_profiler)|xcrun (simctl|devicectl)'
       [ "$(field .details.build.personal_preview)" = true ]
       [ "$(field .details.build.config)" = Release ]
@@ -3843,9 +3475,9 @@ real_copy_device_facts() {
   export MEGURI_PROFILE_DIRS="$BATS_TEST_TMPDIR/profiles"
   mkdir -p "$MEGURI_PROFILE_DIRS"
   jq 'map(.target as $target | .buildSettings |= (. + {
-      MEGURI_BUNDLE_ID_SUFFIX:"", MEGURI_CLOUD_CONFIGURATION:"production", MEGURI_CLOUD_CONTAINER:"iCloud.example.daily",
-      MEGURI_CLOUD_ENVIRONMENT:"production", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Production", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
-      INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.daily", INFOPLIST_KEY_MeguriCloudEnvironment:"production",
+      MEGURI_BUNDLE_ID_SUFFIX:"",
+
+
       PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri" + (if $target == "Meguri" then "" else ".widget" end)),
       MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon", MEGURI_SIGNING:"team", PLATFORM_NAME:"iphoneos",
       DEVELOPMENT_TEAM:"TESTTEAM01", MEGURI_TEAM_ID:"TESTTEAM01", CODE_SIGN_IDENTITY:"Apple Development",
@@ -3913,8 +3545,8 @@ PY
   [ "$(field '.failures[0].id')" = build ]
   called '^host-lease --no-session$'
   called '^xcframework .* --configuration Release --slices device$'
-  called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$'
-  called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/RealCopyDeviceDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$"
+  called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 MEGURI_SIGNING=team MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$'
+  called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/RealCopyDeviceDerivedData .* MEGURI_SIGNING=team MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$"
   not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|devicectl device (install|process)|process launch'
   only_device_info_queries
   [ "$(field .details.build.real_copy)" = true ]

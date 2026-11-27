@@ -29,13 +29,6 @@ extension DebugCloudDiagnostics {
         case success, cancelled
         case failure(CloudEngineErrorCode)
 
-        #if canImport(CloudKit)
-        // Classify the original throw before any network-failure wrapping. Retain no error.
-        static func classifyFailure(_ error: any Error) -> Self {
-            if error is CancellationError { return .cancelled }
-            return .failure(NativeCloudKitSendError.code(error))
-        }
-        #endif
 
         fileprivate var tag: String {
             switch self {

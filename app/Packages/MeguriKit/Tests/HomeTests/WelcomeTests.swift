@@ -9,7 +9,7 @@ import Testing
             == ["home.collection.accountSync", "home.collection.import", "home.collection.startEmpty"])
         #expect(WelcomeChoice.allCases.map(\.title) == ["Set Up Sync", "Import a Collection File", "Start Empty"])
         #expect(WelcomeChoice.allCases.map(\.explanation) == [
-            "Get your collection from Meguri Sync or iCloud.",
+            "Get your collection from Meguri Sync.",
             "Open a .colpkg file exported from Meguri or Anki.",
             "Begin with no decks and add your own notes.",
         ])

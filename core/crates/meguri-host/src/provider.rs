@@ -200,8 +200,14 @@ impl CoreHost {
         }
     }
 
+    /// Historical/internal provider composition; not the application upgrade boundary.
     pub fn migrate_provider_configuration(root: &std::path::Path, legacy: meguri_sync::provider::LegacyInput) -> Result<(), meguri_storage::StorageError> {
         Authority::migrate_input(root, legacy)
+    }
+    /// The Apple application always applies local retirement before attachment.
+    pub fn migrate_application_provider_configuration(root: &std::path::Path, legacy: meguri_sync::provider::LegacyInput) -> Result<(), meguri_storage::StorageError> {
+        Authority::migrate_input(root, legacy)?;
+        Authority::retire_icloud(root)
     }
     pub fn provider_authority(&self) -> &Arc<Authority> { &self.provider }
     /// Whether this device's own Meguri Sync setup transfer (MP4) is what keeps

@@ -341,16 +341,6 @@
         }
       }
     },
-    "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device until you choose what to do with iCloud.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device until you choose what to do with iCloud."
-          }
-        }
-      }
-    },
     "Meguri backs up the current collection first. Media files are kept. Restoring does not upload this collection to Meguri Sync. Review the collection choice in Sync before publishing.": {
       "localizations": {
         "en": {
@@ -593,62 +583,122 @@
     },
     "The deck name is too long for an export file. Shorten it and try again.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "The deck name is too long for an export file. Shorten it and try again." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The deck name is too long for an export file. Shorten it and try again."
+          }
+        }
       }
     },
     "Export Deck": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Export Deck" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export Deck"
+          }
+        }
       }
     },
     "Deck": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Deck" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
       }
     },
     "Format": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Format" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format"
+          }
+        }
       }
     },
     "Deck Package (.apkg)": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Deck Package (.apkg)" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Package (.apkg)"
+          }
+        }
       }
     },
     "Export": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Export" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export"
+          }
+        }
       }
     },
     "Include scheduling information": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Include scheduling information" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include scheduling information"
+          }
+        }
       }
     },
     "Include deck presets": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Include deck presets" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include deck presets"
+          }
+        }
       }
     },
     "Include media": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Include media" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include media"
+          }
+        }
       }
     },
     "Includes this deck and its subdecks. All cards of each selected note are included.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Includes this deck and its subdecks. All cards of each selected note are included." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Includes this deck and its subdecks. All cards of each selected note are included."
+          }
+        }
       }
     },
     "Without scheduling information, cards start fresh when imported. Media includes files used by the selected notes and their note types.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Without scheduling information, cards start fresh when imported. Media includes files used by the selected notes and their note types." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Without scheduling information, cards start fresh when imported. Media includes files used by the selected notes and their note types."
+          }
+        }
       }
     },
     "The deck could not be exported. Check that it still exists, and check available space and collection access, then try again.": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "The deck could not be exported. Check that it still exists, and check available space and collection access, then try again." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The deck could not be exported. Check that it still exists, and check available space and collection access, then try again."
+          }
+        }
       }
     },
     "Preparing Export…": {
@@ -1665,6 +1715,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Replace the current collection with %@ from %@?"
+          }
+        }
+      }
+    },
+    "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri backs up the current collection first. Media files are kept. The restored collection stays on this device."
           }
         }
       }

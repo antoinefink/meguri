@@ -540,7 +540,10 @@ impl CoreHost {
         // A failed migration/load is retained as blocked network admission. It
         // must not prevent local collection open or repair.
         let _ = meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None);
+        let retirement_failed = config.cloud.is_none()
+            && meguri_sync::provider::Authority::retire_icloud(&config.manual_transfer_directory).is_err();
         let provider = meguri_sync::provider::Authority::load(&config.manual_transfer_directory);
+        if retirement_failed { provider.close_admission(); }
         if !meguri_sync::policy::TransferPolicy::new(&config.manual_transfer_directory)
             .active().is_ok_and(|active| active.is_none()) {
             provider.close_admission();

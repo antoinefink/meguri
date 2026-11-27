@@ -274,47 +274,6 @@ import Testing
         inspect(root, parent: nil, depth: 0, native: false)
         return graph
     }
-    private func selectNativeService(_ intended: SyncProviderSelection, in graph: NativeAccountGraph) throws {
-        let matches = graph.matches("settings.sync.service")
-        guard graph.complete else { throw NativeAccountStateFailure.incompleteGraph }
-        guard matches.count == 1, let service = matches.first else {
-            throw NativeAccountStateFailure.duplicateIdentifier
-        }
-        let serviceRoles: Set<String> = [NSAccessibility.Role.popUpButton.rawValue,
-            NSAccessibility.Role.menuButton.rawValue, NSAccessibility.Role.comboBox.rawValue]
-        guard let role = service.role, serviceRoles.contains(role) else {
-            throw NativeAccountStateFailure.inappropriateRole
-        }
-        let optionRoles: Set<String> = [NSAccessibility.Role.menuItem.rawValue, NSAccessibility.Role.radioButton.rawValue]
-        let options = graph.descendants(of: service.object).compactMap { graph.nodes[$0] }.filter {
-            guard let role = $0.role else { return false }
-            return optionRoles.contains(role)
-        }
-        // T19.2: Off, Meguri Sync and iCloud. iCloud's one-line menu caption carries
-        // its Beta label; an element that reports the spoken label instead is the same choice.
-        guard options.count == 3 else { throw NativeAccountStateFailure.invalidOptions }
-        let labels = try options.map {
-            try nativeAccountString(in: $0.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
-        }
-        let off = SyncText.value("sync.service.off"), meguri = SyncText.value("sync.service.meguri")
-        let iCloud: Set<String> = ["\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))",
-            SyncText.value("sync.service.iCloud.accessibility")]
-        let found = labels.compactMap { $0 }
-        guard found.count == 3, found.filter({ $0 == off }).count == 1, found.filter({ $0 == meguri }).count == 1,
-              found.filter({ iCloud.contains($0) }).count == 1 else { throw NativeAccountStateFailure.invalidOptions }
-        let targets = zip(options, labels).filter { _, label in
-            guard let label else { return false }
-            switch intended {
-            case .localOnly: return label == off
-            case .meguri: return label == meguri
-            case .iCloud: return iCloud.contains(label)
-            }
-        }.map { $0.0 }
-        guard targets.count == 1, let target = targets.first else { throw NativeAccountStateFailure.invalidOptions }
-        // Only options ALREADY exposed by this exact control are actionable here.
-        // Never open the picker: public menu-opening actions may synchronously track.
-        try performNativeAccountPress(on: target.object)
-    }
     private func performNativeAccountPress(on object: NSObject) throws {
         let succeeded: Bool
         guard object.responds(to: #selector(NSAccessibilityProtocol.accessibilityPerformPress)) else {
@@ -331,7 +290,7 @@ import Testing
 
     @Test func nativeSidebarSearchIdentifiersSurviveRemountWithText() throws {
         let collection = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
-        collection.syncPresentation.settingsSearch = "iCloud"
+        collection.syncPresentation.settingsSearch = "Meguri Sync"
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -382,7 +341,7 @@ import Testing
             }
             try #require(identified.count == 1)
             #expect(identified[0] === search)
-            #expect(field.stringValue == "iCloud")
+            #expect(field.stringValue == "Meguri Sync")
             // A remount must identify the new native elements, without relying
             // on a retained field, timer or global window lookup.
             window.contentViewController = nil

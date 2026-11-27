@@ -265,6 +265,46 @@ impl Authority {
             put(doc, &ProviderDocument::migration(settings))
         })
     }
+    /// Application upgrade only. This edits installation metadata, never a
+    /// collection, native account, tracking database or remote service.
+    /// Internal historical cloud tests keep using `migrate`/`load` directly.
+    pub fn retire_icloud(root: &Path) -> Result<(), StorageError> {
+        let path = root.join("provider.json");
+        let current = sidecar::read_document(&path, decode)?.ok_or_else(invalid)?;
+        let retired = |doc: &ProviderDocument| doc.selection == Selection::ICloud
+            || doc.handoff.as_ref().is_some_and(|h| h.old == Selection::ICloud || h.destination == Selection::ICloud);
+        if !retired(&current) { return Ok(()); }
+        sidecar::update_document(&path, |raw| {
+            let mut doc = decode(Some(raw))?.ok_or_else(invalid)?;
+            if !retired(&doc) { return Ok(()); }
+            // Preserve the complete pre-upgrade record, including unknown
+            // members and any interrupted handoff, as historical evidence.
+            let previous = Value::Object(raw.clone());
+            raw.insert("retiredICloud".into(), previous);
+            let removal = doc.handoff.as_ref().is_some_and(HandoffIntent::removal_pending);
+            doc.selection = Selection::LocalOnly;
+            doc.settings.enabled = false;
+            doc.settings.paused = false;
+            doc.binding = None;
+            doc.legacy_binding_pending = false;
+            doc.handoff = None;
+            doc.icloud_settings.enabled = false;
+            if removal {
+                // A prior request to remove credentials must never make the
+                // old credential reference usable again. Keychain is not read
+                // here; retire its reference and retain the request above.
+                doc.meguri = None;
+                doc.meguri_binding = None;
+                doc.meguri_bootstrap = None;
+                doc.meguri_structure = None;
+                doc.meguri_settings.automatic = false;
+            }
+            // Otherwise keep inactive Meguri config, binding and pending
+            // intentions byte-for-byte through the sidecar's merging writer.
+            doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
+            put(raw, &doc)
+        })
+    }
     pub fn snapshot(&self) -> Result<ProviderDocument, StorageError> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner).document.clone()
     }

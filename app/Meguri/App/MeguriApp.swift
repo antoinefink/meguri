@@ -166,7 +166,7 @@ struct MeguriApp: App {
             MainWindowCommands()
             AppCommands()
             MaskEditorCommands()
-            CloudSyncCommands(collection: collection)
+            SyncCommands(collection: collection)
         }
         Window(BackupRestoreWindowLayout.title, id: BackupRestoreWindowLayout.id) {
             #if MEGURI_TEST_HOOKS
@@ -204,7 +204,7 @@ struct MeguriApp: App {
             // N20.4: the iPad menu bar and the ⌘-held list have the Mac's menus.
             AppCommands()
             MaskEditorCommands()
-            CloudSyncCommands(collection: collection)
+            SyncCommands(collection: collection)
         }
         #endif
     }

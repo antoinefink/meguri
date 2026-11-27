@@ -130,48 +130,9 @@ snapshot_expect_argv() {
   [ "$(cat "$BATS_TEST_TMPDIR/dispatch.argv")" = "$(jq -nc --args '$ARGS.positional' -- "$BATS_TEST_TMPDIR/dispatch" Snapshot "$@")" ]
 }
 
-@test "ordinary Mac all snapshots exclude exactly the three SDK observation methods" {
-  snapshot_dispatch platform=macOS,arch=arm64 all
-  snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug \
-    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
-    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
-    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()'
-  [ ! -e "$BATS_TEST_TMPDIR/dispatch.fetch" ]
-}
 
-@test "ordinary selected Mac snapshots preserve only-testing and the input guard" {
-  snapshot_dispatch platform=macOS,arch=arm64 'ScreenSnapshots NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()'
-  snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug \
-    '-only-testing:MeguriSnapshotTests/ScreenSnapshots' \
-    '-only-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()' \
-    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
-    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
-    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()'
-}
 
-@test "ordinary simulator snapshots preserve selected suites and exclude only the signed soak method" {
-  snapshot_dispatch id=FAKE-IPAD 'GalleryComponentSnapshots ScreenSnapshots'
-  snapshot_expect_argv iphonesimulator id=FAKE-IPAD Debug \
-    '-only-testing:MeguriSnapshotTests/GalleryComponentSnapshots' \
-    '-only-testing:MeguriSnapshotTests/ScreenSnapshots' \
-    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()'
-  [ "$(cat "$BATS_TEST_TMPDIR/dispatch.fetch")" = "$BATS_TEST_TMPDIR/dispatch" ]
-}
 
-@test "result-only Snapshot calls preserve exact dedicated selectors without exclusions or output fetch" {
-  local selector
-  for selector in 'CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
-      'NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
-      'NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()' \
-      'NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()'; do
-    snapshot_dispatch platform=macOS,arch=arm64 "$selector" --result-only
-    snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug "-only-testing:MeguriSnapshotTests/$selector"
-  done
-  snapshot_dispatch id=FAKE-IPAD 'CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' --result-only
-  snapshot_expect_argv iphonesimulator id=FAKE-IPAD Debug \
-    '-only-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()'
-  [ ! -e "$BATS_TEST_TMPDIR/dispatch.fetch" ]
-}
 
 @test "mac-hosted-test requires one safe exact selector before any work" {
   local bad
@@ -222,21 +183,6 @@ snapshot_expect_argv() {
   [ "$status" -eq 0 ]
 }
 
-@test "mac-hosted-test keeps dedicated SDK observation methods and the guard selectable without exclusions" {
-  local selector
-  for selector in CloudKitSoakTests/signedGeneratedMutationAndSyncNow \
-      NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords \
-      NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes \
-      NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards; do
-    : >"$STUB_LOG"
-    set_cases "$selector()" Passed
-    mg --suite "$selector"
-    [ "$status" -eq 0 ]
-    [ "$(field .status)" = pass ]
-    called "^vm-test .* Snapshot macosx platform=macOS,arch=arm64 Debug -only-testing:MeguriSnapshotTests/$selector\\(\\)$"
-    not_called 'skip-testing|FORBIDDEN|RAW XCODE'
-  done
-}
 
 @test "mac-hosted-test refuses zero executions and a skipped selected method" {
   echo '{"result":"Passed","passedTests":0,"failedTests":0,"skippedTests":0}' >"$FX_RESULT/summary.json"

@@ -787,30 +787,6 @@ class PersonalPreviewTests(unittest.TestCase):
                     query.assert_not_called()
                     artifacts.assert_not_called()
 
-    def test_personal_preview_cloud_policy_allows_team_ios_release_only_with_explicit_development_facts(self):
-        spec = importlib.util.spec_from_file_location("cloud_configuration", Path(__file__).with_name("cloud_build_configuration.py"))
-        cloud = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cloud)
-        settings = {
-            "PRODUCT_BUNDLE_IDENTIFIER": drive.APP, "MEGURI_BUNDLE_ID_SUFFIX": ".dev",
-            "MEGURI_CLOUD_CONTAINER_development": "iCloud.example.isolated",
-            "MEGURI_CLOUD_CONTAINER_production": "iCloud.example.daily",
-            "MEGURI_CLOUD_CONFIGURATION": "development", "MEGURI_CLOUD_CONTAINER": "iCloud.example.isolated",
-            "MEGURI_CLOUD_ENVIRONMENT": "development", "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT": "Development",
-            "MEGURI_CLOUD_PUSH_ENVIRONMENT": "development", "INFOPLIST_KEY_MeguriCloudContainer": "iCloud.example.isolated",
-            "INFOPLIST_KEY_MeguriCloudEnvironment": "development", "MEGURI_CLOUD_SCHEMA_CONFIGURED_development": "NO",
-            "MEGURI_CLOUD_SCHEMA_CONFIGURED_production": "NO", "MEGURI_CLOUD_SCHEMA_CONFIGURED": "NO", "MEGURI_CLOUD_SCHEMA_BOOLEAN": "0"}
-        info = {"MeguriCloudContainer": "iCloud.example.isolated", "MeguriCloudEnvironment": "development", "MeguriCloudSchemaConfigured": False}
-        grants = {"com.apple.developer.icloud-container-identifiers": ["iCloud.example.isolated"],
-                  "com.apple.developer.icloud-services": ["CloudKit"], "com.apple.developer.icloud-container-environment": "Development",
-                  "aps-environment": "development", "get-task-allow": True}
-        cloud.check(settings, "Release", "ios", "team", info, grants, {}, personal_preview=True)
-        for preview, config, signing, entitlements, widget in ((False, "Release", "team", grants, {}),
-                (True, "Debug", "team", grants, {}), (True, "Release", "adhoc", grants, {}),
-                (True, "Release", "team", {**grants, "aps-environment": "production"}, {}),
-                (True, "Release", "team", grants, {"aps-environment": "development"})):
-            with self.assertRaises(ValueError):
-                cloud.check(settings, config, "ios", signing, info, entitlements, widget, personal_preview=preview)
 
 
 if __name__ == "__main__":

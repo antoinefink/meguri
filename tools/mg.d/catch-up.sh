@@ -317,11 +317,6 @@ mg_catch_up__work() {
   while IFS= read -r group <&3; do
     [ -n "$group" ] || continue
     job="$(jq -r '.[0].job' <<<"$group")"
-    # Owner approval is never replayable, even from a manually queued utility.
-    if [ "$job" = cloudkit-account-setup ]; then
-      waiting="$(jq -c --argjson group "$group" '. + $group | unique_by(.id)' <<<"$waiting")"
-      continue
-    fi
     reused=false
     if result="$(mg_catch_up__passing_result "$job" "$(jq -c '.[0].args' <<<"$group")")"; then
       reused=true

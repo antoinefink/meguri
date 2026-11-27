@@ -111,7 +111,7 @@ struct SettingsPageLabel: View {
     let page: SettingsPage
     var body: some View {
         switch page {
-        case .accountSync: Label(SyncText.value("sync.settings.sync.section"), systemImage: "icloud")
+        case .accountSync: Label(SyncText.value("sync.settings.sync.section"), systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
         case .backups: Label { Text("Backups", bundle: .module) } icon: { Image(systemName: "clock.arrow.circlepath") }
         case .collection: Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
         case .integrations: Label("Integrations", systemImage: "puzzlepiece.extension")
@@ -330,7 +330,7 @@ public struct MacSettingsView: View {
         let query = collection.syncPresentation.settingsSearch
         guard !query.isEmpty else { return true }
         let terms: String = switch page {
-        case .accountSync: SyncText.value("sync.settings.sync.section") + " iCloud " + SyncText.value("sync.service.meguri")
+        case .accountSync: SyncText.value("sync.settings.sync.section") + " " + SyncText.value("sync.service.meguri")
         case .backups: String(localized: "Backups", bundle: .module) + " Restore Automatic Retention"
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
         case .integrations: "Integrations Connectors Migaku Sentence Mining AnkiConnect"
