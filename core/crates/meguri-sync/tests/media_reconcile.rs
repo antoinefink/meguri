@@ -2038,8 +2038,13 @@ mod concurrent_downloads {
             first_wave(&observed.lock().unwrap());
             assert_eq!(h.media.store().download_intent_count().unwrap(), 100);
             assert_eq!(h.media.store().sync_baseline().unwrap().usn, 0);
-            let (outcome, _) = run(&h, &[], false, Answers::Full, |_, _| {});
-            assert_eq!(outcome.unwrap().downloaded_files, 100);
+            let published = &names(0..1)[0];
+            assert_eq!(fs::read(h.media.store().media_dir().join(published)).unwrap(), b"payload");
+            assert_eq!(fs::read_dir(h.media.store().staging_dir()).unwrap().count(), 0);
+            let (outcome, resumed) = run(&h, &[], false, Answers::Full, |_, _| {});
+            // Y8.5: check and list adopts the validated file published before cancellation.
+            assert_eq!(outcome.unwrap().downloaded_files, 99);
+            assert!(resumed.lock().unwrap().downloads.iter().flatten().all(|name| name != published));
             exact(&h);
         });
     }

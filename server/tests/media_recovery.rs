@@ -463,10 +463,9 @@ async fn advertised_media_overlap_on_one_account_allows_collection_meta() {
     assert_eq!(h.service.temp.used(),0);let _=h.stop().await;
 }
 
-// Explicit opt-in loopback probe; no live endpoint, settings change, or timing
-// assertion. Compare whole-run wall time, including validation of every byte.
+// Small synthetic loopback probe: count and exact bytes are the regressions.
+// Report whole-run wall time for comparison, without a timing assertion.
 #[tokio::test]
-#[ignore="opt-in synthetic serial/four-way media throughput probe"]
 async fn synthetic_media_serial_vs_four_way_throughput_probe() {
     let h=Harness::new().await;h.setup().await;let key=login(&h,"root.admin").await;
     let mut fixtures=Vec::new();
