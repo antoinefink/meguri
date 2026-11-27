@@ -159,10 +159,6 @@ pub(crate) fn retained_host() -> Option<Arc<meguri_host::CoreHost>> {
         _ => None,
     }
 }
-#[cfg(test)]
-pub(crate) fn process_initialized_for_testing() -> bool {
-    RUNTIME.get().is_some()
-}
 /// Snapshot the retained host's actual configured directory, including FailedCorrupt.
 pub(crate) fn backup_listing_inputs() -> Result<(Arc<meguri_host::CoreHost>, std::path::PathBuf), CoreError> {
     match &*runtime()?.host.lock().unwrap_or_else(PoisonError::into_inner) {
