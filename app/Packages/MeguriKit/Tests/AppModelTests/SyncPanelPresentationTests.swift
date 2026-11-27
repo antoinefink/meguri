@@ -10,6 +10,22 @@ import Testing
 @MainActor @Suite struct SyncPanelPresentationTests {
     private typealias Slot = SyncPanel.Slot
 
+    @Test func syncNowStaysDisabledWhileMovingAndTheTitleIsNotRepeated() {
+        #expect(SyncPanel.syncNowEnabled(available: true, moving: false))
+        #expect(!SyncPanel.syncNowEnabled(available: true, moving: true))
+        #expect(!SyncPanel.syncNowEnabled(available: false, moving: false))
+        // N23.1: a detail that repeats the title is not shown.
+        #expect(SyncKinds.meguri(.init(stage: .required)).shownDetailKey == nil)
+        #expect(SyncKinds.meguri(.init(stage: .preparing)).shownDetailKey == "sync.meguri.setup.preparing")
+        // N23.3 row 5: with no round reported, or round media blocked, Sync Now has its place
+        // but does not run (T18.7's routes stay File › Sync Now's).
+        for routine: MeguriRoutineState? in [nil, .mediaBlocked] {
+            let status = SyncKinds.meguri(.init(routine: routine))
+            #expect(SyncPanel.slot(status, serviceSelected: true, offered: false) == .syncNow)
+            let route = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: nil, routine: routine).route
+            #expect(route != .round, "\(String(describing: routine))")
+        }
+    }
 
     @Test func barShowsMeguriSetupAndRoundsButNeverNeedsYouOrOff() {
         let setup = SyncKinds.meguri(.init(stage: .media))
