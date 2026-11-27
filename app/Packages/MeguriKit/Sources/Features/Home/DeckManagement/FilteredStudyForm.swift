@@ -106,8 +106,9 @@ public struct CustomStudyForm: View {
     }
 }
 
-/// Keep the signed amount at the count's trailing edge without compressing its label.
+/// Stack at accessibility sizes so the label keeps the full row width and the editor stays trailing.
 private struct StudyAmountField: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: LocalizedStringKey
     @Binding var text: String
 
@@ -115,7 +116,9 @@ private struct StudyAmountField: View {
         #if os(macOS)
         StudyTextField(title, text: $text, id: "home.customStudy.amount")
         #else
-        HStack {
+        (dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing))
+            : AnyLayout(HStackLayout())) {
             Text(title, bundle: .module)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)

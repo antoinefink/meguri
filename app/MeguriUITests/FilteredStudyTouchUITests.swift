@@ -37,7 +37,10 @@ import XCTest
         let availableFrame = element(app, "home.customStudy.available").frame
         XCTAssertGreaterThanOrEqual(amount.frame.minX, windowFrame.minX, "The native amount stays inside the window at largest text")
         XCTAssertLessThanOrEqual(amount.frame.maxX, windowFrame.maxX, "The native amount stays inside the window at largest text")
-        XCTAssertEqual(amount.frame.maxX, availableFrame.maxX, accuracy: 1, "The editor aligns with the available-card count")
+        // Native LabeledContent stacks its read-only count at the leading content inset at AX5.
+        let leadingInset = availableFrame.minX - windowFrame.minX
+        XCTAssertEqual(amount.frame.maxX, windowFrame.maxX - leadingInset, accuracy: 1,
+                       "The editor reaches the trailing content edge at largest text")
         try replace("home.customStudy.amount", with: "-99999", app: app)
         capture(app, "filtered-touch-iphone-largest-text-custom-study-signed-boundary")
         _ = try visible("home.customStudy.amount", app: app)
