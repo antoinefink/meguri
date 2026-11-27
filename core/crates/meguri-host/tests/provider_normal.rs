@@ -21,8 +21,7 @@ impl meguri_engine::ProgressListener for RoutineProgress {
 fn evidence(task: &meguri_host::MeguriRoundTask) -> Vec<meguri_engine::progress::RoutineSyncMilestone> {
     let recorder = Arc::new(RoutineProgress::default());
     task.handle().progress.set_listener(recorder.clone());
-    let facts = recorder.0.lock().unwrap().last().unwrap().routine_sync.clone();
-    facts
+    recorder.0.lock().unwrap().last().unwrap().routine_sync.clone()
 }
 
 #[test]
