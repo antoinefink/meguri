@@ -230,7 +230,7 @@ import AppModel
         let empty = try await store.debugInfo()
         #expect(try JSONSerialization.jsonObject(with: empty) as? [String: Any] != nil)
         let emptyInfo = try #require(JSONSerialization.jsonObject(with: empty) as? [String: Any])
-        #expect((emptyInfo["zoneDeletions"] as? [Any])?.isEmpty == true)
+        #expect(emptyInfo["zoneDeletions"] == nil)
         try await deliver([Self.metricReport()], [Self.hangDiagnostic()], to: store)
         let stored = try await store.debugInfo()
         let info = try #require(JSONSerialization.jsonObject(with: stored) as? [String: Any])

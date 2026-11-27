@@ -1763,6 +1763,11 @@ def _first_sync_artifacts(ctx, rid, receipt):
             problems.append("phase-artifact-declaration")
             continue
         path, witness = declared[0]["path"], {}
+        # mg_artifact declares exactly $MG_RUN_DIR/<phase>.json.
+        expected_path = os.path.join(os.path.abspath(ctx["results"].dir), receipt["job"], receipt["run_id"], phase + ".json")
+        if path != expected_path:
+            problems.append("phase-artifact-path-mismatch")
+            continue
         try:
             value = _first_sync_json(os.path.join(ctx["git"].root, "build"), path, witness=witness)
             loaded.append(path)

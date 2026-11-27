@@ -5,7 +5,6 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
-import posixpath
 import re
 import stat
 import subprocess
@@ -132,30 +131,31 @@ def relative(path):
 
 
 def link_terminal(entries, name):
-    visited = set()
-    while True:
-        parts, resolved = name.split("/"), []
-        changed = False
-        for index, part in enumerate(parts):
-            resolved.append(part)
-            current = "/".join(resolved)
-            need(current in entries, "product-link")
-            entry = entries[current]
-            if entry["type"] == "symlink":
-                need(current not in visited, "product-link")
-                visited.add(current)
-                target = entry["target"]
-                need(isinstance(target, str) and target and not target.startswith("/") and
-                     "\x00" not in target, "product-link")
-                name = posixpath.normpath(posixpath.join(posixpath.dirname(current), target,
-                                                       *parts[index + 1:]))
-                relative(name)
-                changed = True
-                break
-            if index < len(parts) - 1:
+    parts, resolved, links = name.split("/"), [], 0
+    while parts:
+        part = parts.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            need(resolved, "product-link")
+            resolved.pop()
+            continue
+        current = "/".join(resolved + [part])
+        need(current in entries, "product-link")
+        entry = entries[current]
+        if entry["type"] == "symlink":
+            links += 1
+            need(links <= 40, "product-link")
+            target = entry["target"]
+            need(isinstance(target, str) and target and not target.startswith("/") and
+                 "\x00" not in target, "product-link")
+            # Expand the target before processing any following parent step.
+            parts = target.split("/") + parts
+        else:
+            if parts:
                 need(entry["type"] == "directory", "product-link")
-        if not changed:
-            return name
+            resolved.append(part)
+    return relative("/".join(resolved))
 
 
 def snapshot(boundary, product):

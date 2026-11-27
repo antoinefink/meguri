@@ -1985,9 +1985,36 @@ runs:
     def test_scope_object_passes_do_not_replace_required_native_phase_proof(self):
         rid = "meguri-provider-real-server"
         bad = copy.deepcopy(self.receipts[rid])
+        # This native job has no required scope. Plausible scoped-receipt
+        # metadata cannot supply its required producer phase files.
+        bad["details"]["phases"] = {phase: {"status": "pass", "passed": 1, "failed": 0, "skipped": 0}
+                                    for phase in self.PHASES}
         bad["artifacts"] = []
         self.write_receipt(self.paths[rid], bad)
-        self.reject(self.data, rid, "phase-artifact-declaration")
+        ev = self.reject(self.data, rid, "phase-artifact-declaration")
+        verified = ev["user_steps"][0]["details"]["results"][rid]
+        self.assertTrue(verified["receipt_validated"])
+        self.assertFalse(verified["evidence_validated"])
+
+    def test_valid_native_phase_from_another_job_or_run_is_refused(self):
+        rid = "meguri-provider-real-server"
+        original = self.receipts[rid]
+        for job, run_id in ((rid, "20261120T100059Z-999"), ("sync-server-test", original["run_id"])):
+            with self.subTest(job=job, run_id=run_id):
+                artifact = os.path.join(self.results, job, run_id, "upload.json")
+                os.makedirs(os.path.dirname(artifact), exist_ok=True)
+                # Copy otherwise genuine passing phase bytes into a foreign
+                # run and declare that path in the selected valid receipt.
+                with open(original["artifacts"][0]["path"], "rb") as source, open(artifact, "wb") as target:
+                    target.write(source.read())
+                bad = copy.deepcopy(original)
+                bad["artifacts"][0]["path"] = artifact
+                self.write_receipt(self.paths[rid], bad)
+                ev = self.reject(self.data, rid, "phase-artifact-path-mismatch")
+                verified = ev["user_steps"][0]["details"]["results"][rid]
+                self.assertTrue(verified["receipt_validated"])
+                self.assertFalse(verified["evidence_validated"])
+        self.write_receipt(self.paths[rid], original)
 
     def test_required_native_artifacts_and_substitutions_fail_closed(self):
         rid = "meguri-provider-real-server"
@@ -2000,7 +2027,7 @@ runs:
         self.write_receipt(outside, fake)
         mod, ctx, step = self._internal_validator()
         diagnostics = {"missing": "artifact-missing-unreadable-or-symlink",
-                       "undeclared": "phase-artifact-declaration", "escaping": "artifact-path-escape",
+                       "undeclared": "phase-artifact-declaration", "escaping": "phase-artifact-path-mismatch",
                        "symlink": "artifact-missing-unreadable-or-symlink", "malformed": "artifact-malformed-json",
                        "copied-pass": "phase-artifact-substitution", "fake": "phase-artifact-substitution",
                        "per-leg": "receipt-arguments-mismatch", "wrong-role": "phase-artifact-declaration",
@@ -2049,7 +2076,7 @@ runs:
                     self.assertEqual(len(signed_calls), 0 if kind == "per-leg" else 1)
                     selected_artifact = bad["artifacts"][0]["path"] if bad["artifacts"] else artifact
                     loads = [c for c in loader.call_args_list if c.args[1] == selected_artifact]
-                    self.assertEqual(len(loads), 0 if kind in ("undeclared", "per-leg", "wrong-role", "duplicate") else 1)
+                    self.assertEqual(len(loads), 0 if kind in ("undeclared", "per-leg", "wrong-role", "duplicate", "escaping") else 1)
                 finally:
                     if os.path.lexists(artifact):
                         os.unlink(artifact)

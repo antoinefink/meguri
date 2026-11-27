@@ -41,6 +41,31 @@ def generated(version=2):
 
 
 class PhysicalDriveEvidenceTests(unittest.TestCase):
+    def test_product_inventory_resolves_internal_links_before_parent_components(self):
+        directory, file = {"type": "directory"}, {"type": "file"}
+        entries = {"Versions": directory, "Versions/A": directory, "Versions/A/Nested": directory,
+                   "Versions/A/Widget": file, "Versions/A/OnlyInternal": file, "Widget": file, "RootOnly": file,
+                   "Versions/Current": {"type": "symlink", "target": "A"},
+                   "nested": {"type": "symlink", "target": "Versions/Current/Nested"}}
+        for target, terminal in (("Versions/Current/Widget", "Versions/A/Widget"),
+                                 ("nested/../Widget", "Versions/A/Widget"),
+                                 ("nested/../OnlyInternal", "Versions/A/OnlyInternal"),
+                                 ("nested/../../A/Widget", "Versions/A/Widget")):
+            with self.subTest(target=target):
+                entries["link"] = {"type": "symlink", "target": target}
+                self.assertEqual(drive.products.link_terminal(entries, "link"), terminal)
+        for target in ("nested/../RootOnly", "nested/../../Widget", "missing/../Widget", "Widget/../Widget",
+                       "nested/../../../../Widget", "escape/../Widget", "loop", "long0"):
+            with self.subTest(target=target):
+                entries["escape"] = {"type": "symlink", "target": "../outside"}
+                entries["loop"] = {"type": "symlink", "target": "loop"}
+                for index in range(41):
+                    entries["long" + str(index)] = {"type": "symlink", "target": "long" + str(index + 1)}
+                entries["long41"] = file
+                entries["link"] = {"type": "symlink", "target": target}
+                with self.assertRaises(drive.Refused):
+                    drive.products.link_terminal(entries, "link")
+
     def test_signature_requires_team_identity_and_development_grants(self):
         metadata = ("Identifier=" + drive.APP + "\nTeamIdentifier=ABCDEFGHIJ\nCDHash=" + "a" * 40 +
                     "\nAuthority=Apple Development: synthetic\n").encode()
