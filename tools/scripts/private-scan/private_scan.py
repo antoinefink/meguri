@@ -889,7 +889,7 @@ PUBLIC_ARTIFACTS = {
         "a15a4b80138f4fc769b16afb9298e0d67aa88e520a2712c0e15d5059edbbd4ec",
     "core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml": "47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b",
     "server/web/tests/browser/browse.spec.ts":
-        "699320082bad2ef596d5c2f0a28cd52882928052309200261cba7004458b0ee9",
+        "5b91ea83795f61e2ec88871e699c908d623d91cb808e325d29cdb566e7ec1da2",
     "server/web/tests/browser/browse-real.spec.ts":
         "3ff13664df064adc095a2558404f0a7113a0a98725481dfe31033ccc68cc44ad",
     "server/web/src/browse.tsx":
@@ -1070,7 +1070,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        "0363d86db300f75ad4f04e5bd80f86446ad140f972498fdbf6db41f69272b4f6",
+        "2bd1e3cdb5ed27b8913727a648e22ddb82d93a8f1ddf75ae0cf18e655eb10256",
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
