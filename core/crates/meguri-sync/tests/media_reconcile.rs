@@ -1972,6 +1972,9 @@ mod concurrent_downloads {
             let (outcome, observed) = run(&h, &["99999999999999999999"], true, Answers::Full, move |s, _| {
                 assert!(s.estimate.is_none());
                 if s.phase == MediaPhase::Downloading && s.files_left < 100 {
+                    assert_eq!(s.download_received, 100);
+                    assert_eq!(s.totals.downloaded_files, 100);
+                    assert_eq!(s.totals.bytes_downloaded, 700);
                     // Serial commits must expose the exact prefix cursor.
                     assert_eq!(store.sync_baseline().unwrap().usn, 100 - s.files_left);
                 }
@@ -2003,17 +2006,21 @@ mod concurrent_downloads {
             let (outcome, observed) = run(&h, &["4"], true, Answers::LateBusy(503), move |s, _| {
                 if s.phase == MediaPhase::Downloading { seen.lock().unwrap().push(s.clone()); }
             });
-            assert_eq!(outcome.unwrap().downloaded_files, 100);
+            let result = outcome.unwrap();
+            assert_eq!(result.downloaded_files, 126);
+            assert_eq!(result.bytes_downloaded, 882);
             let snapshots = snapshots.lock().unwrap();
             // Four saved replies in a wave contribute only one sample. The
-            // The sample first becomes available after 24 received files.
+            // sample first becomes available after 24 received files.
             assert!(snapshots.iter().filter(|s| s.download_received < 24).all(|s| s.estimate.is_none()));
             assert!(snapshots.iter().any(|s| s.download_received == 24 && s.files_left == 76 && s.estimate.is_some()));
             // The fourth wave saves 25 files before its capacity failure.
             // Discard its timing and all faster samples at the serial switch.
-            let reset = snapshots.iter().position(|s| s.download_received == 49 && s.estimate.is_none()).unwrap();
-            assert!(snapshots[reset..].iter().filter(|s| s.download_received < 100).all(|s| s.estimate.is_none()));
-            assert!(snapshots[reset..].iter().any(|s| s.download_received == 100 && s.files_left == 0 && s.estimate.is_some()));
+            let reset = snapshots.iter().position(|s| s.download_received == 75 && s.files_left == 51 && s.estimate.is_none()).unwrap();
+            assert_eq!(snapshots[reset].totals.downloaded_files, 75);
+            assert_eq!(snapshots[reset].totals.bytes_downloaded, 525);
+            assert!(snapshots[reset..].iter().filter(|s| s.download_received < 126).all(|s| s.estimate.is_none()));
+            assert!(snapshots[reset..].iter().any(|s| s.download_received == 126 && s.files_left == 0 && s.estimate.is_some()));
             let observed = observed.lock().unwrap();
             assert_eq!(observed.downloads.len(), 19);
             assert_eq!(observed.live, 0);
@@ -2026,7 +2033,9 @@ mod concurrent_downloads {
         for code in [429, 503] {
             with_collection(|h| {
                 let (outcome, observed) = run(&h, &["4"], true, Answers::Busy(code), |_, _| {});
-                assert_eq!(outcome.unwrap().downloaded_files, 100);
+                let result = outcome.unwrap();
+                assert_eq!(result.downloaded_files, 150);
+                assert_eq!(result.bytes_downloaded, 1050);
                 let observed = observed.lock().unwrap();
                 first_wave(&observed);
                 assert_eq!(&observed.downloads[4..], &[names(25..50), names(50..75), names(75..100)]);
@@ -2054,7 +2063,11 @@ mod concurrent_downloads {
     fn advertised_overlap_busy_never_masks_another_invalid_reply() {
         with_collection(|h| {
             let (outcome, observed) = run(&h, &["4"], true, Answers::BusyAndBad, |_, _| {});
-            assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::BadResponse);
+            let failure = outcome.unwrap_err();
+            assert_eq!(failure.error.kind, meguri_sync::ErrorKind::BadResponse);
+            assert_eq!(failure.snapshot.download_received, 50);
+            assert_eq!(failure.snapshot.totals.downloaded_files, 50);
+            assert_eq!(failure.snapshot.totals.bytes_downloaded, 350);
             let observed = observed.lock().unwrap();
             first_wave(&observed);
             assert_eq!(observed.downloads.len(), 4);
@@ -2094,6 +2107,9 @@ mod concurrent_downloads {
             let failure = result.unwrap_err();
             assert_eq!(failure.error.kind, meguri_sync::ErrorKind::RedirectRefused { code: 308 });
             assert_eq!(failure.error.method, Some(Method::DownloadFiles));
+            assert_eq!(failure.snapshot.download_received, 50);
+            assert_eq!(failure.snapshot.totals.downloaded_files, 50);
+            assert_eq!(failure.snapshot.totals.bytes_downloaded, 350);
             let observed = observed.lock().unwrap();
             first_wave(&observed);
             assert_eq!(observed.downloads.len(), 4);
@@ -2107,7 +2123,11 @@ mod concurrent_downloads {
             let (outcome, observed) = run(&h, &["4"], true, Answers::Full, |s, cancel| {
                 if s.published_files == 1 { cancel.cancel(); }
             });
-            assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::Cancelled);
+            let failure = outcome.unwrap_err();
+            assert_eq!(failure.error.kind, meguri_sync::ErrorKind::Cancelled);
+            assert_eq!(failure.snapshot.download_received, 100);
+            assert_eq!(failure.snapshot.totals.downloaded_files, 100);
+            assert_eq!(failure.snapshot.totals.bytes_downloaded, 700);
             first_wave(&observed.lock().unwrap());
             assert_eq!(h.media.store().download_intent_count().unwrap(), 100);
             assert_eq!(h.media.store().sync_baseline().unwrap().usn, 0);
@@ -2116,7 +2136,9 @@ mod concurrent_downloads {
             assert_eq!(fs::read_dir(h.media.store().staging_dir()).unwrap().count(), 0);
             let (outcome, resumed) = run(&h, &[], false, Answers::Full, |_, _| {});
             // Y8.5: check and list adopts the validated file published before cancellation.
-            assert_eq!(outcome.unwrap().downloaded_files, 99);
+            let result = outcome.unwrap();
+            assert_eq!(result.downloaded_files, 99);
+            assert_eq!(result.bytes_downloaded, 693);
             assert!(resumed.lock().unwrap().downloads.iter().flatten().all(|name| name != published));
             exact(&h);
         });

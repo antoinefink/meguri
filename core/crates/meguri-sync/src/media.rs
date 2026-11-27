@@ -653,6 +653,15 @@ impl Stage<'_> {
                 let files = fetch_download(self.job, staging.path().to_path_buf(), names).await;
                 vec![DownloadReply { intents, files }]
             };
+            // Receipt counts include validated replies that ordered saving may
+            // discard after an earlier failure. Journal progress stays separate.
+            let mut received = 0;
+            for files in replies.iter().filter_map(|r| r.files.as_ref().ok()) {
+                received += files.len() as u64;
+                self.snapshot.totals.bytes_downloaded += files.iter().map(|f| f.file.size()).sum::<u64>();
+            }
+            self.snapshot.totals.downloaded_files += received;
+            self.snapshot.download_received += received;
             // Child refusals also invalidate the parent's recorded target,
             // including replies discarded after an earlier failure.
             if replies.iter().filter_map(|r| r.files.as_ref().err())
@@ -664,13 +673,11 @@ impl Stage<'_> {
             let fatal = replies.iter().filter_map(|r| r.files.as_ref().err())
                 .find(|e| !download_capacity(e)).cloned();
             let mut failed = None;
-            let mut received = 0;
             for DownloadReply { intents, files: reply } in replies {
                 let files = match reply {
                     Ok(files) => files,
                     Err(error) => { failed = Some(error); break; }
                 };
-                received += files.len() as u64;
                 self.save_download_reply(&intents, files)?;
                 if parallel { self.emit(MediaPhase::Downloading); }
             }
@@ -700,9 +707,6 @@ impl Stage<'_> {
         }
     }
     fn save_download_reply(&mut self, intents: &[MediaDownloadIntent], files: Vec<wire::MediaFile>) -> Result<(), JobError> {
-        self.snapshot.totals.downloaded_files += files.len() as u64;
-        self.snapshot.download_received += files.len() as u64;
-        self.snapshot.totals.bytes_downloaded += files.iter().map(|f| f.file.size()).sum::<u64>();
         // Keep every received file and the staging owner through all
         // rebuilds. A stale receipt requires the complete answer to be
         // observed/saved again, never a weakened batch commit.

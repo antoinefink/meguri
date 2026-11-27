@@ -150,6 +150,8 @@ Select up to four batches in journal USN/name order. Each batch requests up to 2
 
 Save each reply and commit its existing receipt boundary serially in scheduled batch order, preserving filename, hash, stamp, trash, progress, event and cursor semantics. Validate a whole ZIP before publishing any member. A partial ZIP commits only its returned files; the next window reselects the remaining journal intents. The cursor never passes unfinished intents. An earlier failed batch prevents saving later replies; earlier committed effects survive.
 
+After the whole window drains, count every successfully spooled and validated file and its bytes as received before saving, including later replies discarded after a failure. Retransfers count again. Files left and durable progress follow the journal, independently of receipt counts.
+
 On HTTP 429 or 503, drain the requests and keep earlier commits. Reduce concurrency to one for the rest of the job, including a later sanity reset. Check cancellation and admission before and after the one-second wait. Request the remaining journal entries. A capacity error at serial speed reaches the caller. Report other failures from the same window.
 
 Keep up to twenty timing samples. A serial sample covers one batch. A parallel sample covers one full window, including elapsed transfer and save time and the number of files received. Show an estimate after three complete samples. Clear samples when the request limit changes.
@@ -240,7 +242,7 @@ The job reports through its progress sink (`engine/jobs#J5`) with these phases a
 | `resyncing` | the re-run's phases follow, reported again from `checking` |
 
 - `checked` (the status view's count, R1560) is the sum of entries examined by change checks and server changes listed; `added` and `removed` are the files and deletions moved in each direction.
-- **Estimate.** In `downloading`, once at least three batches are saved: files left × (seconds taken by the last 20 saved batches ÷ files received in them). This moving average follows changes in throughput better than the phase average of `engine/jobs#J5`, which applies to the other phases.
+- **Estimate.** In `downloading`, use files left × (elapsed seconds ÷ files received) over up to 20 completed batches in serial mode or 20 completed windows in parallel mode (Y8.6). Start estimating after three completed batches or windows, respectively; four saved batches in one window give only one sample. A failed window contributes no timing sample. This moving average follows changes in throughput better than the phase average of `engine/jobs#J5`, which applies to the other phases.
 
 ### Y13.2 Result
 
