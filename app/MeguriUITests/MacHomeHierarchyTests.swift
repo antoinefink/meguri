@@ -388,6 +388,71 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "Native Quit must finish actual close and owned cleanup")
     }
 
+    func testSettingsSectionsDiscardPushedSyncPageAndKeepNativeBack() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.configuration == .debug, bundle == "com.antoinefink.meguri.dev" else {
+            throw XCTSkip("Requires an isolated development fixture launch")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            locale: "en_US", animations: false,
+            route: "settings/sync/window/meguri-connected").arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        func control(_ id: String) -> XCUIElement {
+            let matches = settings.descendants(matching: .any).matching(identifier: id)
+            let target = matches.firstMatch
+            XCTAssertTrue(target.waitForExistence(timeout: 10), id)
+            XCTAssertEqual(matches.count, 1, id)
+            return target
+        }
+        func press(_ target: XCUIElement) throws {
+            try app.bringToFront(bundleIdentifier: bundle)
+            let actionable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                target.exists && target.isEnabled && target.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [actionable], timeout: 10), .completed,
+                "Native action must be enabled and hittable: \(target.identifier)")
+            target.click()
+        }
+        func syncRoot() throws {
+            try press(control("settings.root.sync"))
+            _ = control("settings.sync.service")
+            XCTAssertFalse(settings.descendants(matching: .any).matching(identifier: "sync.trouble.replaceDevice").firstMatch.exists)
+        }
+        func troubleshooting() throws {
+            try press(control("settings.sync.troubleshooting"))
+            XCTAssertFalse(control("sync.trouble.replaceDevice").isEnabled,
+                "Replacement is unavailable in the connected render fixture")
+        }
+        try syncRoot()
+        try troubleshooting()
+        let back = settings.toolbars.buttons["Back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        try press(back)
+        _ = control("settings.sync.service")
+        try troubleshooting()
+        try press(control("settings.root.collection"))
+        _ = control("settings.root.importCollection")
+        let attachment = XCTAttachment(screenshot: settings.screenshot())
+        attachment.name = "Collection after leaving pushed Sync Troubleshooting"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        for (row, reached) in [("settings.backups.open", "settings.backups.create"),
+                               ("settings.root.integrations", "settings.integrations.migaku.enabled")] {
+            try syncRoot()
+            try troubleshooting()
+            try press(control(row))
+            _ = control(reached)
+        }
+        try syncRoot()
+    }
+
     func testExpandedTreesKeepUniqueIDsNativeDisclosureSelectionAndChildMenus() throws {
         let (app, bundle) = try launchFixture()
         // N14.1: the sidebar is the Mac's only deck outline; with no deck selected the
