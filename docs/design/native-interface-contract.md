@@ -423,9 +423,9 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.3 Deck page
 
 - In the tab layout the deck page's toolbar has Add Note only. Sidebar layouts keep Go to Deck and Create Deck in the window toolbar.
-- A regular deck with no new, learning or review cards waiting shows "Nothing to study right now" in place of the counts and an Add Note button in place of Study. A filtered deck keeps its counts and Study. The deck menu's Study and the Mac's Study command are disabled under the same condition, through the same availability function.
+- A regular deck with no new, learning or review cards waiting shows "Nothing to study right now" in place of the counts. In place of Study: a Custom Study button when the deck has cards (finished), an Add Note button when the deck and its subdecks have no card (empty, `decks/deck-list` H5.4). Both are standard bordered buttons in the same place. Empty is the page read's `empty` flag (`sched/counts#C9`); a kept page uses the kept read's answer (N27.2), and a deck never read empty counts as finished. With cards waiting the page shows Study alone: no separate Custom Study row. A filtered deck keeps its counts and Study. Changed 2026-11-27 (owner, chat): Add Note showed for every regular deck with nothing waiting, and a Custom Study row followed on every normal deck page. The deck menu's Study and the Mac's Study command are disabled under the same condition, through the same availability function.
 - No New Subdeck button and no More menu. The long-press deck menu is otherwise unchanged.
-- iPhone, the Duo and iPad: the page is a system inset grouped list on the grouped background. Its first section has the deck's last name component as a large in-content header over one row: leading, "N cards waiting" (new + learning + to review) with "X new · Y learning · Z to review" in footnote secondary text under it; trailing, the standard-size Study button. With nothing waiting the row reads "Nothing to study right now" with Add Note trailing. At the accessibility text sizes the action goes under the text (by text size, not by fit: under a fit test the Dynamic Type audit failed the row's elements), and the three counts go one per line before any of them wraps. Then the "Subdecks" section, the error line, and the previous session in its own section. The navigation bar's title mode is inline, so no empty large-title band sits above the page. Replaces N13.2's "plain list on white" for the touch deck page; the Mac page is N14.4's.
+- iPhone, the Duo and iPad: the page is a system inset grouped list on the grouped background. Its first section has the deck's last name component as a large in-content header over one row: leading, "N cards waiting" (new + learning + to review) with "X new · Y learning · Z to review" in footnote secondary text under it; trailing, the standard-size Study button. With nothing waiting the row reads "Nothing to study right now" with Custom Study, or Add Note for an empty deck, trailing. At the accessibility text sizes the action goes under the text (by text size, not by fit: under a fit test the Dynamic Type audit failed the row's elements), and the three counts go one per line before any of them wraps. Then the "Subdecks" section, the error line, and the previous session in its own section. The navigation bar's title mode is inline, so no empty large-title band sits above the page. Replaces N13.2's "plain list on white" for the touch deck page; the Mac page is N14.4's.
 
 ### N14.4 Mac titles
 
@@ -811,7 +811,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 - Return or a click opens a result: its deck page, with the sidebar selection on that deck (including the filtered deck page, `decks/filtered-study#F6`). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
 - Mac: after each edit the first result is highlighted, or the create row when nothing is listed; ↑ and ↓ move the highlight over all rows and wrap (H6.3). The highlight does not change the detail; Return opens the highlighted row. iPad: a tap opens a result; Return in the field opens the first.
 - ⌘F (Edit › Find…, N20.4), ⇧⌘O (a second key of Find…, with no menu item of its own) and "/" in the `decks.list` and `decks.page` contexts (H9.2; never while a text field or other view owns the key, N4) put the focus in the field, showing the sidebar first when it is hidden. In the tab layout the same keys present the deck list's Search (N14.2). During review Find… is disabled.
-- Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`) and New Deck… (`folder.badge.plus`). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
+- Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`), New Deck… (`folder.badge.plus`) and Create Filtered Deck (`line.3.horizontal.decrease`; on a deck page prefilled with that deck's due search). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
 - "New Deck…" is the one name of that action in every menu; its form is titled "New Deck". "Create Deck" is no longer used.
 - The tab layout keeps N14.2's Search button and Add menu, unchanged.
 - The Go to Deck sheet is retired on every platform: no button, menu item or key opens it. Every list of deck search results shows the two-line rows, never a `::` path, and opens the deck page in every layout (N20.5).
@@ -827,8 +827,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 1 | Add Note | `square.and.pencil` | | normal |
 | 1 | Browse Cards | `magnifyingglass` | | both kinds where Browse is available |
 | 1 | Deck Statistics | `chart.bar.xaxis` | | both kinds where Statistics is available |
-| 2 | Custom Study… | `slider.horizontal.3` | | normal |
-| 2 | Create Filtered Deck… | `line.3.horizontal.decrease` | ⇧⌘F | normal |
+| 2 | Custom Study | `slider.horizontal.3` | | normal |
 | 2 | Edit Filtered Deck… | `pencil` | ⌥⌘O | filtered |
 | 2 | Rebuild | `arrow.clockwise` | ⌥⌘R | filtered |
 | 2 | Empty | `tray` | | filtered |
@@ -837,7 +836,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 3 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | normal |
 | 4 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | both kinds |
 
-- The normal deck page and finished state also offer Custom Study (`decks/filtered-study#F6`).
+- The menu holds actions on its deck. Create Filtered Deck makes another deck, so it is in the Add menu (N20.1) and the Deck menu (⇧⌘F, N20.4), not here. A finished normal deck page also offers Custom Study in Study's place (N14.3), as does the finished review screen (`decks/filtered-study#F6`). Changed 2026-11-27 (owner, chat): group 2 also listed Create Filtered Deck… with ⇧⌘F for normal decks.
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -881,8 +880,8 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
 | Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows in the main window, no sheet or panel owns the keys, and no review runs; focuses N20.1's field (tab layout: presents the Search). While it is disabled, a text view's own Find keeps ⌘F |
 | Deck | Study | ⌘R | the shown normal or filtered deck has Study available (N14.3, H3) |
-| Deck | Custom Study… | | a normal deck is shown and a filtered-study action is available, including on the finished deck page |
-| Deck | Create Filtered Deck… | ⇧⌘F | a filtered-study action is available. In Browse, prefill the editor with its active card search. On a normal deck page, prefill the deck’s due-card search. Elsewhere open the editor with a blank search. |
+| Deck | Custom Study | | a normal deck is shown and a filtered-study action is available, including on the finished deck page |
+| Deck | Create Filtered Deck | ⇧⌘F | a filtered-study action is available. In Browse, prefill the editor with its active card search. On a normal deck page, prefill the deck’s due-card search. Elsewhere open the editor with a blank search. |
 | Deck | Rebuild | ⌥⌘R | a filtered deck is shown and a filtered-study action is available |
 | Deck | Empty | | a filtered deck is shown and a filtered-study action is available |
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
@@ -897,8 +896,8 @@ The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note,
 | Card | Back to Decks | Esc | during review |
 
 - Edit keeps the system's text items intact: its Find submenu and every other item the system adds for text. Meguri's Find… is a separate item placed just before that group; while enabled it takes ⌘F, while disabled the system's Find ▸ Find… of a focused text view keeps it. ⇧⌘O is a hidden second key equivalent of Meguri's Find…, with no menu item; on iPad it is a key command with no discoverability title.
-- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Create Filtered Deck…, Empty and the options editor command. Round 6 placed Card separators after Show Answer, Easy, Suspend Card and Back to Decks; N21.8 gives the newer Note, Format and Card grouping and ordering. A separator with nothing after it yet is left out.
-- A filtered-study action is available in the foreground main window when the collection is ready for a deck write, outside review, with no sheet or conflicting operation. The selected-deck commands act on the Home deck page shown in the sidebar or tab layout. Create Filtered Deck… also works without a selected deck, including from Today and from Browse on the Mac. It captures the active Browse search when invoked, regardless of which cards are selected (`decks/filtered-study#F1`, F6).
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Create Filtered Deck, Empty and the options editor command. Round 6 placed Card separators after Show Answer, Easy, Suspend Card and Back to Decks; N21.8 gives the newer Note, Format and Card grouping and ordering. A separator with nothing after it yet is left out.
+- A filtered-study action is available in the foreground main window when the collection is ready for a deck write, outside review, with no sheet or conflicting operation. The selected-deck commands act on the Home deck page shown in the sidebar or tab layout. Create Filtered Deck also works without a selected deck, including from Today and from Browse on the Mac. It captures the active Browse search when invoked, regardless of which cards are selected (`decks/filtered-study#F1`, F6).
 - Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2). The one exception is Find…: while enabled it takes ⌘F even when a text input has focus, as its row above says.
 - iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu's single keys (Show Answer, the four ratings, Back to Decks): they carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. Note › Edit Note ⌘E, Card › Bury Card ⌘J and Card › Suspend Card ⇧⌘J (N20.8, N21.8) are not single keys and keep their equivalents there. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
 - Built 2026-11-24 (U162; the implementer's reading, pending the coordinator and Antoine): File › Import Collection… is "Import…" (⇧⌘I, same enablement), since its picker now takes deck packages too (N17.2's built line); the table's "Import Collection…" label described the collection-only picker. Settings › Collection's row reads "Import…" as well.
@@ -939,6 +938,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu, the deck menu | N20.9 |
+| Custom Study, Create Filtered Deck | Custom Study: the deck menu, the Deck menu, the finished deck page and review screen; Create Filtered Deck: the Add menu, the Deck menu | changed 2026-11-27 (owner, chat): no ellipsis, an exception for these two only; every other item that opens a form keeps its ellipsis |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
 | Edit Note | the Note menu (moved from Card by N21.8), the card's context menu (Mac), the touch review's More menu, the form's title | N20.8, N21.8 |
 
