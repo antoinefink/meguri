@@ -179,7 +179,9 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertEqual(text(of: helpLines[1]),
                        "Deck, then random notes: Takes one deck at a time, in deck list order. In each deck, the notes are in random order.")
         XCTAssertEqual(helpLines.map(\.frame.minY), helpLines.map(\.frame.minY).sorted(), "The lines follow the menu's order")
-        capture(app, "deck-options-help-popover")
+        capture(app, "deck-options-help-popover-anchor")
+        // The popover is its own window on the Mac: the main window's screenshot omits it.
+        capture(popover, "deck-options-help-popover")
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(helpTitle.waitForNonExistence(timeout: 10), "Esc closes the help")
@@ -368,7 +370,10 @@ final class DeckOptionsUITests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        capture(app.windows.firstMatch, name)
+    }
+    private func capture(_ element: XCUIElement, _ name: String) {
+        let attachment = XCTAttachment(screenshot: element.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

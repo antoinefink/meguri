@@ -379,7 +379,9 @@ private struct DisplayOrderHelp: View {
     let choices: [Int32]
 
     var body: some View {
-        VStack(alignment: .leading) {
+        // A space between the lines, so a long list (Review sort order has 13) scans
+        // choice by choice; the mock the owner approved spaced them the same way.
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
             Text(DeckOptionsStrings.optionKey(row), bundle: .module)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
