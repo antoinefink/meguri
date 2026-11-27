@@ -9,7 +9,7 @@ import Testing
 @Suite struct NavigationFeedbackFixtureTests {
     @Test func selectionStaysHeldUntilFixtureDestructionCancelsIt() async throws {
         var fixture: TestHooks.NavigationFeedbackFixture? = .init(configuration: LaunchConfiguration(), preparedHome: true)
-        weak var owner = fixture
+        weak let owner = fixture
         let navigation = try #require(fixture?.navigation)
         let gate = try #require(fixture?.deck)
         let collection = try #require(fixture?.collection)
@@ -29,7 +29,7 @@ import Testing
         // destroying that owner must abort the save rather than commit the deck.
         fixture = nil
         #expect(owner == nil)
-        #expect(gates.allSatisfy(\.cancelled))
+        #expect(gates.allSatisfy { $0.cancelled })
         #expect(gate.held)
         await collection.deckPageOpened()
         #expect(navigation.selectedDeck == nil)

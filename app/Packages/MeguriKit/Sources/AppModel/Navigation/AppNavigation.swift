@@ -115,18 +115,27 @@ public final class AppNavigation {
     public private(set) var pendingDeckPage: DeckID?
     @ObservationIgnored private(set) var intentRevision: UInt64 = 0 {
         didSet {
-            pendingDeckPage = nil
+            // Writes only on a change: every observer of these reads redraws.
+            if !keepsPendingDeck, pendingDeckPage != nil { pendingDeckPage = nil }
             #if os(macOS)
-            macSidebarSelection = nil
+            if macSidebarSelection != nil { macSidebarSelection = nil }
+            macSidebarIntent = nil
             macSidebarCompletion = nil
             #endif
         }
     }
+    /// Set while a sidebar press supersedes a pending deck save: its feedback stays shown.
+    @ObservationIgnored private var keepsPendingDeck = false
 
     #if os(macOS)
-    /// Native row feedback only. The detail, stacks and restoration still read
-    /// the committed route until the sidebar's window has displayed this row.
+    /// Native row feedback only. The sidebar's rows alone read it: the detail,
+    /// commands, stacks and restoration still read the committed route until
+    /// the sidebar's window has displayed this row, so its frame redraws
+    /// nothing else.
     public private(set) var macSidebarSelection: SidebarItem?
+    /// The same intent, unobserved: guards read it when they act, not when
+    /// they render.
+    @ObservationIgnored private var macSidebarIntent: SidebarItem?
     @ObservationIgnored private var macSidebarCompletion: (() -> Void)?
     public var macSidebarSelectionID: UInt64? { macSidebarSelection == nil ? nil : intentRevision }
 
@@ -134,6 +143,7 @@ public final class AppNavigation {
         guard macSidebarSelectionID == intent, let item = macSidebarSelection else { return }
         let completion = macSidebarCompletion
         macSidebarSelection = nil
+        macSidebarIntent = nil
         macSidebarCompletion = nil
         select(item)
         completion?()
@@ -142,12 +152,12 @@ public final class AppNavigation {
     /// A deck row's double-click starts Study after its own selection has
     /// opened the page. A newer selection cancels both parts together.
     public func afterMacSidebarSelection(_ action: @escaping () -> Void) {
-        if macSidebarSelection != nil { macSidebarCompletion = action }
+        if macSidebarIntent != nil { macSidebarCompletion = action }
         else { action() }
     }
 
     public func cancelMacSidebarSelection() {
-        guard macSidebarSelection != nil else { return }
+        guard macSidebarIntent != nil else { return }
         intentRevision &+= 1
     }
     #endif
@@ -155,12 +165,13 @@ public final class AppNavigation {
     /// User selection from the main sidebar. Programmatic routes use `select`.
     public func selectFromSidebar(_ item: SidebarItem) {
         #if os(macOS)
-        guard macSidebarSelection != item else { return }
-        let displayedDeck = pendingDeckPage
-        intentRevision &+= 1
+        guard macSidebarIntent != item else { return }
         // Keep even pending detail mounted during the visual handoff, while
         // invalidating its former save's authority to navigate.
-        pendingDeckPage = displayedDeck
+        keepsPendingDeck = true
+        intentRevision &+= 1
+        keepsPendingDeck = false
+        macSidebarIntent = item
         macSidebarSelection = item
         #else
         select(item)
@@ -174,9 +185,11 @@ public final class AppNavigation {
         return sidebarSelection
     }
 
+    /// Whether a sidebar press waits for its display frame. Unobserved: a
+    /// view that reads it while rendering does not redraw when the row does.
     public var sidebarInteractionPending: Bool {
         #if os(macOS)
-        return macSidebarSelection != nil
+        return macSidebarIntent != nil
         #else
         return false
         #endif

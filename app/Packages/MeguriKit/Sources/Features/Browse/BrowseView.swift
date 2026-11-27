@@ -295,7 +295,8 @@ private struct BrowseKeys: View {
                 DispatchQueue.main.async { [weak self, weak results] in
                     MainActor.assumeIsolated {
                         if window.firstResponder !== view { window.makeFirstResponder(view) }
-                        results?.tableFocused = isTable
+                        // Only a change: every write redraws the menu bar's commands.
+                        if results?.tableFocused != isTable { results?.tableFocused = isTable }
                         self?.onFocus?(Self.describe(window.firstResponder))
                     }
                 }
