@@ -1785,6 +1785,9 @@ import notify
         XCTAssertTrue(close.waitForExistence(timeout: 20))
         try click(close, app, bundle)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
+        #if os(iOS)
+        XCTAssertFalse(element(app, "home.collection.error").exists)
+        #endif
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
         let after = try XCTUnwrap(HomeControls.deckCounts(app), app.debugDescription)
         capture(app, "entry-saved-answer")
