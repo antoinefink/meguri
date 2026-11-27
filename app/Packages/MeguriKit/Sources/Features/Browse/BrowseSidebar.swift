@@ -98,11 +98,10 @@ public struct BrowseSidebar<Header: View>: View {
         }
         .onDisappear { model.disappear() }
         #if os(macOS)
-        .onChange(of: navigation?.macSidebarSelectionID) { _, intent in
+        .background {
             // The header Button can request Browse without writing List's binding.
             // Clear its old filter target while the getter supplies the pending row.
-            guard intent != nil, navigation?.macSidebarSelection == .section(.browse) else { return }
-            forgetKeyRow()
+            if let navigation { BrowsePressWatcher(navigation: navigation, forget: forgetKeyRow) }
         }
         #else
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
@@ -165,12 +164,10 @@ public struct BrowseSidebar<Header: View>: View {
     /// must not replace the rows on which Delete acts.
     private var listSelection: Binding<Set<BrowseSidebarTag>> {
         #if os(macOS)
-        Binding(get: {
-            if case .section(let section)? = navigation?.macSidebarSelection {
-                return [.section(section)]
-            }
-            return selection
-        }, set: { rows in
+        // The getter does not read the shell's pending row: the shell selects a
+        // pressed section row in this list's table itself, in the press's frame,
+        // and a change of this binding's value updates every row of the list.
+        Binding(get: { selection }, set: { rows in
             // Ignore echoes of restored Browse selection so filter targets survive.
             if rows == model.listSelection && selection == rows { return }
             // Section rows must keep the native selection while the shell
@@ -178,7 +175,7 @@ public struct BrowseSidebar<Header: View>: View {
             if rows.count == 1, case .section(let section)? = rows.first,
                section != .browse, navigation != nil {
                 // Leave the underlying filter selection and key target intact
-                // for cancellation; the getter supplies the pending section.
+                // for cancellation; the table shows the pending section.
                 navigate(section)
                 return
             }
@@ -246,6 +243,9 @@ public struct BrowseSidebar<Header: View>: View {
     }
 
     private func clearDeletionSelection() {
+        // Only a change: every write of this state redraws the whole sidebar
+        // (a click on a section row clears it while the row's press is drawn).
+        guard !deletionSelection.rows.isEmpty || deletionSelection.target != nil else { return }
         deletionSelection = BrowseSidebarDeleteSelection()
     }
 
@@ -676,3 +676,20 @@ private struct RenameSavedSearch: ViewModifier {
             }
     }
 }
+
+#if os(macOS)
+/// Watches a sidebar press on its own: the press then redraws this view
+/// alone, not the sidebar's sections (a large collection's tags and decks).
+private struct BrowsePressWatcher: View {
+    let navigation: AppNavigation
+    let forget: () -> Void
+
+    var body: some View {
+        Color.clear
+            .onChange(of: navigation.macSidebarSelectionID) { _, intent in
+                guard intent != nil, navigation.macSidebarSelection == .section(.browse) else { return }
+                forget()
+            }
+    }
+}
+#endif

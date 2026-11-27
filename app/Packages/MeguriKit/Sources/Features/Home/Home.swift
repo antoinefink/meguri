@@ -1157,14 +1157,17 @@ private struct HomeSidebarBranch: View {
         Group {
             #if os(macOS)
             Button { collection?.navigation.selectFromSidebar(.deck(DeckID(node.id))) } label: {
-                Text(verbatim: name)
-                    // N14.6: nothing waiting reads quieter, except on the selection highlight.
-                    .foregroundStyle(quiet ? .secondary : .primary)
+                // N14.6: nothing waiting reads quieter, except on the selection highlight.
+                // Its own view: a press redraws this name, not the whole row and its menu.
+                SidebarDeckName(name: name, item: .deck(DeckID(node.id)), navigation: collection?.navigation,
+                                previewSelection: previewSelection,
+                                waiting: countsHeld ? nil : DeckWaiting(counts: node.counts, filtered: node.filtered))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            // A source list selects on mouse-down, not on release.
+            .buttonStyle(SidebarRowPressStyle())
             // H12: the first click opens the page, as a click does; the second starts the review.
             .simultaneousGesture(TapGesture(count: 2).onEnded {
                 if let collection {
@@ -1177,7 +1180,7 @@ private struct HomeSidebarBranch: View {
             .accessibilityLabel(Text(verbatim: path))
             .accessibilityValue(countsValue)
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
-            .accessibilityAddTraits(collection?.navigation.displayedSidebarSelection == .deck(DeckID(node.id)) ? .isSelected : [])
+            .modifier(SidebarSelectedTrait(navigation: collection?.navigation, item: .deck(DeckID(node.id))))
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
             HStack {
@@ -1216,6 +1219,25 @@ private struct HomeSidebarBranch: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// A Mac deck row's name, the one part of the row that reads the sidebar's
+/// selection (N14.6's quieter name): a press redraws it alone.
+private struct SidebarDeckName: View {
+    let name: String
+    let item: SidebarItem
+    let navigation: AppNavigation?
+    let previewSelection: SidebarItem?
+    /// Nil while the counts are held: the name is never quieter then.
+    let waiting: DeckWaiting?
+
+    var body: some View {
+        let selected = (navigation?.displayedSidebarSelection ?? previewSelection) == item
+        Text(verbatim: name)
+            .foregroundStyle(waiting?.quietInSidebar(selected: selected) == true ? .secondary : .primary)
+    }
+}
+#endif
 
 /// The production sidebar's deck rows over sample decks (route `home/sidebar/typical`):
 /// one with only new cards, one with nothing waiting, nested decks and a filtered deck, so

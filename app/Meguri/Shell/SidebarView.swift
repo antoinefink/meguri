@@ -3,6 +3,7 @@ import DesignSystem
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Home
 #endif
 
 /// The sidebar (R17): Home, Browse, Stats, Note Types and Settings, then the
@@ -36,7 +37,7 @@ struct SidebarView: View {
     private var content: some View {
         if navigation.pendingDeckPage == nil, navigation.section == .browse, let browseSidebar = features.browseSidebar {
             // N21.1: with Browse selected, the filters take the decks' place.
-            browseSidebar(navigation, AnyView(sectionRows { BrowseSidebarTag.section($0) }))
+            browseSidebar(navigation, AnyView(sectionRows(nativePress: true) { BrowseSidebarTag.section($0) }))
         } else {
             // N20.1: the deck search's field tops the sidebar; its results replace this list.
             features.sidebarSearch(AnyView(list))
@@ -45,10 +46,18 @@ struct SidebarView: View {
 
     /// The section rows at the top (N21.1: Today and Browse, each with its
     /// symbol), each tagged for the list it is in.
-    private func sectionRows<Tag: Hashable>(tag: @escaping (AppSection) -> Tag) -> some View {
+    /// `nativePress`: Browse's list, whose own selection follows the route only
+    /// (`MacSidebarNativePress`).
+    private func sectionRows<Tag: Hashable>(nativePress: Bool = false, tag: @escaping (AppSection) -> Tag) -> some View {
         ForEach(features.availableSections.filter(features.sectionShown), id: \.self) { section in
             Button {
                 navigation.selectFromSidebar(.section(section))
+                #if os(macOS)
+                // Browse's own row is selected there already.
+                if nativePress, section != .browse, navigation.sidebarInteractionPending {
+                    MacSidebarNativePress.selectPressedRow()
+                }
+                #endif
             } label: {
                 Label {
                     // Rows grow with the text size rather than cut it.
@@ -62,9 +71,18 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
+            #if os(macOS)
+            // A source list selects on mouse-down, not on release.
+            .buttonStyle(SidebarRowPressStyle())
+            #else
             .buttonStyle(.plain)
+            #endif
             .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
+            #if os(macOS)
+            .modifier(SidebarSelectedTrait(navigation: navigation, item: .section(section)))
+            #else
             .accessibilityAddTraits(navigation.displayedSidebarSelection == .section(section) ? .isSelected : [])
+            #endif
             .tag(tag(section))
         }
     }
