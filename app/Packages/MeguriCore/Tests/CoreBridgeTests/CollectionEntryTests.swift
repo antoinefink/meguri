@@ -263,7 +263,7 @@ extension EventTests {
     @Test func typedPreparedFactsReachStreamBeforeTerminalDrain() async {
         let (stream, continuation) = AsyncStream<CoreProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let relay = ProgressRelay(continuation)
-        relay.onProgress(update: .init(jobId: 71, phase: .committing, etaMillis: nil, completed: 0, total: nil,
+        relay.onProgress(update: .init(sequence: 1, jobId: 71, routineSync: [], syncFilesLeft: nil, phase: .committing, etaMillis: nil, completed: 0, total: nil,
             collectionMediaPrepared: .init(incoming: 5, decodedBytes: 123, reused: 2, added: 3, trashed: 1)))
         let completion = JobCompletion(progress: continuation)
         completion.resolve(.succeeded)

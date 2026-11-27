@@ -5024,6 +5024,95 @@
           }
         }
       }
+    },
+    "sync.meguri.round.preparing.title": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing to sync…"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.collection.title": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing collection…"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.applying.title": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applying changes on this device…"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.checkingMedia.title": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking media…"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.syncingMedia.title": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing media…"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.detailWithLast": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "sync.meguri.round.filesLeft": {
+      "comment": "Routine downloads remaining reported by Core; excludes pending uploads and checked-file progress.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld file left to download."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld files left to download."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "version": "1.0"

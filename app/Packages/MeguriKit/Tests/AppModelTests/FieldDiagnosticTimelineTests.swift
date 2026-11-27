@@ -24,6 +24,34 @@ import Testing
         try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
     }
 
+    @MainActor @Test func routineMilestonesPersistWithoutTerminalAndOldJSONStillDecodes() async throws {
+        let directory = location()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
+        let round = MeguriRoutineDiagnostics(record: store.enqueue)
+        #expect(round.observe([.collectionStarted, .serverAcknowledged, .applyStarted]) == .applying)
+        // A conflated/replayed update retains intermediate evidence, once only.
+        #expect(round.observe([.collectionStarted, .serverAcknowledged, .applyStarted, .applyCompleted, .mediaCheckStarted]) == .checkingMedia)
+        _ = round.observe([.mediaTransferStarted])
+        _ = await store.timeline()
+        let reopened = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
+        let events = await reopened.timeline().events.map(\.observation)
+        #expect(events.compactMap(\.roundMilestone) == [.started, .collectionStarted, .serverAcknowledged,
+            .applyStarted, .applyCompleted, .mediaCheckStarted, .mediaTransferStarted])
+        #expect(Set(events.compactMap(\.roundID)).count == 1)
+        #expect(events.allSatisfy { $0.durationMilliseconds != nil && $0.outcome == .observed })
+        #expect(!events.contains { $0.roundMilestone == .terminal })
+        let old = try JSONDecoder().decode(FieldDiagnosticObservation.self, from: Data("""
+        {"component":"cloud","operation":"exchange","stage":"statusObserved","outcome":"observed"}
+        """.utf8))
+        #expect(old.roundID == nil && old.roundMilestone == nil && old.roundReason == nil)
+        let cancelled = MeguriRoutineDiagnostics(record: store.enqueue)
+        cancelled.finish(error: CancellationError())
+        let last = await store.timeline().events.last?.observation
+        #expect(last?.roundReason == .cancelled && last?.outcome == .cancelled)
+        #expect(last?.roundID != events.first?.roundID)
+    }
+
     @Test func observationsPersistReopenAndKeepExchangeCompletionDistinctFromConvergence() async throws {
         let directory = location()
         defer { try? FileManager.default.removeItem(at: directory) }

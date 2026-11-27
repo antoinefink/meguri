@@ -21,7 +21,7 @@ import MeguriCoreBindings
         #expect(value.decks[0].fullName.utf8.elementsEqual(" E\u{301} :: :猫: ".utf8))
     }
     @Test func committingProgressDisablesCancellationWithoutInventingCounts() {
-        let value = CoreBridge.CoreProgress(.init(jobId: 37, phase: .committing, etaMillis: nil, completed: 0, total: nil, collectionMediaPrepared: nil))
+        let value = CoreBridge.CoreProgress(.init(sequence: 1, jobId: 37, routineSync: [], syncFilesLeft: nil, phase: .committing, etaMillis: nil, completed: 0, total: nil, collectionMediaPrepared: nil))
         #expect(value.phase == .committing && !value.cancellable)
         #expect(value.job.rawValue == 37 && value.completed == 0 && value.total == nil)
     }

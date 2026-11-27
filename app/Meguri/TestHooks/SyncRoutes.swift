@@ -45,6 +45,11 @@ extension TestHooks {
             }
             #endif
             registry.register("settings/sync/off") { settings(.off, $0) }
+            registry.register("settings/sync/meguri-syncing") { settings(.meguriSyncing, $0) }
+            registry.register("settings/sync/meguri-applying") { settings(.meguriApplying, $0) }
+            registry.register("settings/sync/meguri-checking-media") { settings(.meguriCheckingMedia, $0) }
+            registry.register("settings/sync/meguri-syncing-media") { settings(.meguriSyncingMedia, $0) }
+            registry.register("settings/sync/meguri-syncing-media-unknown") { settings(.meguriSyncingMediaUnknown, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }
             registry.register("settings/sync/meguri-sign-in") { settings(.meguriSignIn, $0) }
             registry.register("settings/sync/meguri-never-signed-in") { settings(.meguriNeverSignedIn, $0) }
@@ -83,6 +88,10 @@ extension TestHooks {
             // N23 (round 10): the status panel in each state, drawn in the window.
             registry.register("settings/sync/panel/off") { panel(.off, $0) }
             registry.register("settings/sync/panel/meguri-up-to-date") { panel(.meguriConnected, $0) }
+            registry.register("settings/sync/panel/meguri-applying") { panel(.meguriApplying, $0) }
+            registry.register("settings/sync/panel/meguri-checking-media") { panel(.meguriCheckingMedia, $0) }
+            registry.register("settings/sync/panel/meguri-syncing-media") { panel(.meguriSyncingMedia, $0) }
+            registry.register("settings/sync/panel/meguri-syncing-media-unknown") { panel(.meguriSyncingMediaUnknown, $0) }
             registry.register("settings/sync/panel/meguri-syncing") { panel(.meguriSyncing, $0) }
             registry.register("settings/sync/panel/meguri-setup-media") { panel(.meguriSetupMedia, $0) }
             registry.register("settings/sync/panel/meguri-setup-media-paused") { panel(.meguriSetupMediaPaused, $0) }

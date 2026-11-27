@@ -11,6 +11,90 @@ use meguri_sync::{ErrorKind, Method, provider::{MeguriReadiness, MeguriRoundRefu
 use serde_json::{Value, json};
 use std::{fs, sync::Arc, time::Duration};
 
+#[derive(Default)]
+struct RoutineProgress(std::sync::Mutex<Vec<meguri_engine::Progress>>);
+impl meguri_engine::ProgressListener for RoutineProgress {
+    fn on_progress(&self, progress: &meguri_engine::Progress) {
+        self.0.lock().unwrap().push(progress.clone());
+    }
+}
+fn evidence(task: &meguri_host::MeguriRoundTask) -> Vec<meguri_engine::progress::RoutineSyncMilestone> {
+    let recorder = Arc::new(RoutineProgress::default());
+    task.handle().progress.set_listener(recorder.clone());
+    let facts = recorder.0.lock().unwrap().last().unwrap().routine_sync.clone();
+    facts
+}
+
+#[test]
+fn routine_finish_response_precedes_apply_and_invalid_or_lost_responses_never_invent_it() {
+    use meguri_engine::progress::RoutineSyncMilestone as M;
+    let _lane = b::LANE.lock().unwrap();
+    for failure in [0, 1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let (host, _, connection) = ready(root.path());
+        r::pending(&host);
+        let mut steps = r::normal(&host, json!({"done": true}), r::empty_changes(), 9);
+        let (arrived, wait) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let finish = steps.last_mut().unwrap();
+        finish.after = Some(Box::new(move || {
+            arrived.send(()).unwrap();
+            held.recv_timeout(Duration::from_secs(10)).unwrap();
+        }));
+        if failure == 1 { finish.reply = b"null".to_vec(); }
+        if failure == 2 { finish.lost = true; }
+        if failure != 0 { steps.push(r::Step::new(Method::Abort, b"null".to_vec())); }
+        let script = r::Script::new(steps);
+        let task = r::started(host.start_meguri_collection(r::access(&connection, &script)));
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        // Finish has been sent; its response has not yet been read or validated.
+        assert_eq!(evidence(&task), vec![M::CollectionStarted]);
+        release.send(()).unwrap();
+        let result = r::complete(&host, &task);
+        script.assert_done();
+        let expected = if failure == 0 { vec![M::CollectionStarted, M::ServerAcknowledged, M::ApplyStarted, M::ApplyCompleted] }
+            else { vec![M::CollectionStarted] };
+        assert_eq!(evidence(&task), expected);
+        assert_eq!(result.collection.as_ref().unwrap().state == MeguriCollectionState::Merged, failure == 0);
+        assert!(result.media.is_none());
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn routine_schema_change_keeps_acknowledgment_without_apply_completion() {
+    use meguri_engine::progress::RoutineSyncMilestone as M;
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, _, connection) = ready(root.path());
+    r::pending(&host);
+    let mut steps = r::normal(&host, json!({"done": true}), r::empty_changes(), 9);
+    let (arrived, wait) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    steps.last_mut().unwrap().after = Some(Box::new(move || {
+        arrived.send(()).unwrap();
+        held.recv_timeout(Duration::from_secs(10)).unwrap();
+    }));
+    let script = r::Script::new(steps);
+    let task = r::started(host.start_meguri_collection(r::access(&connection, &script)));
+    wait.recv_timeout(Duration::from_secs(10)).unwrap();
+    host.collection().unwrap().run(
+        OpSpec::named("schema changed before routine apply", OpSource::UserUndoable).stamp(StampMode::Raw),
+        |ctx| {
+            let mut col = ctx.scope().col()?;
+            col.schema_modified = EpochMillis(col.schema_modified.0 + 1);
+            ctx.scope().put_col(&col)?;
+            Ok(())
+        },
+    ).unwrap();
+    release.send(()).unwrap();
+    let result = r::complete(&host, &task);
+    script.assert_done();
+    assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::FullSyncRequired);
+    assert_eq!(evidence(&task), vec![M::CollectionStarted, M::ServerAcknowledged, M::ApplyStarted]);
+    host.close().unwrap();
+}
+
 fn provider_bytes(config: &meguri_host::HostConfig) -> Vec<u8> { fs::read(config.manual_transfer_directory.join("provider.json")).unwrap() }
 fn ready(root: &std::path::Path) -> (Arc<CoreHost>, meguri_host::HostConfig, meguri_sync::provider::MeguriConnection) {
     let (host, config, connection, _) = b::ready(root); (Arc::new(host), config, connection)
@@ -285,8 +369,35 @@ fn meguri_round_relays_answered_card_revlog_and_media_to_second_bound_device() {
     let script_b = r::Script::new(steps_b);
     let collected = r::complete(&bhost, &r::started(bhost.start_meguri_collection(r::access(&connection_b, &script_b))));
     assert_eq!(collected.collection.as_ref().unwrap().state, MeguriCollectionState::Merged); script_b.assert_done();
-    let media_b = r::Script::new(receive_steps("routine.txt", &entries["0"], &hash));
-    let received = r::complete(&bhost, &r::started(bhost.start_meguri_media(r::access(&connection_b, &media_b))));
+    let mut media_steps = receive_steps("routine.txt", &entries["0"], &hash);
+    let (arrived, waiting) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    media_steps[0].after = Some(Box::new(move || {
+        arrived.send(()).unwrap();
+        held.recv_timeout(Duration::from_secs(10)).unwrap();
+    }));
+    let media_b = r::Script::new(media_steps);
+    let media_task = r::started(bhost.start_meguri_media(r::access(&connection_b, &media_b)));
+    waiting.recv_timeout(Duration::from_secs(10)).unwrap();
+    let progress = Arc::new(RoutineProgress::default());
+    media_task.handle().progress.set_listener(progress.clone());
+    release.send(()).unwrap();
+    let received = r::complete(&bhost, &media_task);
+    {
+        use meguri_engine::ProgressPhase;
+        let updates = progress.0.lock().unwrap();
+        let first_known = updates.iter().position(|p| p.sync_files_left.is_some()).unwrap();
+        assert_eq!(updates[first_known].sync_files_left, Some(1));
+        assert_eq!(updates[first_known].phase, ProgressPhase::Named("meguri-media-transfer"));
+        assert!(updates[..first_known].iter().all(|p| p.sync_files_left.is_none()));
+        assert!(updates.iter().filter(|p| p.sync_files_left.is_some()).all(|p|
+            p.phase == ProgressPhase::Named("meguri-media-transfer")));
+        assert_eq!(updates.last().unwrap().phase, ProgressPhase::Named("meguri-media-checking"));
+        assert_eq!(updates.last().unwrap().sync_files_left, None);
+        assert_eq!(updates.last().unwrap().completed, received.media.as_ref().unwrap().effects.checked);
+    }
+    assert_eq!(evidence(&media_task), vec![meguri_engine::progress::RoutineSyncMilestone::MediaCheckStarted,
+        meguri_engine::progress::RoutineSyncMilestone::MediaTransferStarted]);
     assert!(received.media.as_ref().unwrap().complete); media_b.assert_done();
     let acoll = a.collection().unwrap(); let ar = acoll.reader(ReaderRole::Query).unwrap();
     let expected_card = ar.card(card_id).unwrap().unwrap(); let expected_review = ar.revlog_after(None, 10).unwrap()[0].clone();
@@ -335,6 +446,7 @@ fn normal_refusal_before_finish_and_mid_chunk_retains_original_error_and_pending
         assert_eq!(collection.error.as_ref().unwrap().kind, ErrorKind::Interrupted);
         assert_eq!(collection.refusal, Some(MeguriRoundRefusal::Paused)); assert!(!collection.acceptance_unknown);
         assert!(script.bodies(Method::Finish).is_empty());
+        assert_eq!(evidence(&task), vec![meguri_engine::progress::RoutineSyncMilestone::CollectionStarted]);
         assert!(host.collection().unwrap().reader(ReaderRole::Query).unwrap().config_value("routine-generated").unwrap().is_some());
         assert!(Arc::ptr_eq(&result, &host.meguri_round_result(&task).unwrap().unwrap()));
         host.close().unwrap();
@@ -345,10 +457,14 @@ fn normal_no_changes_and_media_no_reset_preserve_provider_bytes() {
     let _lane = b::LANE.lock().unwrap(); let root = tempfile::tempdir().unwrap();
     let (host, config, connection) = ready(root.path()); let before = provider_bytes(&config); let binding = bound(&host);
     let normal = r::Script::new(vec![r::Step::new(Method::Meta, r::meta(&host, r::modified(&host), 9))]);
-    let result = r::complete(&host, &r::started(host.start_meguri_collection(r::access(&connection, &normal))));
+    let task = r::started(host.start_meguri_collection(r::access(&connection, &normal)));
+    let result = r::complete(&host, &task);
+    assert_eq!(evidence(&task), vec![meguri_engine::progress::RoutineSyncMilestone::CollectionStarted]);
     assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::NoChanges); normal.assert_done();
     let media = r::Script::new(vec![r::begin(0)]);
-    let result = r::complete(&host, &r::started(host.start_meguri_media(r::access(&connection, &media))));
+    let task = r::started(host.start_meguri_media(r::access(&connection, &media)));
+    let result = r::complete(&host, &task);
+    assert_eq!(evidence(&task), vec![meguri_engine::progress::RoutineSyncMilestone::MediaCheckStarted]);
     assert!(result.media.as_ref().unwrap().complete); media.assert_done();
     assert_eq!(provider_bytes(&config), before); assert_eq!(bound(&host), binding); host.close().unwrap();
 }

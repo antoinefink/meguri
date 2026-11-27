@@ -23,6 +23,18 @@ import Testing
         meguriConnection: "setupRequired", meguriSetupStage: "media", statusTitleKey: "sync.status.needsAttention.title",
         statusDetailKey: "sync.needsYou.blocked")
 
+    @MainActor @Test func bindingReadinessAndActivityAreExplicitAlongsideRawSetupRequired() throws {
+        let coordinator = SyncCoordinator.renderFixture(.meguriApplying)
+        let facts = coordinator.debugFacts
+        #expect(facts.meguriBindingReady == true && facts.meguriActivePhase == .applying)
+        #expect(facts.providerPhase == "setupRequired" && facts.meguriConnection == "setupRequired")
+        let text = try SyncDebugInfoText.compose(export: export(events: 0), sync: facts)
+        #expect(text.contains("Binding ready") && text.contains("Active phase: applying"))
+        let data = try JSONEncoder().encode(facts)
+        let restored = try JSONDecoder().decode(SyncDebugFacts.self, from: data)
+        #expect(restored.meguriBindingReady == true && restored.meguriActivePhase == .applying)
+    }
+
     @Test func summaryComesFirstThenThePrettyExportThenTheTimeline() throws {
         let text = try SyncDebugInfoText.compose(export: export(events: 5), sync: blocked)
         let lines = text.components(separatedBy: "\n")

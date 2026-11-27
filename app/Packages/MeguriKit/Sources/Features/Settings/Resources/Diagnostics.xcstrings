@@ -936,6 +936,237 @@
           }
         }
       }
+    },
+    "Sync round started": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync round started"
+          }
+        }
+      }
+    },
+    "Syncing collection": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing collection"
+          }
+        }
+      }
+    },
+    "Server finish acknowledged": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server finish acknowledged"
+          }
+        }
+      }
+    },
+    "Applying changes on this device": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applying changes on this device"
+          }
+        }
+      }
+    },
+    "Changes applied on this device": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes applied on this device"
+          }
+        }
+      }
+    },
+    "Checking media": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking media"
+          }
+        }
+      }
+    },
+    "Syncing media": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing media"
+          }
+        }
+      }
+    },
+    "Sync round ended": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync round ended"
+          }
+        }
+      }
+    },
+    "Collection and media completed": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection and media completed"
+          }
+        }
+      }
+    },
+    "Round cancelled": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Round cancelled"
+          }
+        }
+      }
+    },
+    "Round refused": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Round refused"
+          }
+        }
+      }
+    },
+    "Server acceptance unknown": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server acceptance unknown"
+          }
+        }
+      }
+    },
+    "Collection choice required": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection choice required"
+          }
+        }
+      }
+    },
+    "Sign-in required": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in required"
+          }
+        }
+      }
+    },
+    "Connection interrupted": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection interrupted"
+          }
+        }
+      }
+    },
+    "Server could not complete the round": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server could not complete the round"
+          }
+        }
+      }
+    },
+    "Media incomplete": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media incomplete"
+          }
+        }
+      }
+    },
+    "Local work could not complete": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local work could not complete"
+          }
+        }
+      }
+    },
+    "Round outcome unavailable": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Round outcome unavailable"
+          }
+        }
+      }
+    },
+    "Round %@": {
+      "comment": "Owner-approved routine sync phase diagnostics, 2026-11-27.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Round %@"
+          }
+        }
+      }
+    },
+    "Meguri Sync": {
+      "comment": "Routine Meguri Sync observations.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri Sync"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

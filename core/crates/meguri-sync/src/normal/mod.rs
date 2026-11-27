@@ -219,6 +219,9 @@ async fn run_inner(
     finish: Arc<AtomicBool>,
 ) -> Result<Outcome> {
     checkpoint(engine, collection, job)?;
+    if job.meguri_admission().is_some() {
+        progress.observe_routine_sync(meguri_engine::progress::RoutineSyncMilestone::CollectionStarted);
+    }
     progress.set_phase(ProgressPhase::Named("connecting"));
     collection.check_rollover().map_err(engine_error)?;
     let mut reader = collection.reader(ReaderRole::Sync).map_err(engine_error)?;
@@ -355,12 +358,22 @@ async fn run_inner(
                 "finish body was not consumed",
             ));
         }
+        if job.meguri_admission().is_some() {
+            progress.observe_routine_sync(meguri_engine::progress::RoutineSyncMilestone::ServerAcknowledged);
+        }
         checkpoint(engine, collection, job)?;
+        if job.meguri_admission().is_some() {
+            progress.observe_routine_sync(meguri_engine::progress::RoutineSyncMilestone::ApplyStarted);
+        }
         let input = commit::MergeInput { hold, schema, usn, time, meta };
-        match job.meguri_admission() {
+        let applied = match job.meguri_admission() {
             Some(admission) => commit::apply_admitted(collection, &disk, input, job.cancellation(), progress.clone(), Some(admission)),
             None => commit::apply(collection, &disk, input, job.cancellation(), progress.clone()),
+        };
+        if applied.as_ref().is_ok_and(|merge| !merge.one_way) && job.meguri_admission().is_some() {
+            progress.observe_routine_sync(meguri_engine::progress::RoutineSyncMilestone::ApplyCompleted);
         }
+        applied
     }
     .await;
     drop(snapshot);

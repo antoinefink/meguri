@@ -155,7 +155,8 @@ public actor CoreMeguriRoundService {
         guard !retired else { throw MeguriRoundAdmissionFailure.retired }
         try Task.checkCancellation()
     }
-    public func fullRound() async throws -> MeguriRoundReport {
+    public typealias Observation = @Sendable (CoreProgress) async -> Void
+    public func fullRound(observe: @escaping Observation = { _ in }) async throws -> MeguriRoundReport {
         guard !retired else { throw MeguriRoundAdmissionFailure.retired }
         guard attempt == nil else { throw MeguriRoundAdmissionFailure.busy }
         nextID &+= 1
@@ -169,7 +170,7 @@ public actor CoreMeguriRoundService {
             guard value.connection == connection else { throw MeguriProviderCredentialFailure.wrongConnection }
             let credentials = MeguriCoreBindings.ProviderCredentials(connection: .init(reference: connection.reference,
                 revision: connection.revision, endpoint: connection.endpoint), username: value.username, hostkey: value.hostKey)
-            return try await Self.perform(raw, credentials: credentials)
+            return try await Self.perform(raw, credentials: credentials, observe: observe)
         }
         attempt = (id, task)
         let result = await withTaskCancellationHandler {
@@ -207,21 +208,21 @@ public actor CoreMeguriRoundService {
         await cancelAndDrain()
     }
     private static func perform(_ connection: MeguriCoreBindings.ProviderConnection,
-        credentials: MeguriCoreBindings.ProviderCredentials) async throws -> MeguriRoundReport {
+        credentials: MeguriCoreBindings.ProviderCredentials, observe: @escaping Observation) async throws -> MeguriRoundReport {
         try await CoreEventStream.shared.start()
         try Task.checkCancellation()
-        let collection = try await phase {
+        let collection = try await phase(observe: observe) {
             try await MaintenanceLane.shared.call(.providerStartCollectionRound) { try connection.startCollectionRound(credentials: credentials) }
         }
         guard case .collection(let value) = collection.outcome, value.succeeded, !Task.isCancelled else {
             return MeguriRoundReport(collection: collection, media: nil)
         }
-        let media = try await phase {
+        let media = try await phase(observe: observe) {
             try await MaintenanceLane.shared.call(.providerStartMediaRound) { try connection.startMediaRound(credentials: credentials) }
         }
         return MeguriRoundReport(collection: collection, media: media)
     }
-    private static func phase(_ start: () async throws -> MeguriCoreBindings.ProviderRoundStart) async throws -> MeguriRoundPhaseResult {
+    private static func phase(observe: @escaping Observation, _ start: () async throws -> MeguriCoreBindings.ProviderRoundStart) async throws -> MeguriRoundPhaseResult {
         let started = try await start()
         switch started {
         case .refused(let refusal):
@@ -231,9 +232,18 @@ public actor CoreMeguriRoundService {
             let terminal: JobOutcome
             switch await Jobs.trackRetainingDrain(handle) {
             case .tracked(let job):
+                // The stream may conflate ticks, but each update retains all
+                // observed native milestones, including before listener setup.
+                // Keep consuming until the cancelled native job drains too.
+                let observations = Task.detached {
+                    for await progress in job.progress {
+                        await observe(progress)
+                    }
+                }
                 terminal = await withTaskCancellationHandler { await job.outcome() } onCancel: {
                     Task { try? await job.cancel() }
                 }
+                await observations.value
             case .drained(let error, let outcome): trackingFailure = error; terminal = outcome
             }
             // Real terminal results outrank a Swift cancellation and retain

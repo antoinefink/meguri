@@ -62,6 +62,18 @@ enum SyncStatusCopy {
     /// The main status's detail as the Sync section's status row and the panel show it.
     @MainActor static func detail(_ sync: SyncCoordinator, now: Date) -> String? {
         let status = sync.mainStatus
+        // Routine work keeps the last whole exchange visible in the same
+        // detail Text, including when a valid media remainder is also known.
+        if sync.providerState?.selection == .meguri, sync.meguriRoutine == .exchanging,
+           sync.meguriStage == nil, sync.meguriStructureStage == nil, !status.needsYou,
+           let at = sync.meguriLastExchange {
+            let last = SyncText.format("sync.status.upToDate.detail", SyncText.instant(at, now: now))
+            if let count = status.detailCount, let key = status.shownDetailKey {
+                return SyncText.format("sync.meguri.round.detailWithLast",
+                    SyncText.format(key, Int64(clamping: count)), last)
+            }
+            return last
+        }
         if let key = status.detailKey {
             // N23.1: a detail that repeats the title is not shown ("Setting Up…").
             guard status.shownDetailKey != nil else { return nil }

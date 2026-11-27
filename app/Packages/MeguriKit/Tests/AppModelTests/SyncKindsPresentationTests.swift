@@ -274,7 +274,7 @@ import Testing
         #expect(manual.titleKey == "sync.status.automaticOff.title")
         #expect(manual.detailKey == "sync.status.automaticOff.detail")
         #expect(SyncKinds.meguri(.init(routine: .pending)).titleKey == "sync.status.pending.title")
-        #expect(SyncKinds.meguri(.init(routine: .exchanging)).titleKey == "sync.status.syncing.title")
+        #expect(SyncKinds.meguri(.init(routine: .exchanging)).titleKey == "sync.meguri.round.preparing.title")
         let needs = SyncKinds.meguri(.init(routine: .fullSyncRequired))
         #expect(needs.needsYou && needs.symbol == SyncKinds.needsYouSymbol && needs.action == .chooseCollection)
         // Waiting keeps a Try Again only on the two acceptance-unknown rows.

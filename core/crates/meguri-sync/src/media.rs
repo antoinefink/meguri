@@ -60,6 +60,8 @@ pub struct MediaSyncResult {
 /// completion inference is taken from the generic engine ProgressSink.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MediaSnapshot {
+    /// Retained evidence of an actual transfer request, not a prepared batch.
+    pub transfer_started: bool,
     pub phase: MediaPhase,
     pub totals: MediaSyncResult,
     pub listed: u64,
@@ -630,6 +632,8 @@ impl Stage<'_> {
             }
             let names: Vec<_> = intents.iter().map(|d| d.name.clone()).collect();
             let started = meguri_engine::monotonic::now();
+            self.snapshot.transfer_started = true;
+            self.emit(MediaPhase::Downloading);
             let response = self
                 .job
                 .request(
@@ -838,6 +842,8 @@ impl Stage<'_> {
             self.checkpoint()?;
             let (payload, receipt) = upload.stream_payload(self.cancel.clone());
             requested = true;
+            self.snapshot.transfer_started = true;
+            self.emit(MediaPhase::Uploading);
             let response = self.job.request(Method::UploadChanges, payload).await;
             // Read the answer while the source may still be in flight; always
             // drain, including a rejected status or an invalid success body.

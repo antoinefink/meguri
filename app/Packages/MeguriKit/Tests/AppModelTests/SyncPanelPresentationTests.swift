@@ -10,6 +10,30 @@ import Testing
 @MainActor @Suite struct SyncPanelPresentationTests {
     private typealias Slot = SyncPanel.Slot
 
+    @Test func routineStagesKeepOneIndeterminateIndicatorAndOnlyUseCoreRemainders() {
+        for phase in [MeguriRoutinePhase.preparing, .collection, .applying, .checkingMedia, .syncingMedia] {
+            let status = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: phase))
+            #expect(status.titleKey == phase.titleKey && status.action == nil && !status.needsYou)
+            #expect(status.detailCount == nil)
+            #expect(SyncPanel.progress(status, meguri: true, setupValue: nil,
+                meguriMoving: true, cloudState: nil) == .indeterminate)
+        }
+        let known = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: .syncingMedia, routineFilesLeft: 42))
+        #expect(known.detailKey == "sync.meguri.round.filesLeft" && known.detailCount == 42)
+        #expect(SyncText.format("sync.meguri.round.filesLeft", Int64(1)) == "1 file left to download.")
+        #expect(SyncText.format("sync.meguri.round.filesLeft", Int64(42)) == "42 files left to download.")
+        let zero = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: .syncingMedia, routineFilesLeft: 0))
+        #expect(zero.detailCount == 0)
+        for phase in [MeguriRoutinePhase.preparing, .collection, .applying, .checkingMedia] {
+            let stale = SyncKinds.meguri(.init(routine: .exchanging, routinePhase: phase, routineFilesLeft: 42))
+            #expect(stale.detailCount == nil && stale.detailKey == nil)
+        }
+        let blocked = SyncKinds.meguri(.init(providerBlocked: true, routine: .exchanging, routinePhase: .applying))
+        #expect(blocked.needsYou && blocked.action == .copyDebugInfo)
+        let setup = SyncKinds.meguri(.init(stage: .media, routine: .exchanging, routinePhase: .applying))
+        #expect(setup.titleKey != MeguriRoutinePhase.applying.titleKey)
+    }
+
     @Test func n23_3TableGivesTheButtonsAndTheDefault() {
         // Sync off: Sync Settings alone, the default.
         let off = SyncKinds.cloud(state: .localOnly)

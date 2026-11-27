@@ -724,8 +724,11 @@ The row labelled `sync.service.meguri` shows one title and one detail, from the 
 | paused | `sync.meguri.status.paused.title`: Paused | `sync.meguri.status.paused.detail`: Meguri Sync is paused. Changes stay on this device. |
 | round idle | `sync.meguri.status.on.title`: On | `sync.meguri.lastExchange`: `Last exchange completed %@.` (T1 instant); none without an instant |
 | round with pending work | `sync.meguri.status.pending.title`: Waiting to Sync | `sync.meguri.status.pending.detail`: Some changes on this device haven’t been sent yet. Followed by `sync.meguri.lastExchange` when an instant exists |
-| round exchanging the collection | `sync.meguri.status.syncingCollection.title`: Syncing Collection… | none |
-| round exchanging media | `sync.meguri.status.syncingMedia.title`: Syncing Media… | none |
+| round preparing before collection admission | `sync.meguri.round.preparing.title`: Preparing to sync… | last completed whole exchange when known (MP6.6) |
+| round exchanging the collection | `sync.meguri.round.collection.title`: Syncing collection… | last completed whole exchange when known (MP6.6) |
+| round applying locally, after validated server finish response | `sync.meguri.round.applying.title`: Applying changes on this device… | last completed whole exchange when known (MP6.6) |
+| round checking media | `sync.meguri.round.checkingMedia.title`: Checking media… | last completed whole exchange when known (MP6.6) |
+| round transferring media | `sync.meguri.round.syncingMedia.title`: Syncing media… | known core files left and last completed whole exchange when known (MP6.6) |
 | round media blocked | T18.6 | T18.6 |
 | round failed, authentication | `sync.meguri.status.signInRequired.title`: Sign In Required | `sync.meguri.status.signInRequired.detail`: The server didn’t accept your sign-in, so Meguri Sync stopped. Changes stay on this device. |
 | round failed, acceptance unknown | `sync.meguri.status.acceptanceUnknown.title`: Server Acceptance Unknown | `sync.meguri.round.acceptanceUnknown`: Meguri doesn’t know whether the server received the last changes. They stay on this device. |
@@ -1065,6 +1068,8 @@ Actions added:
 
 ### T19.5 The three kinds: Meguri Sync (T18.4 to T18.6; MP6)
 
+Changed 2026-11-27 (routine status and diagnostics; owner-approved unit). Routine rows below follow observed MP5 boundaries; pre-sanity finalising is not server acknowledgment. A no-change collection skips acknowledgment and local apply. While any routine stage runs, keep the previous fully completed exchange instant in the existing detail text (`sync.status.upToDate.detail`, MP6.6). A valid core media remainder uses `sync.meguri.round.filesLeft`: `%lld media file left.` / `%lld media files left.`; when the instant is also known, combine the two localized texts with `sync.meguri.round.detailWithLast`: `%1$@ %2$@`. Unknown counts remain indeterminate, and no checked/partial-file percentage is formed. No new row or control. Existing precedence, owner/generation fences, timestamp semantics, setup/structure/iCloud behavior and iOS suspension remain. Troubleshooting's persisted Sync Log and Copy Debug Info retain MP5's bounded, content-free per-round observations with optional structured fields for historical JSON compatibility.
+
 The same four rules make the main status. The first condition that applies decides, in T18.4's order.
 
 | Condition (T18.4, T18.5, T18.6) | Kind | Text | Action |
@@ -1096,8 +1101,11 @@ The same four rules make the main status. The first condition that applies decid
 | paused | never reported (MP6.2) | | |
 | round idle | none | `sync.status.upToDate.title`, `sync.status.upToDate.detail` (MP6.6) | |
 | round with pending work | none | `sync.status.pending.title`, `sync.status.pending.detail` | |
-| round exchanging the collection | none | `sync.status.syncing.title` | |
-| round exchanging media | none | `sync.status.syncingMedia.title` | |
+| round preparing before collection admission | none | `sync.meguri.round.preparing.title`: Preparing to sync… | |
+| round exchanging the collection | none | `sync.meguri.round.collection.title`: Syncing collection… | |
+| round applying locally, after validated server finish response | none | `sync.meguri.round.applying.title`: Applying changes on this device… | |
+| round checking media | none | `sync.meguri.round.checkingMedia.title`: Checking media… | |
+| round transferring media | none | `sync.meguri.round.syncingMedia.title`: Syncing media… | |
 | round failed, acceptance unknown | waiting | `sync.meguri.round.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | round failed, full sync required | needs you | `sync.needsYou.meguri.chooseCollection`: Choose which collection to keep before syncing continues. | `sync.decision.action`: opens `sync.keepCollection` (MP6.3 row 4) |
 | round failed, network | waiting | `sync.meguri.round.network` | |
@@ -1194,7 +1202,7 @@ Changed 2026-11-21 (round 10). Decided by Antoine on 2026-11-20 (`docs/design/de
 | Part | Text | Shown |
 |---|---|---|
 | status line | the main status's title (T19.4 rule 1 or 2; T19.5) | always |
-| sentence | the Text column of T19.4 or T19.5 for the row that applies, or, where T19.4 rule 2 applies, the T3 detail of the state; for an up-to-date status `sync.status.upToDate.detail` with its instant (MP6.6) | when the status has a detail that differs from the title |
+| sentence | the Text column of T19.4 or T19.5 for the row that applies, or, where T19.4 rule 2 applies, the T3 detail of the state; for an up-to-date status and during a later routine Meguri round `sync.status.upToDate.detail` with its instant (MP6.6), combined with known routine media files left as T19.5 specifies | when the status has a detail that differs from the title |
 | files left | `sync.meguri.media.filesLeft`: `%lld media file left` / `%lld media files left` | under the bar, while media transfers and a count is known: iCloud's `syncingMedia` (its upload and download files). Changed 2026-11-21 (resume fix): not for Meguri Sync, whose status sentence carries its files left (T19.5) |
 | issues | `sync.issues.row`, or `sync.meguri.media.notTransferred` for Meguri Sync's media-blocked row (T19.5) when the affected count is known, else `sync.issues.row` | while the status has issues; plain text, no link. Changed 2026-11-21 (resume fix): Meguri Sync's media-blocked row has issues only while its affected count is known and above 0 (T19.5) |
 | button | `sync.status.openSettings`: Sync Settings | always |
