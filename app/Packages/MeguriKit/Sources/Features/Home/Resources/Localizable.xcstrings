@@ -44,12 +44,12 @@
         }
       }
     },
-    "Export Deck…": {
+    "Export Deck": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Export Deck…"
+            "value": "Export Deck"
           }
         }
       }
@@ -356,16 +356,6 @@
         }
       }
     },
-    "New Subdeck…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Subdeck…"
-          }
-        }
-      }
-    },
     "Its %lld subdecks move with it.": {
       "localizations": {
         "en": {
@@ -484,16 +474,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rename Deck"
-          }
-        }
-      }
-    },
-    "Rename…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rename…"
           }
         }
       }
@@ -1200,13 +1180,13 @@
         }
       }
     },
-    "Deck Options…": {
+    "Deck Options": {
       "comment": "N20.9: the deck menu's entry to the Deck Options page.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deck Options…"
+            "value": "Deck Options"
           }
         }
       }
@@ -1380,7 +1360,7 @@
       }
     },
     "Edit Filtered Deck": {
-      "comment": "Title of the form for an existing filtered search.",
+      "comment": "Title of the form for an existing filtered search. Command opening the saved filtered-search definition.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1958,17 +1938,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Try again, or edit the search and card limits."
-          }
-        }
-      }
-    },
-    "Edit Filtered Deck…": {
-      "comment": "Command opening the saved filtered-search definition.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Edit Filtered Deck…"
           }
         }
       }

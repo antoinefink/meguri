@@ -3,8 +3,8 @@ import CoreBridge
 import SwiftUI
 
 /// The deck's long-press and right-click menu (N20.2): study and inspection,
-/// Custom Study, deck management, then Export Deck… and Delete Deck.
-/// A filtered deck keeps its study actions and Export Deck…, takes neither
+/// Custom Study, deck management, then Export Deck and Delete Deck.
+/// A filtered deck keeps its study actions and Export Deck, takes neither
 /// notes nor subdecks; its settings edit the saved search definition.
 struct DeckMenu: View {
     let collection: ReviewCollection
@@ -69,7 +69,7 @@ struct DeckMenu: View {
         }
         Group {
             Button { collection.deckActions.present(.rename(deck.id)) } label: {
-                Label { Text("Rename…", bundle: .module) } icon: { Image(systemName: "pencil") }
+                Label { Text("Rename", bundle: .module) } icon: { Image(systemName: "pencil") }
             }
             #if os(macOS)
             .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -78,13 +78,13 @@ struct DeckMenu: View {
             .accessibilityIdentifier("home.deckMenu.rename.\(deck.id)")
             if !deck.filtered {
                 Button { collection.deckActions.present(.subdeck(deck.id)) } label: {
-                    Label { Text("New Subdeck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                    Label { Text("New Subdeck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
                 }
                 .disabled(!collection.deckActions.canPresent(.subdeck(deck.id)))
                 .accessibilityIdentifier("home.deckMenu.subdeck.\(deck.id)")
                 // N20.9: the deck's options, normal decks only.
                 Button { collection.openDeckOptions(deckID: deck.id) } label: {
-                    Label { Text("Deck Options…", bundle: .module) } icon: { Image(systemName: "gearshape") }
+                    Label { Text("Deck Options", bundle: .module) } icon: { Image(systemName: "gearshape") }
                 }
                 #if os(macOS)
                 .keyboardShortcut("o", modifiers: [.command, .option])
@@ -95,7 +95,7 @@ struct DeckMenu: View {
         }
         Divider()
         Button { collection.collectionExport.presentDeck(deck.id) } label: {
-            Label { Text("Export Deck…", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
+            Label { Text("Export Deck", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
         }
         .disabled(!collection.collectionExport.canPresentDeck(deck.id))
         .accessibilityIdentifier("home.deckMenu.export.\(deck.id)")

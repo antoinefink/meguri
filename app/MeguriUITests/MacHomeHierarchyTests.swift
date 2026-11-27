@@ -658,9 +658,9 @@ final class MacHomeHierarchyTests: XCTestCase {
     private func openChildMenu(_ row: XCUIElement, deckID: String, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        // N20.2: Study and Add Note, then Rename… and New Subdeck…; no Overview.
+        // N20.2: Study and Add Note, then Rename and New Subdeck; no Overview.
         let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"),
-            (action: "rename", title: "Rename…"), (action: "subdeck", title: "New Subdeck…")]
+            (action: "rename", title: "Rename"), (action: "subdeck", title: "New Subdeck")]
         for (action, title) in actions {
             let matches = app.menuItems.matching(identifier: "home.deckMenu.\(action).\(deckID)")
             XCTAssertTrue(matches.element(boundBy: 0).waitForExistence(timeout: 10))

@@ -383,6 +383,9 @@ import XCTest
             XCTAssertTrue(command.waitForExistence(timeout: 10))
             XCTAssertEqual(command.isEnabled, filtered, title)
         }
+        let options = menuItem(filtered ? "Edit Filtered Deck" : "Deck Options", app: app)
+        XCTAssertTrue(options.waitForExistence(timeout: 10))
+        XCTAssertTrue(options.isEnabled)
         let custom = menuItem("Custom Study", app: app)
         XCTAssertTrue(custom.waitForExistence(timeout: 10))
         XCTAssertEqual(custom.isEnabled, !filtered)

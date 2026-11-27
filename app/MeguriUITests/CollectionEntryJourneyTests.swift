@@ -1001,7 +1001,7 @@ import notify
         let deckMenu = app.menuBars.menuBarItems["Deck"]
         deckMenu.click()
         let export = deckMenu.menuItems.matching(NSPredicate(
-            format: "title == %@ OR label == %@", "Export Deck…", "Export Deck…")).firstMatch
+            format: "title == %@ OR label == %@", "Export Deck", "Export Deck")).firstMatch
         XCTAssertTrue(export.waitForExistence(timeout: 10) && export.isEnabled)
         try click(export, app, bundle)
         #else

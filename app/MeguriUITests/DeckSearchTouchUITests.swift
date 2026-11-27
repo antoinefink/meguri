@@ -3,7 +3,7 @@ import XCTest
 #if os(iOS)
 
 /// N20.1, N20.3 and D18 on touch: the tab layout's Search with its create row,
-/// New Subdeck… with its preset parent, and the iPad sidebar's search.
+/// New Subdeck with its preset parent, and the iPad sidebar's search.
 @MainActor
 final class DeckSearchTouchUITests: XCTestCase {
     func testTabLayoutSearchCreatesADeckThroughTheNewDeckForm() throws {
@@ -34,7 +34,7 @@ final class DeckSearchTouchUITests: XCTestCase {
             "home.deck.row.", "Local Review")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 20))
         row.press(forDuration: 1.2)
-        let subdeck = app.buttons["New Subdeck…"].firstMatch
+        let subdeck = app.buttons["New Subdeck"].firstMatch
         XCTAssertTrue(subdeck.waitForExistence(timeout: 10))
         subdeck.tap()
         let field = element(app, "home.deckName.name")

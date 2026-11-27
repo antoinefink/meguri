@@ -36,7 +36,7 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(page.waitForExistence(timeout: 10))
         let selectedPage = page.identifier
 
-        // Deck › Rename… (⇧⌘R): the deck's own name and its parent, None here.
+        // Deck › Rename (⇧⌘R): the deck's own name and its parent, None here.
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("r", modifierFlags: [.command, .shift])
         XCTAssertTrue(field.waitForExistence(timeout: 10))
@@ -52,7 +52,7 @@ final class DeckManagementUITests: XCTestCase {
         let row = sidebarRow(app, label: renamedName)
         XCTAssertTrue(row.waitForExistence(timeout: 10))
 
-        // The row's menu: New Subdeck… starts empty inside the deck it came from.
+        // The row's menu: New Subdeck starts empty inside the deck it came from.
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
         // The row's own menu item: the menu bar's Deck menu has items of the same title.
