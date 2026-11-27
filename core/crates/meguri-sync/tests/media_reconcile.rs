@@ -1829,7 +1829,7 @@ mod concurrent_downloads {
     use meguri_testkit::sync_stub::Part;
 
     #[derive(Clone, Copy)]
-    enum Answers { Full, Partial, LateBusy(u16), Busy(u16), BusyAndBad, SerialBusy(u16), RemainsBusy(u16) }
+    enum Answers { Full, Partial, LateBusy(u16), Busy(u16), BusyAndBad, BusyAndRedirect, SerialBusy(u16), RemainsBusy(u16) }
     #[derive(Default)]
     struct Observed {
         downloads: Vec<Vec<String>>,
@@ -1881,6 +1881,9 @@ mod concurrent_downloads {
                 let value: Value = serde_json::from_slice(&body).unwrap();
                 let method = request.url.rsplit('/').next().unwrap();
                 let reply = match method {
+                    "meta" if request.url.starts_with("http://media.test/") =>
+                        Reply::redirect(308, Some("http://media.test:8081/")),
+                    "meta" => Reply::ok(b"{}"),
                     "begin" => {
                         let mut reply = begin(100);
                         for hint in &self.hints { reply = reply.add_header("meguri-media-download-concurrency", hint); }
@@ -1918,6 +1921,9 @@ mod concurrent_downloads {
                             Answers::RemainsBusy(code) if index >= 1 => Reply::status(code),
                             Answers::BusyAndBad if index == 0 => Reply::status(503),
                             Answers::BusyAndBad if index == 2 => Reply::ok(b"invalid ZIP"),
+                            Answers::BusyAndRedirect if index == 0 => Reply::status(503),
+                            Answers::BusyAndRedirect if index == 2 =>
+                                Reply::redirect(308, Some("http://refused.test/")),
                             Answers::SerialBusy(code) => Reply::status(code),
                             _ => download(&names),
                         }
@@ -2049,6 +2055,45 @@ mod concurrent_downloads {
         with_collection(|h| {
             let (outcome, observed) = run(&h, &["4"], true, Answers::BusyAndBad, |_, _| {});
             assert_eq!(outcome.unwrap_err().error.kind, meguri_sync::ErrorKind::BadResponse);
+            let observed = observed.lock().unwrap();
+            first_wave(&observed);
+            assert_eq!(observed.downloads.len(), 4);
+            assert_eq!(h.media.store().download_intent_count().unwrap(), 100);
+            assert_eq!(h.media.store().sync_baseline().unwrap().usn, 0);
+        });
+    }
+    #[test]
+    fn advertised_overlap_discarded_redirect_clears_parent_target_after_meta() {
+        with_collection(|h| {
+            let observed = Arc::new(Mutex::new(Observed::default()));
+            let transport = Transport { observed: observed.clone(),
+                rendezvous: Some(tokio::sync::Barrier::new(4)),
+                hints: vec!["4".into()], answers: Answers::BusyAndRedirect };
+            let service = h.media.clone();
+            let generation = h.collection.generation().0;
+            let engine = h.engine.clone();
+            let random = h.random.clone();
+            let (send, receive) = std::sync::mpsc::channel();
+            h.engine.start_job(JobKind::MediaSync, move |context| {
+                let options = common::options("http://media.test/").cancel(context.cancel.clone());
+                let mut job = Job::with_transport(&options,
+                    Some(meguri_sync::HostKey::new("synthetic")), random.as_ref(), Box::new(transport)).unwrap();
+                meguri_sync::transport::runtime::block_on(engine.threads(), &context.cancel, async {
+                    job.request(Method::Meta, Payload::Json(b"{}".to_vec())).await?.bytes().await
+                }).unwrap();
+                let before = job.new_endpoint().cloned();
+                let result = media::reconcile(engine.threads(), &mut job, &service, generation,
+                    &MediaBaselineOwner::new("configured-owner-111"), &mut |_| {});
+                send.send((result, before, job.new_endpoint().cloned(), job.base().clone())).unwrap();
+                Ok(())
+            }).unwrap();
+            let (result, before, after, base) = receive.recv().unwrap();
+            assert_eq!(before.as_ref().map(meguri_sync::Endpoint::as_str), Some("http://media.test:8081/"));
+            assert_eq!(after, None);
+            assert_eq!(base.as_str(), "http://media.test:8081/");
+            let failure = result.unwrap_err();
+            assert_eq!(failure.error.kind, meguri_sync::ErrorKind::RedirectRefused { code: 308 });
+            assert_eq!(failure.error.method, Some(Method::DownloadFiles));
             let observed = observed.lock().unwrap();
             first_wave(&observed);
             assert_eq!(observed.downloads.len(), 4);

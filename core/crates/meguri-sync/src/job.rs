@@ -256,6 +256,10 @@ impl Job {
         self.new_endpoint.as_ref()
     }
 
+    pub(crate) fn clear_redirect_target(&mut self) {
+        self.new_endpoint = None;
+    }
+
     pub(crate) fn admit_meguri(&mut self, admission: crate::provider::MeguriRoundAdmission) {
         self.admission = Some(admission);
     }
@@ -377,7 +381,7 @@ impl Job {
                         Err(err) => {
                             // A refused redirect stops the job, and its result
                             // has no newEndpoint, even after one was followed.
-                            self.new_endpoint = None;
+                            self.clear_redirect_target();
                             return Err(err);
                         }
                     }

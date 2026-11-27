@@ -653,6 +653,12 @@ impl Stage<'_> {
                 let files = fetch_download(self.job, staging.path().to_path_buf(), names).await;
                 vec![DownloadReply { intents, files }]
             };
+            // Child refusals also invalidate the parent's recorded target,
+            // including replies discarded after an earlier failure.
+            if replies.iter().filter_map(|r| r.files.as_ref().err())
+                .any(|e| matches!(e.kind, ErrorKind::RedirectRefused { .. })) {
+                self.job.clear_redirect_target();
+            }
             // Inspect ALL failures before deciding to back off: a later fatal
             // reply must never be hidden by an earlier capacity response.
             let fatal = replies.iter().filter_map(|r| r.files.as_ref().err())
