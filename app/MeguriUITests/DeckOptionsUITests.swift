@@ -207,10 +207,9 @@ final class DeckOptionsUITests: XCTestCase {
         app.buttons["deckOptions.options.orderHelp.reviewOrder"].click()
         let reviewTitle = popover.staticTexts["deckOptions.options.orderHelpTitle.reviewOrder"]
         XCTAssertTrue(reviewTitle.waitForExistence(timeout: 10), "The Review sort order help opens")
-        let screen = try XCTUnwrap(NSScreen.main)
-        XCTAssertTrue(popover.frame.minY >= screen.frame.height - screen.visibleFrame.maxY - 1
-                      && popover.frame.maxY <= screen.frame.height - screen.visibleFrame.minY + 1,
-                      "The help fits the screen's visible area (popover \(popover.frame), screen \(screen.visibleFrame))")
+        let visible = try XCTUnwrap(Self.visibleFrame(around: popover.frame), "no display holds the help")
+        XCTAssertTrue(visible.insetBy(dx: -1, dy: -1).contains(popover.frame),
+                      "The help fits its display's visible area (popover \(popover.frame), visible \(visible))")
         XCTAssertTrue(reviewTitle.isHittable, "The help opens at its top")
         capture(popover, "deck-options-help-popover-review")
         // Value 10, Latest added first, is the menu's last choice.
@@ -476,6 +475,19 @@ final class DeckOptionsUITests: XCTestCase {
             scroll.scroll(byDeltaX: 0, deltaY: move)
         }
         return false
+    }
+    /// The visible frame of the display that holds most of `frame`, both in
+    /// XCUITest's screen points (top-left origin on the primary display), as
+    /// `AgentDriverTests.visibleFrame(around:)` converts it.
+    private static func visibleFrame(around frame: CGRect) -> CGRect? {
+        guard let height = NSScreen.screens.first?.frame.height else { return nil }
+        func flipped(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        func area(_ rect: CGRect) -> CGFloat { rect.isNull ? 0 : rect.width * rect.height }
+        return NSScreen.screens
+            .max { area(flipped($0.frame).intersection(frame)) < area(flipped($1.frame).intersection(frame)) }
+            .map { flipped($0.visibleFrame) }
     }
     /// A Mac static text carries its string as its value; the label is often empty.
     private func text(of element: XCUIElement) -> String {
