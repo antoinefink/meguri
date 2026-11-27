@@ -284,13 +284,11 @@ extension TestHooks {
                 // commit plus that delay, measured as the row's frame against its state.
                 let selectedAt = watched.first { $0.down == step.down }?.selected
                 let lag = shown.flatMap { shown in selectedAt.map { max(0, shown.time - $0) } } ?? 0
-                // That frame lies on the capture's grid, so the delay can be overstated: the
-                // window also ends at the first frame after the row's own that shows the
-                // destination, which is never the outgoing page.
-                let destination = commit.flatMap { commit in
-                    frames.first { $0.time > max(commit.time, shown?.time ?? step.down) && $0.detail >= FrameStore.contentThreshold }
-                }
-                let end = min(commit.map { $0.time + lag } ?? nextDown, destination?.time ?? .infinity)
+                // The app draws nothing of the destination before the commit, so no frame before
+                // the commit plus that delay shows it; frames in the window are the outgoing page's.
+                // The delay comes from a frame on the capture's grid: one capture interval less
+                // keeps it from being overstated.
+                let end = commit.map { $0.time + max(0, lag - TimingCapture.interval) } ?? nextDown
                 let before = frames.filter { $0.time >= step.down && $0.time < end }
                 let content = commit.flatMap { commit in frames.first { $0.time > commit.time && $0.detail >= FrameStore.contentThreshold } }
                 var entry: [String: Any] = [
@@ -622,6 +620,9 @@ extension TestHooks {
             return info
         }()
 
+        /// The capture's frame interval (120 Hz).
+        static let interval = 1.0 / 120
+
         init(store: FrameStore) { self.store = store }
 
         struct Failure: Error, CustomStringConvertible { let description: String }
@@ -634,7 +635,7 @@ extension TestHooks {
             let configuration = SCStreamConfiguration()
             configuration.width = Int(target.frame.width * scale)
             configuration.height = Int(target.frame.height * scale)
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale((1 / Self.interval).rounded()))
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
             configuration.colorSpaceName = CGColorSpace.sRGB
             configuration.showsCursor = false
