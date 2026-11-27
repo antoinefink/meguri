@@ -59,6 +59,85 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
     func testReturnOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(XCUIKeyboardKey.return.rawValue, "Return") }
     func testSpaceOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(" ", "Space") }
 
+    func testClickingBrowseClearsTheArrowKeyFilterTarget() throws {
+        let (app, bundle) = try launch(route: "browse/sidebar/keyboard-target")
+        addTeardownBlock { @MainActor in
+            guard self.testRun?.hasSucceeded == false else { return }
+            let evidence = XCTAttachment(string: app.windows.firstMatch.debugDescription)
+            evidence.name = "browse-keyboard-target-AX"
+            evidence.lifetime = .keepAlways
+            self.add(evidence)
+        }
+        let list = app.outlines.matching(identifier: "browse.sidebar.list").firstMatch
+        let browse = list.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch
+        let browseRow = list.outlineRows.containing(.any, identifier: "shell.root.sidebar.browse").firstMatch
+        let filterID = "browse.sidebar.state.suspended"
+        let filter = list.descendants(matching: .any).matching(identifier: filterID).firstMatch
+        let filterRows = list.outlineRows.containing(.any, identifier: filterID)
+        XCTAssertTrue(waitUntil { filterRows.count == 1 }, "Exactly one native outline row contains Suspended")
+        let filterRow = filterRows.firstMatch
+        // NSOutlineRow is not itself hittable; its label is interactive.
+        XCTAssertTrue(waitUntil { filter.exists && filter.isHittable })
+        let token = element(app, "browse.search.token.0")
+        let query = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
+        XCTAssertTrue(query.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntil { !self.statusText(app).isEmpty })
+        let whole = statusText(app)
+        XCTAssertFalse(whole.contains(" of "))
+        XCTAssertFalse(token.exists)
+        let originalQuery = try XCTUnwrap(query.value as? String)
+        // An empty AppKit AXSearchField can expose its placeholder as value.
+        XCTAssertTrue(originalQuery.isEmpty || originalQuery == query.placeholderValue)
+
+        func assertUnchanged() {
+            XCTAssertEqual(query.value as? String, originalQuery)
+            XCTAssertEqual(statusText(app), whole)
+            XCTAssertFalse(token.exists)
+        }
+        // Click the current outline, then use only native, unmodified Down.
+        try click(app, browse, bundle)
+        XCTAssertTrue(waitUntil { browseRow.isSelected })
+        try arrowToFilter(app, bundle, filterRow)
+        assertUnchanged()
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { token.exists && filter.isSelected && self.statusText(app).contains(" of ") })
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { !token.exists && !filter.isSelected && self.statusText(app) == whole })
+        XCTAssertTrue(filterRow.isSelected, "The identified native row remains the keyboard target")
+        assertUnchanged()
+
+        try click(app, browse, bundle)
+        XCTAssertTrue(waitUntil { browseRow.isSelected && !filterRow.isSelected })
+        for key in [" ", XCUIKeyboardKey.return.rawValue] {
+            try self.key(app, key, bundle)
+            XCTAssertTrue(waitUntil { browseRow.isSelected })
+            assertUnchanged()
+        }
+        // Prove the no-op keys still had the outline's focus.
+        try arrowToFilter(app, bundle, filterRow)
+        assertUnchanged()
+        try key(app, " ", bundle)
+        XCTAssertTrue(waitUntil { token.exists && filter.isSelected && self.statusText(app).contains(" of ") })
+    }
+
+    private func arrowToFilter(_ app: XCUIApplication, _ bundle: String, _ row: XCUIElement) throws {
+        try key(app, XCUIKeyboardKey.downArrow.rawValue, bundle)
+        // The only intervening row is the nonactionable Card State header.
+        if !row.isSelected { try key(app, XCUIKeyboardKey.downArrow.rawValue, bundle) }
+        XCTAssertTrue(waitUntil { row.isSelected }, "Down reaches Suspended's AX parent outline row")
+    }
+
+    private func click(_ app: XCUIApplication, _ target: XCUIElement, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        XCTAssertTrue(waitUntil(timeout: 5) { target.exists && target.isEnabled && target.isHittable })
+        target.click()
+    }
+
+    private func key(_ app: XCUIApplication, _ key: String, _ bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(key, modifierFlags: [])
+    }
+
     private func keyRemovesTheFilter(_ key: String, _ name: String) throws {
         let (app, bundle) = try launch()
         try openBrowse(app, bundle)
@@ -108,7 +187,7 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
 
     // MARK: Support
 
-    private func launch() throws -> (XCUIApplication, String) {
+    private func launch(route: String? = nil) throws -> (XCUIApplication, String) {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
@@ -117,9 +196,9 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory),
+            fixture: route == nil ? build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory) : nil,
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            appearance: "light").arguments
+            appearance: "light", route: route).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 30),

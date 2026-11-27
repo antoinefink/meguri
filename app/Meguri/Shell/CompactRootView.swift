@@ -94,26 +94,34 @@ struct CompactRootView: View {
         .environment(\.todayBesideDeckList, true)
     }
 
-    private var deckDetail: some View {
-        NavigationStack(path: Binding(get: { navigation.path(.home) }, set: { navigation.setPath($0, for: .home) })) {
-            Group {
-                if showsDeckNameForm {
-                    features.deckNameBesideList()
-                } else if let deck = navigation.homeDeckPage {
-                    SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
-                } else if hasDecks {
-                    features.today(navigation)
+    @ViewBuilder private var deckDetail: some View {
+        if navigation.pendingDeckPage != nil {
+            PendingDeckDetail(navigation: navigation, features: features)
+        } else {
+            let displayed = navigation.homeDeckPage
+            NavigationStack(path: Binding(get: { navigation.path(.home) }, set: { path in
+                guard navigation.pendingDeckPage == nil, navigation.homeDeckPage == displayed else { return }
+                navigation.setPath(path, for: .home)
+            })) {
+                Group {
+                    if showsDeckNameForm {
+                        features.deckNameBesideList()
+                    } else if let deck = navigation.homeDeckPage {
+                        SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
+                    } else if hasDecks {
+                        features.today(navigation)
+                    }
+                }
+                .navigationDestination(for: Destination.self) { destination in
+                    SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
                 }
             }
-            .navigationDestination(for: Destination.self) { destination in
-                SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+            // A new deck starts from its own top, as a new sidebar selection does.
+            .id(navigation.homeDeckPage)
+            // Choosing another row in the list closes the form as Cancel does.
+            .onChange(of: navigation.homeDeckPage) { _, _ in
+                if showsDeckNameForm { features.cancelDeckName() }
             }
-        }
-        // A new deck starts from its own top, as a new sidebar selection does.
-        .id(navigation.homeDeckPage)
-        // Choosing another row in the list closes the form as Cancel does.
-        .onChange(of: navigation.homeDeckPage) { _, _ in
-            if showsDeckNameForm { features.cancelDeckName() }
         }
     }
 
@@ -123,7 +131,12 @@ struct CompactRootView: View {
     }
 
     private func singleStack(_ tab: CompactTab) -> some View {
-        NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { navigation.setCompactPath($0, for: tab) })) {
+        let displayedPath = navigation.compactPath(tab)
+        let pendingSelection = navigation.pendingDeckSelectionID
+        return NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { path in
+            guard navigation.pendingDeckSelectionID == pendingSelection, navigation.compactPath(tab) == displayedPath else { return }
+            navigation.setCompactPath(path, for: tab)
+        })) {
             SectionDestinationView(screen: .root(tab.section), navigation: navigation, features: features)
                 .navigationDestination(for: Destination.self) { destination in
                     SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)

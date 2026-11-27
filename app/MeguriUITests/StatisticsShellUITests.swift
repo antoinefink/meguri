@@ -41,8 +41,17 @@ final class StatisticsShellUITests: XCTestCase {
         XCTAssertTrue(all.waitForExistence(timeout: 10))
         // A segment reads as selected, or (the Mac's radio button) with the value 1.
         XCTAssertTrue(all.isSelected || (all.value as? Int) == 1 || (all.value as? String) == "1", "All is the first period")
-        for section in ["knowledge", "reviews", "cards", "comingUp", "answering", "memory", "decks"] {
-            XCTAssertTrue(element(app, "stats.section.\(section)").exists, "Section \(section)")
+        // Lazy sections are constructed as reached. Exercise the native jump
+        // command as well as the initial section, including below the fold.
+        for (section, title) in [("knowledge", "Knowledge"), ("reviews", "Reviews"), ("cards", "Cards"),
+                                 ("comingUp", "Coming Up"), ("answering", "Answering"),
+                                 ("memory", "Memory"), ("decks", "Decks")] {
+            app.menuBars.menuBarItems["View"].click()
+            app.menuBars.menuItems["Go to Section"].hover()
+            let item = app.menuBars.menuItems[title].firstMatch
+            XCTAssertTrue(item.waitForExistence(timeout: 5))
+            item.click()
+            XCTAssertTrue(element(app, "stats.section.\(section).heading").waitForExistence(timeout: 5), "Section \(section)")
         }
     }
 

@@ -34,6 +34,9 @@ struct NativeCommandContext {
 
     func observingReviewAvailability() -> Self {
         var context = self
+        // Commands must be re-registered when visible feedback replaces a workspace.
+        _ = collection.navigation.pendingDeckPage
+        _ = collection.navigation.sidebarInteractionPending
         let review = review
         #if os(macOS)
         _ = MacUndoResponder.shared.firstResponder
@@ -49,7 +52,7 @@ struct NativeCommandContext {
     }
 
     var fileActionsAvailable: Bool {
-        !collection.backups.busy && collection.navigation.sheet == nil && !collection.filteredStudy.busy && !collection.deckActions.busy && !collection.manualTransfers.busy
+        !collection.navigation.sidebarInteractionPending && !collection.backups.busy && collection.navigation.sheet == nil && !collection.filteredStudy.busy && !collection.deckActions.busy && !collection.manualTransfers.busy
             && !collection.entry.pickerPresented && !collection.intake.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
@@ -87,12 +90,12 @@ struct NativeCommandContext {
         guard let deck = selectedDeck, collection.deck(deck)?.filtered != true else { return nil }
         return deck
     }
-    var canNewNote: Bool { host == .main && collection.addNotePresentation.canPresent(presetDeck: newNoteDeck) }
+    var canNewNote: Bool { !collection.navigation.sidebarInteractionPending && host == .main && collection.addNotePresentation.canPresent(presetDeck: newNoteDeck) }
     func newNote() {
         guard canNewNote else { return }
         collection.navigation.present(.add(deck: newNoteDeck.map { DeckID($0) }))
     }
-    var canNewDeck: Bool { collection.deckActions.canPresent(.create, host: host) }
+    var canNewDeck: Bool { !collection.navigation.sidebarInteractionPending && collection.deckActions.canPresent(.create, host: host) }
     func newDeck() {
         guard canNewDeck else { return }
         collection.deckActions.present(.create, host: host)
@@ -111,7 +114,7 @@ struct NativeCommandContext {
 
     // MARK: Edit
 
-    var canFind: Bool { host == .main && (canFindInBrowse || DeckSearchFocus.available(collection, layout: layout)) }
+    var canFind: Bool { !collection.navigation.sidebarInteractionPending && host == .main && (canFindInBrowse || DeckSearchFocus.available(collection, layout: layout)) }
     func find() {
         guard canFind else { return }
         if canFindInBrowse { return collection.browse.focusField() }
@@ -119,7 +122,7 @@ struct NativeCommandContext {
     }
     /// N21.8, T10: in Browse, Find… focuses Browse's search field.
     private var canFindInBrowse: Bool {
-        layout == .sidebar && collection.navigation.section == .browse && workspaceOwnsCommands
+        layout == .sidebar && collection.navigation.destinationActionsAvailable && collection.navigation.section == .browse && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
 
@@ -177,7 +180,7 @@ struct NativeCommandContext {
     // Add re-entry uses the workspace selection even while its auxiliary
     // window is open. The flow owns validation and keeps the existing draft.
     private var selectedDeck: Int64? {
-        guard host == .main, collection.navigation.section == .home,
+        guard host == .main, collection.navigation.destinationActionsAvailable, collection.navigation.section == .home,
               collection.review == nil, collection.navigation.review == nil,
               let deck = collection.navigation.homeDeckPage?.rawValue,
               collection.deck(deck) != nil || collection.deckPage(deck) != nil else { return nil }
@@ -202,10 +205,10 @@ struct NativeCommandContext {
         guard host == .main, review == nil, collection.navigation.sheet == nil, let deck = shownDeck else { return false }
         return collection.deckOptions.canOpen(deckID: deck) || collection.filteredStudy.canEdit(deck)
     }
-    var canCreateFiltered: Bool { host == .main && collection.filteredStudy.canPresent }
+    var canCreateFiltered: Bool { !collection.navigation.sidebarInteractionPending && host == .main && collection.filteredStudy.canPresent }
     func createFiltered() {
         guard canCreateFiltered else { return }
-        if collection.navigation.section == .browse { collection.filteredStudy.createFromBrowse() }
+        if collection.navigation.destinationActionsAvailable, collection.navigation.section == .browse { collection.filteredStudy.createFromBrowse() }
         else { collection.filteredStudy.create(deck: shownDeck) }
     }
     var canCustomStudy: Bool { shownDeck.map { collection.filteredStudy.canCustom($0) } ?? false }
@@ -256,7 +259,7 @@ struct NativeCommandContext {
 
     /// N25.11: View › Go to Section, while the page shows its sections.
     var canGoToSection: Bool {
-        canShowStatistics && collection.navigation.section == .stats && statsPage?.shown == true
+        canShowStatistics && collection.navigation.destinationActionsAvailable && collection.navigation.section == .stats && statsPage?.shown == true
             && statsPage?.model.state == .content
     }
     func goToSection(_ section: StatsSectionID) {
@@ -267,7 +270,7 @@ struct NativeCommandContext {
     /// N21.8, V2.1: View › Cards and Notes (⌥⌘T) toggles Browse's mode
     /// while Browse is shown.
     var canToggleBrowseMode: Bool {
-        canShowBrowse && collection.navigation.section == .browse
+        canShowBrowse && collection.navigation.destinationActionsAvailable && collection.navigation.section == .browse
     }
     func toggleBrowseMode() {
         guard canToggleBrowseMode else { return }
@@ -301,7 +304,7 @@ struct NativeCommandContext {
 
     /// D3: File › Save (⌘S) saves the shown note type's draft, as the toolbar's Save does.
     var noteTypeSaveShown: Bool {
-        host == .main && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
+        host == .main && collection.navigation.destinationActionsAvailable && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
             && collection.review == nil && collection.navigation.review == nil
     }
     var canSaveNoteType: Bool {
@@ -348,6 +351,7 @@ struct NativeCommandContext {
     }
 
     func undoRoute(redo: Bool) -> EditUndoRouting.Route {
+        guard !collection.navigation.sidebarInteractionPending else { return EditUndoRouting.route(.init()) }
         var inputs = EditUndoRouting.Inputs()
         inputs.reviewShown = review != nil
         #if os(macOS)
@@ -367,7 +371,7 @@ struct NativeCommandContext {
             inputs.reviewStep = available ? CollectionUndoModel.stepName(redo ? review.redoStatus : review.undoStatus) : nil
         }
         // W13: while Note Types shows, its draft's own steps come before the collection's.
-        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.section == .noteTypes {
+        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.destinationActionsAvailable, collection.navigation.section == .noteTypes {
             let draft = collection.noteTypes
             inputs.draftStep = (redo ? draft.redoStep : draft.undoStep)?.rawValue
         }
@@ -424,10 +428,12 @@ struct NativeUndoCommands {
     }
 
     func enabled(redo: Bool) -> Bool {
-        maskEditor?.isEnabled(redo ? .redo : .undo) == true || route(redo: redo).enabled
+        guard context?.collection.navigation.sidebarInteractionPending != true else { return false }
+        return maskEditor?.isEnabled(redo ? .redo : .undo) == true || route(redo: redo).enabled
     }
 
     func perform(redo: Bool) {
+        guard enabled(redo: redo) else { return }
         if maskEditor?.performIfEnabled(redo ? .redo : .undo) == true { return }
         if let context { context.performUndo(redo: redo); return }
         #if os(macOS)

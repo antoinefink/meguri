@@ -835,6 +835,7 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/MeguriUITests/NavigationFeedbackUITests.swift': '9a1cd8eadab248eccc1a8c901373ffecf07f201e9f78befddaae13085020ab04',
     "app/Packages/MeguriKit/Sources/AppModel/Collection/BackupTrigger.swift":
         "dde4dd4b82894df3eb270cded5a9abdac5ada95a203dea7c30e7a9e3bbb10859",
     "docs/plans/2026-11-26-0817-feat-native-backups-plan.md":
@@ -847,7 +848,7 @@ PUBLIC_ARTIFACTS = {
     "app/MeguriUITests/FilteredStudyTouchUITests.swift":
         "aa2ec7c6b55cca107c77a59fbd3b096a445d0d40b217411d2312aed56ee3e64c",
     "app/Packages/MeguriKit/Sources/Features/Home/Resources/Localizable.xcstrings":
-        "ccda8e4316fac11e362249c54f0a00a431f10649d791d0d13541beda5e716f85",
+        "6ae51d989007b9b6e83a14fdb98faf0b5a36b0db3a6f10bddeaafecad237d7e4",
     "core/crates/meguri-engine/tests/session_filtered_lifecycle.rs":
         "847e05fc1456d929196a53a7deb4b401bf06e2441ebb67ba38ff3d4ce7be1fcc",
     "core/crates/meguri-engine/src/decks/custom_study.rs":
@@ -1206,7 +1207,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: U163a checks reviewer, 2026-11-26.
     "docs/process/verification-status.md":
-        "c35e559d50bd784595eb5f754db073626d68c505221e027a761ea8c4771628c2",
+        "19f3014b0356a7049e2f9e29764b2a1432627532872ba0b380a145fa4d8de9d7",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1504,7 +1505,8 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'b57f23a9e355f6905fc383ce12118a9c087d3daeb91d3c12918e48c32de378f9',
+    'app/Packages/MeguriKit/Sources/DesignSystem/Components/Status/DelayedProgressView.swift': '3c412316533cc9498b80068f589391a1fbca6787b3205722daeac5011615ff14',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '4063b0e5bce8fd2ecc2d072a1e2fb607c465d6c07b6e0eee9566fb1d643ddfbf',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '399ffc255b68e30362668066221390794b4a6ffc347e6b21ae776ad4d553675c',

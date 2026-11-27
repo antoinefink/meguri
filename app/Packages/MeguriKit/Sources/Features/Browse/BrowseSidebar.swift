@@ -21,17 +21,19 @@ public struct BrowseSidebar<Header: View>: View {
     private let deckExpanded: (CountedDeckNode) -> Binding<Bool>
     private let navigate: (AppSection) -> Void
     private let header: Header
+    private let navigation: AppNavigation?
 
     /// `decks` is the deck tree in Today's order and `deckExpanded` its
     /// expansion, the same as Today's (V6). Pass the displayed node to avoid
     /// resolving its ID in the tree again; `navigate` selects a section row.
     public init(model: BrowseModel, decks: [CountedDeckNode], deckExpanded: @escaping (CountedDeckNode) -> Binding<Bool>,
-                navigate: @escaping (AppSection) -> Void, @ViewBuilder header: () -> Header) {
+                navigate: @escaping (AppSection) -> Void, navigation: AppNavigation? = nil, @ViewBuilder header: () -> Header) {
         self.model = model
         self.decks = decks
         self.deckExpanded = deckExpanded
         self.navigate = navigate
         self.header = header()
+        self.navigation = navigation
     }
 
     private var filter: BrowseSidebarFilter { BrowseSidebarFilter(model.filter) }
@@ -68,6 +70,7 @@ public struct BrowseSidebar<Header: View>: View {
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in
             rowMenu(rows)
         } primaryAction: { _ in
+            guard navigation?.sidebarInteractionPending != true else { return }
             guard NSApp.currentEvent?.type == .keyDown else { return }
             activateByKey()
         }
@@ -77,7 +80,10 @@ public struct BrowseSidebar<Header: View>: View {
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in rowMenu(rows) }
         #endif
         // T9: Space on the one selected filter row, as Return.
-        .onKeyPress(.space) { activateByKey() ? .handled : .ignored }
+        .onKeyPress(.space) {
+            guard navigation?.sidebarInteractionPending != true else { return .ignored }
+            return activateByKey() ? .handled : .ignored
+        }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
@@ -91,7 +97,14 @@ public struct BrowseSidebar<Header: View>: View {
             model.appear()
         }
         .onDisappear { model.disappear() }
-        #if !os(macOS)
+        #if os(macOS)
+        .onChange(of: navigation?.macSidebarSelectionID) { _, intent in
+            // The header Button can request Browse without writing List's binding.
+            // Clear its old filter target while the getter supplies the pending row.
+            guard intent != nil, navigation?.macSidebarSelection == .section(.browse) else { return }
+            forgetKeyRow()
+        }
+        #else
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
         #endif
         // The rows shown changed: Return and Space never act on a row out of sight.
@@ -103,28 +116,30 @@ public struct BrowseSidebar<Header: View>: View {
     /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
     /// a note type's Edit Note Type… (W14), and Delete Tag (T9, S9.3).
     @ViewBuilder private func rowMenu(_ rows: Set<BrowseSidebarTag>) -> some View {
-        let names = tagNames(in: rows)
-        if names.count > 1, names.count == rows.count {
-            BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target(names),
-                                  identifier: "browse.sidebar.tag.delete")
-        } else if rows.count == 1, let row = rows.first {
-            switch row {
-            case .saved(let name):
-                Button { model.startRenaming(name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
-                    .accessibilityIdentifier("browse.sidebar.saved.rename")
-                Button { model.deleteSavedSearch(name) } label: { Text("browse.savedSearch.delete", bundle: .module) }
-                    .accessibilityIdentifier("browse.sidebar.saved.delete")
-            case .tag(let name):
-                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([name]),
+        if navigation?.sidebarInteractionPending != true {
+            let names = tagNames(in: rows)
+            if names.count > 1, names.count == rows.count {
+                BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target(names),
                                       identifier: "browse.sidebar.tag.delete")
-            case .notetype(let id):
-                Button { model.editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
-                    .accessibilityIdentifier("browse.sidebar.notetype.edit")
-                Button(role: .destructive) { model.deleteNoteType?(id) } label: { Text("browse.notetype.delete", bundle: .module) }
-                    .disabled(model.notetypes.count < 2 || model.deleteNoteType == nil || !model.canDeleteNoteType())
-                    .accessibilityIdentifier("browse.sidebar.notetype.delete")
-            default:
-                EmptyView()
+            } else if rows.count == 1, let row = rows.first {
+                switch row {
+                case .saved(let name):
+                    Button { model.startRenaming(name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
+                        .accessibilityIdentifier("browse.sidebar.saved.rename")
+                    Button { model.deleteSavedSearch(name) } label: { Text("browse.savedSearch.delete", bundle: .module) }
+                        .accessibilityIdentifier("browse.sidebar.saved.delete")
+                case .tag(let name):
+                    BrowseDeleteTagButton(deletion: model.tagDeletion, target: model.tagDeletion.target([name]),
+                                          identifier: "browse.sidebar.tag.delete")
+                case .notetype(let id):
+                    Button { model.editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
+                        .accessibilityIdentifier("browse.sidebar.notetype.edit")
+                    Button(role: .destructive) { model.deleteNoteType?(id) } label: { Text("browse.notetype.delete", bundle: .module) }
+                        .disabled(model.notetypes.count < 2 || model.deleteNoteType == nil || !model.canDeleteNoteType())
+                        .accessibilityIdentifier("browse.sidebar.notetype.delete")
+                default:
+                    EmptyView()
+                }
             }
         }
     }
@@ -150,7 +165,30 @@ public struct BrowseSidebar<Header: View>: View {
     /// must not replace the rows on which Delete acts.
     private var listSelection: Binding<Set<BrowseSidebarTag>> {
         #if os(macOS)
-        Binding(get: { selection }, set: { rows in
+        Binding(get: {
+            if case .section(let section)? = navigation?.macSidebarSelection {
+                return [.section(section)]
+            }
+            return selection
+        }, set: { rows in
+            // Ignore echoes of restored Browse selection so filter targets survive.
+            if rows == model.listSelection && selection == rows { return }
+            // Section rows must keep the native selection while the shell
+            // waits for its display fence, including List's indirect writes.
+            if rows.count == 1, case .section(let section)? = rows.first,
+               section != .browse, navigation != nil {
+                // Leave the underlying filter selection and key target intact
+                // for cancellation; the getter supplies the pending section.
+                navigate(section)
+                return
+            }
+            // Browse and filter selections supersede departure and follow the
+            // model's existing key-row and deletion-selection clearing path.
+            navigation?.cancelMacSidebarSelection()
+            if rows == model.listSelection {
+                forgetKeyRow()
+                return
+            }
             deletionSelection.changed(from: selection, to: rows, byKey: Self.byKey(),
                                       commandClick: Self.click() == .command)
             captureDeletionTarget()
@@ -164,6 +202,7 @@ public struct BrowseSidebar<Header: View>: View {
 
     #if os(macOS)
     private func deleteSelectedTags() {
+        guard navigation?.sidebarInteractionPending != true else { return }
         // Search fields and the inspector's text/WebKit editors keep Delete.
         // Consult the actual responder at dispatch, never a remembered click
         // or SwiftUI focus flag. This handler belongs to this List alone.

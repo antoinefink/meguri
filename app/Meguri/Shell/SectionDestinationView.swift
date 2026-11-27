@@ -120,7 +120,7 @@ struct ShellFeatures {
 
     /// Real features share the app-owned collection; unbound standard remains
     /// available to isolated shell fixtures that replace every review slot.
-    static func standard(collection: ReviewCollection) -> ShellFeatures {
+    static func standard(collection: ReviewCollection, statsService: any StatsService = CoreStatsService()) -> ShellFeatures {
         collection.configureAddNotePresentation()
         var features = standard
         features.addPanel = { AnyView(AddNoteView(collection: collection)) }
@@ -140,7 +140,7 @@ struct ShellFeatures {
         collection.deckImportBrowseAvailable = features.availableSections.contains(.browse)
         let statsPage: StatsPage?
         if StatsRollout.enabled {
-            let host = StatsCollectionHost(collection: collection)
+            let host = StatsCollectionHost(collection: collection, service: statsService)
             statsPage = host.page
             features.statsHost = host
         } else {
@@ -307,7 +307,7 @@ private struct BrowseSidebarHost: View {
         BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { node in
             Binding(get: { collection.studyExpanded(node) },
                     set: { collection.setStudyExpanded(deckID: node.id, expanded: $0, includingDescendants: false) })
-        }, navigate: { navigation.select(.section($0)) }) {
+        }, navigate: { navigation.selectFromSidebar(.section($0)) }, navigation: navigation) {
             header
         }
         // Rows and counts are read once the collection can answer (a launch, a replacement).

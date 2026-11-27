@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Loading Note Types": {
+      "comment": "Accessibility feedback while the note type list is loading.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading Note Types"
+          }
+        }
+      }
+    },
     "noteTypes.delete.menu": {
       "localizations": {
         "en": {

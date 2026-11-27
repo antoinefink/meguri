@@ -34,6 +34,7 @@ struct DriveScript: Equatable {
         case swipe(id: String, direction: Direction)
         case scroll(id: String, direction: Direction)
         case wait(id: String, timeout: TimeInterval, gone: Bool)
+        case waitActivity(label: String, timeout: TimeInterval)
         case snapshot(name: String)
         /// Mac: `minimum`, `default`, `large` or `<width>x<height>`.
         case resize(size: String)
@@ -50,7 +51,7 @@ struct DriveScript: Equatable {
             case .type: "type"
             case .swipe: "swipe"
             case .scroll: "scroll"
-            case .wait: "wait"
+            case .wait, .waitActivity: "wait"
             case .snapshot: "snapshot"
             case .resize: "resize"
             case .foregroundCycle: "foregroundCycle"
@@ -163,6 +164,11 @@ struct DriveScript: Equatable {
         case "wait":
             if let id = value as? String {
                 action = .wait(id: try identifier(id, at, key), timeout: defaultWaitTimeout, gone: false)
+            } else if let fields = value as? [String: Any], fields["activity"] != nil {
+                let fields = try object(value, at, key, required: ["activity"], optional: ["timeout"])
+                let timeout = try number(fields["timeout"], at, "wait.timeout") ?? defaultWaitTimeout
+                guard timeout > 0 else { throw DriveScriptError("\(at): wait.timeout must be positive") }
+                action = .waitActivity(label: try string(fields["activity"], at, "wait.activity"), timeout: timeout)
             } else {
                 let fields = try object(value, at, key, required: ["id"], optional: ["timeout", "gone"])
                 let timeout = try number(fields["timeout"], at, "wait.timeout") ?? defaultWaitTimeout

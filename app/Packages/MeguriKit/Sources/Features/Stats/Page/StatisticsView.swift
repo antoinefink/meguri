@@ -220,7 +220,9 @@ private struct StatsPageScroll: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.xLarge) {
+                // Construct and lay out charts for visible sections. The eager stack
+                // rebuilt every plot (including accessibility data) on each warm entry.
+                LazyVStack(alignment: .leading, spacing: Spacing.xLarge) {
                     VStack(alignment: .leading, spacing: Spacing.small) {
                         if narrow {
                             StatsStripTiles(model: model) { page.go(to: $0) }
@@ -476,7 +478,7 @@ struct StatsStrip: View {
                         .lineLimit(1)
                         .opacity(figure.loading ? 0 : 1)
                         .overlay(alignment: .leading) {
-                            if figure.loading { ProgressView().controlSize(.small) }
+                            if figure.loading { DelayedProgressView(Text("Loading Statistics", bundle: .module)) }
                         }
                     if !figure.loading, let unit = figure.unit {
                         Text(verbatim: unit)
@@ -500,7 +502,9 @@ struct StatsStrip: View {
         .buttonStyle(.plain)
         // The button is the figure's one element (S6), read as its label and value.
         .accessibilityLabel(Text(verbatim: label))
-        .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
+        .accessibilityValue(figure.loading
+            ? Text("Loading Statistics", bundle: .module)
+            : Text(verbatim: figure.spoken ?? figure.value ?? ""))
         .accessibilityIdentifier("stats.strip.\(id.rawValue)")
     }
 }
@@ -548,7 +552,7 @@ struct StatsStripTiles: View {
                     .minimumScaleFactor(0.7)
                     .opacity(figure.loading ? 0 : 1)
                     .overlay(alignment: .leading) {
-                        if figure.loading { ProgressView().controlSize(.small) }
+                        if figure.loading { DelayedProgressView(Text("Loading Statistics", bundle: .module)) }
                     }
                 // Two lines where a tile is narrow ("cards" over "19 min"), never cut short.
                 Text(verbatim: small?.isEmpty == false ? small ?? " " : " ")
@@ -575,7 +579,9 @@ struct StatsStripTiles: View {
         .buttonStyle(.plain)
         // The button is the figure's one element (S6), read as its label and value.
         .accessibilityLabel(Text(verbatim: label))
-        .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
+        .accessibilityValue(figure.loading
+            ? Text("Loading Statistics", bundle: .module)
+            : Text(verbatim: figure.spoken ?? figure.value ?? ""))
         .accessibilityIdentifier("stats.strip.\(id.rawValue)")
     }
 }

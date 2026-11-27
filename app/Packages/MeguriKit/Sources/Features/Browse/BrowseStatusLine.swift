@@ -15,6 +15,12 @@ struct BrowseStatusLine: View {
     var body: some View {
         let status = BrowseStatus(results: model.results, query: model.query)
         HStack(spacing: Spacing.small) {
+            if model.results.showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(Text("Searching Browse", bundle: .module))
+                    .accessibilityIdentifier("browse.navigation.progress")
+            }
             Text(BrowseStrings.status(status, locale: locale))
                 .monospacedDigit()
                 .lineLimit(1)

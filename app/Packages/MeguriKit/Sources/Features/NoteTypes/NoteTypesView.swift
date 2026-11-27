@@ -462,15 +462,9 @@ struct SaveOutcomeAlerts: ViewModifier {
 
 /// A progress indicator that shows only once a read has taken about half a second.
 struct DelayedProgress: View {
-    @State private var visible = false
     var body: some View {
-        ProgressView()
-            .opacity(visible ? 1 : 0)
+        DelayedProgressView(Text("Loading Note Types", bundle: .module))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task {
-                try? await Task.sleep(for: .milliseconds(500))
-                visible = true
-            }
     }
 }
 

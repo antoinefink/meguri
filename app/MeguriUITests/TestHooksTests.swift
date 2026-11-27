@@ -258,6 +258,7 @@ final class TestHooksTests: XCTestCase {
             "browse/search/save-search",
             "browse/search/tokens",
             "browse/sidebar/filtered",
+            "browse/sidebar/keyboard-target",
             "browse/sidebar/today",
             "browse/sidebar/typical",
             "browse/table/empty-collection",
@@ -310,6 +311,7 @@ final class TestHooksTests: XCTestCase {
             "home/today/after-walk",
             "home/today/nothing-waiting",
             "home/today/summary",
+            "navigation/feedback",
             "notetypes/cards/card-text",
             "notetypes/cards/issues",
             "notetypes/cards/preview-back",
@@ -583,6 +585,9 @@ final class TestHooksTests: XCTestCase {
         if build.configuration == .debug {
             routes.append("card/replay-accessibility")
         }
+        #endif
+        #if os(iOS)
+        routes.append("navigation/feedback-cold")
         #endif
         return routes.sorted().joined(separator: ", ")
     }

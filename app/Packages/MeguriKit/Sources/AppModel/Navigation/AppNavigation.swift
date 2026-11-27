@@ -42,6 +42,9 @@ public final class AppNavigation {
     public var sheet: SheetRoute? {
         get { presentedSheet }
         set {
+            #if os(macOS)
+            if newValue != presentedSheet { cancelMacSidebarSelection() }
+            #endif
             if presentedSheet.isAddNote || newValue.isAddNote, let addSheetRequest {
                 addSheetRequest(newValue)
             } else {
@@ -107,12 +110,113 @@ public final class AppNavigation {
 
     /// Production deck rows await the collection-owned save before opening a page.
     @ObservationIgnored public var deckSelectionAction: (@MainActor (DeckID) -> Void)?
-    @ObservationIgnored private(set) var intentRevision: UInt64 = 0
+    /// Visible feedback while the collection saves a deck selection. Restoration and
+    /// study continue to use the committed selection, never this pending intent.
+    public private(set) var pendingDeckPage: DeckID?
+    @ObservationIgnored private(set) var intentRevision: UInt64 = 0 {
+        didSet {
+            pendingDeckPage = nil
+            #if os(macOS)
+            macSidebarSelection = nil
+            macSidebarCompletion = nil
+            #endif
+        }
+    }
 
-    func beginDeckSelection() -> UInt64 {
+    #if os(macOS)
+    /// Native row feedback only. The detail, stacks and restoration still read
+    /// the committed route until the sidebar's window has displayed this row.
+    public private(set) var macSidebarSelection: SidebarItem?
+    @ObservationIgnored private var macSidebarCompletion: (() -> Void)?
+    public var macSidebarSelectionID: UInt64? { macSidebarSelection == nil ? nil : intentRevision }
+
+    public func commitMacSidebarSelection(_ intent: UInt64) {
+        guard macSidebarSelectionID == intent, let item = macSidebarSelection else { return }
+        let completion = macSidebarCompletion
+        macSidebarSelection = nil
+        macSidebarCompletion = nil
+        select(item)
+        completion?()
+    }
+
+    /// A deck row's double-click starts Study after its own selection has
+    /// opened the page. A newer selection cancels both parts together.
+    public func afterMacSidebarSelection(_ action: @escaping () -> Void) {
+        if macSidebarSelection != nil { macSidebarCompletion = action }
+        else { action() }
+    }
+
+    public func cancelMacSidebarSelection() {
+        guard macSidebarSelection != nil else { return }
         intentRevision &+= 1
+    }
+    #endif
+
+    /// User selection from the main sidebar. Programmatic routes use `select`.
+    public func selectFromSidebar(_ item: SidebarItem) {
+        #if os(macOS)
+        guard macSidebarSelection != item else { return }
+        let displayedDeck = pendingDeckPage
+        intentRevision &+= 1
+        // Keep even pending detail mounted during the visual handoff, while
+        // invalidating its former save's authority to navigate.
+        pendingDeckPage = displayedDeck
+        macSidebarSelection = item
+        #else
+        select(item)
+        #endif
+    }
+
+    public var displayedSidebarSelection: SidebarItem {
+        #if os(macOS)
+        if let macSidebarSelection { return macSidebarSelection }
+        #endif
+        return sidebarSelection
+    }
+
+    public var sidebarInteractionPending: Bool {
+        #if os(macOS)
+        return macSidebarSelection != nil
+        #else
+        return false
+        #endif
+    }
+
+    public var destinationActionsAvailable: Bool {
+        pendingDeckPage == nil && !sidebarInteractionPending
+    }
+
+    func beginDeckSelection(deck: DeckID? = nil) -> UInt64 {
+        intentRevision &+= 1
+        pendingDeckPage = deck
         return intentRevision
     }
+
+    func finishDeckSelection(intent: UInt64) {
+        if intentRevision == intent { pendingDeckPage = nil }
+    }
+
+    /// Cancels only the collection request that still owns this feedback.
+    func cancelDeckSelection(intent: UInt64) {
+        guard intentRevision == intent else { return }
+        intentRevision &+= 1
+    }
+
+    /// Identity for native bindings, including repeated requests for the same deck.
+    public var pendingDeckSelectionID: UInt64? { pendingDeckPage == nil ? nil : intentRevision }
+
+    /// The transient deck route. Split detail renders it directly as a root;
+    /// Back writes an empty path without changing the committed stack or selection.
+    public var pendingDetailPath: [Destination] {
+        get { pendingDeckPage.map { [.deckPage($0)] } ?? [] }
+        set {
+            guard pendingDeckPage != nil, newValue.isEmpty else { return }
+            intentRevision &+= 1
+        }
+    }
+
+    /// Selection feedback for deck lists, including the unfolded phone's Today row.
+    public var displayedHomeDeckPage: DeckID? { pendingDeckPage ?? homeDeckPage }
 
     public init() {}
 
@@ -168,6 +272,7 @@ public final class AppNavigation {
     /// The sidebar row of the current section, or of the deck whose page
     /// Home shows.
     public var sidebarSelection: SidebarItem {
+        if let pendingDeckPage { return .deck(pendingDeckPage) }
         if section == .home, let homeDeckPage {
             return .deck(homeDeckPage)
         }
@@ -181,8 +286,9 @@ public final class AppNavigation {
             deckSelectionAction(deck)
             return
         }
+        let displayed = sidebarSelection
         intentRevision &+= 1
-        guard item != sidebarSelection else { return }
+        guard item != displayed else { return }
         endReview()
         switch item {
         case let .section(section):
@@ -203,13 +309,14 @@ public final class AppNavigation {
 
     // MARK: Tab layout (R18, R19, R23)
 
-    public var compactTab: CompactTab { section.tab }
+    public var compactTab: CompactTab { pendingDeckPage == nil ? section.tab : .decks }
 
     /// A tab's stack. The Decks tab holds the deck page Home shows above
     /// Home, the Settings tab Note Types above Settings.
     public func compactPath(_ tab: CompactTab) -> [Destination] {
         switch tab {
         case .decks:
+            if let pendingDeckPage { return [.deckPage(pendingDeckPage)] }
             return homeDeckPage.map { [.deckPage($0)] + path(.home) } ?? path(.home)
         case .settings:
             return settingsTabSection == .noteTypes ? [.noteTypes] + path(.noteTypes) : path(.settings)
@@ -220,7 +327,13 @@ public final class AppNavigation {
 
     /// What a tab's `NavigationStack` writes back: a push or a pop.
     public func setCompactPath(_ newPath: [Destination], for tab: CompactTab) {
-        if newPath != compactPath(tab) { intentRevision &+= 1 }
+        // SwiftUI may write back the displayed path. A pending deck path is
+        // feedback, not permission to commit its selection before the save.
+        guard newPath != compactPath(tab) else { return }
+        // While feedback owns Decks, only native Back can change its stack.
+        // An older nonempty path echoed by SwiftUI must never select a deck.
+        if tab == .decks, pendingDeckPage != nil, !newPath.isEmpty { return }
+        intentRevision &+= 1
         switch tab {
         case .decks:
             if case let .deckPage(deck)? = newPath.first {
@@ -253,12 +366,17 @@ public final class AppNavigation {
     /// A tap on a tab. On the selected tab it pops the stack to its root, or,
     /// at the root, scrolls the root to the top (R19).
     public func selectTab(_ tab: CompactTab) {
+        let displayedTab = compactTab
+        let displayedPath = compactPath(tab)
         intentRevision &+= 1
-        guard tab == compactTab else {
+        guard tab == displayedTab else {
             show(tab == .settings ? settingsTabSection : tab.section)
             return
         }
-        if compactPath(tab).isEmpty {
+        // Pending feedback can make Decks visible while another section is
+        // committed. A repeat tap still selects that visible tab's root.
+        if section.tab != tab { show(tab == .settings ? settingsTabSection : tab.section) }
+        if displayedPath.isEmpty {
             scrollToTop(.section(tab.section))
         } else {
             setCompactPath([], for: tab)
@@ -381,6 +499,9 @@ public final class AppNavigation {
     }
 
     public func startReview(_ presentation: ReviewPresentation) {
+        #if os(macOS)
+        cancelMacSidebarSelection()
+        #endif
         if review == nil {
             columnVisibilityBeforeReview = columnVisibility
         }

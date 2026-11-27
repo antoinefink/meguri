@@ -476,6 +476,21 @@ final class AgentDriver {
                     throw StepFailure(message: "no element '\(id)' after \(timeout) s")
                 }
             }
+        case let .waitActivity(label, timeout):
+            let app = try running()
+            // An ancestor's identifier may override the native activity's ID.
+            // Its role, exact label and visible geometry are independent witnesses.
+            let indicators = app.activityIndicators.matching(NSPredicate(format: "label == %@", label))
+            let visible = NSPredicate { _, _ in
+                let window = app.windows.firstMatch.frame
+                return indicators.allElementsBoundByIndex.contains {
+                    $0.exists && !$0.frame.isEmpty && window.contains($0.frame)
+                }
+            }
+            let expectation = XCTNSPredicateExpectation(predicate: visible, object: app)
+            guard XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed else {
+                throw StepFailure(message: "no visible native activity labelled '\(label)' after \(timeout) s")
+            }
         case .snapshot:
             _ = try running()
         case let .resize(size):

@@ -126,8 +126,10 @@ public final class BrowseModel {
     var epoch: UInt64 = 0
     private var namesToken: UInt64 = 0
     private var countsToken: UInt64 = 0
-    @ObservationIgnored private var namesTask: Task<Void, Never>?
-    @ObservationIgnored private var countsTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var namesTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var countsTask: Task<Void, Never>?
+    @ObservationIgnored private var countsNeedRefresh = false
+    @ObservationIgnored private var namesPending = false
     @ObservationIgnored var device: BrowseDeviceState
 
     /// The results table (U270a): the query's rows in the mode.
@@ -335,6 +337,8 @@ public final class BrowseModel {
             reload()
             // U276: Set Due Date's and Forget's remembered inputs, so their sheets open filled.
             commands.preloadSheetDefaults()
+        } else if countsNeedRefresh && !namesPending {
+            refreshCounts()
         }
         // The rows of the query, once the first open has read it (T14).
         if !openInFlight, !results.hasRun { showResults() }
@@ -344,8 +348,8 @@ public final class BrowseModel {
         visible = false
         // V12: leaving Browse saves the note the inspector shows.
         inspector.browseLeft()
-        // Counts or names still on their way are read again on the next appear.
-        if readsPending { stale = true }
+        // Unfinished counts stay pending; names already read stay valid.
+        if readsPending { countsNeedRefresh = true }
         countsTask?.cancel()
     }
 
@@ -841,9 +845,14 @@ public final class BrowseModel {
         readTags()
         stale = false
         readsPending = true
+        countsNeedRefresh = true
+        countsTask?.cancel()
+        countsToken &+= 1
         namesToken &+= 1
         let token = namesToken, epoch = epoch, backend = backend
+        namesPending = true
         namesTask = Task {
+            defer { if token == namesToken { namesPending = false } }
             async let saved = try? backend.values(.savedSearches)
             async let decks = try? backend.values(.decks)
             async let notetypes = try? backend.notetypes()
@@ -878,7 +887,8 @@ public final class BrowseModel {
             refreshTokenOffers()
             if fieldFocused { refreshSuggestions() }
             // Hidden meanwhile: the counts are read when Browse shows again.
-            if visible { refreshCounts() } else { stale = true }
+            namesPending = false
+            if visible { refreshCounts() } else { countsNeedRefresh = true }
         }
     }
 
@@ -889,7 +899,8 @@ public final class BrowseModel {
         + FilterPeriod.allCases.flatMap { [FilterValue.added($0), .edited($0), .studied($0)] }
 
     /// Every row the sidebar can show, with what it counts.
-    private var countedRows: [(BrowseSidebarTag, FilterCountItem)] {
+    private nonisolated static func countedRows(savedSearches: [SavedSearch], deckValues: [Int64: FilterValue],
+                                               notetypes: [NotetypeName], tags: [TagNode]) -> [(BrowseSidebarTag, FilterCountItem)] {
         var rows: [(BrowseSidebarTag, FilterCountItem)] = FilterBuiltIn.allCases.map { (.builtIn($0), .value($0.value)) }
         rows += savedSearches.map { (.saved($0.name), .saved($0.text)) }
         rows += Self.states.map { (.state($0), .value(.state($0))) }
@@ -914,32 +925,47 @@ public final class BrowseModel {
     private func refreshCounts() {
         // Pending until every read of it lands, whatever started it (a reload,
         // a mode change): leaving Browse meanwhile reads the counts again.
+        countsNeedRefresh = true
+        // The names read will start the counts with its complete snapshots.
+        guard !namesPending else { return }
         readsPending = true
         countsTask?.cancel()
         countsToken &+= 1
         let token = countsToken, epoch = epoch, mode = mode, backend = backend
-        let rows = countedRows
-        let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
+        countsNeedRefresh = false
+        // Copy value snapshots only. Sorting all decks, walking all tags and building
+        // the count request must not run in SidebarView's appearance transaction.
+        let saved = savedSearches, decks = deckValues, types = notetypes, tags = tags
         countsTask = Task(priority: .utility) {
+            defer {
+                if token == countsToken, self.epoch == epoch, readsPending { countsNeedRefresh = true }
+            }
+            let (rows, items, topTags) = await Task.detached(priority: .utility) {
+                let rows = Self.countedRows(savedSearches: saved, deckValues: decks, notetypes: types, tags: tags)
+                let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
+                return (rows, rows.map(\.1) + [.query(FilterQuery())], topTags)
+            }.value
+            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             // The last item is the whole collection: V11's total.
-            guard var values = try? await backend.counts(mode, rows.map(\.1) + [.query(FilterQuery())]), !Task.isCancelled,
+            guard var values = try? await backend.counts(mode, items), !Task.isCancelled,
                   token == countsToken, self.epoch == epoch else { return }
             results.setTotal(values.popLast() ?? nil, mode: mode)
-            var next: [BrowseSidebarTag: UInt64] = [:]
-            for (row, value) in zip(rows.map(\.0), values) {
-                if let value { next[row] = value }
-            }
+            let returned = values
+            let next = await Task.detached(priority: .utility) {
+                var next: [BrowseSidebarTag: UInt64] = [:]
+                for ((row, _), value) in zip(rows, returned) {
+                    if let value { next[row] = value }
+                }
+                return next
+            }.value
+            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             counts = next
             if !topTags.isEmpty, mode == .notes {
                 tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
             } else if !topTags.isEmpty {
                 // The refresh stays pending until the tags' note counts arrive too.
-                let notes: [UInt64?]
-                do { notes = try await backend.counts(.notes, topTags.map { .value(.tag($0)) }) } catch {
-                    if token == countsToken, self.epoch == epoch { stale = true }
-                    return
-                }
-                guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+                guard let notes = try? await backend.counts(.notes, topTags.map { .value(.tag($0)) }),
+                      !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
                 var byTag: [String: UInt64] = [:]
                 for (name, value) in zip(topTags, notes) {
                     if let value { byTag[name] = value }
@@ -949,14 +975,10 @@ public final class BrowseModel {
             // Then the values only the suggestions show, after the sidebar's own,
             // so their slower day searches never hold the sidebar back.
             let extra = Self.suggestedValues
-            let extraCounts: [UInt64?]
-            do { extraCounts = try await backend.counts(mode, extra.map { .value($0) }) } catch {
-                // Read again on the next appear or change; the sidebar's counts stay.
-                if token == countsToken, self.epoch == epoch { stale = true }
-                return
-            }
-            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+            guard let extraCounts = try? await backend.counts(mode, extra.map { .value($0) }),
+                  !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             readsPending = false
+            countsNeedRefresh = false
             var shown: [FilterValue: UInt64] = [:]
             for (value, count) in zip(extra, extraCounts) {
                 if let count { shown[value] = count }
@@ -966,9 +988,9 @@ public final class BrowseModel {
     }
 
     /// The five states of the Card State section (V6; Leech is a saved search).
-    public static let states: [FilterState] = [.new, .learning, .review, .suspended, .buried]
+    public nonisolated static let states: [FilterState] = [.new, .learning, .review, .suspended, .buried]
     /// V6: up to this many top-level tags, the Tags section shows them all.
-    public static let tagsShownWhole = 12
+    public nonisolated static let tagsShownWhole = 12
     /// V6: otherwise it shows this many, those with the most notes.
     public static let tagsShownFew = 8
 

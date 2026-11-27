@@ -41,9 +41,18 @@ struct SidebarRootView: View {
             Group {
                 if let review = navigation.review {
                     features.review(review, navigation)
+                } else if navigation.pendingDeckPage != nil {
+                    PendingDeckDetail(navigation: navigation, features: features)
                 } else {
-                    NavigationStack(path: $navigation.detailPath) {
+                    let selection = navigation.sidebarSelection
+                    NavigationStack(path: Binding(get: { navigation.detailPath }, set: { path in
+                        // A removed stack can echo its path during replacement.
+                        guard navigation.pendingDeckPage == nil, navigation.sidebarSelection == selection else { return }
+                        navigation.detailPath = path
+                    })) {
                         SectionDestinationView(screen: root, navigation: navigation, features: features)
+                            .disabled(navigation.sidebarInteractionPending)
+                            .allowsHitTesting(!navigation.sidebarInteractionPending)
                             #if !os(macOS)
                             // iPadOS draws only a column's own toolbar items: one on the
                             // split view itself never appears (N11.8's status button).
@@ -57,6 +66,8 @@ struct SidebarRootView: View {
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    .disabled(navigation.sidebarInteractionPending)
+                                    .allowsHitTesting(!navigation.sidebarInteractionPending)
                                     // A pushed page (a note type's on iPad) does not get the value set on
                                     // the stack below: it gets it here.
                                     .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
@@ -111,5 +122,44 @@ struct SidebarRootView: View {
             return .deckPage(deck)
         }
         return .root(navigation.section)
+    }
+}
+
+/// Render feedback as the root, not as an initial nonempty path on a newly
+/// mounted stack: macOS can leave that stack at its empty root. The underlying
+/// section's stack and scroll positions stay in the model until save succeeds.
+struct PendingDeckDetail: View {
+    let navigation: AppNavigation
+    let features: ShellFeatures
+
+    var body: some View {
+        let displayed = navigation.pendingDeckSelectionID
+        NavigationStack {
+            if let deck = navigation.pendingDeckPage {
+                SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
+                    .disabled(navigation.sidebarInteractionPending)
+                    .allowsHitTesting(!navigation.sidebarInteractionPending)
+                    .toolbar {
+                        #if os(macOS)
+                        ToolbarItem(placement: .navigation) { back(displayed) }
+                        #else
+                        ToolbarItem(placement: .topBarLeading) { back(displayed) }
+                        #endif
+                    }
+                    .navigationDestination(for: Destination.self) { destination in
+                        SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                    }
+            }
+        }
+        .environment(\.syncStatusItem, features.syncStatus?())
+    }
+
+    private func back(_ displayed: UInt64?) -> some View {
+        Button("Back", systemImage: "chevron.backward") {
+            guard navigation.pendingDeckSelectionID == displayed else { return }
+            navigation.pendingDetailPath = []
+        }
+        .keyboardShortcut("[", modifiers: .command)
+        .accessibilityIdentifier("shell.navigation.pendingBack")
     }
 }

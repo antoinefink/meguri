@@ -2,6 +2,8 @@
 
 **Integration status: failed.** No current passing full gate is established.
 
+The main navigation change is tracked in [PR #245](https://github.com/antoinefink/meguri/pull/245). The [navigation review log](review-log/instant-navigation-20261126.md) records focused test results, native rendering checks and their scope.
+
 Filtered decks and Custom Study passed 239 focused Rust tests, 152 Swift
 tests and both end-to-end Mac journeys. The Mac journeys compared stored
 home schedules before and after a timed preview and relaunch. The iOS

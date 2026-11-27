@@ -14,7 +14,7 @@ public final class StatsCollectionHost {
     private let signals: StatsCacheSignals
     private let identity: StatsCollectionIdentity
     private weak var collection: ReviewCollection?
-    private var appliedTree: (generation: UInt64, nodes: [CountedDeckNode])?
+    private var appliedTree: (generation: UInt64, version: UInt64)?
 
     /// - Parameters:
     ///   - service: the core's statistics (tests and routes pass their own).
@@ -67,6 +67,7 @@ public final class StatsCollectionHost {
         var opening: Bool
         var noFile: Bool
         var tree: UInt64?
+        var treeVersion: UInt64
         var homeIdle: Bool
     }
 
@@ -81,9 +82,9 @@ public final class StatsCollectionHost {
             && collection.review == nil && collection.foreground && collection.state == .ready
         let tree = collection.deckTreeGeneration == collection.generation ? collection.deckTreeGeneration : nil
         // Read so a change of the tree's counts is seen.
-        _ = collection.decks
+        let treeVersion = collection.deckTreeVersion
         return Observed(readable: collection.browseReadable, closed: closed, opening: collection.state == .unopened || (!closed && !collection.browseReadable),
-                        noFile: collection.state == .noFile, tree: tree, homeIdle: homeIdle)
+                        noFile: collection.state == .noFile, tree: tree, treeVersion: treeVersion, homeIdle: homeIdle)
     }
 
     private func track() {
@@ -122,8 +123,8 @@ public final class StatsCollectionHost {
         }
         // The tree once read for this collection: before that a deck shown is not known gone.
         if open, observed.readable, let generation = observed.tree,
-           appliedTree?.generation != generation || appliedTree?.nodes != collection.decks {
-            appliedTree = (generation, collection.decks)
+           appliedTree?.generation != generation || appliedTree?.version != observed.treeVersion {
+            appliedTree = (generation, observed.treeVersion)
             page.model.decksChanged(collection.decks)
         }
         signals.homeIdle(observed.homeIdle)

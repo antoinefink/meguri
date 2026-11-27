@@ -401,6 +401,96 @@ import Testing
         core.resumeCounts(2) { _ in 0 }
     }
 
+    @Test func interruptedCountsResumeWithoutRereadingSidebarNames() async {
+        let (model, core) = await makeModel(holdCounts: true)
+        let names = core.sidebarNameReads
+        model.disappear()
+        await until { core.cancelledCounts == 1 }
+        model.appear()
+        await until { core.countCalls.count == 2 }
+        #expect(core.sidebarNameReads == names)
+        core.resumeCounts(1) { _ in 7 }
+        await until { model.counts[.deck(10)] == 7 }
+        core.resumeCounts(0) { _ in 0 }
+        // A real change still invalidates names, even after the interrupted read.
+        model.changesCommitted(Self.changes(tags: ["new-tag"]), seq: 1)
+        await until { core.sidebarNameReads > names }
+        model.disappear()
+        await until { core.cancelledCounts >= 1 }
+        for call in core.countCalls.indices { core.resumeCounts(call) { _ in 0 } }
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func failedSupplementalCountsRetryWithoutInvalidatingNames(topTags: Bool, cancelled: Bool) async throws {
+        let tags = topTags ? (1...14).map {
+            TagNode(name: "t\($0)", fullName: "t\($0)", collapsed: false, implicit: false, children: [])
+        } : nil
+        let (model, core) = await makeModel(holdCounts: true, tags: tags)
+        core.holdSuggestionCounts = !topTags
+        let task = try #require(model.countsTask)
+        let names = core.sidebarNameReads
+        core.resumeCounts(0) { _ in 3 }
+        await until { topTags ? core.countCalls.count == 2 : core.suggestionCountCalls.count == 1 }
+        if cancelled {
+            model.disappear()
+            await until { core.cancelledCounts == 1 }
+        }
+        // Finish the backend read with an error, then join the caller's catch path.
+        core.failCounts(topTags ? 1 : 0, suggestions: !topTags, cancelled: cancelled)
+        await task.value
+        #expect(model.counts[.deck(10)] == 3)
+        model.appear()
+        let retry = topTags ? 2 : 1
+        await until { core.countCalls.count == retry + 1 }
+        #expect(core.sidebarNameReads == names)
+        let retriedTask = try #require(model.countsTask)
+        core.resumeCounts(retry) { _ in 7 }
+        if topTags {
+            await until { core.countCalls.count == retry + 2 }
+            core.resumeCounts(retry + 1) { _ in 5 }
+        } else {
+            await until { core.suggestionCountCalls.count == 2 }
+            core.resumeSuggestionCounts(1)
+        }
+        await retriedTask.value
+        #expect(model.counts[.deck(10)] == 7 && model.valueCounts[.untagged] == 3)
+        // A completed retry stays complete across another appearance.
+        core.holdCounts = false
+        core.holdSuggestionCounts = false
+        let completedCalls = core.countCalls.count, completedSuggestions = core.suggestionCountCalls.count
+        model.disappear()
+        model.appear()
+        await model.countsTask?.value
+        #expect(core.countCalls.count == completedCalls && core.suggestionCountCalls.count == completedSuggestions)
+        // A real collection change still invalidates names.
+        model.changesCommitted(Self.changes(tags: ["new-tag"]), seq: 1)
+        await model.namesTask?.value
+        await model.countsTask?.value
+        #expect(core.sidebarNameReads > names)
+    }
+
+    @Test func reentryAndModeChangeWaitForNamesAlreadyInFlight() async throws {
+        let core = FakeBrowseBackend()
+        core.holdSidebarNames = true
+        core.holdCounts = true
+        let model = BrowseModel(backend: core)
+        model.appear()
+        await until { core.heldSidebarNameCount == 2 }
+        let namesTask = try #require(model.namesTask)
+        model.disappear()
+        model.appear()
+        model.setMode(.notes)
+        #expect(core.sidebarNameReads == 2 && model.countsTask == nil)
+        core.releaseSidebarNames()
+        await namesTask.value
+        await until { core.countCalls.count == 1 }
+        #expect(core.countCalls[0].0 == .notes)
+        #expect(core.countCalls[0].1.contains(.value(Self.spanish)))
+        core.resumeCounts(0) { _ in 7 }
+        await model.countsTask?.value
+        #expect(core.sidebarNameReads == 2 && model.counts[.deck(10)] == 7)
+    }
+
     @Test func countsLeftUnfinishedWhenBrowseHidesAreReadAgainWhenItShows() async {
         let (model, core) = await makeModel(holdCounts: true)
         model.disappear()
@@ -852,8 +942,19 @@ import Testing
     func renameSavedSearch(_ old: String, to name: String) async throws { renames.append((old, name)) }
     var deletedSearches: [String] = []
     func deleteSavedSearch(_ name: String) async throws { deletedSearches.append(name) }
+    var sidebarNameReads = 0
+    var holdSidebarNames = false
+    private var heldSidebarNames: [CheckedContinuation<Void, Never>] = []
+    var heldSidebarNameCount: Int { heldSidebarNames.count }
+    func releaseSidebarNames() {
+        holdSidebarNames = false
+        heldSidebarNames.forEach { $0.resume() }
+        heldSidebarNames = []
+    }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
-        switch section {
+        sidebarNameReads += 1
+        if holdSidebarNames { await withCheckedContinuation { heldSidebarNames.append($0) } }
+        return switch section {
         case .savedSearches:
             FilterBuiltIn.allCases.map { .builtIn($0) } + [.savedSearch(name: "Hard Ones", text: "is:due -tag:x")] + extraSaved
         case .decks:
@@ -867,12 +968,20 @@ import Testing
     func tagTree() async throws -> [TagNode] { tagNodes }
     func flagNames() async throws -> [String] { ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"] }
     /// The second read of a refresh, the values only the suggestions show
-    /// (U271): answered at once and kept apart from the sidebar's calls.
+    /// (U271): normally answered at once and kept apart from the sidebar's calls.
     var suggestionCountCalls: [(BrowseMode, [FilterCountItem])] = []
+    var holdSuggestionCounts = false
+    private var heldSuggestionCounts: [Int: CheckedContinuation<[UInt64?], any Error>] = [:]
     func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] {
         if items == BrowseModel.suggestedValues.map({ .value($0) }) {
+            let call = suggestionCountCalls.count
             suggestionCountCalls.append((mode, items))
-            return items.map { _ in 3 }
+            guard holdSuggestionCounts else { return items.map { _ in 3 } }
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { heldSuggestionCounts[call] = $0 }
+            } onCancel: {
+                Task { @MainActor in self.cancelledCounts += 1 }
+            }
         }
         let call = countCalls.count
         countCalls.append((mode, items))
@@ -887,6 +996,14 @@ import Testing
     func resumeCounts(_ call: Int, _ value: (FilterCountItem) -> UInt64?) {
         guard let continuation = heldCounts.removeValue(forKey: call) else { return }
         continuation.resume(returning: countCalls[call].1.map(value))
+    }
+    func resumeSuggestionCounts(_ call: Int) {
+        heldSuggestionCounts.removeValue(forKey: call)?.resume(returning: suggestionCountCalls[call].1.map { _ in 3 })
+    }
+    func failCounts(_ call: Int, suggestions: Bool, cancelled: Bool) {
+        let continuation = suggestions ? heldSuggestionCounts.removeValue(forKey: call) : heldCounts.removeValue(forKey: call)
+        if cancelled { continuation?.resume(throwing: CancellationError()) }
+        else { continuation?.resume(throwing: BridgeError.unavailable(reason: "sample")) }
     }
     var holdTagWrites = false
     private var heldTagWrites: [CheckedContinuation<Void, any Error>] = []

@@ -11,6 +11,74 @@ import AppModel
     private let spanishMining = DeckID(1_700_000_000_001)
     private let japanese = DeckID(1_700_000_000_002)
 
+    #if os(macOS)
+    @Test func sidebarFeedbackDoesNotMountOrSaveBeforeTheFrameCommit() throws {
+        let navigation = AppNavigation()
+        navigation.openDeckPage(spanishMining)
+        navigation.push(.deckOptions(spanishMining))
+        var saves: [DeckID] = []
+        navigation.deckSelectionAction = { saves.append($0) }
+        let restored = navigation.uiState
+        navigation.selectFromSidebar(.section(.browse))
+        let first = try #require(navigation.macSidebarSelectionID)
+        #expect(navigation.displayedSidebarSelection == .section(.browse))
+        #expect(navigation.section == .home)
+        #expect(navigation.detailPath == [.deckOptions(spanishMining)])
+        #expect(navigation.uiState == restored)
+        #expect(!navigation.destinationActionsAvailable)
+        navigation.selectFromSidebar(.deck(japanese))
+        let latest = try #require(navigation.macSidebarSelectionID)
+        #expect(saves.isEmpty)
+        navigation.commitMacSidebarSelection(first)
+        #expect(saves.isEmpty)
+        #expect(navigation.macSidebarSelectionID == latest)
+        navigation.commitMacSidebarSelection(latest)
+        #expect(saves == [japanese])
+    }
+
+    @Test func aNewRouteBackOrSheetCancelsTheSidebarFrameCommit() throws {
+        let navigation = AppNavigation()
+        navigation.push(.deckOptions(spanishMining))
+        navigation.selectFromSidebar(.section(.browse))
+        let beforeBack = try #require(navigation.macSidebarSelectionID)
+        navigation.detailPath = []
+        navigation.commitMacSidebarSelection(beforeBack)
+        #expect(navigation.section == .home)
+        navigation.selectFromSidebar(.section(.browse))
+        let beforeRoute = try #require(navigation.macSidebarSelectionID)
+        navigation.select(.section(.noteTypes))
+        navigation.commitMacSidebarSelection(beforeRoute)
+        #expect(navigation.section == .noteTypes)
+        navigation.selectFromSidebar(.section(.home))
+        let beforeSheet = try #require(navigation.macSidebarSelectionID)
+        navigation.present(.collectionExport)
+        navigation.commitMacSidebarSelection(beforeSheet)
+        #expect(navigation.section == .noteTypes)
+        #expect(!navigation.sidebarInteractionPending)
+    }
+
+    @Test func repeatedClickKeepsItsFenceAndDoubleClickCompletionButNewIntentCancelsBoth() throws {
+        let navigation = AppNavigation()
+        var studies = 0
+        navigation.selectFromSidebar(.deck(japanese))
+        let intent = try #require(navigation.macSidebarSelectionID)
+        navigation.afterMacSidebarSelection { studies += 1 }
+        navigation.selectFromSidebar(.deck(japanese))
+        #expect(navigation.macSidebarSelectionID == intent)
+        #expect(studies == 0)
+        navigation.commitMacSidebarSelection(intent)
+        #expect(studies == 1)
+        navigation.selectFromSidebar(.deck(spanishMining))
+        let cancelled = try #require(navigation.macSidebarSelectionID)
+        navigation.afterMacSidebarSelection { studies += 1 }
+        navigation.cancelMacSidebarSelection()
+        navigation.commitMacSidebarSelection(cancelled)
+        #expect(studies == 1)
+        #expect(navigation.homeDeckPage == japanese)
+        #expect(navigation.displayedSidebarSelection == .deck(japanese))
+    }
+    #endif
+
     /// A stand-in for a feature's model (U175's review session, U195's Add
     /// draft): only its identity matters here.
     private final class FeatureModel {
