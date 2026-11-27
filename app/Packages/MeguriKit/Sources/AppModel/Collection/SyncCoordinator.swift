@@ -2578,6 +2578,13 @@ public final class SyncCoordinator {
                 replacing = false
                 await migrateRound2Settings()
                 await successor.attached(settings: settings)
+                // attachProvider's load is refused while replacement owns the
+                // guard. Rehydrate only this still-current, idle successor.
+                if !closing, !replacing, !Task.isCancelled, expected == generation,
+                   revision == hostRevision, backend === successor, ownerState == .attached,
+                   providerState?.selection == .meguri, !meguriBusy {
+                    loadMeguriConnection()
+                }
                 if observeSignals { observePlatformSignals() }
                 return
             }

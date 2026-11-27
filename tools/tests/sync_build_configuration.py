@@ -14,7 +14,7 @@ def require(condition, message):
 
 
 def protected(key):
-    return any(term in key.lower() for term in ("icloud", "ubiquity", "aps-environment"))
+    return any(term in key.lower() for term in ("icloud", "ubiquity", "ubiquitous", "aps-environment"))
 
 
 def check(settings, configuration, platform, signing, info=None, entitlements=None, widget=None,
@@ -30,7 +30,7 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
     for key, value in settings.items():
         require(not key.startswith("MEGURI_CLOUD") and "MeguriCloud" not in key, "retired cloud build setting")
         if key in ("OTHER_LDFLAGS", "OTHER_SWIFT_FLAGS") or key.startswith("INFOPLIST_KEY_"):
-            require(not any(term in (key + str(value)).lower() for term in ("cloudkit", "meguricloud", "remote-notification", "icloud", "ubiquity", "aps-environment")), "retired framework or Info setting")
+            require(not any(term in (key + str(value)).lower() for term in ("cloudkit", "meguricloud", "remote-notification", "icloud", "ubiquity", "ubiquitous", "aps-environment")), "retired framework or Info setting")
     for artifact, label in ((info, "Info"), (entitlements, "app entitlement"), (widget, "widget entitlement")):
         if artifact is not None:
             check_plist(artifact, label)

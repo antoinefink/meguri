@@ -164,6 +164,10 @@ if [ "$action" = build ]; then
     cp "$w/Contents/MacOS/MeguriWidget" "$p/PlugIns/MeguriWidget.appex/MeguriWidget"
     cp "$p/Contents/Info.plist" "$p/Info.plist"
     cp "$w/Contents/Info.plist" "$p/PlugIns/MeguriWidget.appex/Info.plist"
+    if [ "$config" = Release ]; then
+      cp "$p/Contents/embedded.provisionprofile" "$p/embedded.mobileprovision"
+      [ "${FX_WIDGET_NO_PROFILE:-0}" = 1 ] || cp "$w/Contents/embedded.provisionprofile" "$p/PlugIns/MeguriWidget.appex/embedded.mobileprovision"
+    fi
     rm -rf "$p/Contents"
   fi
   [ "${FX_SOURCE_CHANGE:-0}" = 0 ] || echo "synthetic mutation" >>app/TestPlans/Performance.xctestplan
@@ -3383,7 +3387,7 @@ PY
 
 # Preserve the real build/settings boundary; stop at the synthetic compiler
 # failure, before signed-product verification or any installer/device process.
-@test "physical personal preview selects team Release device core isolated products and exact inventory under host lease" {
+@test "physical personal preview selects team Release device core isolated products profiles and exact inventory under host lease" {
   personal_facts
   jq 'map(.buildSettings |= (.CODE_SIGN_ENTITLEMENTS |= sub("macOS"; "iOS")) + {
     PLATFORM_NAME:"iphoneos", MEGURI_SIGNING:"team", DEVELOPMENT_TEAM:"TESTTEAM01",
@@ -3413,8 +3417,20 @@ PY
       [ "$(field .details.build.personal_preview)" = true ]
       [ "$(field .details.build.config)" = Release ]
       [ "$(field .details.build.messages)" = null ]
+      local candidate="$SB/build/app/PersonalDevicePreviewDerivedData/Build/Products/Release-iphoneos/Meguri.app"
+      cmp "$FX_APP_PROFILE" "$candidate/embedded.mobileprovision"
+      cmp "$FX_WIDGET_PROFILE" "$candidate/PlugIns/MeguriWidget.appex/embedded.mobileprovision"
+      [ ! -e "$candidate/Contents" ]
+      [ ! -e "$candidate/PlugIns/MeguriWidget.appex/Contents" ]
     done
   done
+  # The synthetic missing-widget-profile case must remain missing on iOS too.
+  rm -rf "$candidate"
+  FX_WIDGET_NO_PROFILE=1 FX_BUILD_RC=1 mg run --personal-preview --platform ipad --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = build ]
+  cmp "$FX_APP_PROFILE" "$candidate/embedded.mobileprovision"
+  [ ! -e "$candidate/PlugIns/MeguriWidget.appex/embedded.mobileprovision" ]
   : >"$STUB_LOG"
   mg run --personal-preview --platform iphone --physical-device "$SIM"
   [ "$status" -eq 2 ]

@@ -10,7 +10,11 @@ extension ReviewCollectionStartupTests {
     private actor ProviderOnlyCredentials: MeguriProviderCredentialStore {
         private var value: MeguriProviderCredentials?
         private(set) var savedCount = 0
-        func load(connection: MeguriProviderConnection) -> MeguriProviderCredentials? { value }
+        private(set) var loadedCount = 0
+        func load(connection: MeguriProviderConnection) -> MeguriProviderCredentials? {
+            loadedCount += 1
+            return value
+        }
         func save(_ credentials: MeguriProviderCredentials) { value = credentials; savedCount += 1 }
         func delete(connection: MeguriProviderConnection) throws { value = nil }
     }
@@ -78,11 +82,19 @@ extension ReviewCollectionStartupTests {
                     #expect(try await CoreCollectionService().lifecycle() == .noCollection)
                     #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
                     try #require(app.owner.canStartEmpty)
+                    let previousConnection = try await sync.meguriConnection()
+                    let previousLoads = await store.loadedCount
                     await app.owner.startEmpty()
                     try #require(app.owner.state == .ready, "\(app.owner.error ?? "Creation did not become ready")")
                     await app.sync.waitForInputs(); await app.sync.waitForReplacement(); await app.sync.waitForMeguriAction()
                     #expect(app.sync.providerState?.selection == .meguri && app.sync.meguriSignInAttached && !app.sync.operationFailed)
                     #expect(app.sync.generation == app.owner.generation)
+                    // Collection creation replaces the provider owner. Its
+                    // selected connection must reload once after that drain.
+                    #expect(app.sync === sync)
+                    #expect(try await sync.meguriConnection() !== previousConnection)
+                    #expect(await store.loadedCount == previousLoads + 1)
+                    #expect(sync.meguriEndpoint == endpoint && !sync.meguriBusy)
                 }
                 try #require(await app.owner.close())
             } catch { _ = await app.owner.close(); throw error }

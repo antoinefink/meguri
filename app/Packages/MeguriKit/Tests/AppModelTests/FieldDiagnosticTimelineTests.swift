@@ -197,7 +197,7 @@ import Testing
         #expect(Set(header.keys).isSubset(of: ["schemaVersion", "generatedAtUTC", "appVersion", "appBuild", "appVersionUnavailable", "appBuildUnavailable", "osFamily", "osVersion"]))
         #expect((info["metrics"] as? [Any])?.isEmpty == true)
         #expect((info["diagnostics"] as? [Any])?.isEmpty == true)
-        #expect((info["rootReads"] as? [Any])?.isEmpty == true)
+        #expect(info["rootReads"] == nil)
         #expect(info["collectionDetailsUnavailable"] as? Bool == true)
         #expect(SafeFieldDiagnosticsExport.Header.safeVersion("1.2.3") == "1.2.3")
         #expect(SafeFieldDiagnosticsExport.Header.safeVersion("/private/token-secret") == nil)
@@ -229,8 +229,7 @@ import Testing
         #expect(!String(decoding: bytes, as: UTF8.self).contains(secret))
         let projected = try #require((info["diagnostics"] as? [[String: Any]])?.first)
         #expect(Set(projected.keys) == ["receivedAtUnixMilliseconds", "reportTime", "kind", "detailsUnavailable"])
-        #expect((info["rootReads"] as? [[String: Any]])?.first?["outcome"] as? String == "other")
-        #expect((info["rootReads"] as? [[String: Any]])?.first?["a7Failure"] as? Bool == true)
+        #expect(info["rootReads"] == nil)
         #expect(info["coreSnapshotIsAtomic"] as? Bool == false)
     }
 

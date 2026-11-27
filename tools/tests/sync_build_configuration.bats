@@ -120,6 +120,43 @@ PY
   done
 }
 
+@test "both products reject the NSUbiquitousContainers family in Info and injected settings" {
+  cp "$FX/settings.json" "$FX/good.json"
+  local target bundle key
+  for target in Meguri MeguriWidget; do
+    bundle="$FX/Meguri.app"
+    [ "$target" = Meguri ] || bundle="$bundle/Contents/PlugIns/MeguriWidget.appex"
+    cp "$bundle/Contents/Info.plist" "$FX/good-info.plist"
+    for key in NSUbiquitousContainers NSUbiquitousContainersSynthetic; do
+      python3 - "$bundle/Contents/Info.plist" "$key" <<'PY'
+import plistlib, sys
+from pathlib import Path
+path, key = Path(sys.argv[1]), sys.argv[2]
+data = plistlib.loads(path.read_bytes())
+data[key] = {'synthetic.container': {'NSUbiquitousContainerIsDocumentScopePublic': False}}
+path.write_bytes(plistlib.dumps(data))
+PY
+      check_product
+      [ "$status" -eq 1 ]
+      cp "$FX/good-info.plist" "$bundle/Contents/Info.plist"
+      python3 - "$FX" "$target" "$key" <<'PY'
+import json, sys
+from pathlib import Path
+root, target, key = Path(sys.argv[1]), *sys.argv[2:]
+data = json.loads((root / 'good.json').read_text())
+next(t['buildSettings'] for t in data if t['target'] == target)['INFOPLIST_KEY_' + key] = {
+    'synthetic.container': {'NSUbiquitousContainerIsDocumentScopePublic': False}}
+(root / 'settings.json').write_text(json.dumps(data))
+PY
+      check_product
+      [ "$status" -eq 1 ]
+      cp "$FX/good.json" "$FX/settings.json"
+    done
+  done
+  check_product
+  [ "$status" -eq 0 ]
+}
+
 @test "allowed settings retain all configurations platforms and supported preview identities" {
   run python3 -B - "$REPO_ROOT/tools/tests" <<'PY'
 import sys
