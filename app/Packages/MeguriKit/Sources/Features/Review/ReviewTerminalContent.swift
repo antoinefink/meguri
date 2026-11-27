@@ -94,7 +94,7 @@ struct ReviewTerminalContent: View {
                 .reviewStateTarget()
         }
         if !waiting, let customStudy {
-            Button(action: customStudy) { Text("Custom Study…", bundle: .module).reviewStateLabel() }
+            Button(action: customStudy) { Text("Custom Study", bundle: .module).reviewStateLabel() }
                 .focused($customStudyFocused)
                 .disabled(!canFinish)
                 .accessibilityIdentifier("review.session.customStudy")

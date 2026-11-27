@@ -61,7 +61,7 @@ Its actions:
 |---|---|---|---|
 | Options | all decks | normal decks open Deck Options, filtered decks open the search editor | edit the selected deck |
 | Rebuild, Empty | filtered decks only | filtered decks only | `decks/filtered-study#F2` |
-| Custom Study | normal decks only | normal decks, including their finished state | `decks/filtered-study#F5` |
+| Custom Study | normal decks only | normal decks: in the deck menu, and in Study's place in the finished state (H5); an empty deck keeps Add Note (H5.4). Changed 2026-11-27 (owner, chat) | `decks/filtered-study#F5` |
 | Unbury | the deck has buried cards | the record's `sibling_buried` + `user_buried` > 0 (the deck's full subtree by `did`, `sched/manual-ops#M5`) | with both counts above 0, S9's chooser (manual, siblings, all; manual is the default choice); with one kind only, mode all at once, with no chooser |
 | Description | normal decks only | normal decks | the description editor (`decks/decks#D14`, R81, R84) |
 
@@ -256,7 +256,7 @@ These are interface differences. No golden shows them, so `conformance/deviation
 - A filtered deck has its own page and Study action (H3, H4).
 - Deck lists hide zero counts (N11.5, N13.2). Anki shows them dimmed (H2).
 - Anki redraws its deck list every 10 minutes; Meguri redraws only on its triggers (H2, R1854).
-- The normal deck page and its finished state offer Custom Study (H4, `decks/filtered-study#F5`). Meguri omits the shared-deck "Reviews and Updates" link.
+- A normal deck offers Custom Study in its deck menu, and on its page only in the finished state, in Study's place (H4, `decks/filtered-study#F5`). Anki's overview always shows it. Changed 2026-11-27 (owner, chat). Meguri omits the shared-deck "Reviews and Updates" link.
 - Descriptions are sanitized (R82). Anki inserts the HTML unchanged.
 - The deck search's create row replaces Anki's Add button (R27). Ctrl+1 to Ctrl+9 are not bound (H6.3).
 - The New Deck form starts with an empty Name and Parent Deck None. Anki pre-fills the current deck's name (H7). A name made only of U+001C to U+001F (with or without White_Space) creates `blank`; Anki creates nothing (H7).

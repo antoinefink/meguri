@@ -178,7 +178,9 @@ screens:
       Study button, the finished state, the Subdecks section, then the deck's activity heatmap with its
       subdecks (N14.11, stats/activity-heatmap). Changed 2026-11-22 (round 11, N25.1): the Activity
       header is a button that opens Statistics on that deck (stats/statistics-page S13); streak
-      stats stay off the deck page (they are on the Statistics page).
+      stats stay off the deck page (they are on the Statistics page). Changed 2026-11-27 (owner,
+      chat; N14.3): a regular deck with cards waiting shows Study alone; finished, Custom Study in
+      Study's place; empty, Add Note.
   - id: home.deckMenu
     title: Deck menu
     units: [U152, U156]

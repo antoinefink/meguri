@@ -1369,7 +1369,7 @@
       }
     },
     "Create Filtered Deck": {
-      "comment": "Title of the form for a new saved filtered search.",
+      "comment": "Title of the form for a new saved filtered search, and the command opening it (no ellipsis, owner choice).",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1391,7 +1391,7 @@
       }
     },
     "Custom Study": {
-      "comment": "Title of the normal deck’s custom study form.",
+      "comment": "Title of the normal deck’s custom study form, and the command and button opening it (no ellipsis, owner choice).",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1969,28 +1969,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Edit Filtered Deck…"
-          }
-        }
-      }
-    },
-    "Create Filtered Deck…": {
-      "comment": "Command opening a new filtered-search definition.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Create Filtered Deck…"
-          }
-        }
-      }
-    },
-    "Custom Study…": {
-      "comment": "Command opening custom study choices for a normal deck.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Custom Study…"
           }
         }
       }

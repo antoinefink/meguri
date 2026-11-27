@@ -27,14 +27,14 @@ import Testing
             == 2 * Int(UInt32.max) + 1)
     }
 
-    @Test func onlyARegularDeckWithNothingWaitingOffersAddNote() {
+    @Test func onlyARegularDeckWithNothingWaitingRests() {
         let none = ReviewCounts(new: 0, learning: 0, review: 0)
-        #expect(DeckWaiting(counts: none, filtered: false).offersAddNote)
-        // A filtered deck cannot take notes: its empty page offers Rebuild (F6).
-        #expect(!DeckWaiting(counts: none, filtered: true).offersAddNote)
+        #expect(DeckWaiting(counts: none, filtered: false).regularNothingWaiting)
+        // A filtered deck with nothing waiting offers Rebuild instead (F6).
+        #expect(!DeckWaiting(counts: none, filtered: true).regularNothingWaiting)
         for counts in [ReviewCounts(new: 1, learning: 0, review: 0), ReviewCounts(new: 0, learning: 1, review: 0),
                        ReviewCounts(new: 0, learning: 0, review: 1)] {
-            #expect(!DeckWaiting(counts: counts, filtered: false).offersAddNote)
+            #expect(!DeckWaiting(counts: counts, filtered: false).regularNothingWaiting)
         }
     }
 

@@ -13,9 +13,9 @@ nonisolated public struct DeckWaiting: Sendable, Equatable {
 
     /// New, learning and to-review cards together.
     public var total: Int { counts.waiting }
-    /// A regular deck with nothing waiting says so and offers Add Note in Study's place.
-    /// A filtered deck cannot take notes: an empty one offers Rebuild (F6).
-    public var offersAddNote: Bool { total == 0 && !filtered }
+    /// A regular deck with nothing waiting says so and offers Custom Study in Study's place,
+    /// or Add Note when it has no card (N14.3). A filtered one offers Rebuild instead (F6).
+    public var regularNothingWaiting: Bool { total == 0 && !filtered }
     /// A sidebar row reads quieter with nothing waiting, except on the selection highlight.
     public func quietInSidebar(selected: Bool) -> Bool { total == 0 && !selected }
 }

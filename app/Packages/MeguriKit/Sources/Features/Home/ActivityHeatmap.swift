@@ -58,11 +58,12 @@ struct ActivityHeatmapSection: View {
     /// N14.11's fixed squares; Mac Home reveals older weeks as its row grows.
     #if os(macOS)
     static let square = ActivityGrid.Square.mac
-    static let gridAlignment = Alignment.trailing
     #else
     static let square = ActivityGrid.Square.touch
-    static let gridAlignment = Alignment.leading
     #endif
+    /// N24.6: the grid and its month labels start at the row's leading edge, under the
+    /// header and in line with the summary; the unused width, less than one pitch, trails.
+    static let gridAlignment = Alignment.leading
 
     /// Shared by the view and focused resize checks, including a hidden section's
     /// remeasurement and bounded legacy service coverage.
@@ -181,7 +182,8 @@ struct ActivityHeatmapSection: View {
     }
 }
 
-/// Weeks as columns, the newest trailing; days as rows from the locale's first weekday.
+/// Weeks as columns, the newest the grid's trailing column; days as rows from the locale's
+/// first weekday. The row places the grid at its leading edge.
 private struct ActivityGridView: View {
     let grid: ActivityGrid
     let geometry: ActivityGrid.Geometry

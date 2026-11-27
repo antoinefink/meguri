@@ -52,15 +52,20 @@ public nonisolated struct HomeSnapshot: Codable, Equatable, Sendable {
     public var previous: Previous?
     /// The tab layout's list: the previous session's answers.
     public var previousAnswers: Int?
+    /// Regular decks whose page last read them empty (H5.4): their kept page offers Add Note,
+    /// any other with nothing waiting Custom Study (N14.3). Nil in a file written before it.
+    public var emptyDecks: [Int64]?
 
     public init(collection: CollectionFileIdentity, dayEndsAt: Int64?, decks: [CountedDeckNode],
-                studied: StudiedToday?, nextLearningReadyAt: Date?, previous: Previous?, previousAnswers: Int?) {
+                studied: StudiedToday?, nextLearningReadyAt: Date?, previous: Previous?, previousAnswers: Int?,
+                emptyDecks: [Int64] = []) {
         version = Self.currentVersion
         self.collection = collection; self.dayEndsAt = dayEndsAt
         self.decks = decks.map(Deck.init)
         self.studied = studied.map(Studied.init)
         self.nextLearningReadyAt = nextLearningReadyAt; self.previous = previous
         self.previousAnswers = previousAnswers
+        self.emptyDecks = emptyDecks
     }
 
     /// Whether the counts are this study day's: before the day they were read in ends.

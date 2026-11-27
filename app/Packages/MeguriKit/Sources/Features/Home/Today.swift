@@ -60,7 +60,7 @@ enum HomeHeading {
     static func deckTitle(_ fullName: String) -> String { fullName.components(separatedBy: "::").last ?? fullName }
     /// The deck's counts, zeros included, or the nothing-waiting line.
     static func deckSubtitle(_ waiting: DeckWaiting, locale: Locale) -> String {
-        waiting.offersAddNote ? String(localized: "Nothing to study right now", bundle: .module)
+        waiting.regularNothingWaiting ? String(localized: "Nothing to study right now", bundle: .module)
             : waiting.counts.summary(locale: locale)
     }
     /// Today's totals; nothing at all while nothing waits.

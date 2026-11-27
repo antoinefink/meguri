@@ -242,10 +242,11 @@ public struct HomeView: View {
         return HomeHeading.todaySubtitle(TodayDecks.totals(nodes: collection.homeDecks), locale: locale)
     }
     #endif
-    /// N14.3: a regular deck with nothing waiting says so and offers Add Note in Study's place.
+    /// N14.3: a deck with nothing waiting says so; a regular one offers Custom Study in Study's
+    /// place, or Add Note when it has no card (`homeDeckEmpty`), a filtered one Rebuild.
     private func nothingDue(_ deck: ReviewCollection.DeckPageDetail) -> Bool {
         if phase == .kept {
-            return DeckWaiting(counts: deck.counts, filtered: collection.homeDeck(deck.id)?.filtered == true).offersAddNote
+            return DeckWaiting(counts: deck.counts, filtered: collection.homeDeck(deck.id)?.filtered == true).regularNothingWaiting
         }
         return !collection.offersStudy(deckID: deck.id)
     }
@@ -385,14 +386,9 @@ public struct HomeView: View {
         let empty = nothingDue(deck)
         return List {
             deckSummary(deck, empty: empty)
-            Section {
-                if collection.deck(deck.id)?.filtered == true {
-                    FilteredDeckActions(collection: collection, deck: deck.id)
-                } else {
-                    Button { collection.filteredStudy.custom(deck.id) } label: { Text("Custom Study…", bundle: .module) }
-                        .disabled(!collection.filteredStudy.canCustom(deck.id))
-                        .accessibilityIdentifier("home.deck.customStudy")
-                }
+            // A regular deck's Custom Study is its finished action and in the deck menu (N14.3).
+            if collection.deck(deck.id)?.filtered == true {
+                Section { FilteredDeckActions(collection: collection, deck: deck.id) }
             }
             if !subdecks.isEmpty {
                 Section {
@@ -440,7 +436,8 @@ public struct HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!collection.filteredStudy.canEdit(deck.id))
                 .accessibilityIdentifier("home.deck.rebuild")
-        } else if empty {
+        } else if empty && collection.homeDeckEmpty(deck.id) {
+            // H5.4: no card in the deck or its subdecks.
             Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
                 Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "plus") }
             }
@@ -448,6 +445,15 @@ public struct HomeView: View {
             .frame(minHeight: ControlMetrics.minimumTarget)
             .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
             .accessibilityIdentifier("home.deck.empty.addNote")
+        } else if empty {
+            // Finished: cards, none waiting now (F5).
+            Button { collection.filteredStudy.custom(deck.id) } label: {
+                Label { Text("Custom Study", bundle: .module) } icon: { Image(systemName: "slider.horizontal.3") }
+            }
+            .buttonStyle(.bordered)
+            .frame(minHeight: ControlMetrics.minimumTarget)
+            .disabled(!collection.filteredStudy.canCustom(deck.id))
+            .accessibilityIdentifier("home.deck.customStudy")
         } else {
             Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                 #if os(macOS)
@@ -1361,7 +1367,7 @@ public struct HomeAddMenu: View {
                     if fromBrowse { collection.filteredStudy.createFromBrowse() }
                     else { collection.filteredStudy.create(deck: deckID) }
                 } label: {
-                    Label { Text("Create Filtered Deck…", bundle: .module) } icon: { Image(systemName: "line.3.horizontal.decrease") }
+                    Label { Text("Create Filtered Deck", bundle: .module) } icon: { Image(systemName: "line.3.horizontal.decrease") }
                 }
                 .disabled(!collection.filteredStudy.canPresent)
                 .accessibilityIdentifier("home.collection.createFilteredDeck")

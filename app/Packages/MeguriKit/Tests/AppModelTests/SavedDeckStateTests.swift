@@ -213,6 +213,25 @@ import Testing
         #expect(owner.error == "Couldn’t refresh the deck. Try again.")
     }
 
+    /// N14.3, H5.4: the page offers Add Note only once a read found no card; any other
+    /// regular deck with nothing waiting is finished. A failed or running read keeps the last answer.
+    @Test func deckPageEmptinessSeparatesEmptyFromFinished() async throws {
+        let (owner, _) = await makeOwner()
+        #expect(await owner.openDeckPage(deckID: 1).value)
+        #expect(!owner.homeDeckEmpty(1), "Unread: finished, never guessed empty")
+        let request = try #require(owner.deckPageRefreshRequest)
+        owner.loadFixtureDeckEmptiness = { _ in true }
+        await owner.refreshDeckPage(request)
+        #expect(owner.homeDeckEmpty(1))
+        #expect(!owner.homeDeckEmpty(2))
+        owner.loadFixtureDeckEmptiness = { _ in throw BridgeError.internal("Synthetic detail failure") }
+        await owner.refreshDeckPage(request)
+        #expect(owner.homeDeckEmpty(1), "A failed read keeps the last one")
+        owner.loadFixtureDeckEmptiness = { _ in false }
+        await owner.refreshDeckPage(request)
+        #expect(!owner.homeDeckEmpty(1))
+    }
+
     @Test(arguments: [false, true])
     func abandonedSelectionFailureDoesNotReachHomeOrAnotherSection(showsAnotherSection: Bool) async {
         let (owner, store) = await makeOwner()

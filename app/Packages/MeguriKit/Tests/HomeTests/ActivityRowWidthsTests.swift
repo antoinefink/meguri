@@ -43,6 +43,27 @@ import Testing
         #expect(widths.row(.deckList) == 700)
     }
 
+    /// N24.6 (changed 2026-11-27): on every platform the grid and its month labels start at
+    /// the row's leading edge, under the header and the summary line; whatever width whole
+    /// weeks leave over, always less than one pitch, is at the trailing side.
+    @Test func theGridStartsAtTheLeadingEdgeAndLeavesUnderOnePitchTrailing() {
+        #expect(ActivityHeatmapSection.gridAlignment == Alignment.leading)
+        let history = ActivityDays(generation: 1, schedulerDay: 10, nextDayAt: 0,
+                                   today: .init(year: 2026, month: 11, day: 24, weekday: 3),
+                                   counts: [], history: [0: 3])
+        let pitch = ActivityHeatmapSection.square.side + ActivityHeatmapSection.square.gap
+        var weeks: [Int] = []
+        // Every point from one week less than a year to well past it, Mac and touch alike.
+        for width in stride(from: CGFloat(600), through: 700, by: 1) {
+            let geometry = ActivityHeatmapSection.Presentation(days: history, width: width, firstWeekday: 1).geometry
+            let unused = width - geometry.width
+            #expect(unused >= 0 && unused < pitch, "\(width) pt leaves \(unused) pt")
+            weeks.append(geometry.weeks)
+        }
+        // A wider row only adds whole weeks, one per pitch.
+        #expect(zip(weeks, weeks.dropFirst()).allSatisfy { $1 == $0 || $1 == $0 + 1 })
+    }
+
     #if os(macOS)
     private func days(_ history: [Int: UInt32]?) -> ActivityDays {
         ActivityDays(generation: 1, schedulerDay: 10, nextDayAt: 0,
@@ -70,7 +91,6 @@ import Testing
             widths.measuredRow(page, 634)
             #expect(!ActivityHeatmapSection.Presentation(days: old, width: widths.row(page), firstWeekday: 1).visible)
         }
-        #expect(ActivityHeatmapSection.gridAlignment == Alignment.trailing)
     }
 
     @Test func emptyStartupAndBoundedLegacyResultsKeepTheirCoverage() {
