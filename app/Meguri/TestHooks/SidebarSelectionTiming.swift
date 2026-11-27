@@ -203,6 +203,8 @@ extension TestHooks {
             }
             watched = steps.compactMap { step in step.table.map { (table: $0, row: step.row, down: step.down, selected: TimeInterval?.none, lost: TimeInterval?.none) } }
             sampler?.start()
+            // Every exit stops it: it suspends the main thread while it runs.
+            defer { sampler?.stop() }
             let late = await Self.post(ScheduledEvents(
                 events: events, times: times, application: unsafeBitCast(NSApplication.shared, to: (any EventPosting).self)))
             // Times count from each event's timestamp: a late post only adds to them.
@@ -277,7 +279,12 @@ extension TestHooks {
                 // Its own commit, never a later press's; none when a later press superseded it.
                 let commit = intended.flatMap { route in commits.first { $0.time >= step.down && $0.value == route } }
                 // The outgoing page before the route changes: any frame that changes it is a flash.
-                let before = frames.filter { $0.time >= step.down && $0.time < (commit?.time ?? nextDown) }
+                // Captured frames trail the app's own commits by the window server's
+                // compositing (tens of milliseconds in the test VM): the window ends at the
+                // commit plus that delay, measured as the row's frame against its state.
+                let selectedAt = watched.first { $0.down == step.down }?.selected
+                let lag = shown.flatMap { shown in selectedAt.map { max(0, shown.time - $0) } } ?? 0
+                let before = frames.filter { $0.time >= step.down && $0.time < (commit.map { $0.time + lag } ?? nextDown) }
                 let content = commit.flatMap { commit in frames.first { $0.time > commit.time && $0.detail >= FrameStore.contentThreshold } }
                 var entry: [String: Any] = [
                     "label": step.label,
@@ -286,6 +293,8 @@ extension TestHooks {
                     "rowMax": (frames.map { $0.rows[index] }.max() ?? 0),
                     "detailBeforeCommitMax": before.map(\.delta).max() ?? 0,
                     "detailBeforeCommitFrames": before.filter { $0.delta >= FrameStore.flashThreshold }.count,
+                    "framesBeforeCommit": before.count,
+                    "captureLagMs": ms(lag),
                     "commitMs": commit.map { ms($0.time - step.down) } ?? NSNull(),
                     "commit": commit?.value ?? NSNull(),
                     "route": intended ?? NSNull(),
@@ -547,7 +556,8 @@ extension TestHooks {
             let detail = Self.sample(pixels, geometry, detailRect, stride: 8)
             records.append(Record(time: time, displayed: displayed, rows: rows,
                                   detail: Self.difference(detail, baselineDetail), delta: Self.difference(detail, previousDetail)))
-            if !detail.isEmpty { previousDetail = detail }
+            // A frame with no display time is no reference for the next dated one.
+            if displayed, !detail.isEmpty { previousDetail = detail }
         }
 
         private static func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
@@ -570,11 +580,12 @@ extension TestHooks {
             let width = CVPixelBufferGetWidth(pixels), height = CVPixelBufferGetHeight(pixels)
             let bytesPerRow = CVPixelBufferGetBytesPerRow(pixels)
             let scale = geometry.contentScale * geometry.scaleFactor
-            let minX = max(0, Int((geometry.contentRect.minX * geometry.scaleFactor) + rect.minX * scale))
-            let minY = max(0, Int((geometry.contentRect.minY * geometry.scaleFactor) + rect.minY * scale))
-            let maxX = min(width, Int((geometry.contentRect.minX * geometry.scaleFactor) + rect.maxX * scale))
-            let maxY = min(height, Int((geometry.contentRect.minY * geometry.scaleFactor) + rect.maxY * scale))
-            guard maxX > minX, maxY > minY else { return [] }
+            let minX = Int((geometry.contentRect.minX * geometry.scaleFactor) + rect.minX * scale)
+            let minY = Int((geometry.contentRect.minY * geometry.scaleFactor) + rect.minY * scale)
+            let maxX = Int((geometry.contentRect.minX * geometry.scaleFactor) + rect.maxX * scale)
+            let maxY = Int((geometry.contentRect.minY * geometry.scaleFactor) + rect.maxY * scale)
+            // The whole region or nothing: a clipped strip would compare as unchanged.
+            guard minX >= 0, minY >= 0, maxX <= width, maxY <= height, maxX > minX, maxY > minY else { return [] }
             var out: [UInt8] = []
             out.reserveCapacity(((maxX - minX) / stride + 1) * ((maxY - minY) / stride + 1) * 3)
             var y = minY

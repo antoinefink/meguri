@@ -34,7 +34,10 @@ final class SidebarSelectionTimingTests: PerfTestCase {
         let decks = any.matching(NSPredicate(format: "identifier BEGINSWITH 'home.sidebar.deck.'"))
         XCTAssert(decks.firstMatch.waitForExistence(timeout: 180), "the sidebar showed no deck rows")
         let deckRows = decks.allElementsBoundByIndex.prefix(2).map(\.identifier)
-        XCTAssertEqual(deckRows.count, 2, "the 150k fixture shows two decks")
+        guard deckRows.count == 2 else {
+            XCTFail("the 150k fixture shows two decks, found \(deckRows.count)")
+            return
+        }
         let deck = deckRows.map { "deck:" + $0.replacingOccurrences(of: "home.sidebar.deck.", with: "") }
         // Every row's place, read once while the app is idle: later queries can
         // wait on a busy app, and the rows do not move (Browse's sidebar keeps
@@ -157,6 +160,8 @@ final class SidebarSelectionTimingTests: PerfTestCase {
         }
         // Nothing of the outgoing page changes before the route does: no dimming,
         // no relayout of its columns.
+        // At least the row's own frame precedes the commit: no frame is no evidence.
+        XCTAssertGreaterThan(step["framesBeforeCommit"] as? Int ?? 0, 0, "\(label): no displayed frame before the route changed")
         XCTAssertEqual(step["detailBeforeCommitFrames"] as? Int, 0, "\(label): the outgoing page changed before the new one")
     }
 

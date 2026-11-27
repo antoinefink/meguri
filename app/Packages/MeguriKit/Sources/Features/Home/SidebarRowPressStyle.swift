@@ -19,22 +19,22 @@ public struct SidebarRowPressStyle: PrimitiveButtonStyle {
 
     private struct Pressed: View {
         let configuration: Configuration
-        /// One action per press, however far the pointer then moves.
-        @State private var down = false
+        /// One action per press, however far the pointer then moves. Gesture
+        /// state: SwiftUI clears it when the press ends or is cancelled.
+        @GestureState private var down = false
 
         var body: some View {
             configuration.label
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
+                    .updating($down) { _, down, _ in
                         guard !down else { return }
                         down = true
                         // A Control-click opens the row's menu, as in a source list: it
                         // does not select the row.
                         guard !NSEvent.modifierFlags.contains(.control) else { return }
                         configuration.trigger()
-                    }
-                    .onEnded { _ in down = false })
+                    })
                 // The gesture replaces the button's own: VoiceOver's press keeps the action.
                 .accessibilityAction { configuration.trigger() }
         }
