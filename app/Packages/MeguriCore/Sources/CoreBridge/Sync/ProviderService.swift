@@ -8,7 +8,7 @@ public enum SyncProviderPhase: Sendable, Equatable { case localOnly, setupRequir
 public struct SyncProviderState: Sendable {
     public let selection: SyncProviderSelection?
     public let phase: SyncProviderPhase
-    public let settings: CloudPolicyDeviceSettings?
+    public let settings: SyncDeviceSettings?
     public let revision: UInt64
     public let removalPending: Bool
     init(_ value: MeguriCoreBindings.ProviderSnapshot) {
@@ -18,13 +18,12 @@ public struct SyncProviderState: Sendable {
         revision = value.revision
         removalPending = value.removalPending
     }
-    public var permitsICloudStartup: Bool { false }
     public static let blocked = SyncProviderState(selection: nil, phase: .blocked, settings: nil, revision: 0)
     /// Rendering fixtures only: a synthetic value that describes no stored selection.
     public static func renderFixture(selection: SyncProviderSelection, phase: SyncProviderPhase) -> SyncProviderState {
         SyncProviderState(selection: selection, phase: phase, settings: nil, revision: 0)
     }
-    private init(selection: SyncProviderSelection?, phase: SyncProviderPhase, settings: CloudPolicyDeviceSettings?, revision: UInt64) {
+    private init(selection: SyncProviderSelection?, phase: SyncProviderPhase, settings: SyncDeviceSettings?, revision: UInt64) {
         self.selection = selection; self.phase = phase; self.settings = settings; self.revision = revision; removalPending = false
     }
 }
@@ -65,7 +64,7 @@ public actor CoreProviderService: MeguriProviderConnectionService {
     public static func legacyMigrationJSON(_ value: Any?) -> String? {
         do { return try strictLegacyJSON(value) } catch { return "null" }
     }
-    public static func legacySettings(_ value: Any?) throws -> CloudPolicyDeviceSettings {
+    public static func legacySettings(_ value: Any?) throws -> SyncDeviceSettings {
         guard let text = try strictLegacyJSON(value) else { return .init(enabled: false, paused: false, automatic: true, media: true) }
         let values = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Bool]
         guard let values else { throw BridgeError.unavailable(reason: "Sync settings could not be read") }
@@ -96,7 +95,7 @@ public actor CoreProviderService: MeguriProviderConnectionService {
         let raw = raw
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerRefresh) { try raw.refresh() })
     }
-    public func saveSettings(_ settings: CloudPolicyDeviceSettings) async throws -> SyncProviderState {
+    public func saveSettings(_ settings: SyncDeviceSettings) async throws -> SyncProviderState {
         let raw = raw
         let value = MeguriCoreBindings.ProviderSettings(enabled: settings.enabled, paused: settings.paused, automatic: settings.automatic, media: settings.media)
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerSaveSettings) { try raw.saveSettings(settings: value) })

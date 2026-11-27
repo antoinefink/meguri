@@ -54,11 +54,6 @@ tempfile.workspace = true
 name = "ffi_it"
 path = "tests/main.rs"
 
-# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
-[[test]]
-name = "cloud_original_role"
-path = "tests/cloud_original_role.rs"
-
 # `tools/mg native-durability` builds and runs this whole binary on the Mac.
 [[test]]
 name = "collection_ffi"

@@ -23,12 +23,12 @@ extension ReviewCollectionStartupTests {
         var backends: [BackupCancellationBackend] = []
         var observeSuccessor: (@MainActor (String) async -> Void)?
         defer { for backend in backends { backend.onBoundary = nil }; observeSuccessor = nil }
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: {
             let backend = BackupCancellationBackend(provider: try await CoreProviderService.attached())
             if !backends.isEmpty { backend.onBoundary = { await observeSuccessor?($0) } }
             backends.append(backend)
             return backend
-        }, defaults: nil, providerDirectory: providerDirectory, cloudConfigured: false)
+        }, defaults: nil, providerDirectory: providerDirectory)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: providerDirectory, maintenanceService: service)
         owner.studyPreparation.runsUnprompted = false
@@ -38,14 +38,14 @@ extension ReviewCollectionStartupTests {
         do {
             try #require(try await CoreCollectionService().lifecycle() == .noCollection)
             await owner.start()
-            await sync.prepareConnectionAuthority()
+            await sync.waitForInputs()
             await owner.studyPreparation.waitForJob()
             await owner.waitForLifecycle()
             await owner.backupTrigger.drain()
             // Off still needs a real provider facade on the retained Ready Host.
             // Its public iCloud setup state deliberately stays unavailable.
             let generation = owner.generation
-            #expect(sync.setupState == .configurationUnavailable)
+            #expect(sync.setupState == .attached)
             #expect(sync.providerState?.selection == .localOnly)
             #expect(!sync.settings.enabled)
             #expect(!sync.operationFailed)
@@ -62,8 +62,8 @@ extension ReviewCollectionStartupTests {
             let providerState = try await capturedProvider.state()
             _ = try await CoreDeckService().addDeck(name: "Synthetic cancellation survivor")
             let decks = try await CoreDeckService().allDeckNames()
-            sync.receive(.network(reachable: false))
-            await sync.prepareConnectionAuthority()
+            sync.networkChanged(reachable: false)
+            await sync.waitForInputs()
             await owner.backupTrigger.drain()
             var terminalTaskWasCancelled = false
             var terminalAttachments = 0
@@ -109,7 +109,6 @@ extension ReviewCollectionStartupTests {
             #expect(predecessor.quiesces == 1)
             #expect(backends.count == 1)
             #expect(predecessor.boundaries.first == "settings")
-            #expect(predecessor.boundaries.contains("offline"))
             #expect(owner.generation == generation)
             var shutdownEnded = false
             switch cancellation {
@@ -161,7 +160,7 @@ extension ReviewCollectionStartupTests {
                 await owner.waitForLifecycle()
                 #expect(reattached.freezes == 1)
                 #expect(reattached.delegate.closeCount == 0)
-                #expect(reattached.boundaries == ["settings", "expired", "freeze"])
+                #expect(reattached.boundaries == ["settings", "freeze"])
                 let retainedProviderState = try await capturedProvider.state()
                 #expect(retainedProviderState.selection == providerState.selection)
                 #expect(retainedProviderState.revision == providerState.revision)
@@ -171,7 +170,7 @@ extension ReviewCollectionStartupTests {
                 #expect(reattached.resumes == 1)
                 #expect(sync.syncOwnerAttached)
                 #expect(owner.sync === sync)
-                #expect(reattached.boundaries == ["settings", "expired", "freeze", "resume"])
+                #expect(reattached.boundaries == ["settings", "freeze", "resume"])
                 #expect(backends.count == 2, "Resume must reuse the terminally attached backend")
                 #expect(owner.backups.canCreate && owner.backups.canOpenRestore)
                 #expect(try await CoreDeckService().allDeckNames() == decks)
@@ -204,22 +203,7 @@ extension ReviewCollectionStartupTests {
     }
     var freezes = 0
     var resumes = 0
-    var connection: CoreCloudConnectionService? { nil }
-    var own: CloudOwnExecutor? { nil }
-    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
-        switch event {
-        case .settings: await record("settings")
-        case .network(false): await record("offline")
-        case .background: await record("background")
-        case .backgroundExpiring: await record("expired")
-        case .quitRequested: await record("quit")
-        default: break
-        }
-        return try await delegate.input(event)
-    }
-    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult { await delegate.execute(command) }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { try await delegate.beginAccountRead(transition: transition) }
-    func readAccount(_ read: UInt64) async -> SyncCommandResult { await delegate.readAccount(read) }
+    func attached(settings: SyncDeviceSettings) async { await record("settings") }
     func freezeForSuspend() async throws { freezes += 1; await record("freeze") }
     func resumeAfterCoreResume() async { resumes += 1; await record("resume") }
     func quiesce() async throws { try await delegate.quiesce(); quiesces += 1; await record("quiesce") }

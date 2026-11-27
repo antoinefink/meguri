@@ -109,6 +109,42 @@ import Testing
             } catch { _ = await collection.close(); throw error }
         }
     }
+    private func selectNativeService(_ selection: SyncProviderSelection, in graph: NativeAccountGraph) throws {
+        let control = try #require(graph.element("settings.sync.service"))
+        let roles = Set([NSAccessibility.Role.popUpButton.rawValue, NSAccessibility.Role.radioGroup.rawValue])
+        let role = try nativeAccountString(in: control, selector: #selector(NSAccessibilityProtocol.accessibilityRole))
+        guard roles.contains(role ?? "") else { throw NativeAccountStateFailure.inappropriateRole }
+        let descendants = graph.descendants(of: control)
+        if role == NSAccessibility.Role.popUpButton.rawValue {
+            let popups = graph.nodes.values.compactMap { node -> NSPopUpButton? in
+                guard node.object === control || descendants.contains(ObjectIdentifier(node.object)) else { return nil }
+                return node.object as? NSPopUpButton
+            }
+            guard popups.count == 1, let popup = popups.first else { throw NativeAccountStateFailure.inappropriateRole }
+            guard popup.itemArray.map(\.title) == ["Off", "Meguri Sync"], popup.isEnabled,
+                  let action = popup.action else { throw NativeAccountStateFailure.invalidOptions }
+            popup.selectItem(withTitle: selection == .meguri ? "Meguri Sync" : "Off")
+            guard popup.sendAction(action, to: popup.target) else { throw NativeAccountStateFailure.actionFailed }
+            return
+        }
+        let options = graph.nodes.values.filter {
+            descendants.contains(ObjectIdentifier($0.object))
+                && ($0.role == NSAccessibility.Role.menuItem.rawValue || $0.role == NSAccessibility.Role.radioButton.rawValue)
+        }
+        var named: [String: NSObject] = [:]
+        for option in options {
+            let title = try nativeAccountString(in: option.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
+            guard let title, ["Off", "Meguri Sync"].contains(title), named[title] == nil else {
+                throw NativeAccountStateFailure.invalidOptions
+            }
+            named[title] = option.object
+        }
+        guard named.count == 2, let target = named[selection == .meguri ? "Meguri Sync" : "Off"] else {
+            throw NativeAccountStateFailure.invalidOptions
+        }
+        try performNativeAccountPress(on: target)
+    }
+
     private func waitForNativeAccountState(line: Int = #line, _ ready: () throws -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while ContinuousClock.now < deadline {

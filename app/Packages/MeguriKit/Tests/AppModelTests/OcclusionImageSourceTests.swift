@@ -136,7 +136,7 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: root.appending(path: "backups"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil), providerDirectory: root.appending(path: "transfers"))
+            sync: SyncCoordinator(directory: directory, defaults: nil), providerDirectory: root.appending(path: "transfers"))
         do {
             await owner.start(); await owner.startEmpty()
             try #require(owner.state == .ready)

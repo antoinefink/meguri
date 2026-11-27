@@ -151,7 +151,7 @@ import Testing
 
     @Test func tryAgainOnAnUnknownRoundDoesNothingWithoutThatState() {
         let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-            configuration: nil, defaults: nil)
+            defaults: nil)
         sync.settleMeguriRound()
         sync.settleMeguriSetup()
         sync.startMeguriSetup()

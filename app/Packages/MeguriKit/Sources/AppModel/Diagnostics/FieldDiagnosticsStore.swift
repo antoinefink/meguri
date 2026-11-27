@@ -46,22 +46,12 @@ public actor FieldDiagnosticsStore {
     // Successful admissions only, including every intermediate signpost folder.
     // A retained authority is never replaced after pathname substitution.
     private var archiveAuthorities: [String: FieldDiagnosticDirectory] = [:]
-    private let cloudDiagnostics: @Sendable () async -> CloudDiagnosticsExport
-
-    public init(directory: URL, clock: AppClock = .system,
-                cloudDiagnostics: @escaping @Sendable () async -> CloudDiagnosticsExport = { .unavailable }) {
+    public init(directory: URL, clock: AppClock = .system) {
         self.directory = directory
         self.clock = clock
-        self.cloudDiagnostics = cloudDiagnostics
     }
-
-    /// One process-wide store. The export accessor neither creates a workflow
-    /// owner nor needs an open collection; no collection is explicit absence.
-    public nonisolated static let standard: FieldDiagnosticsStore = {
-        let workflow = CoreCloudWorkflowService()
-        return FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory),
-                                     cloudDiagnostics: { await workflow.diagnosticsExport() })
-    }()
+    public nonisolated static let standard = FieldDiagnosticsStore(
+        directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory))
 
     // MARK: Writing
 
@@ -129,10 +119,9 @@ public actor FieldDiagnosticsStore {
         return try readAll([FieldSignpost].self, in: Folder.signposts(name)).flatMap { $0 }
     }
 
-    /// One bounded read-only cloud projection, plus the store's pinned archive
+    /// The store's pinned archive
     /// authorities. Optional section failures leave header/timeline copyable.
     public func debugInfo() async throws -> Data {
-        let cloud = await cloudDiagnostics()
         let snapshot = timeline()
         var archives: [String: Result<FieldDiagnosticDirectory, DiagnosticReadFailure>] = [:]
         for folder in [Folder.metrics, Folder.diagnostics] + IntervalNames.all.map({ Folder.signposts($0.name) }) {
@@ -140,7 +129,7 @@ public actor FieldDiagnosticsStore {
             catch DiagnosticReadFailure.notFound { archives[folder] = .failure(.notFound) }
             catch { archives[folder] = .failure(.unavailable) }
         }
-        return try SafeFieldDiagnosticsExport.make(archives: archives, now: clock.now(), timeline: snapshot, cloud: cloud)
+        return try SafeFieldDiagnosticsExport.make(archives: archives, now: clock.now(), timeline: snapshot)
     }
 
     /// Nonblocking with respect to storage: no actor hop, file work or await.

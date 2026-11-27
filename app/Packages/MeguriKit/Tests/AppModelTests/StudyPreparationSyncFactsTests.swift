@@ -26,7 +26,7 @@ import Testing
         return input
     }
     /// Every combination of selection, readiness, load, phase, routine, last
-    /// exchange and iCloud state, without the switches that turn sync off.
+    /// exchange state, without the switches that turn sync off.
     private static var everyConnection: [StudyPreparationSyncInput] {
         var all: [StudyPreparationSyncInput] = [.init(selection: nil), .init(selection: .localOnly)]
         for ready in [false, true] { for settled in [false, true] { for phase in phases { for routine in routines {
@@ -101,28 +101,9 @@ import Testing
         } }
     }
 
-    @Test func meguriIgnoresICloudState() {
-        for state in Self.cloudStates { for attached in [false, true] {
-            let input = Self.meguri { $0.cloudState = state; $0.cloudAttached = attached; $0.cloudLastEnded = 88 }
-            #expect(Facts.mapping(input) == Self.settled(77))
-        } }
-    }
-
-    // MARK: iCloud Sync
 
 
-    @Test func iCloudNotAttachedExpectsNoExchange() {
-        for state in Self.cloudStates {
-            #expect(Facts.mapping(Self.cloud { $0.cloudAttached = false; $0.cloudState = state }) == .none)
-        }
-    }
 
-    @Test func iCloudIgnoresMeguriState() {
-        for phase in Self.phases { for routine in Self.routines { for settled in [false, true] {
-            let input = Self.cloud {
-                $0.meguriPhase = phase; $0.meguriRoutine = routine; $0.meguriSettled = settled; $0.meguriLastExchange = 77
-            }
-            #expect(Facts.mapping(input) == Self.settled(88))
-        } } }
-    }
+
+
 }

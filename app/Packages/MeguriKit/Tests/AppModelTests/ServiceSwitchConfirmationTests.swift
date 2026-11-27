@@ -59,13 +59,12 @@ import Testing
         #expect(confirmation.unsent.isEmpty && confirmation.closing == .unknown)
     }
 
-    // MARK: iCloud as the old service
 
 
 
 
     @Test func theAcceptanceLineComesLast() {
-        let confirmation = ServiceSwitchConfirmation(source: .meguri, destination: "iCloud",
+        let confirmation = ServiceSwitchConfirmation(source: .meguri, destination: "localOnly",
                                                      facts: .init(changes: .unknown, acceptanceUnknown: true))
         #expect(confirmation.message(source: .meguri, locale: english).hasSuffix(SyncText.value("sync.switch.acceptanceUnknown")))
     }
@@ -88,17 +87,17 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        let first = SyncCoordinator(directory: directory, configuration: nil, defaults: defaults)
+        let first = SyncCoordinator(directory: directory, defaults: defaults)
         // A round's credential failure proves an earlier sign-in, and is kept.
         #expect(first.applyMeguriRoundCredentialFailure(MeguriRoundAdmissionFailure.credentialsMissing))
         #expect(defaults.bool(forKey: "meguri.sync.signedInBefore"))
-        let relaunched = SyncCoordinator(directory: directory, configuration: nil, defaults: defaults)
+        let relaunched = SyncCoordinator(directory: directory, defaults: defaults)
         #expect(relaunched.meguriKindFacts.signedInBefore)
     }
 
     @Test func aRefusedFirstSignInStaysSetupWhenTheAddressIsEdited() {
         let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
-                                   configuration: nil, defaults: nil)
+                                   defaults: nil)
         sync.renderFirstSignInRefusedForTests()
         #expect(sync.meguriKindFacts.signInRefused && !sync.meguriKindFacts.signedInBefore)
         sync.meguriAddressEdited()

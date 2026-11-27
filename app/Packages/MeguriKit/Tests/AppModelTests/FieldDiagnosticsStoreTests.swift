@@ -218,67 +218,12 @@ import AppModel
         #expect(RequestRecorder.requests.withLock { $0 }.isEmpty, "field diagnostics never leave the device")
     }
 
-    @Test func debugInfoExportsBoundedReadDeletionAndLocalFailureFacts() async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "FieldCloudDiagnostics-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let diagnostics: [CloudDiagnosticDeletion] = [
-            .init(kind: .read, found: false, allowed: 0, failure: .init(code: 6, retryAfterMilliseconds: 123_000), terminal: .init(code: 2)),
-            .init(kind: .deleted, terminal: .init(code: 2, retryAfterMilliseconds: 456_000), results: [
-                .init(failure: nil),
-                .init(failure: .init(code: 26, encryptedDataReset: true)),
-                .init(failure: .init(code: 7, retryAfterMilliseconds: 456_000))
-            ]),
-            .init(kind: .localFailure, failure: .init(code: nil), category: .queueRejected)
-        ]
-        let store = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: { .init(available: true, zoneDeletions: diagnostics) })
-        let bytes = try await store.debugInfo()
-        let json = try JSONSerialization.jsonObject(with: bytes)
-        let info = try #require(json as? [String: Any])
-        let exported = try #require(info["zoneDeletions"] as? [[String: Any]])
-        #expect(exported.count == 3)
-        #expect(exported[0]["kind"] as? String == "read")
-        let read = try #require(exported[0]["failure"] as? [String: Any])
-        #expect(read["code"] as? Int == 6 && read["retryAfterMilliseconds"] as? Int == 123_000)
-        #expect((exported[0]["terminal"] as? [String: Any])?["code"] as? Int == 2)
-        let results = try #require(exported[1]["results"] as? [[String: Any]])
-        #expect(results.count == 3 && results[0]["failure"] == nil)
-        let reset = try #require(results[1]["failure"] as? [String: Any])
-        #expect(reset["code"] as? Int == 26 && reset["encryptedDataReset"] as? Bool == true)
-        let deletion = try #require(results[2]["failure"] as? [String: Any])
-        #expect(deletion["code"] as? Int == 7 && deletion["retryAfterMilliseconds"] as? Int == 456_000)
-        #expect((exported[1]["terminal"] as? [String: Any])?["retryAfterMilliseconds"] as? Int == 456_000)
-        #expect(exported[2]["category"] as? String == "queueRejected")
-        #expect((exported[2]["failure"] as? [String: Any])?["code"] == nil)
-        let text = String(decoding: bytes, as: UTF8.self)
-        #expect(!text.contains("private-zone") && !text.contains("account") && !text.contains("settings") && !text.contains("systemFields"))
-        let bounded = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: {
-            .init(available: true, zoneDeletions: Array(repeating: diagnostics[0], count: 200))
-        })
-        let boundedBytes = try await bounded.debugInfo()
-        let boundedJSON = try JSONSerialization.jsonObject(with: boundedBytes)
-        let boundedInfo = try #require(boundedJSON as? [String: Any])
-        #expect((boundedInfo["zoneDeletions"] as? [Any])?.count == 128)
-    }
+
 
     /// Serialization unit coverage only. Real Runtime/adapter A7 input is
     /// exercised by serviceAppNoStateProofReturnsThroughCoordinatorAndCopyDebugInfo.
-    @Test func copyDebugInfoProducerIncludesA7OnlyForQualifiedEpochFailures() async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "A7DebugInfo-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let reads = [
-            CloudDiagnosticRootRead(active: false, lostCollection: false, outcome: .found, a7Failure: true, accepted: true),
-            CloudDiagnosticRootRead(active: false, lostCollection: false, outcome: .found, a7Failure: false, accepted: true),
-            CloudDiagnosticRootRead(active: true, lostCollection: false, outcome: .found, a7Failure: false, accepted: true)
-        ]
-        let store = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: { .init(available: true, rootReads: reads) })
-        let bytes = try await store.debugInfo()
-        let object = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
-        let exported = try #require(object["rootReads"] as? [[String: Any]])
-        #expect(exported.count == 3)
-        #expect(exported.compactMap { $0["a7Failure"] as? Bool } == [true, false, false])
-        #expect(exported.compactMap { $0["active"] as? Bool } == [false, false, true])
-        #expect(exported.allSatisfy { $0["outcome"] as? String == "found" })
-    }
+
+
 
     @Test func debugInfoProjectsStoredReportsWithoutRawSDKDetails() async throws {
         let store = try temporaryStore()

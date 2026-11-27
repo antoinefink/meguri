@@ -16,7 +16,7 @@ import Testing
         // Up to date, waiting, a failure that retries: a tap syncs at once.
         for status in [SyncKinds.meguri(.init(routine: .idle)), SyncKinds.meguri(.init(routine: .pending)),
                        SyncKinds.meguri(.init(routine: .network)), SyncKinds.meguri(.init(routine: .server)),
-                       SyncKinds.cloud(state: .upToDate(asOfMilliseconds: 1)), SyncKinds.cloud(state: .changesPending)] {
+                       SyncKinds.meguri(.init(routine: .waiting))] {
             #expect(!status.needsYou, "\(status.titleKey)")
             #expect(tap(status) == .syncNow, "\(status.titleKey)")
         }
@@ -35,7 +35,7 @@ import Testing
     @Test func t22_1ATapWhileMovingDoesNothing() {
         // No second sync: a tap during a round or a transfer does nothing.
         for status in [SyncKinds.meguri(.init(routine: .exchanging)), SyncKinds.meguri(.init(stage: .media)),
-                       SyncKinds.cloud(state: .syncingCollection), SyncKinds.cloud(state: .syncingMedia)] {
+                       SyncKinds.meguri(.init(stage: .collection))] {
             #expect(tap(status, available: true, moving: true) == .nothing, "\(status.titleKey)")
             #expect(tap(status, available: false, moving: true) == .nothing, "\(status.titleKey)")
         }

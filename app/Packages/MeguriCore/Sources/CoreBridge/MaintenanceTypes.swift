@@ -51,16 +51,15 @@ public struct RestoredBackup: Sendable, Equatable {
     public let name: String
     public let safetyBackup: String?
     public let generation: UInt64
-    public let cloudPublicationPending: Bool
     public let deadlineMilliseconds: Int64?
-    public init(name: String, safetyBackup: String?, generation: UInt64, cloudPublicationPending: Bool,
+    public init(name: String, safetyBackup: String?, generation: UInt64,
                 deadlineMilliseconds: Int64?) {
         self.name = name; self.safetyBackup = safetyBackup; self.generation = generation
-        self.cloudPublicationPending = cloudPublicationPending; self.deadlineMilliseconds = deadlineMilliseconds
+        self.deadlineMilliseconds = deadlineMilliseconds
     }
     init(_ raw: MeguriCoreBindings.RestoredBackup) {
         name = raw.name; safetyBackup = raw.safetyBackup; generation = raw.generation
-        cloudPublicationPending = raw.cloudPublicationPending; deadlineMilliseconds = raw.deadlineMs
+        deadlineMilliseconds = raw.deadlineMs
     }
 }
 public enum BackupKind: Sendable, Equatable { case backup, serverCopy, serverCopyUnverified }

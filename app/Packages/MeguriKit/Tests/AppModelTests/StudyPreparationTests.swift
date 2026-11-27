@@ -240,7 +240,7 @@ import Testing
     @Test func incomingSwitchChangeDuringTheWaitDoesNotEndIt() async {
         let (preparation, core) = make { $0.facts = Self.exchanging }
         await preparation.collectionOpened()
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         #expect(core.starts == 0 && preparation.phase == .waitingForExchange)
     }
 
@@ -255,7 +255,7 @@ import Testing
         await settle()
         #expect(preparation.phase == .running && core.starts == 1)
         // A second read during the job starts none.
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         core.facts = Self.exchanging
         await preparation.syncChanged()
         core.facts = Self.settled(1_000_900)
@@ -272,7 +272,7 @@ import Testing
         let (preparation, core) = make { $0.status = .ok }
         await preparation.collectionOpened()
         await preparation.changesCommitted(Self.changes(source: .userUndoable, keys: ["fsrs"]))
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["rollover"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["rollover"]))
         #expect(core.reads == 1)
         await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         #expect(core.reads == 2)
@@ -283,7 +283,7 @@ import Testing
         await preparation.collectionOpened()
         core.sessionOpen = true
         core.status = .needsReEnable
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         #expect(core.starts == 0 && preparation.phase == .idle && preparation.status == .needsReEnable)
         // The core's event can arrive before the session is gone: still deferred.
         await preparation.sessionEnded()
@@ -313,7 +313,7 @@ import Testing
         await preparation.collectionOpened()
         for round in 1...3 {
             core.status = .needsReEnable
-            await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+            await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
             await preparation.waitForJob()
             #expect(core.starts == round && preparation.status == .ok)
         }
@@ -346,7 +346,7 @@ import Testing
         await preparation.collectionOpened()
         core.status = .needsReEnable
         core.results = [.failure(BridgeError.internal("synthetic"))]
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         await preparation.waitForJob()
         #expect(preparation.phase == .failed)
         #expect(core.records.last == .init(component: .scheduling, operation: .recover, stage: .statusObserved,
@@ -376,7 +376,7 @@ import Testing
         await preparation.collectionOpened()
         core.status = .needsReEnable
         core.results = [.failure(BridgeError.busy(runningOperation: "synthetic"))]
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         await preparation.waitForJob()
         #expect(preparation.phase == .idle && core.starts == 1)
         #expect(core.records.last == .init(component: .scheduling, operation: .recover, stage: .statusObserved,
@@ -443,7 +443,7 @@ import Testing
         async let first = preparation.prepare(for: .study)
         async let second = preparation.prepare(for: .study)
         async let sync: Void = preparation.syncChanged()
-        async let incoming: Void = preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        async let incoming: Void = preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         await settle()
         core.release()
         let results = await (first, second)
@@ -491,7 +491,7 @@ import Testing
         let (preparation, core) = make()
         await preparation.syncChanged()
         await preparation.sessionEnded()
-        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.changesCommitted(Self.changes(source: .syncIncoming, keys: ["fsrs"]))
         #expect(await !preparation.prepare(for: .tryAgain))
         #expect(core.reads == 0 && core.starts == 0)
     }

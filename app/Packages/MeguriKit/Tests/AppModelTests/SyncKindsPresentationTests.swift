@@ -6,116 +6,8 @@ import Testing
 /// `sync/status-strings` T19.9: each row of T19.4's two tables and of T19.5.
 @MainActor @Suite struct SyncKindsPresentationTests {
     private typealias Row = SyncKindRow
-    private func one(_ item: CloudPolicyAttention, _ facts: CloudKindFacts = .init()) -> Row? {
-        SyncKinds.cloudRows(attention: [item: 2], facts: facts).first
-    }
 
 
-    @Test func cloudNeedsYouRowsOneToTwentyFive() {
-        #expect(one(.collectionCorrupt) == Row(.needsYou, "sync.attention.collectionCorrupt", .repair))
-        #expect(one(.localStorageFull) == Row(.needsYou, "sync.needsYou.localStorageFull", .tryAgain))
-        #expect(one(.trackingError) == Row(.needsYou, "sync.attention.trackingError", .tryAgain))
-        #expect(one(.unsupportedSchema) == Row(.needsYou, "sync.needsYou.update"))
-        let isolated: [(CloudKindFacts.Isolation, Bool, String, SyncStatusAction)] = [
-            (.signedOut, true, "sync.attention.signedOut", .resume),
-            (.signedOut, false, "sync.attention.signedOut", .setUpAgain),
-            (.accountChanged, true, "sync.needsYou.accountChanged", .chooseCollection),
-            (.accountChangedBack, true, "sync.attention.accountChangedBack", .resume),
-            (.accountChangedBack, false, "sync.attention.accountChangedBack", .setUpAgain),
-            (.replacedElsewhere, false, "sync.attention.replacedElsewhere", .chooseCollection),
-            (.missing, false, "sync.needsYou.missing", .chooseCollection),
-            (.deleted, false, "sync.needsYou.deleted", .chooseCollection),
-            (.encryptionReset, false, "sync.needsYou.encryptionReset", .chooseCollection),
-            (.fileMismatch, true, "sync.attention.fileMismatch", .setUpAgain),
-            (.other, true, "sync.attention.isolated", .setUpAgain)
-        ]
-        for (reason, resume, key, action) in isolated {
-            #expect(one(.isolated, .init(isolation: reason, resumeBindingOffered: resume)) == Row(.needsYou, key, action))
-        }
-        #expect(one(.rootUnreadable) == Row(.needsYou, "sync.needsYou.rootUnreadable", .chooseCollection))
-        #expect(one(.chooseCollection, .init(layoutDecision: true))
-            == Row(.needsYou, "sync.attention.chooseCollection", .chooseCollection))
-        #expect(one(.chooseCollection) == Row(.needsYou, "sync.needsYou.setUp", .setUpAgain))
-        #expect(one(.crtMismatch) == Row(.needsYou, "sync.attention.crtMismatch", .chooseCollection))
-        #expect(one(.mediaZoneMissing) == Row(.needsYou, "sync.needsYou.mediaMissingInICloud", .chooseCollection))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .adoptUnproven))
-            == Row(.needsYou, "sync.attention.adoptUnproven", .cancelOp))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .publishConflict))
-            == Row(.needsYou, "sync.attention.publishConflict", .chooseCollection))
-        #expect(one(.quotaFull, .init(publishQuota: true)) == Row(.needsYou, "sync.attention.publishQuota", .cancelOp))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .publishAccount, resumeOpOffered: true))
-            == Row(.needsYou, "sync.attention.publishAccount", .resumeOp))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .publishAccount))
-            == Row(.needsYou, "sync.attention.publishAccount", .cancelOp))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .publishWaiting, resumeOpOffered: true))
-            == Row(.needsYou, "sync.attention.publishWaiting", .resumeOp))
-        #expect(one(.quotaFull) == Row(.needsYou, "sync.needsYou.quotaFull", .tryAgain))
-        #expect(one(.generationIncomplete, .init(abandonOffered: true))
-            == Row(.needsYou, "sync.attention.generationIncomplete", .abandon))
-    }
-
-    @Test func cloudWaitingAndIssuesRows() {
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .publishWaiting)) == Row(.waiting, "sync.attention.publishWaiting"))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .adoptAfterReview)) == Row(.waiting, "sync.attention.adoptAfterReview"))
-        #expect(one(.recoveryOpWaiting, .init(recoveryOp: .abandonWaiting)) == Row(.waiting, "sync.attention.abandonWaiting"))
-        #expect(one(.cloudError) == Row(.waiting, "sync.waiting.cloudError"))
-        #expect(one(.exchangeIncomplete) == Row(.waiting, "sync.attention.exchangeIncomplete"))
-        #expect(one(.referenceWaiting) == Row(.waiting, "sync.attention.referenceWaiting", count: 2))
-        #expect(one(.assetUnavailable) == Row(.waiting, "sync.attention.assetUnavailable", count: 2))
-        #expect(one(.mediaChanged) == Row(.waiting, "sync.attention.mediaChanged", count: 2))
-        #expect(one(.conflictsUnreadable) == Row(.issues, "sync.attention.conflictsUnreadable"))
-        #expect(one(.refused) == Row(.issues, "sync.attention.refused", count: 2))
-        #expect(one(.oversize) == Row(.issues, "sync.attention.oversize", count: 2))
-        #expect(one(.unreadable) == Row(.issues, "sync.attention.unreadable", .checkDatabase, count: 2))
-        #expect(one(.unsyncable) == Row(.issues, "sync.attention.unsyncable", count: 2))
-        #expect(one(.claimStuck) == Row(.issues, "sync.attention.claimStuck", count: 2))
-        #expect(one(.generationIncomplete) == Row(.issues, "sync.attention.generationIncomplete"))
-        #expect(one(.applyFailed) == Row(.issues, "sync.attention.applyFailed", count: 2))
-        #expect(one(.rekeyFailed) == Row(.issues, "sync.attention.rekeyFailed", count: 2))
-        #expect(one(.mediaMissing) == Row(.issues, "sync.attention.mediaMissing", count: 2))
-        // The list's only button is row 37's.
-        let all = SyncKinds.cloudRows(attention: Dictionary(uniqueKeysWithValues:
-            [CloudPolicyAttention.conflictsUnreadable, .refused, .oversize, .unreadable, .unsyncable, .claimStuck,
-             .generationIncomplete, .applyFailed, .rekeyFailed, .mediaMissing].map { ($0, 1) }))
-        #expect(all.count == 10 && all.allSatisfy { $0.kind == .issues })
-        #expect(all.filter { $0.action != nil }.map(\.action) == [.checkDatabase])
-    }
-
-
-    @Test func waitingOrIssuesAloneKeepTheStateUnderneath() {
-        let underneath: [(CloudPolicyStatusState, String, String)] = [
-            (.paused(.automaticOff), "sync.status.automaticOff.title", SyncSymbol.waiting),
-            (.offline, "sync.status.offline.title", SyncSymbol.waiting),
-            (.syncingCollection, "sync.status.syncing.title", SyncSymbol.moving),
-            (.syncingMedia, "sync.status.syncingMedia.title", SyncSymbol.moving),
-            (.changesPending, "sync.status.pending.title", SyncSymbol.waiting),
-            (.upToDate(asOfMilliseconds: 5), "sync.status.upToDate.title", SyncSymbol.upToDate)
-        ]
-        for (state, title, symbol) in underneath {
-            let issues = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: state, attention: [.oversize: 4])
-            #expect(issues.titleKey == title && issues.symbol == symbol)
-            #expect(issues.kind == nil && issues.action == nil && !issues.needsYou)
-            #expect(issues.issues == [Row(.issues, "sync.attention.oversize", count: 4)])
-            let waiting = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: state,
-                attention: [.exchangeIncomplete: 1, .cloudError: 1])
-            #expect(waiting.titleKey == title && waiting.symbol == symbol)
-            // The first waiting row in the table's order is the detail; no button.
-            #expect(waiting.kind == .waiting && waiting.detailKey == "sync.waiting.cloudError")
-            #expect(waiting.action == nil && waiting.issues.isEmpty)
-        }
-    }
-
-    @Test func conflictCopiesChangeNothingInTheMainStatus() {
-        let plain = SyncKinds.cloud(state: .upToDate(asOfMilliseconds: 9))
-        let conflicts = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .upToDate(asOfMilliseconds: 9),
-            attention: [.conflicts: 6])
-        #expect(conflicts == plain)
-        #expect(SyncKinds.cloudRows(attention: [.conflicts: 6]).isEmpty)
-        #expect(SyncKinds.conflictCopies([.conflicts: 6]) == 6)
-        #expect(SyncKinds.conflictCopies([:]) == nil && SyncKinds.conflictCopies([.conflicts: 0]) == nil)
-        #expect(SyncText.format("sync.trouble.conflictCopies", Int64(6)) == "6 conflict copies are saved on this device.")
-        #expect(SyncText.format("sync.trouble.conflictCopies", Int64(1)) == "1 conflict copy is saved on this device.")
-    }
 
     /// T19.5 (MP7 step 5): an acceptance unknown comes before Upload…, as a round's or as setup's.
     @Test func acceptanceUnknownComesBeforeTheStructureUpload() {
@@ -337,30 +229,7 @@ import Testing
 
     // Rows that T19.4 does not list, kept at the least claim.
 
-    @Test func anAdoptionWaitingOnTransportOffersResumeOnlyWhileItIsOffered() {
-        let offered = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
-            attention: [.recoveryOpWaiting: 1], facts: .init(recoveryOp: .adoptWaiting, resumeOpOffered: true))
-        #expect(offered.needsYou && offered.detailKey == "sync.attention.adoptWaiting" && offered.action == .resumeOp)
-        let waiting = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
-            attention: [.recoveryOpWaiting: 1], facts: .init(recoveryOp: .adoptWaiting))
-        #expect(waiting.kind == .waiting && waiting.detailKey == "sync.attention.adoptWaiting" && waiting.action == nil)
-        #expect(waiting.titleKey == "sync.status.pending.title")
-        let marks: Set<Character> = [".", "!", "?"]
-        #expect(SyncText.value("sync.attention.adoptWaiting").filter(marks.contains).count == 1)
-    }
 
-    @Test func iCloudSelectedButNeverSetUpIsRow16NotSyncOff() {
-        // The policy still reports `localOnly` until a connection is confirmed.
-        let selected = SyncKinds.cloud(state: .localOnly, selectedNotSetUp: true)
-        #expect(selected.needsYou && selected.titleKey == "sync.status.needsAttention.title")
-        #expect(selected.detailKey == "sync.needsYou.setUp" && selected.action == .setUpAgain)
-        // With the service Off the same state stays Sync Off.
-        let off = SyncKinds.cloud(state: .localOnly)
-        #expect(off.titleKey == "sync.status.off.title" && off.action == nil && !off.needsYou)
-        // Any other state ignores the flag.
-        let connected = SyncKinds.cloud(state: .changesPending, selectedNotSetUp: true)
-        #expect(connected.titleKey == "sync.status.pending.title" && !connected.needsYou)
-    }
 
     @Test func everyActionHasItsCatalogTitle() {
         for action in SyncStatusAction.allCases { #expect(SyncText.value(action.titleKey) != action.titleKey) }

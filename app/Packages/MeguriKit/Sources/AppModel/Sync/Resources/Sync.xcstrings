@@ -3750,6 +3750,26 @@
           }
         }
       }
+    },
+    "sync.service.recovery.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recover the sync settings and turn off Meguri Sync. Your local collection and study data stay on this device."
+          }
+        }
+      }
+    },
+    "sync.switch.message.meguri": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Meguri Sync to sync this collection with your server. Your local collection stays on this device."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

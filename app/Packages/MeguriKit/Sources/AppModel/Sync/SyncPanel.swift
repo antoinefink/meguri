@@ -51,28 +51,16 @@ public enum SyncPanel {
         }
     }
 
-    /// N23.1: Meguri Sync's setup work uses the status row's value (MP6.5);
-    /// a round's exchange and iCloud's collection or media transfer are
-    /// indeterminate. A status that needs the person has no bar.
-    /// `meguriMoving`: Meguri Sync signs in or a round exchanges, which the
-    /// status row shows no setup value for.
-    public static func progress(_ status: SyncMainStatus, meguri: Bool, setupValue: MeguriProgressValue?,
-                                meguriMoving: Bool, cloudState: CloudPolicyStatusState?) -> Progress? {
+    /// Setup shows its recorded progress; a regular exchange is indeterminate.
+    public static func progress(_ status: SyncMainStatus, setupValue: MeguriProgressValue?, moving: Bool) -> Progress? {
         guard !status.needsYou else { return nil }
-        if meguri {
-            switch setupValue {
-            case .fraction(let value)?: return .fraction(value)
-            case .indeterminate?: return .indeterminate
-            case nil: return meguriMoving ? .indeterminate : nil
-            }
-        }
-        // The bar shows with the moving symbol only: a transfer under an
-        // up-to-date state shows none (N23.1).
-        switch cloudState {
-        case .syncingCollection?, .syncingMedia?: return .indeterminate
-        default: return nil
+        switch setupValue {
+        case .fraction(let value)?: return .fraction(value)
+        case .indeterminate?: return .indeterminate
+        case nil: return moving ? .indeterminate : nil
         }
     }
+
 }
 
 extension SyncMainStatus {
@@ -89,7 +77,7 @@ extension SyncStatusAction {
     /// Copy Debug Info too.
     public var neverDefault: Bool {
         switch self {
-        case .meguriCancel, .meguriFinishSetup, .resumeOp, .meguriUploadStructure, .copyDebugInfo, .repair: true
+        case .meguriCancel, .meguriFinishSetup, .meguriUploadStructure, .copyDebugInfo: true
         default: false
         }
     }

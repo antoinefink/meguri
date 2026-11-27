@@ -6,8 +6,7 @@ public enum SyncProblemKind: Sendable, Equatable { case waiting, needsYou, issue
 
 /// The one action a status row may carry (T19.4, T19.5). The view runs it.
 public enum SyncStatusAction: String, Sendable, Equatable, CaseIterable {
-    case copyDebugInfo, chooseCollection, repair, tryAgain, resume, setUpAgain
-    case cancelOp, resumeOp, abandon, checkDatabase
+    case copyDebugInfo, chooseCollection
     case serviceRecovery, meguriConnectionRetry, meguriSignIn, meguriCancel
     case meguriTryAgain, meguriFinishSetup, meguriRetryMedia
     /// MP7 step 5's Upload…: a committed structure save's upload.
@@ -16,14 +15,6 @@ public enum SyncStatusAction: String, Sendable, Equatable, CaseIterable {
         switch self {
         case .copyDebugInfo: "sync.action.copyDebugInfo"
         case .chooseCollection: "sync.decision.action"
-        case .repair: "sync.needsYou.action.repair"
-        case .tryAgain: "sync.action.tryAgain"
-        case .resume: "sync.action.resume"
-        case .setUpAgain: "sync.needsYou.action.setUp"
-        case .cancelOp: "sync.action.cancelOp"
-        case .resumeOp: "sync.action.resumeOp"
-        case .abandon: "sync.action.abandon"
-        case .checkDatabase: "sync.action.checkDatabase"
         case .serviceRecovery: "sync.service.recovery.action"
         case .meguriConnectionRetry: "sync.meguri.connection.retry"
         case .meguriSignIn: "sync.meguri.signIn"
@@ -46,41 +37,6 @@ public struct SyncKindRow: Sendable, Equatable {
     public let count: UInt64?
     public init(_ kind: SyncProblemKind?, _ textKey: String?, _ action: SyncStatusAction? = nil, count: UInt64? = nil) {
         self.kind = kind; self.textKey = textKey; self.action = action; self.count = count
-    }
-}
-
-/// Facts that pick a row among those sharing one attention item. Each defaults
-/// to the row that claims least: an unknown isolation reason is "any other".
-public struct CloudKindFacts: Sendable, Equatable {
-    public enum Isolation: Sendable, Equatable, CaseIterable {
-        case signedOut, accountChanged, accountChangedBack, replacedElsewhere
-        case missing, deleted, encryptionReset, fileMismatch, other
-    }
-    public enum RecoveryOp: Sendable, Equatable, CaseIterable {
-        case adoptUnproven, publishConflict, publishAccount, publishWaiting, adoptAfterReview, abandonWaiting
-        /// An `adopt` op whose download waits on transport (V14.3): the person can resume it.
-        case adoptWaiting
-    }
-    public enum Fence: Sendable, Equatable, CaseIterable { case restore, importCollection, none }
-    public var isolation: Isolation
-    public var recoveryOp: RecoveryOp?
-    /// V9.2 offers Resume for the isolated binding.
-    public var resumeBindingOffered: Bool
-    /// V15.3 offers Resume for the waiting op.
-    public var resumeOpOffered: Bool
-    /// A `publish` op is at `bound`, `zones` or `sent` while the quota is full.
-    public var publishQuota: Bool
-    /// V18 offers Abandon.
-    public var abandonOffered: Bool
-    /// `chooseCollection` is V13.6's unproved-layout decision.
-    public var layoutDecision: Bool
-    public var fence: Fence
-    public init(isolation: Isolation = .other, recoveryOp: RecoveryOp? = nil, resumeBindingOffered: Bool = false,
-                resumeOpOffered: Bool = false, publishQuota: Bool = false, abandonOffered: Bool = false,
-                layoutDecision: Bool = false, fence: Fence = .none) {
-        self.isolation = isolation; self.recoveryOp = recoveryOp; self.resumeBindingOffered = resumeBindingOffered
-        self.resumeOpOffered = resumeOpOffered; self.publishQuota = publishQuota; self.abandonOffered = abandonOffered
-        self.layoutDecision = layoutDecision; self.fence = fence
     }
 }
 
@@ -154,160 +110,23 @@ public struct SyncMainStatus: Sendable, Equatable {
     public var hasIssues: Bool { !issues.isEmpty }
 }
 
-/// N23.2: five states, one system symbol each, for both services; only needs you
-/// has a colour. The names are the `icloud` symbols, which Apple reserves for
-/// iCloud: `glyph` gives them for iCloud only, and unrestricted system symbols
-/// for Meguri Sync and Off (N23.4). Nothing is drawn over or inside a symbol.
+/// Semantic status values keep Off distinct from Waiting even though both use
+/// the same neutral system glyph. Presentation never selects a service variant.
 public enum SyncSymbol {
-    public static let upToDate = "checkmark.icloud"
-    /// Something moves; it turns while the work lasts.
-    public static let moving = "arrow.trianglehead.2.clockwise.rotate.90.icloud"
-    /// Waiting, or not sent yet.
-    public static let waiting = "icloud"
-    public static let needsYou = "exclamationmark.icloud"
-    public static let off = "icloud.slash"
+    public static let upToDate = "checkmark.circle"
+    public static let moving = "arrow.trianglehead.2.clockwise.rotate.90"
+    public static let waiting = "cloud"
+    public static let needsYou = "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+    public static let off = "off"
 
-    /// N23.2: the system symbol a state is drawn with. The `icloud` symbols only
-    /// refer to Apple's iCloud, and SF Symbols has no unrestricted cloud with a
-    /// badge, so Meguri Sync and Off use other unrestricted symbols.
-    public static func glyph(_ shape: String, iCloud: Bool) -> String {
-        if iCloud, shape != off { return shape }
-        return switch shape {
-        case upToDate: "checkmark.circle"
-        case moving: "arrow.trianglehead.2.clockwise.rotate.90"
-        case needsYou: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
-        default: "cloud" // Waiting, and Sync Off (in the secondary colour in the toolbar).
-        }
-    }
+    public static func glyph(_ shape: String) -> String { shape == off ? "cloud" : shape }
 }
 
 public enum SyncKinds {
     public static let needsYouSymbol = SyncSymbol.needsYou
 
-    // MARK: iCloud (T19.4)
-
-    /// The state table: the row of a P14.2 state that is itself a kind.
-    public static func cloudStateRow(_ state: CloudPolicyStatusState?, fence: CloudKindFacts.Fence = .none) -> SyncKindRow? {
-        switch state {
-        case .iCloudUnavailable(.noAccount): .init(.needsYou, "sync.status.unavailable.noAccount")
-        case .iCloudUnavailable(.restricted): .init(.needsYou, "sync.status.unavailable.restricted")
-        case .iCloudUnavailable(.temporary): .init(.waiting, "sync.status.unavailable.temporary")
-        case .iCloudUnavailable(.setupNeeded): .init(.needsYou, "sync.status.unavailable.setupNeeded", .copyDebugInfo)
-        case .paused(.decisionRequired):
-            switch fence {
-            case .restore: .init(.needsYou, "sync.needsYou.fence.restore", .chooseCollection)
-            case .importCollection: .init(.needsYou, "sync.needsYou.fence.import", .chooseCollection)
-            case .none: .init(.needsYou, "sync.needsYou.fence.none", .chooseCollection)
-            }
-        case .offline: .init(.waiting, "sync.status.offline.detail")
-        default: nil
-        }
-    }
-
-    /// The attention table, rows 1 to 43, in the order that decides which shows.
-    /// `conflicts` (row 44) has no entry.
-    public static func cloudRows(attention: [CloudPolicyAttention: UInt64], facts: CloudKindFacts = .init()) -> [SyncKindRow] {
-        func has(_ item: CloudPolicyAttention) -> Bool { (attention[item] ?? 0) > 0 }
-        func count(_ item: CloudPolicyAttention) -> UInt64? { attention[item] }
-        var rows: [SyncKindRow] = []
-        let resumeOrSetUp: SyncStatusAction = facts.resumeBindingOffered ? .resume : .setUpAgain
-        if has(.collectionCorrupt) { rows.append(.init(.needsYou, "sync.attention.collectionCorrupt", .repair)) }
-        if has(.localStorageFull) { rows.append(.init(.needsYou, "sync.needsYou.localStorageFull", .tryAgain)) }
-        if has(.trackingError) { rows.append(.init(.needsYou, "sync.attention.trackingError", .tryAgain)) }
-        if has(.unsupportedSchema) { rows.append(.init(.needsYou, "sync.needsYou.update")) }
-        if has(.isolated) {
-            let row: SyncKindRow = switch facts.isolation {
-            case .signedOut: .init(.needsYou, "sync.attention.signedOut", resumeOrSetUp)
-            case .accountChanged: .init(.needsYou, "sync.needsYou.accountChanged", .chooseCollection)
-            case .accountChangedBack: .init(.needsYou, "sync.attention.accountChangedBack", resumeOrSetUp)
-            case .replacedElsewhere: .init(.needsYou, "sync.attention.replacedElsewhere", .chooseCollection)
-            case .missing: .init(.needsYou, "sync.needsYou.missing", .chooseCollection)
-            case .deleted: .init(.needsYou, "sync.needsYou.deleted", .chooseCollection)
-            case .encryptionReset: .init(.needsYou, "sync.needsYou.encryptionReset", .chooseCollection)
-            case .fileMismatch: .init(.needsYou, "sync.attention.fileMismatch", .setUpAgain)
-            case .other: .init(.needsYou, "sync.attention.isolated", .setUpAgain)
-            }
-            rows.append(row)
-        }
-        if has(.rootUnreadable) { rows.append(.init(.needsYou, "sync.needsYou.rootUnreadable", .chooseCollection)) }
-        if has(.chooseCollection) {
-            rows.append(facts.layoutDecision
-                ? .init(.needsYou, "sync.attention.chooseCollection", .chooseCollection)
-                : .init(.needsYou, "sync.needsYou.setUp", .setUpAgain))
-        }
-        if has(.crtMismatch) { rows.append(.init(.needsYou, "sync.attention.crtMismatch", .chooseCollection)) }
-        if has(.mediaZoneMissing) { rows.append(.init(.needsYou, "sync.needsYou.mediaMissingInICloud", .chooseCollection)) }
-        let op = has(.recoveryOpWaiting) ? facts.recoveryOp : nil
-        if op == .adoptUnproven { rows.append(.init(.needsYou, "sync.attention.adoptUnproven", .cancelOp)) }
-        if op == .publishConflict { rows.append(.init(.needsYou, "sync.attention.publishConflict", .chooseCollection)) }
-        if has(.quotaFull), facts.publishQuota { rows.append(.init(.needsYou, "sync.attention.publishQuota", .cancelOp)) }
-        if op == .publishAccount {
-            rows.append(.init(.needsYou, "sync.attention.publishAccount", facts.resumeOpOffered ? .resumeOp : .cancelOp))
-        }
-        if op == .publishWaiting, facts.resumeOpOffered {
-            rows.append(.init(.needsYou, "sync.attention.publishWaiting", .resumeOp))
-        }
-        if op == .adoptWaiting {
-            rows.append(facts.resumeOpOffered ? .init(.needsYou, "sync.attention.adoptWaiting", .resumeOp) : .init(.waiting, "sync.attention.adoptWaiting"))
-        }
-        if has(.quotaFull), !facts.publishQuota { rows.append(.init(.needsYou, "sync.needsYou.quotaFull", .tryAgain)) }
-        if has(.generationIncomplete), facts.abandonOffered {
-            rows.append(.init(.needsYou, "sync.attention.generationIncomplete", .abandon))
-        }
-        // Waiting.
-        if op == .publishWaiting, !facts.resumeOpOffered { rows.append(.init(.waiting, "sync.attention.publishWaiting")) }
-        if op == .adoptAfterReview { rows.append(.init(.waiting, "sync.attention.adoptAfterReview")) }
-        if op == .abandonWaiting { rows.append(.init(.waiting, "sync.attention.abandonWaiting")) }
-        // An op whose kind this projection does not carry claims nothing: it waits.
-        if has(.recoveryOpWaiting), facts.recoveryOp == nil { rows.append(.init(.waiting, "sync.error.conflictRecovery")) }
-        if has(.cloudError) { rows.append(.init(.waiting, "sync.waiting.cloudError")) }
-        if has(.exchangeIncomplete) { rows.append(.init(.waiting, "sync.attention.exchangeIncomplete")) }
-        if has(.referenceWaiting) { rows.append(.init(.waiting, "sync.attention.referenceWaiting", count: count(.referenceWaiting))) }
-        if has(.assetUnavailable) { rows.append(.init(.waiting, "sync.attention.assetUnavailable", count: count(.assetUnavailable))) }
-        if has(.mediaChanged) { rows.append(.init(.waiting, "sync.attention.mediaChanged", count: count(.mediaChanged))) }
-        // Issues.
-        if has(.conflictsUnreadable) { rows.append(.init(.issues, "sync.attention.conflictsUnreadable")) }
-        if has(.refused) { rows.append(.init(.issues, "sync.attention.refused", count: count(.refused))) }
-        if has(.oversize) { rows.append(.init(.issues, "sync.attention.oversize", count: count(.oversize))) }
-        if has(.unreadable) { rows.append(.init(.issues, "sync.attention.unreadable", .checkDatabase, count: count(.unreadable))) }
-        if has(.unsyncable) { rows.append(.init(.issues, "sync.attention.unsyncable", count: count(.unsyncable))) }
-        if has(.claimStuck) { rows.append(.init(.issues, "sync.attention.claimStuck", count: count(.claimStuck))) }
-        if has(.generationIncomplete), !facts.abandonOffered {
-            rows.append(.init(.issues, "sync.attention.generationIncomplete"))
-        }
-        if has(.applyFailed) { rows.append(.init(.issues, "sync.attention.applyFailed", count: count(.applyFailed))) }
-        if has(.rekeyFailed) { rows.append(.init(.issues, "sync.attention.rekeyFailed", count: count(.rekeyFailed))) }
-        if has(.mediaMissing) { rows.append(.init(.issues, "sync.attention.mediaMissing", count: count(.mediaMissing))) }
-        return rows
-    }
-
-    /// T19.4's four rules. `setup` covers an installation with no projection yet.
-    public static func cloud(state: CloudPolicyStatusState?, stateWithoutAttention: CloudPolicyStatusState? = nil,
-                             attention: [CloudPolicyAttention: UInt64] = [:], facts: CloudKindFacts = .init(),
-                             setup: SyncCoordinator.SetupState = .attached,
-                             selectedNotSetUp: Bool = false) -> SyncMainStatus {
-        var rows = cloudRows(attention: attention, facts: facts)
-        let effective: CloudPolicyStatusState? = state == nil && setup == .configurationUnavailable
-            ? .iCloudUnavailable(.setupNeeded) : state
-        // Row 16: iCloud is the selected service and nothing is set up, so the
-        // policy still reports `localOnly`. The status must not read "Sync Off".
-        if selectedNotSetUp, effective == .localOnly {
-            rows.insert(.init(.needsYou, "sync.needsYou.setUp", .setUpAgain), at: 0)
-        }
-        if let row = cloudStateRow(effective, fence: facts.fence) { rows.insert(row, at: row.kind == .needsYou ? 0 : rows.count) }
-        let issues = rows.filter { $0.kind == .issues }
-        if let row = rows.first(where: { $0.kind == .needsYou }) {
-            return .init(symbol: needsYouSymbol, titleKey: "sync.status.needsAttention.title", detailKey: row.textKey,
-                         detailCount: row.count, action: row.action, kind: .needsYou, issues: issues, issuesRowKey: nil)
-        }
-        // Rule 2: the state underneath, with the first waiting text as its detail.
-        let shown = effective == .needsAttention ? stateWithoutAttention : effective
-        let base = SyncStatusPresentation(state: shown, setup: setup)
-        let waiting = rows.first { $0.kind == .waiting }
-        return .init(symbol: base.symbol, titleKey: base.titleKey,
-                     detailKey: waiting?.textKey ?? base.detailKey, detailCount: waiting?.count, action: nil,
-                     kind: waiting == nil ? nil : .waiting, issues: issues, issuesRowKey: nil)
-    }
+    public static let off = SyncMainStatus(symbol: SyncSymbol.off, titleKey: "sync.status.off.title",
+        detailKey: "sync.status.localOnly.detail", detailCount: nil, action: nil, kind: nil, issues: [], issuesRowKey: nil)
 
     // MARK: Meguri Sync (T19.5)
 
@@ -480,10 +299,6 @@ public enum SyncKinds {
     // MARK: Troubleshooting and Sync Now
 
     /// V27.7: the count line of Troubleshooting, the copies' only entry.
-    public static func conflictCopies(_ attention: [CloudPolicyAttention: UInt64]) -> UInt64? {
-        attention[.conflicts].flatMap { $0 > 0 ? $0 : nil }
-    }
-
     /// T19.7's replaced reasons.
     public static let syncNowOffKey = "sync.now.unavailable.off"
 }

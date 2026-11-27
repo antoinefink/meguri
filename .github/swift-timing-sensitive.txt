@@ -12,4 +12,3 @@
 availabilityUsesOneDeadlineAndReturnsTheCoreRefusal  # hosted run 44933572455: elapsed 105 ms against its 100 ms bound (CollectionServiceTests.swift:142)
 progressFiredAThousandTimesASecondReachesSwiftAtMostElevenTimesInAnySecond  # hosted run 44933572455: the fixture fired fewer than 1,000 progress events in a second (EventTests.swift:200)
 aLongCallCancelledAfter50msReturnsCancelledWithin100ms  # hosted run 44954210907: cancel latency over its 100 ms bound (CancelTests.swift:29)
-nativePolicyMediaPauseAndStopDrainOriginalCallback  # hosted run 44954210907 and once here under load: result.mediaCancellation false (NativeCloudMediaTests.swift:1935); passed alone

@@ -17,7 +17,7 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { SyncOwnerFake() }, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: directory.appending(path: "synthetic-installation"))
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
@@ -326,7 +326,7 @@ extension ReviewCollectionStartupTests {
         _ = await fixture.model.end()
     }
 
-    @Test(arguments: [MeguriCoreBindings.OpSource.syncIncoming, .cloudIncoming, .cloudRekey])
+    @Test(arguments: [MeguriCoreBindings.OpSource.syncIncoming, .syncIncoming, .syncIncoming])
     func incomingChangesCannotMakeLocalAnswerDurable(source: MeguriCoreBindings.OpSource) async throws {
         let fixture = Fixture()
         await fixture.model.start()

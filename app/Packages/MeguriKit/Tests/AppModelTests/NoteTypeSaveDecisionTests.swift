@@ -71,7 +71,7 @@ import Testing
         // The losses went away and the service asks nothing: no sheet, the save goes on.
         let gone = NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldRemoved(ord: 1, name: "Back", notesWithContent: 0)], losesContent: false)
         #expect(!NoteTypeSaveDecision.asksAgain(confirmed: confirmed, shown: shown, latest: gone, service: .other))
-        // A Meguri Sync sheet with no loss: the binding went away, and iCloud asks nothing.
+        // A Meguri Sync sheet with no loss: the binding went away, and Off asks nothing.
         let meguri = NoteTypeSaveDecision.decide(Self.structural, service: .meguriSync)
         #expect(!NoteTypeSaveDecision.asksAgain(confirmed: .init(), shown: meguri, latest: Self.structural, service: .other))
     }

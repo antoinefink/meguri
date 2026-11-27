@@ -17,7 +17,7 @@ struct SyncStatusSymbol: View {
     /// from the button succeeds: the accent colour, then the default again.
     var accented = false
     var body: some View {
-        let glyph = Image(systemName: status.symbol)
+        let glyph = Image(systemName: SyncSymbol.glyph(status.symbol))
             // Only the moving symbol ever turns, whatever drives `turning`.
             .symbolEffect(.rotate, options: .repeating, isActive: turning && status.symbol == SyncSymbol.moving)
         Group {
@@ -84,11 +84,7 @@ struct SyncStatusPanel: View {
                     .progressViewStyle(.linear)
                     .accessibilityLabel(SyncText.value(status.titleKey))
                     .accessibilityIdentifier("sync.status.panel.progress")
-                    if let left = sync.panelFilesLeft {
-                        Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: left)))
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("sync.status.panel.filesLeft")
-                    }
+
                 }
             }
             buttons
@@ -198,9 +194,8 @@ struct SyncStatusActionButton: View {
         switch action {
         case .chooseCollection:
             return sync.providerState?.selection != .meguri || (sync.meguriCanChoose && !sync.meguriBusy)
-        case .tryAgain, .serviceRecovery, .meguriConnectionRetry: return true
-        case .setUpAgain, .resume, .cancelOp, .resumeOp: return false
-        case .copyDebugInfo, .repair:
+        case .serviceRecovery, .meguriConnectionRetry: return true
+        case .copyDebugInfo:
             // The damaged-collection screen (V19) is not built: Copy Debug Info
             // is the one action that can run for that row.
             return collection.configuration.fieldDiagnostics != nil
@@ -244,13 +239,7 @@ struct SyncStatusActionButton: View {
             Button(title) { askKeepCollection() }
                 .accessibilityLabel(SyncText.value("sync.decision.action.label"))
                 .accessibilityIdentifier(id)
-        case .setUpAgain, .resume, .cancelOp, .resumeOp:
-            EmptyView()
-        case .tryAgain:
-            Button(title) { collection.requestSyncNow() }
-                .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
-                .accessibilityIdentifier(id)
-        case .copyDebugInfo, .repair:
+        case .copyDebugInfo:
             if let callbacks = collection.configuration.fieldDiagnostics {
                 SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: id)
             }
@@ -307,8 +296,6 @@ struct SyncStatusActionButton: View {
             // it replaces the collection on Meguri Sync, as the Save sheet agreed.
             Button(title) { sync.uploadNotetypeStructure() }
                 .disabled(!sync.meguriCanUploadStructure).accessibilityIdentifier(id)
-        case .abandon, .checkDatabase:
-            EmptyView()
         }
     }
     private func askKeepCollection() {

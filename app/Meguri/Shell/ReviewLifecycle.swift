@@ -56,7 +56,7 @@ enum ReviewBackgroundLease {
     static func begin(_ collection: ReviewCollection?) {
         guard let collection, collection.foreground else { return }
         let lease = Lease(collection: collection)
-        lease.identifier = UIApplication.shared.beginBackgroundTask(withName: "Review and iCloud flush") {
+        lease.identifier = UIApplication.shared.beginBackgroundTask(withName: "Review and sync flush") {
             Task { @MainActor in lease.expire() }
         }
         let remaining = UIApplication.shared.backgroundTimeRemaining

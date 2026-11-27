@@ -10,7 +10,7 @@ import Testing
 
 @Suite(.serialized) struct FieldDiagnosticTimelineTests {
     static let instant = Date(timeIntervalSince1970: 1_800_000_000)
-    static let observation = FieldDiagnosticObservation(component: .cloud, operation: .exchange, stage: .exchangeCompleted,
+    static let observation = FieldDiagnosticObservation(component: .sync, operation: .exchange, stage: .exchangeCompleted,
                                                         outcome: .incomplete, failure: .other, count: 3, durationMilliseconds: 42)
 
     func location() -> URL {
@@ -29,7 +29,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
         store.enqueue(Self.observation)
-        store.enqueue(.init(component: .cloud, operation: .status, stage: .statusObserved, outcome: .waiting))
+        store.enqueue(.init(component: .sync, operation: .status, stage: .statusObserved, outcome: .waiting))
         let written = await store.timeline()
         #expect(written.events.count == 2)
         #expect(written.events[0].observation.stage == .exchangeCompleted)
@@ -74,10 +74,10 @@ import Testing
         let time = Mutex(Self.instant)
         let clock = AppClock { time.withLock { $0 } }
         let store = FieldDiagnosticsStore(directory: directory, clock: clock)
-        store.enqueue(.init(component: .cloud, operation: .start, stage: .requested, outcome: .observed, count: 0))
+        store.enqueue(.init(component: .sync, operation: .start, stage: .requested, outcome: .observed, count: 0))
         _ = await store.timeline()
         time.withLock { $0 = Self.instant.addingTimeInterval(-1) }
-        store.enqueue(.init(component: .cloud, operation: .start, stage: .admission, outcome: .failed, count: 1))
+        store.enqueue(.init(component: .sync, operation: .start, stage: .admission, outcome: .failed, count: 1))
         let written = await store.timeline()
         #expect(written.events.map(\.observation.stage) == [.requested, .admission])
         #expect(written.events.map(\.observedAtUnixMilliseconds) == [1_800_000_000_000, 1_799_999_999_000])
@@ -212,9 +212,7 @@ import Testing
             .replacingOccurrences(of: "\"applicationVersion\": \"1.0\"", with: "\"applicationVersion\": \"\(secret)\"")
             .replacingOccurrences(of: "\"binaryInfo\": []", with: "\"binaryInfo\": [], \"binaryPath\": \"\(secret)\"")
         let diagnostic = try JSONDecoder().decode(DiagnosticReport.self, from: Data(hostileJSON.utf8))
-        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
-            .init(available: true, rootReads: [.init(active: false, lostCollection: false, outcome: .other, a7Failure: true, accepted: false)])
-        })
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
         try await store.record(diagnostic)
         try await store.record(FieldDiagnosticsStoreTests.metricReport())
         #expect(try await store.diagnostics().first?.applicationVersion == secret)
@@ -344,29 +342,7 @@ import Testing
         #expect(try Data(contentsOf: file) == oversizedArchive)
     }
 
-    @Test func exportByteCapIncludesNestedDeletionFactsAndKeepsOriginalCloudCaps() async throws {
-        let directory = location()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let failures = (0..<100).map { _ in CloudDiagnosticResult(failure: .init(code: .max, retryAfterMilliseconds: .max, encryptedDataReset: true)) }
-        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
-            .init(available: true,
-                  rootReads: Array(repeating: .init(active: false, lostCollection: false, outcome: .found, a7Failure: true, accepted: true), count: 100),
-                  zoneDeletions: Array(repeating: .init(kind: .deleted, terminal: .init(code: .max), results: failures), count: 200))
-        })
-        store.enqueue(Self.observation)
-        let bytes = try await store.debugInfo()
-        #expect(bytes.count <= 1_048_576)
-        let info = try json(bytes)
-        let deletions = try #require(info["zoneDeletions"] as? [[String: Any]])
-        #expect(deletions.count <= 128)
-        #expect((info["rootReads"] as? [Any])?.count == 64)
-        #expect(deletions.allSatisfy { $0["resultsOmittedCount"] as? Int == 36 })
-        let sections = try #require(info["sections"] as? [String: [String: Any]])
-        #expect((sections["zoneDeletions"]?["omittedCountLowerBound"] as? Int ?? 0) >= 72)
-        #expect(sections["rootReads"]?["omittedCountLowerBound"] as? Int == 36)
-        #expect(!String(decoding: bytes, as: UTF8.self).contains("private-zone-canary"))
-        #expect((info["timeline"] as? [String: Any])?["events"] as? [Any] != nil)
-    }
+
 
     @Test func maximumScalarsAndExcessPersistedEventsStayWithinEncodedByteLimits() async throws {
         let directory = location()
@@ -493,25 +469,7 @@ import Testing
         #expect(try Data(contentsOf: unrelated) == sentinel)
     }
 
-    @Test func unavailableCloudProjectionStillCopiesHeaderTimelineAndExplicitAbsence() async throws {
-        let directory = location()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let reads = Mutex(0)
-        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
-            reads.withLock { $0 += 1 }
-            return .unavailable
-        })
-        store.enqueue(Self.observation)
-        let info = try json(await store.debugInfo())
-        #expect(reads.withLock { $0 } == 1)
-        #expect(info["header"] != nil && info["cloudDiagnosticsAvailable"] as? Bool == false)
-        #expect(info["missingDidFetchEvents"] == nil && info["statusEvidence"] == nil)
-        #expect(info["statusEvidenceUnavailable"] as? Bool == true)
-        #expect(((info["timeline"] as? [String: Any])?["events"] as? [Any])?.count == 1)
-        let sections = try #require(info["sections"] as? [String: [String: Any]])
-        #expect(sections["rootReads"]?["unavailable"] as? Bool == true)
-        #expect(sections["zoneDeletions"]?["unavailable"] as? Bool == true)
-    }
+
 
     @Test(arguments: [false, true])
     func childDirectorySubstitutionCannotRedirectRetainedReadOrReplacement(linked: Bool) throws {

@@ -75,7 +75,7 @@ import Testing
         return await store.timeline()
     }
 
-    private func observation(component: FieldDiagnosticObservation.Component = .cloud,
+    private func observation(component: FieldDiagnosticObservation.Component = .sync,
                              stage: FieldDiagnosticObservation.Stage = .requested,
                              outcome: FieldDiagnosticObservation.Outcome = .observed,
                              count: UInt64? = nil) -> FieldDiagnosticObservation {
@@ -85,20 +85,20 @@ import Testing
     @Test func emptyAndLongTimelinesShowOnlyTheLatest20CloudMediaObservationsInFIFOOrder() async {
         let empty = SyncDiagnosticsPresentation(await snapshot(), locale: locale)
         #expect(empty.rows.isEmpty)
-        #expect(empty.notices == ["No recent cloud or media observations are available."])
+        #expect(empty.notices == ["No recent sync or media observations are available."])
         var observations: [FieldDiagnosticObservation] = []
         for index in 0..<30 {
-            observations.append(observation(component: index.isMultiple(of: 2) ? .cloud : .media, count: UInt64(index)))
+            observations.append(observation(component: index.isMultiple(of: 2) ? .sync : .media, count: UInt64(index)))
             observations.append(.init(component: .review, operation: .answer, stage: .persistence,
                                       outcome: .failed, failure: .transport, count: 9_999))
         }
         let presentation = SyncDiagnosticsPresentation(await snapshot(observations), locale: locale)
         #expect(presentation.rows.count == 20)
         #expect(presentation.rows.compactMap(\.count) == (10..<30).map { "Recorded count: \($0)" })
-        #expect(presentation.rows.first?.summary == "Cloud: Sync data")
+        #expect(presentation.rows.first?.summary == "Sync: Sync data")
         #expect(presentation.rows.last?.summary == "Media: Sync data")
         #expect(presentation.rows.allSatisfy { $0.failure == nil })
-        #expect(presentation.notices.contains("Only the latest 20 cloud and media observations are shown."))
+        #expect(presentation.notices.contains("Only the latest 20 sync and media observations are shown."))
         #expect(!presentation.rows.compactMap(\.count).joined().contains("9999"))
     }
 

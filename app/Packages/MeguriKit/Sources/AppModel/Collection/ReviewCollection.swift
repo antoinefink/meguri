@@ -731,11 +731,11 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     private var deckTreeRevision: UInt64 = 0
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
-    private var cloudPreparationTasks: [ObjectIdentifier: Task<Void, any Error>] = [:]
-    private var cloudHostPreparationTask: Task<Void, any Error>?
+    private var providerPreparationTasks: [ObjectIdentifier: Task<Void, any Error>] = [:]
+    private var providerHostPreparationTask: Task<Void, any Error>?
     private var meguriSignInPreparationTask: Task<Void, Never>?
     public private(set) var meguriSignInPreparing = false
-    private var cloudActivationCompletion: Task<Void, Never>?
+    private var collectionActivationCompletion: Task<Void, Never>?
     private var meguriActivationAttachment: (sync: SyncCoordinator, generation: UInt64, noFile: Bool)?
     private var opening = false
     private var preparedGeneration: UInt64?
@@ -843,11 +843,6 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             guard let self, let originalSync, self.sync === originalSync else { return false }
             return self.editorReplacementIsCurrent(id)
         }
-        sync.finishCloudEditorReplacement = { [weak self] id in
-            guard let self else { return }
-            await self.cloudActivationCompletion?.value
-            self.finishEditorReplacement(id)
-        }
         sync.beginMeguriActivation = { [weak self, weak originalSync] reservation in
             guard let self, let originalSync, self.sync === originalSync else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
             try self.beginManualActivation(replacement: reservation)
@@ -936,7 +931,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             }
             // Use the retained Host's ordinary setup path. Attachment failures
             // belong to this current coordinator and its explicit Retry action.
-            try await prepareLocalCloudConnectionHost()
+            try await prepareLocalProviderHost()
             guard sync === current, generation == expected, !closing, !closed else {
                 throw BridgeError.unavailable(reason: "collectionUnavailable")
             }
@@ -1287,7 +1282,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         try requireCurrent()
         let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
         try requireCurrent()
-        let retained = try await collection.prepareCloudConnectionHost(location, randomSeed: seed)
+        let retained = try await collection.prepareProviderHost(location, randomSeed: seed)
         try requireCurrent()
         let actual = try await readBackupLifecycle()
         try requireCurrent()
@@ -1422,7 +1417,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
 
     /// Selection needs local Host admission before handoff can cancel the old
     /// account owner. It must not join that owner's account-authority wait.
-    public func prepareSyncServiceSelection() async throws { try await prepareLocalCloudConnectionHost() }
+    public func prepareSyncServiceSelection() async throws { try await prepareLocalProviderHost() }
     /// Explicit account action only. Preparing a NoCollection Host grants no
     /// collection choice, transfer or permission to create a collection.
     public func signInMeguri(endpoint: String, username: String, password: String) {
@@ -1456,7 +1451,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             do {
                 guard current(), generation == initialGeneration,
                       original.meguriSignInAttachmentRevision == initialRevision else { return }
-                if !original.meguriSignInAttached { try await prepareCloudConnectionHost() }
+                if !original.meguriSignInAttached { try await prepareProviderHost() }
                 guard current() else { return }
                 let expected = generation, revision = original.meguriSignInAttachmentRevision
                 // Attachment may have issued its ordinary offline connection
@@ -1481,38 +1476,36 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
     func waitForMeguriSignInPreparation() async { await meguriSignInPreparationTask?.value }
     /// Account-dependent callers share this wait, separately from local Host
     /// readiness so selection can reach the guarded handoff's cancellation.
-    func prepareCloudConnectionHost() async throws {
+    func prepareProviderHost() async throws {
         let original = sync, owner = ObjectIdentifier(sync)
-        if let task = cloudPreparationTasks[owner] { try await task.value; return }
+        if let task = providerPreparationTasks[owner] { try await task.value; return }
         guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         let task = Task {
-            defer { cloudPreparationTasks[owner] = nil }
-            try await prepareLocalCloudConnectionHost()
+            defer { providerPreparationTasks[owner] = nil }
+            try await prepareLocalProviderHost()
             let expected = generation, revision = original.meguriSignInAttachmentRevision
             guard sync === original, original.generation == expected else { throw CancellationError() }
-            await original.prepareConnectionAuthority()
+            await original.waitForInputs()
             guard sync === original, generation == expected, original.generation == expected,
                   original.meguriSignInAttachmentRevision == revision else { throw CancellationError() }
             guard original.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
         // Keep retired waits retained until their actual completion, without
         // making a successor join them or letting their cleanup erase its wait.
-        cloudPreparationTasks[owner] = task
+        providerPreparationTasks[owner] = task
         try await task.value
     }
-    private func prepareLocalCloudConnectionHost() async throws {
-        if let cloudHostPreparationTask { try await cloudHostPreparationTask.value; return }
+    private func prepareLocalProviderHost() async throws {
+        if let providerHostPreparationTask { try await providerHostPreparationTask.value; return }
         guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         let task = Task {
-            defer { cloudHostPreparationTask = nil }
+            defer { providerHostPreparationTask = nil }
             if let openTask { await openTask.value }
             guard !closing, !closed, !opening else { throw BridgeError.busy(runningOperation: "collection preparation") }
             let location = try await prepareEntry()
             try Task.checkCancellation()
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-            // An installation that cannot use iCloud still attaches its provider
-            // here: Off and Meguri Sync need no iCloud setup. iCloud's own entries
-            // refuse it themselves (`prepareCloudConnectionPreview`).
+            // Off and Meguri Sync attach the same local provider owner.
             if sync.syncOwnerAttached { return }
             // An existing file follows the owner's ordinary open path. Neither
             // discovery nor its UI may create or replace that file.
@@ -1522,7 +1515,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 return
             }
             let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
-            let retainedGeneration = try await collection.prepareCloudConnectionHost(location, randomSeed: seed)
+            let retainedGeneration = try await collection.prepareProviderHost(location, randomSeed: seed)
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
             lifecycle = try await collection.lifecycle()
             if case .noCollection = lifecycle { state = .noFile; generation = retainedGeneration }
@@ -1531,13 +1524,13 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             try sync.requireProviderAttachment()
             guard sync.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
-        cloudHostPreparationTask = task
+        providerHostPreparationTask = task
         try await task.value
     }
     var entryAllowed: Bool { allowsEntryActivation() }
     var manualAllowed: Bool { allowsManualActivation() }
     private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
-        (backupOwner?.busy != true || backupOwner?.work == .restore) && !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
+        (backupOwner?.busy != true || backupOwner?.work == .restore) && !meguriSignInPreparing && !sync.providerHandoffInProgress && providerPreparationTasks.isEmpty && providerHostPreparationTask == nil && !deckNamesReserved &&
             (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
             !backupRecoveryRequired && !opening && !starting && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
     }
@@ -1576,7 +1569,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         sync.beginEntryActivation()
     }
     func drainEntryActivation() async throws {
-        guard await sync.drainEntryActivation() else { throw BridgeError.busy(runningOperation: "iCloud drain") }
+        guard await sync.drainEntryActivation() else { throw BridgeError.busy(runningOperation: "sync drain") }
     }
     @discardableResult func finishEntryActivation(candidateActive: Bool) async -> Bool {
         defer { opening = false }
@@ -1730,7 +1723,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 scheduleMediaRefresh(names: changes.mediaAdded, generation: event.generation)
             }
             if event.generation == generation, !opening,
-               changes.source == .cloudIncoming || changes.source == .syncIncoming {
+               changes.source == .syncIncoming {
                 Task { await studyPreparation.changesCommitted(changes) }
             }
         case .mediaArrived(let names):
@@ -1761,9 +1754,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             if !opening {
                 if navigation.sheet != .backupRestore { navigation.dismissSheet() }
                 entryOwner?.destinationChanged()
-                cloudActivationCompletion = Task { [weak self] in
+                collectionActivationCompletion = Task { [weak self] in
                     guard let self else { return }
-                    defer { self.cloudActivationCompletion = nil }
+                    defer { self.collectionActivationCompletion = nil }
                     // The original NoCollection Host is retained already, but
                     // R6 reopen/step 9 and the old SDK drain must finish first.
                     await self.sync.waitForReplacement()
@@ -2431,16 +2424,6 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                        since clicked: ContinuousClock.Instant = .now) {
         reviewVisible = true
         review = model
-        let expected = generation
-        model.onVisibleMediaChanged = { [weak self, weak model] names in
-            guard let self, let model, !self.closed, !self.closing,
-                  self.generation == expected, self.review === model else { return }
-            if !names.isEmpty {
-                guard case .ready(let current) = self.lifecycle, current == expected else { return }
-            }
-            self.sync.visibleMedia(names, generation: expected)
-        }
-        sync.visibleMedia(model.visibleMediaNames, generation: expected)
         // The walk is the presentation: its next deck keeps the same review on screen.
         walk?.present(model, retry: retry)
         let shown = walk.map { navigation.review?.session === $0 } ?? false
@@ -2849,7 +2832,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                 return
             }
             if state == .noFile {
-                // A retained NoCollection Host has cloud callbacks to drain,
+                // A retained NoCollection Host has provider work to drain,
                 // even though there is no local writer to flush or suspend.
                 if sync.syncOwnerAttached {
                     if active { await sync.foregroundAfterLocalResume() }
@@ -2895,7 +2878,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
                     try await collection.flushForBackground()
                     didFlushLocally?()
                     guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
-                        throw BridgeError.cloudPolicy(.coreCapabilityUnavailable)
+                        throw BridgeError.unavailable(reason: "Sync could not suspend")
                     }
                     if !foreground, !closing, lease == backgroundLease, !backgroundLeaseExpired {
                         await backupTrigger.run(.background)
@@ -2933,7 +2916,7 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
             if walkTask == task { return }
         }
     }
-    func waitForCloudActivation() async { await cloudActivationCompletion?.value }
+    func waitForCollectionActivation() async { await collectionActivationCompletion?.value }
     /// The UIKit assertion owner supplies the OS's remaining time, never a
     /// guessed duration. Tokens keep a late expiry out of a later foreground.
     public func beginBackgroundTask(deadlineMilliseconds: Int64?) -> UInt64? {
@@ -3026,9 +3009,9 @@ public final class ReviewCollection: ChangeFanoutSink, BackupHost {
         await exportOwner?.cancelAndDrain()
         await deckImportOwner?.collectionClosing()
         await openTask?.value
-        _ = await cloudHostPreparationTask?.result
-        for task in Array(cloudPreparationTasks.values) { _ = await task.result }
-        await cloudActivationCompletion?.value
+        _ = await providerHostPreparationTask?.result
+        for task in Array(providerPreparationTasks.values) { _ = await task.result }
+        await collectionActivationCompletion?.value
         await lifecycleTask?.value
         // Preserve the owner's no-file/unopened cleanup admission, including a
         // failed open whose absent host still has a historical failed lifecycle.
@@ -3254,9 +3237,6 @@ enum OpenFailureDiagnostic {
     static func bridgeCategory(_ error: any Error) -> String {
         guard let error = error as? BridgeError else { return "other" }
         switch error {
-        case .cloudPolicy: return "cloudPolicy"
-        case .cloudConnection: return "cloudConnection"
-        case .cloudSDKCallbackRejected: return "cloudSDKCallbackRejected"
         case .maintenance: return "maintenance"
         case .exportSourceChanged: return "exportSourceChanged"
         case .exportSourceInvalid: return "exportSourceInvalid"
@@ -3316,7 +3296,6 @@ enum OpenFailureDiagnostic {
         case "derived-store": return "derived-store"
         case "media": return "media"
         case "review-session": return "review-session"
-        case "cloud-note-capture": return "cloud-note-capture"
         default: return "other"
         }
     }

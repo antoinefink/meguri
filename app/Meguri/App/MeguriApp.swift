@@ -61,7 +61,7 @@ struct MeguriApp: App {
         let navigation = uiStateStore.load().map(AppNavigation.init(restoring:)) ?? AppNavigation()
         var startsProduction = configuration.initialPresentation == nil && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         #if MEGURI_TEST_HOOKS
-        startsProduction = startsProduction && !hooks.setupOnly && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
+        startsProduction = startsProduction && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
         #endif
         var recordsFieldDiagnostics = startsProduction
         #if MEGURI_TEST_HOOKS

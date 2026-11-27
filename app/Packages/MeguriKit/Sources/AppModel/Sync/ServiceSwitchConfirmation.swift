@@ -30,7 +30,7 @@ public struct ServiceSwitchConfirmation: Sendable, Equatable {
     public let closing: Closing
     public let acceptanceUnknown: Bool
 
-    /// `destination` is the Service control's tag: "localOnly", "meguri" or "iCloud".
+    /// `destination` is the Service control's tag: "localOnly" or "meguri".
     public init(source: SyncProviderSelection, destination: String, facts: ServiceSwitchFacts) {
         switch destination {
         case "meguri":
@@ -54,7 +54,7 @@ public struct ServiceSwitchConfirmation: Sendable, Equatable {
         acceptanceUnknown = facts.acceptanceUnknown
     }
 
-    /// The old service's name in the lines: T19.1's names, iCloud without its label inside a sentence.
+    /// The old service's name in the lines: T19.1's supported service names.
     public static func serviceName(_ source: SyncProviderSelection) -> String {
         SyncText.value("sync.service.meguri")
     }

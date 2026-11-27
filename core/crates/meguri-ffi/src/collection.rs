@@ -21,15 +21,6 @@ pub struct CollectionLocation {
     pub manual_transfer_directory: String,
 }
 
-/// Local facts without requiring a CloudWorkflow or native account factory.
-#[uniffi::export]
-pub fn local_publication_information(
-    generation: u64,
-) -> Result<crate::cloud_connection::CloudLocalPublicationInformation, CoreError> {
-    callback::enter("local_publication_information");
-    crate::cloud_connection::local_information_for_host(runtime::host()?.as_ref(), generation)
-}
-
 /// Trusted bounded synchronous platform values only; no core reentry, UI or async
 /// work. These reads alone may run under core locks (E-20261021T142014Z-9c3d).
 #[uniffi::export(foreign)]
@@ -111,10 +102,6 @@ pub fn start_create_empty(
         Arc::new(ForeignSpace(disk_space)),
     );
     config.manual_transfer_directory = manual_transfer_directory.into();
-    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
-        config.cloud = Some(inputs);
-        config.cloud_key_bytes = key_bytes;
-    }
     let engine = runtime::engine()?;
     Ok(jobs::wrap(engine.jobs().start("create empty collection", engine.generation(), None, move |job| {
         job.cancel.check()?;
@@ -147,10 +134,6 @@ pub fn start_open(
         Arc::new(ForeignSpace(disk_space)),
     );
     config.manual_transfer_directory = manual_transfer_directory.into();
-    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
-        config.cloud = Some(inputs);
-        config.cloud_key_bytes = key_bytes;
-    }
     jobs::start("open collection", runtime::engine()?.generation().0, move |job| {
         job.cancel.check()?;
         reservation.open(config)?;
@@ -168,13 +151,13 @@ pub fn start_open(
 /// Retain a provider Host on the original process without creating a collection.
 /// Existing owners are reused only for this exact configured directory.
 #[uniffi::export]
-pub fn prepare_cloud_connection_host(
+pub fn prepare_provider_host(
     location: CollectionLocation,
     clock: Arc<dyn HostClock>,
     disk_space: Arc<dyn DiskSpaceProvider>,
     random_seed: u64,
 ) -> Result<u64, CoreError> {
-    callback::enter("prepare_cloud_connection_host");
+    callback::enter("prepare_provider_host");
     if let Ok(host) = runtime::host() {
         let generation = host.cloud_connection_generation()?;
         if host.cloud_connection_directory() != Path::new(&location.collection_directory) {
@@ -195,11 +178,7 @@ pub fn prepare_cloud_connection_host(
         Arc::new(ForeignSpace(disk_space)),
     );
     config.manual_transfer_directory = manual_transfer_directory.into();
-    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
-        config.cloud = Some(inputs);
-        config.cloud_key_bytes = key_bytes;
-    }
-    reservation.prepare_cloud(config)?;
+    reservation.prepare_provider(config)?;
     Ok(runtime::host()?.cloud_connection_generation()?.0)
 }
 
@@ -243,7 +222,7 @@ mod tests {
                 manual_transfer_directory: root.path().join("manual").to_string_lossy().into_owned(),
             };
             if retained {
-                prepare_cloud_connection_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
+                prepare_provider_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
                 assert!(!file.exists(), "Account & Sync preparation creates nothing");
             }
             if retained {
@@ -259,7 +238,7 @@ mod tests {
                 // Refusal does not claim this unknown sidecar is no collection.
                 runtime::close().unwrap();
                 std::fs::remove_file(wal).unwrap();
-                prepare_cloud_connection_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
+                prepare_provider_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
             }
             let before = runtime::retained_host();
             assert_eq!(wait(start_create_empty(location.clone(), Arc::new(Clock), Arc::new(Space), 42).unwrap()), JobOutcome::Succeeded);

@@ -23,7 +23,7 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: collection)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let sync = SyncCoordinator(directory: collection, configuration: nil, defaults: nil)
+        let sync = SyncCoordinator(directory: collection, defaults: nil)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: directory.appending(path: "synthetic-installation", directoryHint: .isDirectory))
         await owner.start()

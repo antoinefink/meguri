@@ -508,7 +508,7 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil), providerDirectory: root.appending(path: "transfers"))
+            sync: SyncCoordinator(directory: directory, defaults: nil), providerDirectory: root.appending(path: "transfers"))
         // Warm-up and review each receive their own headless surface. It
         // consumes real Core renders, without an unhosted WebKit page.
         owner.makeReviewSurface = { _ in OcclusionReviewDisplay() }

@@ -64,7 +64,7 @@ extension TestHooks.Session {
         #if DEBUG
         guard options.fixtureRunID != nil else { return nil }
         let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
-            clock: configuration.clock, configuration: nil, defaults: nil)
+            clock: configuration.clock, defaults: nil)
         return ReviewCollection(configuration: configuration, navigation: navigation, sync: sync,
             providerDirectory: configuration.collectionLocation.directory.deletingLastPathComponent().appending(path: "Installation"))
         #else

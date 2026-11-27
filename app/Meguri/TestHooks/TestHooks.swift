@@ -13,7 +13,6 @@ import SwiftUI
 /// agent can never mistake a half-applied launch for the requested state.
 enum TestHooks {
     struct Session {
-        var setupOnly = false
         var options = LaunchOptions()
         var error: TestHookError?
         /// A shell route's state and features.
@@ -23,7 +22,7 @@ enum TestHooks {
         /// A launch with any hook option starts from a fresh UI state and
         /// leaves none behind, so a run never depends on the previous one;
         /// a launch with none restores the device's as usual.
-        var startsFresh: Bool { setupOnly || error != nil || options != LaunchOptions() }
+        var startsFresh: Bool { error != nil || options != LaunchOptions() }
 
         /// Puts the navigation in the shell route's state and starts the
         /// run-time commands (`ShellCommands`).
@@ -33,7 +32,7 @@ enum TestHooks {
                 AppDelegate.keepsRunningWithoutWindow = integrations
             }
             #endif
-            guard !setupOnly, error == nil else { return }
+            guard error == nil else { return }
             #if os(macOS)
             if let ownedProvider {
                 ownedProvider.transport.bind(to: collection, owned: ownedProvider)
@@ -91,16 +90,6 @@ enum TestHooks {
         }
         #else
         if transportRequested { return Session(error: TestHookError("Owned provider transport refused")) }
-        #endif
-        // Reject setup-only environments before they can exclude normal startup.
-        if arguments.contains("-MeguriOwnedProviderFixture") {
-            do throws(TestHookError) {
-                if admittedOptions?.ownedProviderFixture == true {
-
-                }
-            } catch { return Session(error: error) }
-        }
-        #if DEBUG
         #endif
         // Performance tests ask for a warmed web content process (R1866).
         WebContentWarmup.shared.listen()
@@ -170,9 +159,7 @@ enum TestHooks {
         }
 
         var body: some View {
-            if session.setupOnly {
-                EmptyView()
-            } else if let error = session.error {
+            if let error = session.error {
                 ErrorView(error: error)
             } else {
                 // The probe takes a strip below the shell rather than a
