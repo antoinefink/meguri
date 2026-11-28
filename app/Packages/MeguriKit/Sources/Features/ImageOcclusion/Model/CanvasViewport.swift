@@ -110,19 +110,6 @@ extension MaskEditorSession {
         return shape.unrotatedBounds(in: referenceSize).origin
     }
 
-    func handlePoint(_ handle: ResizeHandle, in value: OcclusionDocument) -> CGPoint {
-        if selection.count == 1, let shape = value.shapes.first(where: { selection.contains($0.id) }) {
-            if case .polygon = shape.data.kind {} else {
-                let box = shape.unrotatedBounds(in: referenceSize)
-                let p = handle.point(in: box), angle = shape.data.angle * .pi / 180
-                let dx = p.x - box.minX, dy = p.y - box.minY
-                return .init(x: box.minX + dx * cos(angle) - dy * sin(angle),
-                             y: box.minY + dx * sin(angle) + dy * cos(angle))
-            }
-        }
-        return handle.point(in: value.bounds(of: selection, in: referenceSize) ?? .zero)
-    }
-
     func resized(handle: ResizeHandle, delta: CGSize, finishing: Bool) -> OcclusionDocument {
         guard var box = document.bounds(of: selection, in: referenceSize), box.width > 0, box.height > 0 else { return document }
         let single = selection.count == 1 ? document.shapes.first(where: { selection.contains($0.id) }) : nil
@@ -195,5 +182,84 @@ extension OcclusionDocument {
             else { identifier = "io.mask.\(first.data.number)" }
             return .init(ids: ids, first: first, identifier: identifier, frame: viewport.screenRect(bounds))
         }
+    }
+}
+
+/// Screen geometry shared by rendering, native input and accessibility.
+struct CanvasHandleGeometry: Identifiable {
+    enum Target: Hashable { case resize(ResizeHandle), rotate }
+    let target: Target
+    let center: CGPoint
+    var id: Target { target }
+    var frame: CGRect { .init(x: center.x - 22, y: center.y - 22, width: 44, height: 44) }
+}
+
+extension Array where Element == CanvasHandleGeometry {
+    func nearest(to point: CGPoint) -> Element? {
+        filter { $0.frame.contains(point) }.min {
+            hypot($0.center.x - point.x, $0.center.y - point.y) < hypot($1.center.x - point.x, $1.center.y - point.y)
+        }
+    }
+}
+
+extension MaskEditorSession {
+    func shape(at point: CGPoint) -> OcclusionShape? {
+        document.shapes.reversed().first { $0.path(in: referenceSize).contains(point) }
+    }
+
+    func canvasHandles(in viewport: CanvasViewport) -> [CanvasHandleGeometry] {
+        guard !selection.isEmpty,
+              let box = displayed.bounds(of: selection, in: viewport.reference) else { return [] }
+        let uniform = uniformResize
+        var handleBox = box, angle = 0.0
+        if selection.count == 1, let shape = displayed.shapes.first(where: { selection.contains($0.id) }) {
+            if case .polygon = shape.data.kind {} else {
+                handleBox = shape.unrotatedBounds(in: referenceSize)
+                angle = shape.data.angle * .pi / 180
+            }
+        }
+        let cosine = cos(angle), sine = sin(angle)
+        var handles = ResizeHandle.allCases.filter { !uniform || $0.isCorner }.map { handle in
+            var point = handle.point(in: handleBox)
+            if angle != 0 {
+                let dx = point.x - handleBox.minX, dy = point.y - handleBox.minY
+                point = CGPoint(x: handleBox.minX + dx * cosine - dy * sine,
+                                y: handleBox.minY + dx * sine + dy * cosine)
+            }
+            return CanvasHandleGeometry(target: .resize(handle), center: viewport.screenPoint(point))
+        }
+        if canRotate {
+            let top = viewport.screenPoint(.init(x: box.midX, y: box.minY))
+            handles.append(.init(target: .rotate, center: .init(x: top.x, y: top.y - 44)))
+        }
+        return handles
+    }
+
+    func resizeCursorHandle(_ handle: ResizeHandle) -> ResizeHandle {
+        guard selection.count == 1,
+              let shape = document.shapes.first(where: { selection.contains($0.id) }),
+              let index = ResizeHandle.allCases.firstIndex(of: handle) else { return handle }
+        if case .polygon = shape.data.kind { return handle }
+        let count = ResizeHandle.allCases.count
+        let angle = shape.data.angle.truncatingRemainder(dividingBy: 360)
+        let steps = Int((angle / 45).rounded()) % count
+        return ResizeHandle.allCases[(index + steps + count) % count]
+    }
+
+    func canvasHandle(at point: CGPoint, in viewport: CanvasViewport) -> CanvasHandleGeometry? {
+        guard tool != .fill, tool != .polygon,
+              let handle = canvasHandles(in: viewport).nearest(to: point) else { return nil }
+        // Large AX/handle targets must not consume the entire interior of a
+        // small mask. Its centre remains a move target; edges remain handles.
+        if let shape = shape(at: viewport.referencePoint(point)), selection.contains(shape.id) {
+            let box = shape.bounds(in: referenceSize)
+            if box.width * viewport.zoom < 44 || box.height * viewport.zoom < 44 {
+                let center = viewport.screenPoint(.init(x: box.midX, y: box.midY))
+                if hypot(point.x - center.x, point.y - center.y) < hypot(point.x - handle.center.x, point.y - handle.center.y) {
+                    return nil
+                }
+            }
+        }
+        return handle
     }
 }

@@ -6,6 +6,17 @@ import Observation
 /// One lifecycle for drawing, moving and handles. Navigation cancels the
 /// current gesture even if its final callback arrives after navigation ends.
 @MainActor @Observable final class MaskCanvasInteraction {
+    private var hitID: UUID?
+    private var previewNumber: UInt16?
+    private var previewNumberAttempted = false
+    private var previewSource: OcclusionDocument?
+    private var nativeHandle: CanvasHandleGeometry.Target?
+    private var nativeStart: CGPoint?
+    private var nativeInputRevision: Int?
+    private var nativePivot: CGPoint?
+    private var nativeMoved = false
+    private var nativeLabelCandidate: UUID?
+    private var nativeInside = false
     private var dragStart: CGPoint?
     private var drawingTool: MaskEditorTool?
     private(set) var selectionBox: CGRect?
@@ -24,7 +35,8 @@ import Observation
             self.extending = extending
             moved = false
             if session.tool == .polygon { drawingTool = .polygon; return }
-            let hit = session.document.shapes.reversed().first { $0.path(in: session.referenceSize).contains(start) }
+            let hit = session.shape(at: start)
+            hitID = hit?.id
             if let hit {
                 if session.tool == .fill { drawingTool = .fill; return }
                 session.select(hit.id, extending: extending)
@@ -37,8 +49,7 @@ import Observation
         guard let start = dragStart else { return }
         moved = moved || point != start
         if drawingTool == .select {
-            let hit = session.document.shapes.contains { $0.path(in: session.referenceSize).contains(start) }
-            if hit {
+            if hitID != nil {
                 if moved { session.preview = session.moved(dx: point.x - start.x, dy: point.y - start.y, finishing: false) }
             } else if moved {
                 let box = rect(from: start, to: point); selectionBox = box
@@ -51,10 +62,17 @@ import Observation
                 session.selection = selected
             }
         } else if (drawingTool == .rectangle || drawingTool == .ellipse), session.inside(start) {
+            guard moved else { return }
+            if !previewNumberAttempted {
+                previewNumberAttempted = true
+                previewSource = session.document
+                previewNumber = session.boxPreviewNumber()
+            }
+            guard let previewNumber else { return }
             let box = rect(from: start, to: point)
             var preview = session.document
             let width = box.width / session.referenceSize.width, height = box.height / session.referenceSize.height
-            preview.shapes.append(.init(.init(number: 0, left: box.minX / session.referenceSize.width,
+            preview.shapes.append(.init(.init(number: previewNumber, left: box.minX / session.referenceSize.width,
                                               top: box.minY / session.referenceSize.height,
                                               kind: drawingTool == .ellipse ? .ellipse(rx: width / 2, ry: height / 2) : .rect(width: width, height: height))))
             session.preview = preview
@@ -62,19 +80,20 @@ import Observation
     }
 
     func ended(point: CGPoint, fill: String, closingDistance: Double, session: MaskEditorSession) -> UUID? {
-        defer { dragStart = nil; drawingTool = nil; moved = false; pointerCancelled = false; session.preview = nil; selectionBox = nil }
+        defer { pointerGestureEnded(session: session) }
         guard !isNavigating, let start = dragStart else { return nil }
         switch drawingTool {
-        case .rectangle: session.addBox(from: start, to: point)
-        case .ellipse: session.addBox(from: start, to: point, ellipse: true)
+        case .rectangle, .ellipse:
+            session.addBox(from: start, to: point, ellipse: drawingTool == .ellipse,
+                           previewNumber: previewSource == session.document ? previewNumber : nil)
         case .polygon: session.addPolygonPoint(start, closingDistance: closingDistance)
         case .text:
             guard session.inside(start) else { return nil }
             session.addLabel(at: start)
             return session.selection.first
         case .fill:
-            if let shape = session.document.shapes.reversed().first(where: { $0.path(in: session.referenceSize).contains(start) }) {
-                session.fill(shape.id, color: fill)
+            if let hitID {
+                session.fill(hitID, color: fill)
             }
         case .select:
             // A click only selects. Even a zero-distance transform can normalize
@@ -89,14 +108,101 @@ import Observation
 
     func navigationStarted(session: MaskEditorSession) {
         isNavigating = true
+        nativeStart = nil; nativeHandle = nil; nativePivot = nil; nativeLabelCandidate = nil
         if handleActive { handleCancelled = true }
-        if dragStart != nil { pointerCancelled = true; session.selection = selectionAtStart }
+        if dragStart != nil {
+            pointerCancelled = true
+            if nativeInputRevision == nil || nativeInputRevision == session.inputRevision {
+                session.selection = selectionAtStart
+            }
+        }
+        nativeInputRevision = nil
         dragStart = nil; drawingTool = nil; session.preview = nil; selectionBox = nil
+        previewNumber = nil; previewSource = nil; previewNumberAttempted = false
     }
     func navigationEnded() { isNavigating = false }
     func pointerGestureEnded(session: MaskEditorSession) {
         dragStart = nil; drawingTool = nil; moved = false; pointerCancelled = false
         session.preview = nil; selectionBox = nil
+        hitID = nil; previewNumber = nil; previewSource = nil; previewNumberAttempted = false
+    }
+
+    // Native press ownership is separate from SwiftUI's touch lifecycle. A
+    // stationary handle press never invokes a normalizing transform.
+    enum PointerCue: Equatable { case arrow, openHand, closedHand, crosshair, text, fill, resize(ResizeHandle), rotate }
+    var nativeCue: PointerCue? {
+        guard nativeStart != nil else { return nil }
+        if let nativeHandle {
+            switch nativeHandle {
+            case let .resize(handle): return .resize(handle)
+            case .rotate: return .rotate
+            }
+        }
+        if hitID != nil, drawingTool == .select { return .closedHand }
+        switch drawingTool {
+        case .select: return .crosshair
+        case .rectangle, .ellipse, .polygon: return nativeInside ? .crosshair : .arrow
+        case .text: return nativeInside ? .text : .arrow
+        case .fill: return .fill
+        case nil: return .arrow
+        }
+    }
+    func nativeBegan(at point: CGPoint, viewport: CanvasViewport, extending: Bool, clickCount: Int = 1, session: MaskEditorSession) {
+        nativeStart = point; nativeMoved = false; nativeLabelCandidate = nil
+        nativeInputRevision = session.inputRevision
+        nativeInside = session.inside(viewport.referencePoint(point))
+        nativeHandle = session.canvasHandle(at: point, in: viewport)?.target
+        nativePivot = session.rotationPivot.map(viewport.screenPoint)
+        if nativeHandle == nil {
+            changed(start: viewport.referencePoint(point), point: viewport.referencePoint(point), extending: extending, session: session)
+            if clickCount == 2, drawingTool == .select,
+               let shape = session.document.shapes.first(where: { $0.id == hitID }), shape.isLabel {
+                nativeLabelCandidate = shape.id
+            }
+        }
+    }
+    func nativeChanged(at point: CGPoint, viewport: CanvasViewport, session: MaskEditorSession) {
+        guard let start = nativeStart else { return }
+        guard nativeInputRevision == session.inputRevision else { nativeCancelled(session: session); return }
+        nativeMoved = nativeMoved || point != start
+        if let nativeHandle {
+            guard nativeMoved else { return }
+            updateNativeHandle(nativeHandle, start: start, point: point, viewport: viewport, finishing: false, session: session)
+        } else {
+            changed(start: viewport.referencePoint(start), point: viewport.referencePoint(point), extending: false, session: session)
+        }
+    }
+    func nativeEnded(at point: CGPoint, viewport: CanvasViewport, fill: String, session: MaskEditorSession) -> UUID? {
+        defer { nativeCancelled(session: session) }
+        guard let start = nativeStart, nativeInputRevision == session.inputRevision else { return nil }
+        if let nativeHandle {
+            if nativeMoved, point != start {
+                updateNativeHandle(nativeHandle, start: start, point: point, viewport: viewport, finishing: true, session: session)
+            }
+            return nil
+        }
+        let label = !nativeMoved && point == start ? nativeLabelCandidate : nil
+        let addedLabel = ended(point: viewport.referencePoint(point), fill: fill, closingDistance: 5, session: session)
+        if let label { session.select(label) }
+        return label ?? addedLabel
+    }
+    func nativeCancelled(session: MaskEditorSession) {
+        if dragStart != nil, nativeInputRevision == session.inputRevision { session.selection = selectionAtStart }
+        nativeStart = nil; nativeHandle = nil; nativePivot = nil; nativeMoved = false; nativeLabelCandidate = nil
+        nativeInputRevision = nil; nativeInside = false
+        pointerGestureEnded(session: session); handleGestureEnded(session: session)
+    }
+    private func updateNativeHandle(_ target: CanvasHandleGeometry.Target, start: CGPoint, point: CGPoint,
+                                    viewport: CanvasViewport, finishing: Bool, session: MaskEditorSession) {
+        switch target {
+        case let .resize(handle):
+            resize(handle, delta: .init(width: (point.x - start.x) / viewport.zoom,
+                                       height: (point.y - start.y) / viewport.zoom), finishing: finishing, session: session)
+        case .rotate:
+            guard let pivot = nativePivot else { return }
+            let angle = atan2(point.y - pivot.y, point.x - pivot.x) - atan2(start.y - pivot.y, start.x - pivot.x)
+            rotate(degrees: angle * 180 / .pi, finishing: finishing, session: session)
+        }
     }
 
     func resize(_ handle: ResizeHandle, delta: CGSize, finishing: Bool, session: MaskEditorSession) {

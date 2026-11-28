@@ -135,6 +135,22 @@ import Testing
         #expect(model.document.shapes.count == 1)
     }
 
+    @Test func targetedItemLookupPreservesGroupOrderAndIndependentItems() throws {
+        let label = "{{c1::image-occlusion:text:left=.1:top=.1:text=hi:scale=1}}"
+        let zero = rect1.replacingOccurrences(of: "c1::", with: "c0::")
+        let model = session([rect1, label, zero, protected, rect1, zero].joined(separator: "<br>"), editing: true)
+        let shapes = model.document.shapes
+        try #require(shapes.count == 6)
+        #expect(model.document.item(containing: UUID()).isEmpty)
+        for shape in shapes {
+            #expect(model.document.item(containing: shape.id) == model.document.items.first { $0.contains(shape.id) })
+        }
+        #expect(model.document.item(containing: shapes[0].id) == [shapes[0].id, shapes[4].id])
+        for index in [1, 2, 3, 5] {
+            #expect(model.document.item(containing: shapes[index].id) == [shapes[index].id])
+        }
+    }
+
     @Test func labelsAreC0AndInvalidBracesNeverWrite() throws {
         let model = session()
         model.addLabel(at: .init(x: 300, y: 300))
