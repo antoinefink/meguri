@@ -70,6 +70,21 @@ public final class SyncCoordinator {
     }
     #if DEBUG
     public private(set) var debugMeguriRoundSuccessSequence: UInt64 = 0
+    /// Replace only execution of the issued round; command/wake ownership stays live.
+    @ObservationIgnored var debugExecuteMeguriRound: (@MainActor (CoreMeguriRoundService) async throws -> MeguriRoundReport)?
+
+    /// Stage readiness and its automatic consent without writing a Core binding.
+    func stageMeguriReadyForTests(_ round: CoreMeguriRoundService) {
+        settings = .init(enabled: true, paused: false, automatic: true, media: true)
+        rememberAutomatic(true)
+        meguriReady = true; meguriRound = round; meguriStage = nil; meguriRoutine = .unreported
+    }
+    /// Join the original wake, including any replay it admits.
+    @discardableResult func waitForCurrentMeguriWakeForTests() async -> Bool {
+        guard let task = meguriWake?.task else { return false }
+        await task.value
+        return true
+    }
     #endif
     public private(set) var operationFailed = false
     var syncOwnerAttached: Bool { ownerState == .attached && !replacing && backend != nil && provider != nil }
@@ -150,7 +165,7 @@ public final class SyncCoordinator {
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
             meguriRoutine = switch state {
             case .meguriSyncing, .meguriApplying, .meguriCheckingMedia, .meguriSyncingMedia, .meguriSyncingMediaUnknown: .exchanging
-            case .meguriRoundFailed: .network
+            case .meguriRoundFailed: .failed
             case .meguriMediaBlocked: .mediaBlocked
             case .meguriAcceptanceUnknown: .acceptanceUnknown
             default: .authentication
@@ -1690,7 +1705,7 @@ public final class SyncCoordinator {
     }
     private var meguriCanRun: Bool {
         meguriReady && meguriRound != nil && providerState?.selection == .meguri && settings.enabled
-            && !settings.paused && desiredProviderSettings?.paused != true && meguriPauseDrain == nil && !meguriAddressDirty && !meguriBusy
+            && !settings.paused && desiredProviderSettings?.paused != true && meguriPauseDrain == nil && !meguriAddressDirty && !meguriBusy && !meguriCancelling
             && !closing && !suspended && !replacing && !providerActionInProgress && !providerHandoffInProgress
             && !providerNeedsAttention && !entryActivationHeld
     }
@@ -1739,7 +1754,7 @@ public final class SyncCoordinator {
                 let diagnostics = MeguriRoutineDiagnostics(record: recordDiagnostic)
                 let availabilityRevision = availability.revision
                 do {
-                    let report = try await round.fullRound { [weak self] progress in
+                    let observe: CoreMeguriRoundService.Observation = { [weak self] progress in
                         await MainActor.run { [weak self] in
                             var phase = diagnostics.observe(progress.routineSync)
                             if progress.phase == .named("meguri-media-checking") { phase = .checkingMedia }
@@ -1751,6 +1766,16 @@ public final class SyncCoordinator {
                             self.meguriRoutineFilesLeft = phase == .syncingMedia ? progress.syncFilesLeft : nil
                         }
                     }
+                    let report: MeguriRoundReport
+                    #if DEBUG
+                    if let debugExecuteMeguriRound {
+                        report = try await debugExecuteMeguriRound(round)
+                    } else {
+                        report = try await round.fullRound(observe: observe)
+                    }
+                    #else
+                    report = try await round.fullRound(observe: observe)
+                    #endif
                     diagnostics.finish(report)
                     // Retain actual terminal effects before checking retirement.
                     meguriRoundReport = report
@@ -1758,7 +1783,7 @@ public final class SyncCoordinator {
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
                     meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil
                     meguriAccounting = nil
-                    reduceMeguriRound(report)
+                    reduceMeguriRound(report, cancelled: Task.isCancelled)
                     // Only this actual routine round can supply a new instant.
                     // Pending/skipped work retains the earlier complete exchange.
                     if meguriRoutine == .idle, !Task.isCancelled, !meguriCancelling,
@@ -1802,7 +1827,7 @@ public final class SyncCoordinator {
                           editRevision == meguriAddressEditRevision else { return }
                     meguriRoutinePhase = nil; meguriRoutineFilesLeft = nil
                     if !applyMeguriRoundCredentialFailure(error) {
-                        meguriRoutine = error is CancellationError ? .cancelled : .failed
+                        meguriRoutine = Self.meguriThrownRoundState(error)
                     }
                     meguriWakePending = false
                 }
@@ -1832,37 +1857,69 @@ public final class SyncCoordinator {
         meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
         return true
     }
-    private func reduceMeguriRound(_ report: MeguriRoundReport) {
-        let collectionOutcome = meguriCollectionFinalization ?? report.collection.outcome
+    private func reduceMeguriRound(_ report: MeguriRoundReport, cancelled: Bool = false) {
+        meguriRoutine = Self.meguriRoundState(report, collectionFinalization: meguriCollectionFinalization,
+            mediaFinalization: meguriMediaFinalization, cancelled: cancelled)
+    }
+    /// The phase boundary matters: only a typed start refusal proves no work.
+    /// Terminal authority, unknown acceptance and local finalization stay fenced.
+    static func meguriRoundState(_ report: MeguriRoundReport,
+                                 collectionFinalization: MeguriRoundPhaseOutcome? = nil,
+                                 mediaFinalization: MeguriRoundPhaseOutcome? = nil,
+                                 cancelled: Bool = false) -> MeguriRoutineState {
+        let collectionOutcome = collectionFinalization ?? report.collection.outcome
         guard case .collection(let collection) = collectionOutcome else {
-            meguriRoutine = Self.meguriUnstartedPhaseState(collectionOutcome); return
+            guard report.collection.trackingFailure == nil else { return .failed }
+            return meguriUnstartedPhaseState(collectionOutcome)
         }
-        if collection.acceptanceUnknown { meguriRoutine = .acceptanceUnknown; return }
-        if case .fullSyncRequired = collection.state { meguriRoutine = .fullSyncRequired; return }
-        guard collection.recovery == nil, report.collection.trackingFailure == nil else { meguriRoutine = .failed; return }
-        if let failure = collection.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
-        guard collection.succeeded else { meguriRoutine = .failed; return }
-        guard let mediaResult = report.media else { meguriRoutine = .failed; return }
-        let mediaOutcome = meguriMediaFinalization ?? mediaResult.outcome
+        if collection.acceptanceUnknown { return .acceptanceUnknown }
+        if case .fullSyncRequired = collection.state { return .fullSyncRequired }
+        guard collection.recovery == nil,
+              report.collection.trackingFailure == nil else { return .failed }
+        if let refusal = collection.refusal {
+            // Preserve cancellation before acceptance, including a pause during
+            // the original job. Changed authority never grants another round.
+            switch refusal {
+            case .bindingChanged, .connectionChanged, .accountChanged, .publicationChanged: return .failed
+            case .notSelected, .paused, .notReady, .busy, .interrupted, .storage:
+                guard let failure = collection.failure,
+                      meguriRoundFailure(failure) == .cancelled else { return .failed }
+            }
+        }
+        if let failure = collection.failure { return meguriRoundFailure(failure) }
+        guard collection.succeeded else { return .failed }
+        // Core joins the collection, then omits media if cancellation arrived
+        // at the boundary. Collection success alone is never a whole exchange.
+        guard let mediaResult = report.media else { return cancelled ? .cancelled : .failed }
+        let mediaOutcome = mediaFinalization ?? mediaResult.outcome
         guard case .media(let media) = mediaOutcome else {
-            meguriRoutine = Self.meguriUnstartedPhaseState(mediaOutcome); return
+            guard mediaResult.trackingFailure == nil else { return .failed }
+            return meguriUnstartedPhaseState(mediaOutcome)
         }
         guard media.recovery == nil, media.refusal == nil, media.accountingFailure == nil,
-              mediaResult.trackingFailure == nil else { meguriRoutine = .failed; return }
-        if let failure = media.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
-        guard media.complete else { meguriRoutine = .mediaBlocked; return }
-        meguriRoutine = collection.skipped > 0 ? .pending : .idle
+              mediaResult.trackingFailure == nil else { return .failed }
+        if let failure = media.failure { return meguriRoundFailure(failure) }
+        guard media.complete else { return .mediaBlocked }
+        return collection.skipped > 0 ? .pending : .idle
     }
     static func meguriUnstartedPhaseState(_ outcome: MeguriRoundPhaseOutcome) -> MeguriRoutineState {
-        // Only a typed start refusal proves this phase did no work. A later
-        // legitimate wake may try again; terminal failures keep their guards.
-        if case .refused(.busy) = outcome { return .waiting }
-        return .failed
+        switch outcome {
+        // Later legitimate wakes sample Core admission again. This grants no
+        // replay: only collection Busy has the once-per-wake availability replay.
+        case .refused(.busy), .refused(.interrupted), .refused(.storage): .waiting
+        default: .failed
+        }
+    }
+    static func meguriThrownRoundState(_ error: any Error) -> MeguriRoutineState {
+        switch error {
+        case is CancellationError, BridgeError.cancelled: .cancelled
+        default: .failed
+        }
     }
     private static func meguriRoundFailure(_ failure: MeguriRoundFailure) -> MeguriRoutineState {
         switch failure.kind {
         case "auth_failed": .authentication
-        case "network", "offline": .network
+        case "network", "offline", "timeout": .network
         case "server_error", "unexpected_status", "server_message": .server
         case "cancelled", "interrupted": .cancelled
         default: .failed

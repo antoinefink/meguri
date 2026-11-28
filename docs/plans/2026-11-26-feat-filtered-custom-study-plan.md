@@ -29,7 +29,7 @@ Extend the existing queue, counts, scheduling states, answer transaction and rev
 
 ### U3. Native entry points and evidence
 
-Use native forms for a named filtered deck and a deck-scoped Custom Study session. Make Study primary on the filtered deck page and expose Edit, Rebuild and Empty in context. Launch Custom Study on a normal deck and at completion. Allow creation from Browse's current search. Make cancellation inert and surface writer failures with the draft intact. Refresh deck selection and counts after mutations.
+Use native forms for a named filtered deck and a deck-scoped Custom Study session. Make Study primary on the filtered deck page and expose Edit, Rebuild and Empty in context. Launch Custom Study from a normal deck's menu or finished deck page. The finished review keeps its summary and Done, returning to that deck page (owner, 2026-11-28; F6). Allow creation from Browse's current search. Make cancellation inert and surface writer failures with the draft intact. Refresh deck selection and counts after mutations.
 
 Verify on synthetic cards with focused MG Rust and Swift tests. Drive creation and Custom Study through the native Mac VM UI using the project's test hooks, attach window screenshots for both tasks and verify the uploaded links on the PR. Run affected Apple builds, independent review and the repository's provenance, privacy and similarity checks. Record any inherited failures separately.
 

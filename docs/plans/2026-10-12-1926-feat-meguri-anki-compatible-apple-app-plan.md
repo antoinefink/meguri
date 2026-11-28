@@ -184,7 +184,7 @@ flowchart TB
 - R50. Home has Create Deck and Import File actions. The optional Get Decks action opens the shared-deck site in the default browser and uses no Anki credentials or sync endpoint; it is present only when its existing build availability rules allow it.
 - R51. Dropping an `.apkg` (or any file type the import area accepts) onto the Mac window, the Dock icon, the iPad window or the deck list starts the import flow; unsupported files show a short message naming the accepted types.
 - R52. Opening a supported file from Finder, Files, Mail or the share sheet ("Open in Meguri") starts the import flow over the current screen; if a review is in progress, the review stays underneath and resumes on the same card after the import sheet closes.
-**Scope update, 2026-11-26.** The request to build filtered decks and Custom Study supersedes this plan's original exclusions for creating, rebuilding, editing, emptying and studying filtered decks, and for Custom Study on deck and finished pages. The current contract, including behavior for existing synced decks, is `specs/decks/filtered-study.md` F1–F6. R54, normal-deck queue isolation and sync compatibility continue to apply.
+**Scope update, 2026-11-26.** The request to build filtered decks and Custom Study supersedes this plan's original exclusions for creating, rebuilding, editing, emptying and studying filtered decks and for Custom Study on deck screens. The owner removed Custom Study from the review summary on 2026-11-28. The current contract, including behavior for existing synced decks, is `specs/decks/filtered-study.md` F1–F6. R54, normal-deck queue isolation and sync compatibility continue to apply.
 
 - R53. Filtered decks present in a synced collection appear in the tree in a distinct style with their counts, but cannot be studied; tapping one explains that filtered decks are not supported yet, and its menu offers only Rename and Delete.
 - R54. Deleting a filtered deck returns its cards to their home decks and deletes no cards, as in Anki.
@@ -665,7 +665,7 @@ flowchart TB
 **Congratulations / deck finished**
 - R434. When the queue is empty, the screen shows Anki's congratulations content: "Congratulations! You have finished this deck for now." plus, when they apply, the next-learning-card notice (time until ready and remaining count), the review-limit-reached notice, the new-limit-reached notice, the buried-cards notice with an Unbury action, and the deck description (HTML, or Markdown when the deck's `md` flag is set).
 - R435. Unbury offers "Manually buried cards", "Buried siblings" and "All buried cards" when both kinds exist, unburies within the session's deck tree, and resumes the session if cards became available.
-- R436. The congratulations screen has no Custom Study link (deviation: custom study is out of scope).
+- R436. The review summary has no Custom Study button. The finished normal deck page and deck menus offer Custom Study under `specs/decks/filtered-study.md` F6.
 - R437. The next-learning-card countdown updates live, and when a learning card enters the learn-ahead window a "Continue" button appears; review never resumes on its own.
 - R438. The content is recomputed at day rollover and after any sync or edit while it is shown.
 - R439. If cards were answered in the session, the congratulations content is passed to the end-of-session summary and shown there; otherwise it is shown on its own.

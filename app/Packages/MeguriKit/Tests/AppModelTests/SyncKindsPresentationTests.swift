@@ -110,6 +110,7 @@ import Testing
             (Facts(routine: .fullSyncRequired), Row(.needsYou, "sync.needsYou.meguri.chooseCollection", .chooseCollection)),
             (Facts(routine: .network), Row(.waiting, "sync.meguri.round.network")),
             (Facts(routine: .server), Row(.waiting, "sync.meguri.round.server")),
+            (Facts(routine: .failed), Row(.waiting, nil)),
             (Facts(routine: .cancelled), Row(nil, "sync.status.pending.detail"))
         ]
         for (facts, row) in rows { #expect(SyncKinds.meguriRow(facts) == row, "\(facts)") }
@@ -134,6 +135,11 @@ import Testing
         #expect(SyncKinds.meguri(.init(stage: .acceptanceUnknown)).action == .meguriTryAgain)
         #expect(SyncKinds.meguri(.init(routine: .network)).action == nil)
         #expect(SyncKinds.meguri(.init(routine: .network)).symbol != SyncKinds.needsYouSymbol)
+        let failed = SyncKinds.meguri(.init(routine: .failed))
+        #expect(failed.titleKey == "sync.meguri.status.failed.title" && failed.detailKey == nil)
+        #expect(SyncText.value(failed.titleKey) == "Last Exchange Didn’t Finish")
+        let fixture = SyncCoordinator.renderFixture(.meguriRoundFailed).mainStatus
+        #expect(fixture.titleKey == failed.titleKey && fixture.detailKey == nil)
         // Media blocked is an issues row that opens Affected Files.
         let blocked = SyncKinds.meguri(.init(routine: .mediaBlocked))
         #expect(blocked.kind == .issues && blocked.issuesRowKey == "sync.meguri.media.notTransferred")

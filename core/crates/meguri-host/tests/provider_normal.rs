@@ -94,6 +94,45 @@ fn routine_schema_change_keeps_acknowledgment_without_apply_completion() {
     host.close().unwrap();
 }
 
+#[test]
+fn reconnect_after_network_and_unstarted_storage_refusal_uses_same_binding_without_restart() {
+    use meguri_engine::progress::RoutineSyncMilestone as M;
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config, connection) = ready(root.path());
+    let original = bound(&host); let bytes = provider_bytes(&config);
+    let mut lost = r::Step::new(Method::Meta, vec![]); lost.lost = true;
+    let offline = r::Script::new(vec![lost]);
+    let task = r::started(host.start_meguri_collection(r::access(&connection, &offline)));
+    let failed = r::complete(&host, &task); offline.assert_done();
+    let collection = failed.collection.as_ref().unwrap();
+    assert_eq!(collection.state, MeguriCollectionState::Failed);
+    assert!(matches!(collection.error.as_ref().unwrap().kind, ErrorKind::Network { .. }));
+    assert!(!collection.acceptance_unknown); assert!(failed.recovery.is_none());
+    assert_eq!(evidence(&task), vec![M::CollectionStarted]);
+    // A temporarily unreadable sidecar is a true pre-start refusal, no request.
+    let path = config.manual_transfer_directory.join("provider.json");
+    let retained = config.manual_transfer_directory.join("provider-retained.json");
+    fs::rename(&path, &retained).unwrap();
+    let no_requests = r::Script::new(vec![]);
+    assert!(matches!(host.start_meguri_collection(r::access(&connection, &no_requests)),
+        MeguriRoundStart::Refused(MeguriRoundRefusal::Storage)));
+    assert!(no_requests.methods().is_empty());
+    fs::rename(&retained, &path).unwrap();
+    let online = r::Script::new(vec![r::Step::new(Method::Meta, r::meta(&host, r::modified(&host), 9))]);
+    let task = r::started(host.start_meguri_collection(r::access(&connection, &online)));
+    let result = r::complete(&host, &task); online.assert_done();
+    assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::NoChanges);
+    assert_eq!(evidence(&task), vec![M::CollectionStarted]);
+    assert!(result.media.is_none(), "collection success is not whole-round success");
+    let media = r::Script::new(vec![r::begin(0)]);
+    assert!(r::complete(&host, &r::started(host.start_meguri_media(r::access(&connection, &media))))
+        .media.as_ref().unwrap().complete); media.assert_done();
+    assert_eq!(online.methods(), vec![Method::Meta]);
+    assert_eq!(provider_bytes(&config), bytes); assert_eq!(bound(&host), original);
+    host.close().unwrap();
+}
+
 fn provider_bytes(config: &meguri_host::HostConfig) -> Vec<u8> { fs::read(config.manual_transfer_directory.join("provider.json")).unwrap() }
 fn ready(root: &std::path::Path) -> (Arc<CoreHost>, meguri_host::HostConfig, meguri_sync::provider::MeguriConnection) {
     let (host, config, connection, _) = b::ready(root); (Arc::new(host), config, connection)
@@ -739,6 +778,10 @@ fn failed_epoch_publication_retains_terminal_and_retries_no_network() {
     assert_eq!(provider_bytes(&config), before);
     assert!(host.media().unwrap().try_job(MediaJobKind::Sync).is_err());
     assert!(Arc::ptr_eq(&result, &host.meguri_round_result(&task).unwrap().unwrap()));
+    let refused = r::Script::new(vec![]);
+    assert!(matches!(host.start_meguri_collection(r::access(&connection, &refused)),
+        MeguriRoundStart::Refused(MeguriRoundRefusal::Busy)));
+    assert!(refused.methods().is_empty(), "retained local finalization excludes new network work");
     let calls = script.bodies(Method::MediaBegin).len();
     let retried = host.retry_meguri_round_finalization(&task).unwrap().unwrap();
     assert!(retried.recovery.is_none()); assert!(!retried.media.as_ref().unwrap().complete);

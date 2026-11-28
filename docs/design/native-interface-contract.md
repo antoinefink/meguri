@@ -617,6 +617,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 ### N16.5 End of a session
 
 - A finished session shows the number of cards studied as one large number, "cards in 12 minutes" under it in secondary text, and Done. No symbol, no title, no count per answer, no line about learning cards to come.
+- The owner removed Custom Study from the review summary on 2026-11-28. When review starts from a deck page, Done returns to that page. The finished normal deck page and deck menus offer Custom Study (N14.3, N20.2, `decks/filtered-study#F6`).
 - The number counts different cards answered in the session. The time is the session's active study time: whole minutes from one minute up, seconds before that ("card in 40 seconds").
 - Keep Going sits beside Done only while learning cards are ready again; the two stack at the accessibility text sizes. Both are standard bordered buttons.
 - A session that ends with nothing answered has no number: it says "Finished for Now" over Done.
@@ -838,7 +839,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 3 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | normal |
 | 4 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | both kinds |
 
-- The menu holds actions on its deck. Create Filtered Deck makes another deck, so it is in the Add menu (N20.1) and the Deck menu (⇧⌘F, N20.4), not here. A finished normal deck page also offers Custom Study in Study's place (N14.3), as does the finished review screen (`decks/filtered-study#F6`). Changed 2026-11-27 (owner, chat): group 2 also listed Create Filtered Deck… with ⇧⌘F for normal decks.
+- The menu holds actions on its deck. Create Filtered Deck makes another deck, so it is in the Add menu (N20.1) and the Deck menu (⇧⌘F, N20.4), not here. A finished normal deck page also offers Custom Study in Study's place (N14.3, `decks/filtered-study#F6`). Changed 2026-11-27 (owner, chat): group 2 also listed Create Filtered Deck… with ⇧⌘F for normal decks.
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -940,7 +941,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu, the deck menu | N20.9 |
-| Custom Study, Create Filtered Deck | Custom Study: the deck menu, the Deck menu, the finished deck page and review screen; Create Filtered Deck: the Add menu, the Deck menu | changed 2026-11-27 (owner, chat): no ellipsis, an exception for these two only; every other item that opens a form keeps its ellipsis |
+| Custom Study, Create Filtered Deck | Custom Study: the deck menu, the Deck menu and the finished deck page (owner, 2026-11-28; N16.5); Create Filtered Deck: the Add menu, the Deck menu | changed 2026-11-27 (owner, chat): no ellipsis, an exception for these two only; every other item that opens a form keeps its ellipsis |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
 | Edit Note | the Note menu (moved from Card by N21.8), the card's context menu (Mac), the touch review's More menu, the form's title | N20.8, N21.8 |
 
