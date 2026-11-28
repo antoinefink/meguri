@@ -5,6 +5,9 @@ import Synchronization
 import Darwin
 #endif
 import Foundation
+import struct MeguriCoreBindings.ProviderCollectionRound
+import struct MeguriCoreBindings.ProviderMediaRound
+import struct MeguriCoreBindings.ProviderRoundFailure
 import Testing
 @testable import AppModel
 
@@ -738,6 +741,89 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
 
 #if os(macOS)
 @MainActor extension ReviewCollectionStartupTests {
+    #if DEBUG
+    @Test(.timeLimit(.minutes(1))) func meguriSyncNowRecoversAfterNetworkWakeStorageRefusalOnOriginalOwner() async throws {
+        let store = NativeMeguriSetupCredentials()
+        try await withNativeMeguriSetupOwner(meguriCredentialStore: store) { app in
+            try #require(await app.sync.changeProvider(to: .meguri))
+            let sync = app.sync
+            await sync.waitForMeguriAction()
+            let original = try await sync.meguriConnection()
+            try await original.configure(endpoint: "https://reconnect.synthetic.example/")
+            let core = try await CoreProviderService.attached()
+            let configured = try #require(try await core.configuredMeguri())
+            await store.save(.init(connection: configured.connection, username: "synthetic-user", hostKey: "synthetic-key"))
+            sync.loadMeguriConnection()
+            await sync.waitForMeguriAction()
+            let round = try await original.roundService()
+            try #require(sync.meguriPhase == .setupRequired)
+
+            func phase(_ outcome: MeguriRoundPhaseOutcome) -> MeguriRoundPhaseResult {
+                .init(outcome: outcome, finalization: nil, trackingFailure: nil)
+            }
+            let network = MeguriRoundReport(collection: phase(.collection(.init(.init(state: .failed,
+                failure: .init(kind: "network", method: nil, status: nil, clockOffsetSeconds: nil, databaseCheckIsLocal: nil),
+                refusal: nil, acceptanceUnknown: false, skipped: 0, recovery: nil)))), media: nil)
+            let refused = MeguriRoundReport(collection: phase(.refused(.storage)), media: nil)
+            let complete = MeguriRoundReport(collection: phase(.collection(.init(.init(state: .noChanges,
+                failure: nil, refusal: nil, acceptanceUnknown: false, skipped: 0, recovery: nil)))),
+                media: phase(.media(.init(.init(complete: true, failure: nil, refusal: nil, recovery: nil,
+                    uploadedFiles: 0, uploadedDeletions: 0, downloadedFiles: 0, downloadedDeletions: 0,
+                    bytesUploaded: 0, bytesDownloaded: 0, checked: 0, resynced: false,
+                    excluded: 0, pending: 0, awaiting: 0, affected: [], accountingFailure: nil)))))
+            let reports = [network, refused, complete]
+            var executions = 0
+            sync.debugExecuteMeguriRound = { issued in
+                #expect(issued === round)
+                #expect(try await sync.meguriConnection() === original)
+                let index = executions
+                executions += 1
+                guard reports.indices.contains(index) else {
+                    Issue.record("Unexpected autonomous round replay")
+                    throw BridgeError.internal("synthetic unexpected replay")
+                }
+                return reports[index]
+            }
+            defer { sync.debugExecuteMeguriRound = nil }
+            // Stage only readiness: the connection, credentials and issued facade
+            // above are real. Rust covers transport and the durable ready binding.
+            sync.stageMeguriReadyForTests(round)
+            try #require(sync.settings.automatic && sync.storedAutomatic && !sync.updateHold)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                try #require(sync.meguriStatus.route == .round)
+                sync.syncNow()
+                try #require(await sync.waitForCurrentMeguriWakeForTests())
+                #expect(executions == 1 && sync.meguriRoutine == .network)
+                #expect(sync.meguriRoundReport?.complete == false && sync.meguriLastExchange == nil)
+                #expect(sync.debugMeguriRoundSuccessSequence == 0)
+                try #require(sync.meguriStatus.route == .round)
+
+                sync.networkChanged(reachable: false)
+                sync.networkChanged(reachable: true)
+                try #require(await sync.waitForCurrentMeguriWakeForTests())
+                #expect(executions == 2 && sync.meguriRoutine == .waiting)
+                #expect(sync.meguriRoundReport?.complete == false && sync.meguriLastExchange == nil)
+                #expect(sync.debugMeguriRoundSuccessSequence == 0)
+                try #require(sync.meguriStatus.route == .round)
+
+                sync.syncNow()
+                try #require(await sync.waitForCurrentMeguriWakeForTests())
+                #expect(executions == 3 && sync.meguriRoutine == .idle)
+                #expect(sync.meguriRoundReport?.complete == true)
+                #expect(sync.meguriLastExchange == Int64(app.owner.configuration.clock.now().timeIntervalSince1970 * 1_000))
+                #expect(sync.debugMeguriRoundSuccessSequence == 1)
+                #expect(app.sync === sync)
+                #expect(try await sync.meguriConnection() === original)
+                #expect(try await original.roundService() === round)
+                #expect(!(await sync.waitForCurrentMeguriWakeForTests()))
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+                #expect(calls.withLock { !$0.contains(.providerStartLogin) })
+            }
+        }
+    }
+    #endif
+
     @Test(.timeLimit(.minutes(1))) func meguriLocalConnectionCommandsNeverStartCollectionOrMediaWork() async throws {
         try await withNativeMeguriSetupOwner { app in
             let core = try await CoreProviderService.attached()

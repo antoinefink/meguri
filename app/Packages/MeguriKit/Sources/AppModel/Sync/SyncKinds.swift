@@ -253,8 +253,9 @@ public enum SyncKinds {
         case .fullSyncRequired: return .init(.needsYou, "sync.needsYou.meguri.chooseCollection", .chooseCollection)
         case .network: return .init(.waiting, "sync.meguri.round.network")
         case .server: return .init(.waiting, "sync.meguri.round.server")
-        // No round has reported, or one stopped with no typed reason: nothing is claimed.
-        case .unreported, .failed: return .init(.waiting, "sync.meguri.status.setupUnavailable")
+        // No round has reported: retain the existing setup-unavailable detail.
+        case .unreported: return .init(.waiting, "sync.meguri.status.setupUnavailable")
+        case .failed: return .init(.waiting, nil)
         }
     }
 
@@ -297,7 +298,7 @@ public enum SyncKinds {
         case .mediaBlocked?: return (stopped, "sync.meguri.status.mediaBlocked.title")
         case .pending?, .waiting?, .cancelled?: return (SyncSymbol.waiting, "sync.status.pending.title")
         case .acceptanceUnknown?: return (stopped, "sync.meguri.status.acceptanceUnknown.title")
-        case .network?, .server?: return (stopped, "sync.meguri.status.failed.title")
+        case .network?, .server?, .failed?: return (stopped, "sync.meguri.status.failed.title")
         default: return (stopped, "sync.meguri.status.signedIn.title")
         }
     }
