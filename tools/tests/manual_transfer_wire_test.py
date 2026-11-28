@@ -1582,7 +1582,18 @@ class WireTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 marker = root / 'reader.pid'
-                code = 'import os,time; from pathlib import Path; Path(' + repr(str(marker)) + ').write_text(str(os.getpid())); time.sleep(60)'
+                # The marker is ready to read as soon as it appears.
+                code = f"""\
+import os
+import time
+from pathlib import Path
+
+marker = Path({str(marker)!r})
+pending = marker.with_suffix('.tmp')
+pending.write_text(str(os.getpid()))
+pending.replace(marker)
+time.sleep(60)
+"""
                 command = root / 'reader-command.json'
                 command.write_text(json.dumps(dict(context='a' * 64, command=[sys.executable, '-c', code])))
                 child = subprocess.Popen([sys.executable, str(SCRIPTS / 'manual-transfer-wire.py'),
