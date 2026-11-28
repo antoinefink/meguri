@@ -865,8 +865,8 @@ PUBLIC_ARTIFACTS = {
     "app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorTests.swift": "8dbb714b027d1e138953bd32032092c2ae32f07449dcc4e752e4243c22d42fec",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/CanvasNavigationInput.swift": "7aac7f43d09803cfadfbaae3cb2ef0188379db9f370d658c38a586fd69e06f71",
     "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskCanvas.swift": "cbf1759e81c4c3ed80e3483342852c01c2707c2de2539a8a47f0a029de301387",
-    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskCanvasInteraction.swift": "e1eb135b1cd43336c8c589151fa668ae34756529784a12ef9b4be01f3af78574",
-    "app/MeguriUITests/IOAddEditUITests.swift": "a32aa567e6c188acba98352f79984429346f9841f430b3f224b57ae020fed649",
+    "app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskCanvasInteraction.swift": "8e19a1ae38b62cbfe56e8a3f6fdeb10a63cd83b628a0fb9d2f6eae1825330d7a",
+    "app/MeguriUITests/IOAddEditUITests.swift": "d9dfc919b948ba01a476c03b2774d185656d8aba5fcc4a9413cc055b616ef532",
     "app/Packages/MeguriKit/Tests/CardRenderingTests/Runtime/GlobalsSurfaceTests.swift":
         "0aa34a950507d4d64ff1d0589b24d15552aefea764eaa0487e3c1f820f8b6bc1",
     # Complete public source review of the bundled card runtime.

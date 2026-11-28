@@ -4,6 +4,60 @@ import Testing
 @testable import ImageOcclusion
 
 @MainActor @Suite struct MaskCanvasInteractionTests {
+    @Test(arguments: [MaskEditorTool.rectangle, .ellipse], [false, true])
+    func drawingToolClickDeselectsWithoutEditingAndCanDrawAgain(tool: MaskEditorTool, native: Bool) throws {
+        let session = OcclusionDocumentTests().session()
+        session.tool = tool
+        let interaction = MaskCanvasInteraction()
+        let viewport = CanvasViewport(reference: session.referenceSize, area: session.referenceSize)
+        var writes = 0
+        session.onWrite = { _ in writes += 1 }
+        func gesture(from start: CGPoint, through points: [CGPoint], to end: CGPoint) {
+            if native {
+                interaction.nativeBegan(at: start, viewport: viewport, extending: false, session: session)
+                for point in points { interaction.nativeChanged(at: point, viewport: viewport, session: session) }
+                _ = interaction.nativeEnded(at: end, viewport: viewport, fill: "#000000", session: session)
+            } else {
+                interaction.changed(start: start, point: start, extending: false, session: session)
+                for point in points { interaction.changed(start: start, point: point, extending: false, session: session) }
+                _ = interaction.ended(point: end, fill: "#000000", closingDistance: 5, session: session)
+            }
+        }
+        let firstEnd = CGPoint(x: 250, y: 230)
+        gesture(from: .init(x: 100, y: 100), through: [firstEnd], to: firstEnd)
+        let first = try #require(session.document.shapes.first)
+        #expect(session.document.shapes.count == 1 && session.selection == [first.id])
+        #expect(session.tool == tool && session.canUndo && !session.canRedo && writes == 1)
+        let document = session.document, field = session.field
+        let blank = CGPoint(x: 700, y: 700), tiny = CGPoint(x: 702, y: 703)
+        let outside = CGPoint(x: -20, y: 700)
+        // Sub-minimum drags, including an out-and-back path or movement only
+        // at release, and clicks outside the image must keep the selection.
+        let noOps: [(CGPoint, [CGPoint], CGPoint)] = [
+            (blank, [tiny], tiny), (blank, [tiny, blank], blank),
+            (blank, [], tiny), (outside, [], outside)
+        ]
+        for (start, points, end) in noOps {
+            gesture(from: start, through: points, to: end)
+            #expect(session.selection == [first.id])
+            #expect(session.document == document && session.field == field && writes == 1)
+        }
+        gesture(from: blank, through: [], to: blank)
+        #expect(session.selection.isEmpty && session.preview == nil)
+        #expect(session.document == document && session.field == field && writes == 1)
+        #expect(session.tool == tool && session.canUndo && !session.canRedo)
+        let secondEnd = CGPoint(x: 850, y: 830)
+        gesture(from: blank, through: [secondEnd], to: secondEnd)
+        let second = try #require(session.document.shapes.last)
+        #expect(session.document.shapes.count == 2 && second.id != first.id)
+        #expect(session.selection == [second.id] && session.tool == tool && writes == 2)
+        // Exactly two undo steps: neither the no-ops nor deselection added one.
+        session.undo()
+        #expect(session.document == document && session.field == field && session.canUndo)
+        session.undo()
+        #expect(session.document.shapes.isEmpty && session.field.isEmpty && !session.canUndo)
+    }
+
     @Test(arguments: [false, true], [false, true])
     func boxDraftShowsCommittedOrdinalIncludingGap(ellipse: Bool, gap: Bool) throws {
         let session = gap ? OrdinalAllocatorTests().model() : OcclusionDocumentTests().session()

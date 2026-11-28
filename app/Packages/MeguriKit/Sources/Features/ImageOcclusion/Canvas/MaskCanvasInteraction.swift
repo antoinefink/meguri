@@ -84,8 +84,12 @@ import Observation
         guard !isNavigating, let start = dragStart else { return nil }
         switch drawingTool {
         case .rectangle, .ellipse:
-            session.addBox(from: start, to: point, ellipse: drawingTool == .ellipse,
-                           previewNumber: previewSource == session.document ? previewNumber : nil)
+            if !moved, point == start, session.inside(point) {
+                session.selection = []
+            } else {
+                session.addBox(from: start, to: point, ellipse: drawingTool == .ellipse,
+                               previewNumber: previewSource == session.document ? previewNumber : nil)
+            }
         case .polygon: session.addPolygonPoint(start, closingDistance: closingDistance)
         case .text:
             guard session.inside(start) else { return nil }

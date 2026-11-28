@@ -104,16 +104,45 @@ import XCTest
         try drag(addCanvas, from: CGVector(dx: 0.05, dy: 0.50), to: CGVector(dx: 0.31, dy: 0.62))
         capture(addWindow, named: "image-occlusion-add-first-mask-immediately-after-input-synthetic")
         try requireMask(1, in: addWindow, stage: "add-first")
+        let handles = addWindow.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "io.handle."))
+        observationStage = "add-first-deselect"
+        check(wait { handles.count > 0 }, "drawing selects the first mask and exposes native handles")
+        try prepareInput()
+        addCanvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).click()
+        check(wait { handles.count == 0 }, "bare blank-image click clears selection with Rectangle still armed")
         try drag(addCanvas, from: CGVector(dx: 0.69, dy: 0.50), to: CGVector(dx: 0.95, dy: 0.62))
         capture(addWindow, named: "image-occlusion-add-two-masks-immediately-after-input-synthetic")
         try requireMask(2, in: addWindow, stage: "add-second")
-        try deselect(in: addCanvas, app: app)
+        observationStage = "add-second-deselect"
+        check(wait { handles.count > 0 }, "the still-armed Rectangle draws and selects the second mask")
+        try prepareInput()
+        addCanvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).click()
+        check(wait { handles.count == 0 }, "bare blank-image click clears the second mask's native handles")
         recordNativeImage(addCanvas, in: addWindow, stage: "add-completed")
         let original = try maskBounds(in: addWindow, canvas: addCanvas)
         assertBounds(original, equalTo: [
             CGRect(x: 0.05, y: 0.50, width: 0.26, height: 0.12),
             CGRect(x: 0.69, y: 0.50, width: 0.26, height: 0.12)
         ])
+        // Keep Rectangle armed: selecting mask 1 must not make a drag on mask
+        // 2 move mask 1. Restore mask 2 so the saved/reopened geometry stays exact.
+        observationStage = "add-select-first-drag-second"
+        let addFirst = element(addWindow, "io.mask.1"), addSecond = element(addWindow, "io.mask.2")
+        try click(addFirst)
+        check(wait { addFirst.isSelected && !addSecond.isSelected }, "native selection identifies mask 1")
+        try drag(addCanvas, from: CGVector(dx: 0.82, dy: 0.56), to: CGVector(dx: 0.86, dy: 0.70))
+        let moved = try maskBounds(in: addWindow, canvas: addCanvas)
+        check(abs(moved[0].minX - original[0].minX) <= 0.015 &&
+              abs(moved[0].minY - original[0].minY) <= 0.015, "dragging mask 2 leaves mask 1 in place")
+        check(abs(moved[1].minX - original[1].minX - 0.04) <= 0.015 &&
+              abs(moved[1].minY - original[1].minY - 0.14) <= 0.015, "the first drag moves mask 2")
+        try drag(addCanvas, from: CGVector(dx: 0.86, dy: 0.70), to: CGVector(dx: 0.82, dy: 0.56))
+        assertBounds(try maskBounds(in: addWindow, canvas: addCanvas), equalTo: original)
+        check(wait { addSecond.isSelected && !addFirst.isSelected }, "native selection identifies mask 2 before deselecting")
+        try prepareInput()
+        addCanvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).click()
+        check(wait { handles.count == 0 }, "bare blank-image click clears selection after moving mask 2")
         // Option B keeps ordinary fields and both native masks visible while
         // typing. Focus the actual editable role, never the Header label.
         let header = "Isosceles triangle"
