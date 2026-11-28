@@ -140,7 +140,11 @@ struct OcclusionDocument: Equatable {
         }
         return result
     }
-    func item(containing id: UUID) -> [UUID] { items.first { $0.contains(id) } ?? [] }
+    func item(containing id: UUID) -> [UUID] {
+        guard let shape = shapes.first(where: { $0.id == id }) else { return [] }
+        if shape.isLabel || shape.data.number == 0 { return [id] }
+        return shapes.filter { !$0.isLabel && $0.data.number == shape.data.number }.map(\.id)
+    }
     func bounds(of ids: Set<UUID>, in size: CGSize) -> CGRect? {
         shapes.filter { ids.contains($0.id) }.map { $0.bounds(in: size) }.reduce(nil) { result, box in
             result.map { $0.union(box) } ?? box
