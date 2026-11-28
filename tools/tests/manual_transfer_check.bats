@@ -236,8 +236,7 @@ PY
 }
 
 @test "manual transfer: real socket observer enforces consent counts gate and bounded teardown" {
-  run python3 "$FX_REPO/tools/tests/manual_transfer_wire_test.py"
-  [ "$status" -eq 0 ]
+  python3 "$FX_REPO/tools/tests/manual_transfer_wire_test.py"
 }
 
 @test "manual transfer: missing native media evidence fails without exposing input" {
