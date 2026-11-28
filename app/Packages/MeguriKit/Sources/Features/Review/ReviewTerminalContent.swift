@@ -18,12 +18,10 @@ struct ReviewTerminalContent: View {
     let refresh: () -> Void
     let continueReview: () -> Void
     let close: () -> Void
-    var customStudy: (() -> Void)? = nil
     @Environment(\.locale) private var locale
 
     @State private var finished = false
     @FocusState private var continueFocused: Bool
-    @FocusState private var customStudyFocused: Bool
     #if !os(macOS)
     @FocusState private var keyboardFocused: Bool
     #endif
@@ -38,14 +36,14 @@ struct ReviewTerminalContent: View {
         content
             #if os(macOS)
             .background(ReviewTerminalKeyboard(enabled: canFinish && showsDone,
-                continueFocused: continueFocused, customStudyFocused: customStudyFocused, done: finish))
+                continueFocused: continueFocused, done: finish))
             #else
             .focusable()
             .focused($keyboardFocused)
             .onAppear { keyboardFocused = true }
             .onKeyPress(keys: [.space, .return, KeyEquivalent("\u{3}")], phases: [.down, .repeat]) { press in
                 guard press.modifiers.isEmpty, canFinish, showsDone else { return .ignored }
-                if press.phase == .down, customStudyFocused || (press.key == .space && continueFocused) { return .ignored }
+                if press.phase == .down, press.key == .space && continueFocused { return .ignored }
                 if press.phase == .down { finish() }
                 return .handled
             }
@@ -91,13 +89,6 @@ struct ReviewTerminalContent: View {
                 .focused($continueFocused)
                 .disabled(!canContinue)
                 .accessibilityIdentifier("review.session.continue")
-                .reviewStateTarget()
-        }
-        if !waiting, let customStudy {
-            Button(action: customStudy) { Text("Custom Study", bundle: .module).reviewStateLabel() }
-                .focused($customStudyFocused)
-                .disabled(!canFinish)
-                .accessibilityIdentifier("review.session.customStudy")
                 .reviewStateTarget()
         }
         Button(action: finish) { Text("Done", bundle: .module).reviewStateLabel() }

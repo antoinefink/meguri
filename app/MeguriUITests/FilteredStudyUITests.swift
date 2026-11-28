@@ -91,12 +91,18 @@ import XCTest
         try click("home.deck.study", app: app, bundle: bundle)
         try answer("easy", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "review.session.done").waitForExistence(timeout: 15))
-        try click("review.session.customStudy", app: app, bundle: bundle)
+        XCTAssertTrue(element(app, "review.session.summary").exists)
+        XCTAssertFalse(element(app, "review.session.customStudy").exists)
+        XCTAssertFalse(app.buttons["Custom Study"].exists)
+        capture(app, "custom-study-synthetic-finished-review-summary-and-done")
+        try click("review.session.done", app: app, bundle: bundle)
+        XCTAssertTrue(element(app, "home.deck.page." + sourceID).waitForExistence(timeout: 15),
+                      "Done returns to the same Custom Source deck page")
+        XCTAssertTrue(element(app, "review.session.done").waitForNonExistence(timeout: 10))
+        try click("home.deck.customStudy", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.customStudy.available").waitForExistence(timeout: 10))
-        capture(app, "custom-study-finished-review-native-entry")
         try click("home.customStudy.cancel", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.customStudy.sheet").waitForNonExistence(timeout: 10))
-        // Custom Study ends the terminal review before presenting its sheet.
         XCTAssertTrue(element(app, "home.deck.page." + sourceID).waitForExistence(timeout: 15),
                       "Cancel returns to the Custom Source deck page")
         XCTAssertTrue(element(app, "home.deck.customStudy").exists)
@@ -107,7 +113,7 @@ import XCTest
         let before = try schedules(expected, app: app, bundle: bundle)
         capture(app, "custom-preview-home-schedule-before")
         try selectDeck("Custom Source", app: app, bundle: bundle)
-        // The normal deck page also offers Custom Study when nothing is due.
+        // Reopen the finished normal deck page's Custom Study after cancellation.
         try click("home.deck.customStudy", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.customStudy.available").waitForExistence(timeout: 10))
         capture(app, "custom-study-finished-normal-deck-real-availability")

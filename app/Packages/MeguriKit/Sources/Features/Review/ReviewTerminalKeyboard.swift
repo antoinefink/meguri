@@ -8,7 +8,6 @@ import AppKit
 struct ReviewTerminalKeyboard: NSViewRepresentable {
     let enabled: Bool
     let continueFocused: Bool
-    let customStudyFocused: Bool
     let done: () -> Void
     final class Host: NSView {
         var attached: (() -> Void)?
@@ -17,7 +16,6 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
     final class Coordinator {
         var enabled = false
         var continueFocused = false
-        var customStudyFocused = false
         var done: () -> Void = {}
         private var presentedAt: Double
         private var gate: ReviewTerminalKeyGate
@@ -33,10 +31,10 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
             gate = ReviewTerminalKeyGate(presentedAt: presentedAt)
         }
         /// Admission (window, modifiers, text and menus) is checked by the
-        /// monitor. Explicit Custom Study focus yields activation keys;
-        /// Continue keeps its Space-only behavior. Held grades activate neither.
+        /// monitor. Explicit Continue focus yields Space to its native button.
+        /// Held grades activate neither Continue nor Done.
         func route(_ event: NSEvent) -> NSEvent? {
-            if customStudyFocused || (continueFocused && event.charactersIgnoringModifiers == " "), !event.isARepeat,
+            if continueFocused && event.charactersIgnoringModifiers == " ", !event.isARepeat,
                event.timestamp > presentedAt { return event }
             if gate.take(timestamp: event.timestamp, repeated: event.isARepeat, enabled: enabled) { done() }
             return nil
@@ -78,7 +76,6 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
     func updateNSView(_ view: Host, context: Context) {
         context.coordinator.enabled = enabled
         context.coordinator.continueFocused = continueFocused
-        context.coordinator.customStudyFocused = customStudyFocused
         context.coordinator.done = done
     }
     static func dismantleNSView(_ view: Host, coordinator: Coordinator) {

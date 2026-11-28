@@ -21,15 +21,13 @@ public struct ReviewView: View {
     public let editNote: ReviewEditNote?
     /// N16.11: opens Browse on a card, where Browse is shown; nil elsewhere.
     public let showInBrowse: ((Int64) -> Void)?
-    public let customStudy: (() -> Void)?
     public let visibilityChanged: (Bool) -> Void
     /// Today's Study (N24.3): the walk whose open deck `model` is. One review for the
     /// whole walk: its progress, its finished screen, and nothing between its decks.
     public let walk: StudyWalk?
     @Environment(\.colorScheme) private var colorScheme
     public init(model: ReviewCoordinator, walk: StudyWalk? = nil, status: AnyView? = nil, editNote: ReviewEditNote? = nil,
-                showInBrowse: ((Int64) -> Void)? = nil, customStudy: (() -> Void)? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
-        self.customStudy = customStudy
+                showInBrowse: ((Int64) -> Void)? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
         self.status = status; self.walk = walk; self.editNote = editNote; self.showInBrowse = showInBrowse
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
@@ -133,7 +131,7 @@ public struct ReviewView: View {
                     ReviewTerminalContent(waiting: model.phase == .waiting, summary: model.sessionSummary,
                         continueAvailable: model.continueAvailable, canContinue: model.canContinue,
                         canRefresh: model.canRefresh, canFinish: model.canFinish,
-                        refresh: model.retry, continueReview: model.continueReview, close: close, customStudy: customStudy)
+                        refresh: model.retry, continueReview: model.continueReview, close: close)
                 }
             }
             #if DEBUG

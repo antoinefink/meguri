@@ -23,16 +23,6 @@ private struct ReviewDestination: View {
             editNote: ReviewEditNote(flow: collection.editNoteFlow, open: { Task { await collection.openEditNote() } },
                 form: AnyView(EditNoteView(collection: collection))),
             showInBrowse: collection.reviewShowInBrowse,
-            customStudy: walk == nil && collection.deck(model.record.deckID)?.filtered == false ? {
-                let expected = collection.generation
-                Task {
-                    await collection.finishReview()
-                    guard expected == collection.generation, collection.review == nil,
-                          collection.navigation.section == .home, collection.navigation.sheet == nil,
-                          collection.navigation.homeDeckPage?.rawValue == model.record.deckID else { return }
-                    collection.filteredStudy.custom(model.record.deckID)
-                }
-            } : nil,
             visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
     }
 }
